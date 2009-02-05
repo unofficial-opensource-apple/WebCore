@@ -17,20 +17,18 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLMapElement_h
-#define HTMLMapElement_h
+#ifndef HTMLMapElement_H
+#define HTMLMapElement_H
 
 #include "HTMLElement.h"
+#include "RenderObject.h" // for RenderObject::NodeInfo
 
 namespace WebCore {
-
-class IntSize;
-class HitTestResult;
 
 class HTMLMapElement : public HTMLElement {
 public:
@@ -45,7 +43,7 @@ public:
 
     virtual void parseMappedAttribute(MappedAttribute*);
 
-    bool mapMouseEvent(int x, int y, const IntSize&, HitTestResult&);
+    bool mapMouseEvent(int x, int y, const IntSize&, RenderObject::NodeInfo&);
 
     PassRefPtr<HTMLCollection> areas();
 

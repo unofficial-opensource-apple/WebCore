@@ -18,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -33,7 +33,6 @@ using namespace EventNames;
 
 MouseEvent::MouseEvent()
     : m_button(0)
-    , m_buttonDown(false)
 {
 }
 
@@ -44,8 +43,7 @@ MouseEvent::MouseEvent(const AtomicString& eventType, bool canBubble, bool cance
                        Clipboard* clipboard, bool isSimulated)
     : MouseRelatedEvent(eventType, canBubble, cancelable, view, detail, screenX, screenY,
                         pageX, pageY, ctrlKey, altKey, shiftKey, metaKey, isSimulated)
-    , m_button(button == (unsigned short)-1 ? 0 : button)
-    , m_buttonDown(button != (unsigned short)-1)
+    , m_button(button)
     , m_relatedTarget(relatedTarget)
     , m_clipboard(clipboard)
 {
@@ -71,8 +69,7 @@ void MouseEvent::initMouseEvent(const AtomicString& type, bool canBubble, bool c
     m_altKey = altKey;
     m_shiftKey = shiftKey;
     m_metaKey = metaKey;
-    m_button = button == (unsigned short)-1 ? 0 : button;
-    m_buttonDown = button != (unsigned short)-1;
+    m_button = button;
     m_relatedTarget = relatedTarget;
 
     initCoordinates(clientX, clientY);
@@ -104,19 +101,13 @@ int MouseEvent::which() const
 Node* MouseEvent::toElement() const
 {
     // MSIE extension - "the object toward which the user is moving the mouse pointer"
-    if (type() == mouseoutEvent) 
-        return relatedTarget();
-    
-    return target() ? target()->toNode() : 0;
+    return (type() == mouseoutEvent) ? relatedTarget() : target();
 }
 
 Node* MouseEvent::fromElement() const
 {
     // MSIE extension - "object from which activation or the mouse pointer is exiting during the event" (huh?)
-    if (type() != mouseoutEvent)
-        return relatedTarget();
-    
-    return target() ? target()->toNode() : 0;
+    return (type() == mouseoutEvent) ? target() : relatedTarget();
 }
 
 } // namespace WebCore

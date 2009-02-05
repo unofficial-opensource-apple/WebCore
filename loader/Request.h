@@ -1,8 +1,10 @@
 /*
+    This file is part of the KDE libraries
+
     Copyright (C) 1998 Lars Knoll (knoll@mpi-hd.mpg.de)
     Copyright (C) 2001 Dirk Mueller <mueller@kde.org>
     Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
-    Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+    Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -16,12 +18,15 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
+    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+    Boston, MA 02111-1307, USA.
+
+    This class provides all functionality needed for loading images, style sheets and html
+    pages from the web. It has a memory cache for these objects.
 */
 
-#ifndef Request_h
-#define Request_h
+#ifndef Request_h_
+#define Request_h_
 
 #include <wtf/Vector.h>
 
@@ -32,11 +37,11 @@ namespace WebCore {
 
     class Request {
     public:
-        Request(DocLoader*, CachedResource*, bool incremental, bool skipCanLoadCheck, bool sendResourceLoadCallbacks);
+        Request(DocLoader*, CachedResource*, bool incremental);
         ~Request();
         
         Vector<char>& buffer() { return m_buffer; }
-        CachedResource* cachedResource() { return m_object; }
+        CachedResource* cachedObject() { return m_object; }
         DocLoader* docLoader() { return m_docLoader; }
 
         bool isIncremental() { return m_incremental; }
@@ -45,19 +50,14 @@ namespace WebCore {
         bool isMultipart() { return m_multipart; }
         void setIsMultipart(bool b = true) { m_multipart = b; }
 
-        bool shouldSkipCanLoadCheck() const { return m_shouldSkipCanLoadCheck; }
-        bool sendResourceLoadCallbacks() const { return m_sendResourceLoadCallbacks; }
-        
     private:
         Vector<char> m_buffer;
         CachedResource* m_object;
         DocLoader* m_docLoader;
         bool m_incremental;
         bool m_multipart;
-        bool m_shouldSkipCanLoadCheck;
-        bool m_sendResourceLoadCallbacks;
     };
 
 } //namespace WebCore
 
-#endif // Request_h
+#endif // Request_h_

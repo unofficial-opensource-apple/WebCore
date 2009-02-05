@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,13 +17,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLElement_h
-#define HTMLElement_h
+#ifndef HTMLElementImpl_H
+#define HTMLElementImpl_H
 
 #include "StyledElement.h"
 
@@ -29,11 +31,12 @@ namespace WebCore {
 
 class DocumentFragment;
 class HTMLCollection;
-class HTMLFormElement;
+class String;
 
 enum HTMLTagStatus { TagStatusOptional, TagStatusRequired, TagStatusForbidden };
                        
-class HTMLElement : public StyledElement {
+class HTMLElement : public StyledElement
+{
 public:
     HTMLElement(const QualifiedName& tagName, Document*);
     virtual ~HTMLElement();
@@ -51,7 +54,7 @@ public:
     
     String id() const;
     void setId(const String&);
-    virtual String title() const;
+    String title() const;
     void setTitle(const String&);
     String lang() const;
     void setLang(const String&);
@@ -62,6 +65,8 @@ public:
 
     String innerHTML() const;
     String outerHTML() const;
+    String innerText() const;
+    String outerText() const;
     PassRefPtr<DocumentFragment> createContextualFragment(const String&);
     void setInnerHTML(const String&, ExceptionCode&);
     void setOuterHTML(const String&, ExceptionCode&);
@@ -70,13 +75,11 @@ public:
     
     virtual bool isFocusable() const;
     virtual bool isContentEditable() const;
-    virtual bool isContentRichlyEditable() const;
     virtual String contentEditable() const;
     virtual void setContentEditable(MappedAttribute*);
     virtual void setContentEditable(const String&);
 
-    void click();
-
+    virtual void click(bool sendMouseEvents = false, bool showPressedLook = true);
     virtual void accessKeyAction(bool sendToAnyElement);
 
     virtual bool isGenericFormElement() const { return false; }
@@ -96,21 +99,14 @@ public:
 
     void setHTMLEventListener(const AtomicString& eventType, Attribute*);
 
-    virtual bool rendererIsNeeded(RenderStyle*);
-    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-
-    HTMLFormElement* form() const { return virtualForm(); }
-    HTMLFormElement* findFormAncestor() const;
-
     virtual bool willRespondToMouseMoveEvents();
     virtual bool willRespondToMouseWheelEvents();
     virtual bool willRespondToMouseClickEvents();
 
 protected:
-    void addHTMLAlignment(MappedAttribute*);
 
-private:
-    virtual HTMLFormElement* virtualForm() const;
+    // for IMG, OBJECT and APPLET
+    void addHTMLAlignment(MappedAttribute*);
 };
 
 } //namespace

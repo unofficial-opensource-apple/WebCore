@@ -19,28 +19,26 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
 #include "HTMLOptionElement.h"
 
-#include "CSSStyleSelector.h"
 #include "Document.h"
-#include "EventNames.h"
 #include "ExceptionCode.h"
 #include "HTMLNames.h"
 #include "HTMLSelectElement.h"
 #include "RenderMenuList.h"
 #include "Text.h"
+#include "cssstyleselector.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
-using namespace EventNames;
 
 HTMLOptionElement::HTMLOptionElement(Document* doc, HTMLFormElement* f)
     : HTMLGenericFormElement(optionTag, doc, f)
@@ -56,11 +54,9 @@ bool HTMLOptionElement::checkDTD(const Node* newChild)
 
 void HTMLOptionElement::attach()
 {
-    if (parentNode()->renderStyle()) {
-        RenderStyle* style = styleForRenderer(0);
-        setRenderStyle(style);
-        style->deref(document()->renderArena());
-    }
+    RenderStyle* style = styleForRenderer(0);
+    setRenderStyle(style);
+    style->deref(document()->renderArena());
     HTMLGenericFormElement::attach();
 }
 
@@ -89,27 +85,22 @@ String HTMLOptionElement::text() const
     String text;
 
     // WinIE does not use the label attribute, so as a quirk, we ignore it.
-    if (!document()->inCompatMode())
-        text = getAttribute(labelAttr);
-
-    if (text.isEmpty()) {
-        const Node* n = firstChild();
-        while (n) {
-            if (n->nodeType() == TEXT_NODE || n->nodeType() == CDATA_SECTION_NODE)
-                text += n->nodeValue();
-            // skip script content
-            if (n->isElementNode() && n->hasTagName(HTMLNames::scriptTag))
-                n = n->traverseNextSibling(this);
-            else
-                n = n->traverseNextNode(this);
-        }
+    if (!document()->inCompatMode()) {
+        String text = getAttribute(labelAttr);
+        if (!text.isEmpty())
+            return text;
     }
 
-    text.replace('\\', document()->backslashAsCurrencySymbol());
-    // In WinIE, leading and trailing whitespace is ignored in options and optgroups. We match this behavior.
-    text = text.stripWhiteSpace();
-    // We want to collapse our whitespace too.  This will match other browsers.
-    text = text.simplifyWhiteSpace();
+    const Node* n = firstChild();
+    while (n) {
+        if (n->nodeType() == TEXT_NODE || n->nodeType() == CDATA_SECTION_NODE)
+            text += n->nodeValue();
+        // skip script content
+        if (n->isElementNode() && n->hasTagName(HTMLNames::scriptTag))
+            n = n->traverseNextSibling(this);
+        else
+            n = n->traverseNextNode(this);
+    }
 
     return text;
 }
@@ -147,6 +138,12 @@ int HTMLOptionElement::index() const
     return 0;
 }
 
+void HTMLOptionElement::setIndex(int, ExceptionCode& ec)
+{
+    ec = NO_MODIFICATION_ALLOWED_ERR;
+    // ###
+}
+
 void HTMLOptionElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == selectedAttr)
@@ -162,7 +159,7 @@ String HTMLOptionElement::value() const
     if ( !m_value.isNull() )
         return m_value;
     // Use the text if the value wasn't set.
-    return text().stripWhiteSpace();
+    return text().deprecatedString().stripWhiteSpace();
 }
 
 void HTMLOptionElement::setValue(const String& value)
@@ -174,25 +171,16 @@ void HTMLOptionElement::setSelected(bool selected)
 {
     if (m_selected == selected)
         return;
+    m_selected = selected;
     if (HTMLSelectElement* select = getSelect())
-        select->setSelectedIndex(selected ? index() : -1, false);
-    m_selected = selected;
+        select->notifyOptionSelected(this, selected);
 }
 
-void HTMLOptionElement::setSelectedState(bool selected)
-{
-    if (m_selected == selected)
-        return;
-    m_selected = selected;
-    setChanged();
-}
-
-void HTMLOptionElement::childrenChanged(bool changedByParser)
+void HTMLOptionElement::childrenChanged()
 {
    HTMLSelectElement *select = getSelect();
    if (select)
-       select->childrenChanged(changedByParser);
-   HTMLGenericFormElement::childrenChanged(changedByParser);
+       select->childrenChanged();
 }
 
 HTMLSelectElement* HTMLOptionElement::getSelect() const
@@ -235,24 +223,19 @@ void HTMLOptionElement::setRenderStyle(RenderStyle* newStyle)
 
 String HTMLOptionElement::optionText()
 {
-    if (parentNode() && parentNode()->hasTagName(optgroupTag))
-        return "    " + text();
-        
-    return text();
-}
-
-bool HTMLOptionElement::disabled() const
-{ 
-    return HTMLGenericFormElement::disabled() || (parentNode() && static_cast<HTMLGenericFormElement*>(parentNode())->disabled()); 
-}
-
-void HTMLOptionElement::insertedIntoDocument()
-{
-    HTMLSelectElement* select;
-    if (selected() && (select = getSelect()))
-        select->scrollToSelection();
+    DeprecatedString itemText = text().deprecatedString();
+    if (itemText.isEmpty())
+        itemText = getAttribute(labelAttr).deprecatedString();
     
-    HTMLGenericFormElement::insertedIntoDocument();
+    itemText.replace('\\', document()->backslashAsCurrencySymbol());
+    // In WinIE, leading and trailing whitespace is ignored in options and optgroups. We match this behavior.
+    itemText = itemText.stripWhiteSpace();
+    // We want to collapse our whitespace too.  This will match other browsers.
+    itemText = itemText.simplifyWhiteSpace();
+    if (parentNode() && parentNode()->hasTagName(optgroupTag))
+        itemText.prepend("    ");
+        
+    return itemText;
 }
 
 } // namespace

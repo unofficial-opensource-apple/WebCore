@@ -20,45 +20,42 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef RenderTableRow_h
-#define RenderTableRow_h
+#ifndef RenderTableRow_H
+#define RenderTableRow_H
 
 #include "RenderTableSection.h"
 
 namespace WebCore {
 
-class RenderTableRow : public RenderContainer {
+class RenderTableRow : public RenderContainer
+{
 public:
     RenderTableRow(Node*);
 
-    virtual const char* renderName() const { return isAnonymous() ? "RenderTableRow (anonymous)" : "RenderTableRow"; }
-
-    virtual bool isTableRow() const { return true; }
-
     virtual void destroy();
-
-    RenderTableSection* section() const { return static_cast<RenderTableSection*>(parent()); }
-    RenderTable* table() const { return static_cast<RenderTable*>(parent()->parent()); }
-
     virtual void setStyle(RenderStyle*);
+    virtual const char* renderName() const { return "RenderTableRow"; }
+    virtual bool isTableRow() const { return true; }
     virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0);
-    virtual short lineHeight(bool firstLine, bool isRootLineBox = false) const { return 0; }
-    virtual void position(InlineBox*) { }
+    virtual short lineHeight(bool) const { return 0; }
+    virtual void position(int, int, int, int, int, bool, bool, int) { }
     virtual void layout();
-    virtual IntRect absoluteClippedOverflowRect();
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
+    virtual IntRect getAbsoluteRepaintRect();
+    virtual bool nodeAtPoint(NodeInfo& info, int x, int y, int tx, int ty, HitTestAction action);
 
     // The only time rows get a layer is when they have transparency.
     virtual bool requiresLayer() { return isTransparent() || hasOverflowClip(); }
 
-    virtual void paint(PaintInfo&, int tx, int ty);
-    virtual void imageChanged(CachedImage*);
+    virtual void paint(PaintInfo& i, int tx, int ty);
+
+    RenderTable* table() const { return static_cast<RenderTable*>(parent()->parent()); }
+    RenderTableSection* section() const { return static_cast<RenderTableSection*>(parent()); }
 };
 
-} // namespace WebCore
+}
 
-#endif // RenderTableRow_h
+#endif

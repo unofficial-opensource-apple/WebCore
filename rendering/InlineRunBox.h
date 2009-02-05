@@ -15,19 +15,20 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef InlineRunBox_h
-#define InlineRunBox_h
+#ifndef InlineRunBox_H
+#define InlineRunBox_H
 
 #include "InlineBox.h"
 
 namespace WebCore {
 
-class InlineRunBox : public InlineBox {
+class InlineRunBox : public InlineBox
+{
 public:
     InlineRunBox(RenderObject* obj)
         : InlineBox(obj)
@@ -41,14 +42,14 @@ public:
     void setNextLineBox(InlineRunBox* n) { m_nextLine = n; }
     void setPreviousLineBox(InlineRunBox* p) { m_prevLine = p; }
 
-    virtual void paintBoxDecorations(RenderObject::PaintInfo&, int tx, int ty) { }
-    virtual void paintTextDecorations(RenderObject::PaintInfo&, int tx, int ty, bool paintedChildren = false) { }
+    virtual void paintBackgroundAndBorder(RenderObject::PaintInfo&, int _tx, int _ty) {};
+    virtual void paintDecorations(RenderObject::PaintInfo&, int _tx, int _ty, bool paintedChildren = false) {};
     
 protected:
     InlineRunBox* m_prevLine;  // The previous box that also uses our RenderObject
     InlineRunBox* m_nextLine;  // The next box that also uses our RenderObject
 };
 
-} // namespace WebCore
+} //namespace
 
-#endif // InlineRunBox_h
+#endif

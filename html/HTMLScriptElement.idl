@@ -13,23 +13,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface [
-        GenerateConstructor,
-        InterfaceUUID=57ddf4da-1c9b-4005-87d7-eb9b2ed78e95,
-        ImplementationUUID=2edb1093-08f1-4e76-9728-df5dedb879fe
-    ] HTMLScriptElement : HTMLElement {
-        attribute [ConvertNullToNullString] DOMString text;
-        attribute [ConvertNullToNullString] DOMString htmlFor;
-        attribute [ConvertNullToNullString] DOMString event;
-        attribute [ConvertNullToNullString] DOMString charset;
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLScriptElement : HTMLElement {
+        attribute DOMString text;
+        attribute DOMString htmlFor;
+        attribute DOMString event;
+        attribute DOMString charset;
         attribute boolean defer;
-        attribute [ConvertNullToNullString] DOMString src;
-        attribute [ConvertNullToNullString] DOMString type;
+        attribute DOMString src;
+        attribute DOMString type;
     };
 }

@@ -17,28 +17,30 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLEmbedElement_h
-#define HTMLEmbedElement_h
+#ifndef HTMLEmbedElement_H
+#define HTMLEmbedElement_H
 
 #include "HTMLPlugInElement.h"
 
-#if USE(JAVASCRIPTCORE_BINDINGS)
-#include <bindings/runtime.h>
+#if PLATFORM(MAC)
+#include <JavaScriptCore/runtime.h>
+#else
+namespace KJS { namespace Bindings { class Instance; } }
 #endif
 
 namespace WebCore {
 
-class HTMLEmbedElement : public HTMLPlugInElement {
+class HTMLEmbedElement : public HTMLPlugInElement
+{
 public:
     HTMLEmbedElement(Document*);
     ~HTMLEmbedElement();
 
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
     virtual int tagPriority() const { return 0; }
 
     virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
@@ -50,14 +52,10 @@ public:
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
-    virtual void attributeChanged(Attribute*, bool preserveDecls = false);
     
     virtual bool isURLAttribute(Attribute*) const;
 
-    virtual void updateWidget();
-    void setNeedWidgetUpdate(bool needWidgetUpdate) { m_needWidgetUpdate = needWidgetUpdate; }
-
-#if USE(JAVASCRIPTCORE_BINDINGS)
+#if PLATFORM(MAC)
     virtual KJS::Bindings::Instance* getInstance() const;
 #endif
 
@@ -68,9 +66,8 @@ public:
     void setType(const String&);
 
     DeprecatedString url;
-    String m_pluginPage;
-    String m_serviceType;
-    bool m_needWidgetUpdate;
+    DeprecatedString pluginPage;
+    DeprecatedString serviceType;
 };
 
 }

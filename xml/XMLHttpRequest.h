@@ -16,144 +16,105 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef XMLHttpRequest_h
-#define XMLHttpRequest_h
+#ifndef XMLHTTPREQUEST_H_
+#define XMLHTTPREQUEST_H_
 
-#include "EventTarget.h"
-#include "HTTPHeaderMap.h"
 #include "KURL.h"
 #include "PlatformString.h"
-#include "ResourceResponse.h"
-#include "StringHash.h"
-#include "SubresourceLoaderClient.h"
-#include <kjs/ustring.h>
-
-#include <wtf/HashMap.h>
+#include "TransferJobClient.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
-class TextResourceDecoder;
-class Document;
-class Event;
-class EventListener;
-class String;
+  class Decoder;
+  class Document;
+  class EventListener;
+  class String;
 
-typedef int ExceptionCode;
+  typedef int ExceptionCode;
+  
+  // these exact numeric values are important because JS expects them
+  enum XMLHttpRequestState {
+    Uninitialized = 0,  // open() has not been called yet
+    Loading = 1,        // send() has not been called yet
+    Loaded = 2,         // send() has been called, headers and status are available
+    Interactive = 3,    // Downloading, responseText holds the partial data
+    Completed = 4       // Finished with all operations
+  };
 
-// these exact numeric values are important because JS expects them
-enum XMLHttpRequestState {
-    Uninitialized = 0,  // The initial value.
-    Open = 1,           // The open() method has been successfully called.
-    Sent = 2,           // The user agent successfully completed the request, but no data has yet been received.
-    Receiving = 3,      // Immediately before receiving the message body (if any). All HTTP headers have been received.
-    Loaded = 4          // The data transfer has been completed.
-};
-
-class XMLHttpRequest : public RefCounted<XMLHttpRequest>, public EventTarget, private SubresourceLoaderClient {
-public:
+  class XMLHttpRequest : public Shared<XMLHttpRequest>, TransferJobClient {
+  public:
     XMLHttpRequest(Document*);
     ~XMLHttpRequest();
-
-    virtual XMLHttpRequest* toXMLHttpRequest() { return this; }
 
     static void detachRequests(Document*);
     static void cancelRequests(Document*);
 
-    String getStatusText(ExceptionCode&) const;
-    int getStatus(ExceptionCode&) const;
+    String getStatusText() const;
+    int getStatus() const;
     XMLHttpRequestState getReadyState() const;
-    void open(const String& method, const KURL&, bool async, ExceptionCode&);
-    void open(const String& method, const KURL&, bool async, const String& user, ExceptionCode&);
-    void open(const String& method, const KURL&, bool async, const String& user, const String& password, ExceptionCode&);
-    void send(const String& body, ExceptionCode&);
+    void open(const String& method, const KURL& url, bool async, const String& user, const String& password, ExceptionCode& ec);
+        void send(const String& body, ExceptionCode& ec);
     void abort();
-    void setRequestHeader(const String& name, const String& value, ExceptionCode&);
+    void setRequestHeader(const String& name, const String &value, ExceptionCode& ec);
     void overrideMIMEType(const String& override);
-    String getAllResponseHeaders(ExceptionCode&) const;
-    String getResponseHeader(const String& name, ExceptionCode&) const;
-    const KJS::UString& getResponseText(ExceptionCode&) const;
-    Document* getResponseXML(ExceptionCode&) const;
+    String getAllResponseHeaders() const;
+    String getResponseHeader(const String& name) const;
+    String getResponseText() const;
+    Document* getResponseXML() const;
 
     void setOnReadyStateChangeListener(EventListener*);
     EventListener* onReadyStateChangeListener() const;
     void setOnLoadListener(EventListener*);
     EventListener* onLoadListener() const;
 
-    typedef Vector<RefPtr<EventListener> > ListenerVector;
-    typedef HashMap<AtomicStringImpl*, ListenerVector> EventListenersMap;
-
-    // useCapture is not used, even for add/remove pairing (for Firefox compatibility).
-    virtual void addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture);
-    virtual void removeEventListener(const AtomicString& eventType, EventListener*, bool useCapture);
-    virtual bool dispatchEvent(PassRefPtr<Event>, ExceptionCode&, bool tempEvent = false);
-    EventListenersMap& eventListeners() { return m_eventListeners; }
-
     Document* document() const { return m_doc; }
 
-    using RefCounted<XMLHttpRequest>::ref;
-    using RefCounted<XMLHttpRequest>::deref;
-
-private:
-    virtual void refEventTarget() { ref(); }
-    virtual void derefEventTarget() { deref(); }
-
+  private:
     bool urlMatchesDocumentDomain(const KURL&) const;
 
-    virtual void willSendRequest(SubresourceLoader*, ResourceRequest& request, const ResourceResponse& redirectResponse);
-    virtual void didReceiveResponse(SubresourceLoader*, const ResourceResponse&);
-    virtual void didReceiveData(SubresourceLoader*, const char* data, int size);
-    virtual void didFail(SubresourceLoader*, const ResourceError&);
-    virtual void didFinishLoading(SubresourceLoader*);
-    virtual void receivedCancellation(SubresourceLoader*, const AuthenticationChallenge&);
+    virtual void receivedRedirect(TransferJob*, const KURL&);
+    virtual void receivedData(TransferJob*, const char *data, int size);
+    virtual void receivedAllData(TransferJob*);
 
-    void processSyncLoadResults(const Vector<char>& data, const ResourceResponse&);
+    void processSyncLoadResults(const Vector<char>& data, const KURL& finalURL, const DeprecatedString& headers);
 
-    String responseMIMEType() const;
     bool responseIsXML() const;
-
-    String getRequestHeader(const String& name) const;
+    
+    DeprecatedString getRequestHeader(const DeprecatedString& name) const;
+    static DeprecatedString getSpecificHeader(const DeprecatedString& headers, const DeprecatedString& name);
 
     void changeState(XMLHttpRequestState newState);
     void callReadyStateChangeListener();
-    void dropProtection();
 
     Document* m_doc;
-
     RefPtr<EventListener> m_onReadyStateChangeListener;
     RefPtr<EventListener> m_onLoadListener;
-    EventListenersMap m_eventListeners;
 
     KURL m_url;
     DeprecatedString m_method;
-    HTTPHeaderMap m_requestHeaders;
-    String m_mimeTypeOverride;
     bool m_async;
+    DeprecatedString m_requestHeaders;
 
-    RefPtr<SubresourceLoader> m_loader;
+    TransferJob* m_job;
+
     XMLHttpRequestState m_state;
 
-    ResourceResponse m_response;
+    RefPtr<Decoder> m_decoder;
     String m_encoding;
+    String m_responseHeaders;
+    String m_mimeTypeOverride;
 
-    RefPtr<TextResourceDecoder> m_decoder;
-
-    // Unlike most strings in the DOM, we keep this as a KJS::UString, not a WebCore::String.
-    // That's because these strings can easily get huge (they are filled from the network with
-    // no parsing) and because JS can easily observe many intermediate states, so it's very useful
-    // to be able to share the buffer with JavaScript versions of the whole or partial string.
-    // In contrast, this string doesn't interact much with the rest of the engine so it's not that
-    // big a cost that it isn't a String.
-    KJS::UString m_responseText;
+    DeprecatedString m_response;
     mutable bool m_createdDocument;
     mutable RefPtr<Document> m_responseXML;
 
     bool m_aborted;
-};
+  };
 
-} // namespace WebCore
+} // namespace
 
-#endif // XMLHttpRequest_h
+#endif

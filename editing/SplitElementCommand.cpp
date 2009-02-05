@@ -31,8 +31,8 @@
 
 namespace WebCore {
 
-SplitElementCommand::SplitElementCommand(Element* element, Node* atChild)
-    : EditCommand(element->document()), m_element2(element), m_atChild(atChild)
+SplitElementCommand::SplitElementCommand(Document *document, Element *element, Node *atChild)
+    : EditCommand(document), m_element2(element), m_atChild(atChild)
 {
     ASSERT(m_element2);
     ASSERT(m_atChild);
@@ -42,7 +42,6 @@ void SplitElementCommand::doApply()
 {
     ASSERT(m_element2);
     ASSERT(m_atChild);
-    ASSERT(m_atChild->parentNode() == m_element2);
 
     ExceptionCode ec = 0;
 
@@ -55,10 +54,6 @@ void SplitElementCommand::doApply()
 
     m_element2->parent()->insertBefore(m_element1.get(), m_element2.get(), ec);
     ASSERT(ec == 0);
-    
-    // Bail if we were asked to split at a bogus child, to avoid hanging below.
-    if (!m_atChild || m_atChild->parentNode() != m_element2)
-        return;
     
     while (m_element2->firstChild() != m_atChild) {
         ASSERT(m_element2->firstChild());

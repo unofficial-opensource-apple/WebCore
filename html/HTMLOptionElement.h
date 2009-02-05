@@ -18,12 +18,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-#ifndef HTMLOptionElement_h
-#define HTMLOptionElement_h
+#ifndef HTML_HTMLOptionElementImpl_H
+#define HTML_HTMLOptionElementImpl_H
 
 #include "HTMLGenericFormElement.h"
 
@@ -57,6 +57,7 @@ public:
     void setText(const String&, ExceptionCode&);
 
     int index() const;
+    void setIndex(int, ExceptionCode&);
     virtual void parseMappedAttribute(MappedAttribute*);
 
     String value() const;
@@ -64,11 +65,10 @@ public:
 
     bool selected() const { return m_selected; }
     void setSelected(bool);
-    void setSelectedState(bool);
 
     HTMLSelectElement* getSelect() const;
 
-    virtual void childrenChanged(bool changedByParser = false);
+    virtual void childrenChanged();
 
     bool defaultSelected() const;
     void setDefaultSelected(bool);
@@ -77,10 +77,6 @@ public:
     void setLabel(const String&);
     
     String optionText();
-    
-    virtual bool disabled() const;
-    
-    virtual void insertedIntoDocument();
 
 private:
     String m_value;

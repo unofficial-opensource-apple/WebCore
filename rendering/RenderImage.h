@@ -1,9 +1,11 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2006 Allan Sandfeld Jensen (kde@carewolf.com) 
  *           (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,22 +19,25 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderImage_h
-#define RenderImage_h
+#ifndef RENDER_IMAGE_H
+#define RENDER_IMAGE_H
 
 #include "CachedImage.h"
+#include "HTMLElement.h"
 #include "RenderReplaced.h"
 
 namespace WebCore {
 
+class DocLoader;
 class HTMLMapElement;
 
-class RenderImage : public RenderReplaced {
+class RenderImage : public RenderReplaced
+{
 public:
     RenderImage(Node*);
     virtual ~RenderImage();
@@ -40,44 +45,50 @@ public:
     virtual const char* renderName() const { return "RenderImage"; }
 
     virtual bool isImage() const { return true; }
+    virtual bool isImageButton() const { return false; }
     
-    virtual void paintReplaced(PaintInfo& paintInfo, int tx, int ty);
+    virtual void paint(PaintInfo&, int tx, int ty);
 
-    virtual int minimumReplacedHeight() const;
+    virtual void layout();
 
     virtual void imageChanged(CachedImage*);
-    virtual void notifyFinished(CachedResource*);
     
-    bool setImageSizeForAltText(CachedImage* newImage = 0);
+    // don't even think about making this method virtual!
+    HTMLElement* element() const
+        { return static_cast<HTMLElement*>(RenderReplaced::element()); }
 
+    // hook to keep RendeObject::m_inline() up to date
+    virtual void setStyle(RenderStyle *style);
     void updateAltText();
-
+    
     void setIsAnonymousImage(bool anon) { m_isAnonymousImage = anon; }
     bool isAnonymousImage() { return m_isAnonymousImage; }
-
+    
     void setCachedImage(CachedImage*);
     CachedImage* cachedImage() const { return m_cachedImage; }
+    
+    Image* image() { return m_cachedImage ? m_cachedImage->image() : nullImage(); }
 
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
-
+    virtual bool nodeAtPoint(NodeInfo&, int x, int y, int tx, int ty, HitTestAction);
+    
     virtual int calcReplacedWidth() const;
     virtual int calcReplacedHeight() const;
 
-    virtual void calcPrefWidths();
+    int calcAspectRatioWidth() const;
+    int calcAspectRatioHeight() const;
 
+    virtual void calcMinMaxWidth();
+
+    // Called to set generated content images (e.g., :before/:after generated images).
+    void setContentObject(CachedResource*);
+    
+    bool errorOccurred() const { return m_cachedImage && m_cachedImage->isErrorImage(); }
+    
     HTMLMapElement* imageMap();
 
     void resetAnimation();
 
-protected:
-    Image* image() { return m_cachedImage ? m_cachedImage->image() : nullImage(); }
-    
-    bool errorOccurred() const { return m_cachedImage && m_cachedImage->errorOccurred(); }
-
 private:
-    int calcAspectRatioWidth() const;
-    int calcAspectRatioHeight() const;
-
     bool isWidthSpecified() const;
     bool isHeightSpecified() const;
 
@@ -93,6 +104,6 @@ private:
     static Image* nullImage();
 };
 
-} // namespace WebCore
+} //namespace
 
-#endif // RenderImage_h
+#endif

@@ -1,9 +1,11 @@
 /*
+    This file is part of the KDE libraries
+
     Copyright (C) 1997 Martin Jones (mjones@kde.org)
               (C) 1997 Torben Weis (weis@kde.org)
               (C) 1998 Waldo Bastian (bastian@kde.org)
               (C) 2001 Dirk Mueller (mueller@kde.org)
-    Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+    Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -17,21 +19,19 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
+    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+    Boston, MA 02111-1307, USA.
 */
 
-#ifndef HTMLTokenizer_h
-#define HTMLTokenizer_h
+#ifndef HTMLTOKENIZER_H
+#define HTMLTOKENIZER_H
 
 #include "DeprecatedPtrQueue.h"
 #include "NamedMappedAttrMap.h"
 #include "SegmentedString.h"
 #include "Timer.h"
-#include "Tokenizer.h"
+#include "XMLTokenizer.h"
 #include "CachedResourceClient.h"
-#include <wtf/Vector.h>
-#include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
@@ -43,10 +43,6 @@ class HTMLViewSourceDocument;
 class FrameView;
 class HTMLParser;
 class Node;
-class PreloadScanner;
-class ScriptSourceCode;
-
-extern const double tokenizerTimeDelay;
 
 /**
  * @internal
@@ -54,12 +50,12 @@ extern const double tokenizerTimeDelay;
  * of attributes. Can also represent text. In this case the id = 0 and
  * text contains the text.
  */
-class Token {
+class Token
+{
 public:
-    Token() : beginTag(true), flat(false), brokenXMLStyle(false), m_sourceInfo(0) { }
-    ~Token() { }
+    Token() : beginTag(true), flat(false) { }
 
-    void addAttribute(Document*, AtomicString& attrName, const AtomicString& v, bool viewSourceMode);
+    void addAttribute(Document*, const AtomicString& attrName, const AtomicString& v);
 
     bool isOpenTag(const QualifiedName& fullName) const { return beginTag && fullName.localName() == tagName; }
     bool isCloseTag(const QualifiedName& fullName) const { return !beginTag && fullName.localName() == tagName; }
@@ -67,29 +63,23 @@ public:
     void reset()
     {
         attrs = 0;
-        text = 0;
+        text = 0;        
         tagName = nullAtom;
         beginTag = true;
         flat = false;
-        brokenXMLStyle = false;
-        if (m_sourceInfo)
-            m_sourceInfo->clear();
     }
-
-    void addViewSourceChar(UChar c) { if (!m_sourceInfo.get()) m_sourceInfo.set(new Vector<UChar>); m_sourceInfo->append(c); }
 
     RefPtr<NamedMappedAttrMap> attrs;
     RefPtr<StringImpl> text;
     AtomicString tagName;
     bool beginTag;
     bool flat;
-    bool brokenXMLStyle;
-    OwnPtr<Vector<UChar> > m_sourceInfo;
 };
 
 //-----------------------------------------------------------------------------
 
-class HTMLTokenizer : public Tokenizer, public CachedResourceClient {
+class HTMLTokenizer : public Tokenizer, public CachedResourceClient
+{
 public:
     HTMLTokenizer(HTMLDocument*, bool reportErrors);
     HTMLTokenizer(HTMLViewSourceDocument*);
@@ -104,16 +94,13 @@ public:
     virtual bool processingData() const;
     virtual int executingScript() const { return m_executingScript; }
     virtual void parsePending();
-
-    virtual int lineNumber() const { return m_lineNumber; }
+    
+    virtual int lineNumber() const { return lineno; }
     virtual int columnNumber() const { return 1; }
-
+    
+    int* lineNumberPtr() { return &lineno; }
+    
     bool processingContentWrittenByScript() const { return src.excludeLineNumbers(); }
-    
-    virtual void executeScriptsWaitingForStylesheets();
-    
-    virtual bool isHTMLTokenizer() const { return true; }
-    HTMLParser* htmlParser() const { return parser; }
 
 private:
     class State;
@@ -134,20 +121,19 @@ private:
     State parseEntity(SegmentedString&, UChar*& dest, State, unsigned& _cBufferPos, bool start, bool parsingTag);
     State parseProcessingInstruction(SegmentedString&, State);
     State scriptHandler(State);
-    State scriptExecution(const ScriptSourceCode& sourceCode, State state);
+    State scriptExecution(const DeprecatedString& script, State state, DeprecatedString scriptURL = DeprecatedString(), int baseLine = 0);
     void setSrc(const SegmentedString&);
- 
+
     // check if we have enough space in the buffer.
     // if not enlarge it
     inline void checkBuffer(int len = 10)
     {
-        if ((dest - buffer) > size - len)
+        if ( (dest - buffer) > size-len )
             enlargeBuffer(len);
     }
-
     inline void checkScriptBuffer(int len = 10)
     {
-        if (scriptCodeSize + len >= scriptCodeMaxSize)
+        if ( scriptCodeSize + len >= scriptCodeMaxSize )
             enlargeScriptBuffer(len);
     }
 
@@ -202,7 +188,7 @@ private:
 
     class State {
     public:
-        State() : m_bits(0) { }
+        State() : m_bits(0) {}
 
         TagState tagState() const { return static_cast<TagState>(m_bits & TagMask); }
         void setTagState(TagState t) { m_bits = (m_bits & ~TagMask) | t; }
@@ -213,6 +199,8 @@ private:
         void setInScript(bool v) { setBit(InScript, v); }
         bool inStyle() const { return testBit(InStyle); }
         void setInStyle(bool v) { setBit(InStyle, v); }
+        bool inSelect() const { return testBit(InSelect); }
+        void setInSelect(bool v) { setBit(InSelect, v); }
         bool inXmp() const { return testBit(InXmp); }
         void setInXmp(bool v) { setBit(InXmp, v); }
         bool inTitle() const { return testBit(InTitle); }
@@ -255,7 +243,7 @@ private:
             EntityMask = (1 << 7) - (1 << 4),
             InScript = 1 << 7,
             InStyle = 1 << 8,
-            // Bit 9 unused
+            InSelect = 1 << 9,
             InXmp = 1 << 10,
             InTitle = 1 << 11,
             InPlainText = 1 << 12,
@@ -269,14 +257,14 @@ private:
             DiscardLF = 1 << 20, // FIXME: should clarify difference between skip and discard
             AllowYield = 1 << 21,
             LoadingExtScript = 1 << 22,
-            ForceSynchronous = 1 << 23
+            ForceSynchronous = 1 << 23,
         };
-
-        void setBit(StateBits bit, bool value)
-        {
-            if (value)
-                m_bits |= bit;
-            else
+    
+        void setBit(StateBits bit, bool value) 
+        { 
+            if (value) 
+                m_bits |= bit; 
+            else 
                 m_bits &= ~bit;
         }
         bool testBit(StateBits bit) const { return m_bits & bit; }
@@ -290,7 +278,7 @@ private:
 
     // Name of an attribute that we just scanned.
     AtomicString attrName;
-
+    
     // Used to store the code of a srcipting sequence
     UChar* scriptCode;
     // Size of the script sequenze stored in @ref #scriptCode
@@ -314,8 +302,9 @@ private:
     // may be still downloading) and finish
     bool noMoreData;
     // URL to get source code of script from
-    String scriptSrc;
-    String scriptSrcCharset;
+    DeprecatedString scriptSrc;
+    DeprecatedString scriptSrcCharset;
+    bool javascript;
     // the HTML code we will parse after the external script we are waiting for has loaded
     SegmentedString pendingSrc;
 
@@ -330,13 +319,12 @@ private:
     RefPtr<Node> scriptNode;
 
     bool m_requestingScript;
-    bool m_hasScriptsWaitingForStylesheets;
 
     // if we found one broken comment, there are most likely others as well
     // store a flag to get rid of the O(n^2) behaviour in such a case.
     bool brokenComments;
     // current line number
-    int m_lineNumber;
+    int lineno;
     // line number at which the current <script> started
     int scriptStartLineno;
     int tagStartLineno;
@@ -348,22 +336,20 @@ private:
 // So any fixed number might be too small, but rather than rewriting all usage of this buffer
 // we'll just make it large enough to handle all imaginable cases.
 #define CBUFLEN 1024
-    UChar cBuffer[CBUFLEN + 2];
+    char cBuffer[CBUFLEN+2];
     unsigned int m_cBufferPos;
-
+    
     SegmentedString src;
     Document* m_doc;
     HTMLParser* parser;
     bool inWrite;
     bool m_fragment;
-
-    OwnPtr<PreloadScanner> m_preloadScanner;
 };
 
 void parseHTMLDocumentFragment(const String&, DocumentFragment*);
 
 UChar decodeNamedEntity(const char*);
 
-} // namespace WebCore
+}
 
-#endif // HTMLTokenizer_h
+#endif

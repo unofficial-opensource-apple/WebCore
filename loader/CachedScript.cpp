@@ -19,8 +19,8 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
+    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+    Boston, MA 02111-1307, USA.
 
     This class provides all functionality needed for loading images, style sheets and html
     pages from the web. It has a memory cache for these objects.
@@ -37,68 +37,47 @@
 
 namespace WebCore {
 
-CachedScript::CachedScript(DocLoader* dl, const String& url, const String& charset)
-    : CachedResource(url, Script)
-    , m_encoding(charset)
-    , m_decodedDataDeletionTimer(this, &CachedScript::decodedDataDeletionTimerFired)
+CachedScript::CachedScript(DocLoader* dl, const String &url, CachePolicy cachePolicy, const DeprecatedString& charset)
+    : CachedResource(url, Script, cachePolicy)
+    , m_encoding(charset.latin1())
 {
     // It's javascript we want.
     // But some websites think their scripts are <some wrong mimetype here>
     // and refuse to serve them if we only accept application/x-javascript.
     setAccept("*/*");
+    m_errorOccurred = false;
     // load the file
     cache()->loader()->load(dl, this, false);
     m_loading = true;
     if (!m_encoding.isValid())
-        m_encoding = Latin1Encoding();
+        m_encoding = TextEncoding(Latin1Encoding);
 }
 
 CachedScript::~CachedScript()
 {
 }
 
-void CachedScript::ref(CachedResourceClient* c)
+void CachedScript::ref(CachedResourceClient *c)
 {
     CachedResource::ref(c);
-    if (!m_loading)
-        c->notifyFinished(this);
+
+    if(!m_loading) c->notifyFinished(this);
 }
 
-void CachedScript::allReferencesRemoved()
+void CachedScript::setCharset(const DeprecatedString &chs)
 {
-    m_decodedDataDeletionTimer.startOneShot(0);
-}
-
-void CachedScript::setEncoding(const String& chs)
-{
-    TextEncoding encoding(chs);
+    TextEncoding encoding = TextEncoding(chs.latin1());
     if (encoding.isValid())
         m_encoding = encoding;
 }
 
-String CachedScript::encoding() const
-{
-    return m_encoding.name();
-}
-    
-const String& CachedScript::script()
-{
-    if (!m_script && m_data) {
-        m_script = m_encoding.decode(m_data->data(), encodedSize());
-        setDecodedSize(m_script.length() * sizeof(UChar));
-    }
-    
-    m_decodedDataDeletionTimer.startOneShot(0);
-    return m_script;
-}
-
-void CachedScript::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+void CachedScript::data(Vector<char>& data, bool allDataReceived)
 {
     if (!allDataReceived)
         return;
 
-    m_data = data;
-    setEncodedSize(m_data.get() ? m_data->size() : 0);
+    setEncodedSize(data.size());
+    m_script = String(m_encoding.toUnicode(data.data(), encodedSize()));
     m_loading = false;
     checkNotify();
 }
@@ -109,7 +88,7 @@ void CachedScript::checkNotify()
         return;
 
     CachedResourceClientWalker w(m_clients);
-    while (CachedResourceClient* c = w.next())
+    while (CachedResourceClient *c = w.next())
         c->notifyFinished(this);
 }
 
@@ -118,17 +97,6 @@ void CachedScript::error()
     m_loading = false;
     m_errorOccurred = true;
     checkNotify();
-}
-
-void CachedScript::destroyDecodedData()
-{
-    m_script = String();
-    setDecodedSize(0);
-}
-
-void CachedScript::decodedDataDeletionTimerFired(Timer<CachedScript>*)
-{
-    destroyDecodedData();
 }
 
 }

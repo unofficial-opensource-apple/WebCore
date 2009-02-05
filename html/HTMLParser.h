@@ -1,9 +1,11 @@
 /*
+    This file is part of the KDE libraries
+
     Copyright (C) 1997 Martin Jones (mjones@kde.org)
               (C) 1997 Torben Weis (weis@kde.org)
               (C) 1998 Waldo Bastian (bastian@kde.org)
               (C) 1999 Lars Knoll (knoll@kde.org)
-    Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+    Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -17,39 +19,38 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
+    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+    Boston, MA 02111-1307, USA.
 */
+//----------------------------------------------------------------------------
+//
+// KDE HTML Widget -- HTML Parser
 
-#ifndef HTMLParser_h
-#define HTMLParser_h
+#ifndef HTMLPARSER_H
+#define HTMLPARSER_H
 
-#include "QualifiedName.h"
-#include <wtf/Forward.h>
-#include <wtf/RefPtr.h>
+#include "HTMLDocument.h"
 #include "HTMLParserErrorCodes.h"
-#include "Text.h"
 
 namespace WebCore {
 
-class Document;
 class DocumentFragment;
-class HTMLDocument;
+class FrameView;
+class HTMLElement;
 class HTMLFormElement;
 class HTMLHeadElement;
 class HTMLMapElement;
-class Node;
+class HTMLStackElem;
 class Token;
 
-struct HTMLStackElem;
-
 /**
- * The parser for HTML. It receives a stream of tokens from the HTMLTokenizer, and
- * builds up the Document structure from it.
+ * The parser for html. It receives a stream of tokens from the HTMLTokenizer, and
+ * builds up the Document structure form it.
  */
-class HTMLParser : Noncopyable {
+class HTMLParser
+{
 public:
-    HTMLParser(HTMLDocument*, bool reportErrors);
+    HTMLParser(Document*, bool);
     HTMLParser(DocumentFragment*);
     virtual ~HTMLParser();
 
@@ -68,13 +69,17 @@ public:
      */
     void reset();
 
-    bool skipMode() const { return !m_skipModeTag.isNull(); }
-    bool isHandlingResidualStyleAcrossBlocks() const { return m_handlingResidualStyleAcrossBlocks; }
+    bool skipMode() const { return !discard_until.isNull(); }
+    bool noSpaces() const { return !inBody; }
+    bool selectMode() const { return inSelect; }
+
+    HTMLDocument *doc() const { return static_cast<HTMLDocument *>(document); }
 
 private:
-    void setCurrent(Node*);
-    void derefCurrent();
-    void setSkipMode(const QualifiedName& qName) { m_skipModeTag = qName.localName(); }
+    void setCurrent(Node* newCurrent);
+    void setSkipMode(const QualifiedName& qName) { discard_until = qName.localName(); }
+
+    Document* document;
 
     PassRefPtr<Node> getNode(Token*);
     bool bodyCreateErrorCheck(Token*, RefPtr<Node>&);
@@ -99,72 +104,92 @@ private:
     bool tableSectionCreateErrorCheck(Token*, RefPtr<Node>&);
     bool textCreateErrorCheck(Token*, RefPtr<Node>&);
 
-    void processCloseTag(Token*);
+    void processCloseTag(Token *);
 
-    bool insertNode(Node*, bool flat = false);
-    bool handleError(Node*, bool flat, const AtomicString& localName, int tagPriority);
+    bool insertNode(Node *n, bool flat = false);
+    bool handleError(Node* n, bool flat, const AtomicString& localName, int tagPriority);
     
-    void pushBlock(const AtomicString& tagName, int level);
+    // The currently active element (the one new elements will be added to).  Can be a DocumentFragment, a Document or an Element.
+    Node* current;
+
+    bool currentIsReferenced;
+
+    HTMLStackElem *blockStack;
+
+    void pushBlock(const AtomicString& tagName, int _level);
     void popBlock(const AtomicString& tagName, bool reportErrors = false);
-    void popBlock(const QualifiedName& qName, bool reportErrors = false) { return popBlock(qName.localName(), reportErrors); } // Convenience function for readability.
-    void popOneBlock();
-    void moveOneBlockToStack(HTMLStackElem*& head);
-    inline HTMLStackElem* popOneBlockCommon();
+    void popBlock(const QualifiedName& qName) { return popBlock(qName.localName()); } // Convenience function for readability.
+    void popOneBlock(bool delBlock = true);
     void popInlineBlocks();
 
     void freeBlock();
 
     void createHead();
 
-    static bool isResidualStyleTag(const AtomicString& tagName);
-    static bool isAffectedByResidualStyle(const AtomicString& tagName);
-    void handleResidualStyleCloseTagAcrossBlocks(HTMLStackElem*);
-    void reopenResidualStyleTags(HTMLStackElem*, Node* malformedTableParent);
+    bool isResidualStyleTag(const AtomicString& tagName);
+    bool isAffectedByResidualStyle(const AtomicString& tagName);
+    void handleResidualStyleCloseTagAcrossBlocks(HTMLStackElem* elem);
+    void reopenResidualStyleTags(HTMLStackElem* elem, Node* malformedTableParent);
 
     bool allowNestedRedundantTag(const AtomicString& tagName);
     
     static bool isHeaderTag(const AtomicString& tagName);
     void popNestedHeaderTag();
 
-    bool isInline(Node*) const;
+    bool isInline(Node* node) const;
     
-    void startBody(); // inserts the isindex element
-    PassRefPtr<Node> handleIsindex(Token*);
+    Node *parseTelephoneNumbers(Node *inputNode);
+    Text *parseNextPhoneNumber(Text *inputText);
+    
+    /*
+     * currently active form
+     */
+    HTMLFormElement *form;
 
-    PassRefPtr<Node> parseTelephoneNumbers(Node *inputNode);
-    PassRefPtr<Text> parseNextPhoneNumber(Text *inputText);
+    /*
+     * current map
+     */
+    HTMLMapElement *map;
 
+    /*
+     * the head element. Needed for crappy html which defines <base> after </head>
+     */
+    HTMLHeadElement *head;
+
+    /*
+     * a possible <isindex> element in the head. Compatibility hack for
+     * html from the stone age
+     */
+    RefPtr<Node> isindex;
+    Node* handleIsindex(Token*);
+
+    /*
+     * inserts the stupid isIndex element.
+     */
+    void startBody();
+    
     void reportError(HTMLParserErrorCode errorCode, const AtomicString* tagName1 = 0, const AtomicString* tagName2 = 0, bool closeTags = false)
     { if (!m_reportErrors) return; reportErrorToConsole(errorCode, tagName1, tagName2, closeTags); }
-
-    void reportErrorToConsole(HTMLParserErrorCode, const AtomicString* tagName1, const AtomicString* tagName2, bool closeTags);
     
-    Document* document;
-
-    // The currently active element (the one new elements will be added to). Can be a document fragment, a document or an element.
-    Node* current;
-    // We can't ref a document, but we don't want to constantly check if a node is a document just to decide whether to deref.
-    bool didRefCurrent;
-
-    HTMLStackElem* blockStack;
-
-    RefPtr<HTMLFormElement> m_currentFormElement; // currently active form
-    RefPtr<HTMLMapElement> m_currentMapElement; // current map
-    HTMLHeadElement* head; // head element; needed for HTML which defines <base> after </head>
-    RefPtr<Node> m_isindexElement; // a possible <isindex> element in the head
+    void reportErrorToConsole(HTMLParserErrorCode, const AtomicString* tagName1, const AtomicString* tagName2, bool closeTags);
 
     bool inBody;
     bool haveContent;
     bool haveFrameSet;
+    bool end;
+    bool inSelect;
 
-    AtomicString m_skipModeTag; // tells the parser to discard all tags until it reaches the one specified
+    /*
+     * tells the parser to discard all tags, until it reaches the one specified
+     */
+    AtomicString discard_until;
 
-    bool m_isParsingFragment;
+    bool headLoaded;
+    bool m_fragment;
     bool m_reportErrors;
-    bool m_handlingResidualStyleAcrossBlocks;
     int inStrayTableContent;
 };
 
 }
     
-#endif // HTMLParser_h
+#endif // HTMLPARSER_H

@@ -18,8 +18,8 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
+    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+    Boston, MA 02111-1307, USA.
 
     This class provides all functionality needed for loading images, style sheets and html
     pages from the web. It has a memory cache for these objects.
@@ -30,39 +30,34 @@
 
 #include "CachedResource.h"
 #include "TextEncoding.h"
-#include "Timer.h"
+#include <wtf/Vector.h>
 
 namespace WebCore {
-
     class DocLoader;
 
     class CachedScript : public CachedResource {
     public:
-        CachedScript(DocLoader*, const String& url, const String& charset);
+        CachedScript(DocLoader*, const String& URL, CachePolicy, const DeprecatedString& charset);
         virtual ~CachedScript();
 
-        const String& script();
+        const String& script() const { return m_script; }
 
         virtual void ref(CachedResourceClient*);
-        virtual void allReferencesRemoved();
 
-        virtual void setEncoding(const String&);
-        virtual String encoding() const;
-        virtual void data(PassRefPtr<SharedBuffer> data, bool allDataReceived);
+        virtual void setCharset(const DeprecatedString&);
+        virtual void data(Vector<char>&, bool allDataReceived);
         virtual void error();
 
         virtual bool schedule() const { return false; }
+        
+        bool errorOccurred() const { return m_errorOccurred; }
 
         void checkNotify();
-        
-        virtual void destroyDecodedData();
 
     private:
-        void decodedDataDeletionTimerFired(Timer<CachedScript>*);
-
         String m_script;
         TextEncoding m_encoding;
-        Timer<CachedScript> m_decodedDataDeletionTimer;
+        bool m_errorOccurred;
     };
 }
 

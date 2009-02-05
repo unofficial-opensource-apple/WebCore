@@ -13,18 +13,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
-
-    interface [
-        GenerateConstructor,
-        InterfaceUUID=91c029bb-aa3a-4877-8ab5-59f304525fd5,
-        ImplementationUUID=ab39e189-5d0c-465d-b518-f57bc920038b
-    ] HTMLHeadingElement : HTMLElement {
-        attribute [ConvertNullToNullString] DOMString align;
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLHeadingElement : HTMLElement {
+        attribute DOMString align;
     };
-
 }

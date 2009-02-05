@@ -13,18 +13,16 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module events {
 
-    // Introduced in DOM Level 2:
-    interface [
-        GenerateConstructor
-    ] MutationEvent : Event {
+    interface [GenerateConstructor] MutationEvent : Event {
 
-        // attrChangeType
+        // DOM Level 2
+
         const unsigned short MODIFICATION = 1;
         const unsigned short ADDITION     = 2;
         const unsigned short REMOVAL      = 3;
@@ -35,14 +33,14 @@ module events {
         readonly attribute DOMString      attrName;
         readonly attribute unsigned short attrChange;
 
-        [OldStyleObjC] void initMutationEvent(in AtomicString type, 
-                                              in boolean canBubble, 
-                                              in boolean cancelable, 
-                                              in Node relatedNode, 
-                                              in DOMString prevValue, 
-                                              in DOMString newValue, 
-                                              in DOMString attrName, 
-                                              in unsigned short attrChange);
+        void initMutationEvent(in AtomicString typeArg, 
+                               in boolean canBubbleArg, 
+                               in boolean cancelableArg, 
+                               in Node relatedNodeArg, 
+                               in DOMString prevValueArg, 
+                               in DOMString newValueArg, 
+                               in DOMString attrNameArg, 
+                               in unsigned short attrChangeArg);
 
     };
 

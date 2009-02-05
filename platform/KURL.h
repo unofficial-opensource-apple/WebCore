@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,65 +23,45 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef KURL_h
-#define KURL_h
+#ifndef KURL_H_
+#define KURL_H_
 
-#include "DeprecatedString.h"
-#include "PlatformString.h"
-#include <wtf/Platform.h>
+#include "TextEncoding.h"
 
-#if PLATFORM(CF)
-typedef const struct __CFURL * CFURLRef;
-#endif
-
-#if PLATFORM(MAC)
+#if __APPLE__
 #ifdef __OBJC__
+@class NSData;
 @class NSURL;
 #else
+class NSData;
 class NSURL;
 #endif
-#endif
-#if PLATFORM(QT)
-class QUrl;
 #endif
 
 namespace WebCore {
 
     class KURL;
-    class TextEncoding;
+    class String;
 
     bool operator==(const KURL&, const KURL&);
-    inline bool operator!=(const KURL &a, const KURL &b) { return !(a == b); }
-
     bool equalIgnoringRef(const KURL&, const KURL&);
-    bool protocolHostAndPortAreEqual(const KURL&, const KURL&);
 
 class KURL {
 public:
     KURL();
     KURL(const char*);
-    KURL(const KURL&, const DeprecatedString&);
-    KURL(const KURL&, const DeprecatedString&, const TextEncoding&);
+    KURL(const KURL&, const DeprecatedString&, const TextEncoding& encoding = TextEncoding(UTF8Encoding));
     KURL(const DeprecatedString&);
-#if PLATFORM(MAC)
+#if __APPLE__
     KURL(NSURL*);
 #endif
-#if PLATFORM(CF)
-    KURL(CFURLRef);
-#endif
-#if PLATFORM(QT)
-    KURL(const QUrl&);
-#endif
-
-    bool isNull() const { return urlString.isNull(); }
-    bool isEmpty() const { return urlString.isEmpty(); }
-
+    
+    bool isEmpty() const { return urlString.isEmpty(); } 
+    bool isMalformed() const { return !m_isValid; }
     bool isValid() const { return m_isValid; }
-
     bool hasPath() const;
 
-    String string() const { return urlString; }
-    const DeprecatedString& deprecatedString() const { return urlString; }
+    DeprecatedString url() const { return urlString; }
 
     DeprecatedString protocol() const;
     DeprecatedString host() const;
@@ -89,7 +69,6 @@ public:
     DeprecatedString user() const;
     DeprecatedString pass() const;
     DeprecatedString path() const;
-    DeprecatedString lastPathComponent() const;
     DeprecatedString query() const;
     DeprecatedString ref() const;
     bool hasRef() const;
@@ -106,42 +85,22 @@ public:
     void setQuery(const DeprecatedString &);
     void setRef(const DeprecatedString &);
 
-    // Returns true if the current URL's protocol is the same as the null-
-    // terminated ASCII argument. The argument must be lower-case.
-    bool protocolIs(const char*) const;
-
     DeprecatedString prettyURL() const;
 
-#if PLATFORM(CF)
+#if __APPLE__
     CFURLRef createCFURL() const;
-#endif
-#if PLATFORM(MAC)
     NSURL *getNSURL() const;
-#endif
-#if PLATFORM(QT)
-    operator QUrl() const;
 #endif
 
     bool isLocalFile() const;
-    String fileSystemPath() const;
 
-    static DeprecatedString decode_string(const DeprecatedString&);
-    static DeprecatedString decode_string(const DeprecatedString&, const TextEncoding&);
-    static DeprecatedString encode_string(const DeprecatedString&);
+    static DeprecatedString decode_string(const DeprecatedString &, const TextEncoding& encoding = TextEncoding(UTF8Encoding));
+    static DeprecatedString encode_string(const DeprecatedString &);
     
     friend bool operator==(const KURL &, const KURL &);
-    
-    int hostStart() const { return (passwordEndPos == userStartPos) ? passwordEndPos : passwordEndPos + 1; }
-    int hostEnd() const { return hostEndPos; }
-
-#ifndef NDEBUG
-    void print() const;
-#endif
 
 private:
     bool isHierarchical() const;
-    void init(const KURL&, const DeprecatedString&, const TextEncoding&);
-    static bool protocolIs(const String&, const char*);
     void parse(const char *url, const DeprecatedString *originalString);
 
     DeprecatedString urlString;
@@ -157,11 +116,8 @@ private:
     int fragmentEndPos;
     
     friend bool equalIgnoringRef(const KURL& a, const KURL& b);
-    friend bool protocolHostAndPortAreEqual(const KURL&, const KURL&);
 };
-
-bool protocolIs(const String& url, const char* protocol);
 
 }
 
-#endif // KURL_h
+#endif

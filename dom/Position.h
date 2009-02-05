@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef Position_h
-#define Position_h
+#ifndef Position_H
+#define Position_H
 
 #include "Node.h"
 #include "TextAffinity.h"
@@ -33,7 +33,6 @@ namespace WebCore {
 
 class CSSComputedStyleDeclaration;
 class Element;
-class PositionIterator;
 class Range;
 
 enum EUsingComposedCharacters { NotUsingComposedCharacters = false, UsingComposedCharacters = true };
@@ -43,7 +42,6 @@ class Position
 public:
     Position() : m_node(0), m_offset(0) { }
     Position(Node*, int offset);
-    Position(const PositionIterator&);
 
     void clear();
 
@@ -57,17 +55,12 @@ public:
     Element* element() const;
     PassRefPtr<CSSComputedStyleDeclaration> computedStyle() const;
 
-    // Move up or down the DOM by one position.
-    // Offsets are computed using render text for nodes that have renderers - but note that even when
-    // using composed characters, the result may be inside a single user-visible character if a ligature is formed.
+    // Move up or down the DOM by one position
     Position previous(EUsingComposedCharacters usingComposedCharacters=NotUsingComposedCharacters) const;
     Position next(EUsingComposedCharacters usingComposedCharacters=NotUsingComposedCharacters) const;
-    static int uncheckedPreviousOffset(const Node*, int current);
-    static int uncheckedNextOffset(const Node*, int current);
-
     bool atStart() const;
     bool atEnd() const;
-
+    
     // FIXME: Make these non-member functions and put them somewhere in the editing directory.
     // These aren't really basic "position" operations. More high level editing helper functions.
     Position leadingWhitespacePosition(EAffinity, bool considerNonCollapsibleWhitespace = false) const;
@@ -77,13 +70,10 @@ public:
     Position upstream() const;
     Position downstream() const;
     
-    bool isCandidate() const;
-    bool inRenderedText() const;
+    Position equivalentRangeCompliantPosition() const;
+    bool inRenderedContent() const;
     bool isRenderedCharacter() const;
     bool rendersInDifferentPosition(const Position &pos) const;
-    
-    static bool hasRenderedNonAnonymousDescendantsWithHeight(RenderObject*);
-    static bool nodeIsUserSelectNone(Node*);
     
     void debugPosition(const char* msg = "") const;
 
@@ -95,8 +85,11 @@ public:
 private:
     int renderedOffset() const;
 
+    bool inRenderedText() const;
+
     Position previousCharacterPosition(EAffinity) const;
     Position nextCharacterPosition(EAffinity) const;
+    
     RefPtr<Node> m_node;
     int m_offset;
 };
@@ -122,4 +115,4 @@ void showTree(const WebCore::Position&);
 void showTree(const WebCore::Position*);
 #endif
 
-#endif // Position_h
+#endif // Position_H

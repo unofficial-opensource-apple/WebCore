@@ -23,12 +23,10 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef Widget_h
-#define Widget_h
+#ifndef WEBCORE_PLATFORM_WIDGET_H_
+#define WEBCORE_PLATFORM_WIDGET_H_
 
-#include <wtf/Platform.h>
-
-#if PLATFORM(MAC)
+#if __APPLE__
 #ifdef __OBJC__
 @class NSView;
 #else
@@ -36,47 +34,42 @@ class NSView;
 #endif
 #endif
 
-#if PLATFORM(WIN)
-typedef struct HWND__* HWND;
+#if WIN32
+typedef struct HWND__ *HWND;
+typedef struct HINSTANCE__ *HINSTANCE;
 #endif
 
-#if PLATFORM(GTK)
+#if PLATFORM(GDK)
 typedef struct _GdkDrawable GdkDrawable;
-typedef struct _GtkWidget GtkWidget;
-typedef struct _GtkContainer GtkContainer;
-#endif
-
-#if PLATFORM(QT)
-class QWidget;
-class QWebFrame;
-#endif
-
-#if PLATFORM(WX)
-class wxWindow;
 #endif
 
 namespace WebCore {
 
     class Cursor;
-    class Event;
     class Font;
     class GraphicsContext;
     class IntPoint;
     class IntRect;
     class IntSize;
-#if ENABLE(HW_COMP)
-    class LCLayer; // cassoulet - need to make this platform indep.
-#endif
-    class PlatformMouseEvent;
-    class ScrollView;
     class WidgetClient;
     class WidgetPrivate;
 
     class Widget {
     public:
+
+        enum FocusPolicy {
+            NoFocus = 0,
+            TabFocus = 0x1,
+            ClickFocus = 0x2,
+            StrongFocus = 0x3,
+            WheelFocus = 0x7
+        };
+
         Widget();
         virtual ~Widget();
 
+        virtual IntSize sizeHint() const;
+        
         virtual void setEnabled(bool);
         virtual bool isEnabled() const;
 
@@ -92,19 +85,38 @@ namespace WebCore {
         void move(const IntPoint&);
 
         virtual void paint(GraphicsContext*, const IntRect&);
-        virtual void invalidate();
-        virtual void invalidateRect(const IntRect&);
 
-        virtual void setFrameGeometry(const IntRect&);
         virtual IntRect frameGeometry() const;
+        virtual void setFrameGeometry(const IntRect&);
 
-        virtual void setFocus();
+        virtual int baselinePosition(int height) const; // relative to the top of the widget
+
+        virtual IntPoint mapFromGlobal(const IntPoint&) const;
+
+        float scaleFactor() const;
+
+        bool hasFocus() const;
+        void setFocus();
+        void clearFocus();
+        virtual bool checksDescendantsForFocus() const;
+
+        virtual FocusPolicy focusPolicy() const;
+
+        const Font& font() const;
+        virtual void setFont(const Font&);
 
         void setCursor(const Cursor&);
         Cursor cursor();
 
-        virtual void show();
-        virtual void hide();
+        void show();
+        void hide();
+
+        virtual void populate() {}
+
+        GraphicsContext* lockDrawingFocus();
+        void unlockDrawingFocus(GraphicsContext*);
+        void enableFlushDrawing();
+        void disableFlushDrawing();
 
         void setIsSelected(bool);
 
@@ -113,116 +125,42 @@ namespace WebCore {
 
         virtual bool isFrameView() const;
 
-        virtual void removeFromParent();
-
-        // This method is used by plugins on all platforms to obtain a clip rect that includes clips set by WebCore,
-        // e.g., in overflow:auto sections.  The clip rects coordinates are in the containing window's coordinate space.
-        // This clip includes any clips that the widget itself sets up for its children.
-        virtual IntRect windowClipRect() const;
-
-        virtual void handleEvent(Event*) { }
-
-#if PLATFORM(WIN)
-        void setContainingWindow(HWND);
-        HWND containingWindow() const;
-
-        virtual void setParent(ScrollView*);
-        ScrollView* parent() const;
-
-        virtual void attachToWindow() { }
-        virtual void detachFromWindow() { }
-
-        virtual void geometryChanged() const {};
-        
-        IntRect convertToContainingWindow(const IntRect&) const;
-        IntPoint convertToContainingWindow(const IntPoint&) const;
-        IntPoint convertFromContainingWindow(const IntPoint&) const;
-
-        virtual IntPoint convertChildToSelf(const Widget*, const IntPoint&) const;
-        virtual IntPoint convertSelfToChild(const Widget*, const IntPoint&) const;
-
-        bool suppressInvalidation() const;
-        void setSuppressInvalidation(bool);
-
+#if WIN32
+        Widget(HWND);
+        HWND windowHandle() const;
+        void setWindowHandle(HWND);
+        // The global DLL or application instance used for all WebCore windows.
+        static HINSTANCE instanceHandle;
 #endif
 
-#if PLATFORM(GTK)
-        virtual void setParent(ScrollView*);
-        ScrollView* parent() const;
-
-        void setContainingWindow(GtkContainer*);
-        GtkContainer* containingWindow() const;
-
-        virtual void geometryChanged() const;
-
-        IntRect convertToContainingWindow(const IntRect&) const;
-        IntPoint convertToContainingWindow(const IntPoint&) const;
-        IntPoint convertFromContainingWindow(const IntPoint&) const;
-
-        virtual IntPoint convertChildToSelf(const Widget*, const IntPoint&) const;
-        virtual IntPoint convertSelfToChild(const Widget*, const IntPoint&) const;
-
-        bool suppressInvalidation() const;
-        void setSuppressInvalidation(bool);
-
-        GtkWidget* gtkWidget() const;
-protected:
-        void setGtkWidget(GtkWidget*);
+#if PLATFORM(GDK)
+      Widget(GdkDrawable* drawable);
+      virtual void setDrawable(GdkDrawable* drawable);
+      GdkDrawable* drawable() const;
 #endif
 
-#if PLATFORM(QT)
-        void setNativeWidget(QWidget *widget);
-        QWidget* nativeWidget() const;
-
-        QWidget *containingWindow() const;
-
-        QWebFrame* qwebframe() const;
-        void setQWebFrame(QWebFrame *webFrame);
-        virtual void setParent(ScrollView*);
-        ScrollView* parent() const;
-        virtual void geometryChanged() const;
-        ScrollView* topLevel() const;
-
-        IntRect convertToContainingWindow(const IntRect&) const;
-        IntPoint convertToContainingWindow(const IntPoint&) const;
-        IntPoint convertFromContainingWindow(const IntPoint&) const;
-
-        virtual IntPoint convertChildToSelf(const Widget*, const IntPoint&) const;
-        virtual IntPoint convertSelfToChild(const Widget*, const IntPoint&) const;
-
-        bool suppressInvalidation() const;
-        void setSuppressInvalidation(bool);
-#endif
-
-#if PLATFORM(MAC)
-        Widget(NSView*);
+#if __APPLE__
+        Widget(NSView* view);
 
         NSView* getView() const;
         NSView* getOuterView() const;
         void setView(NSView*);
-                
-        static void beforeMouseDown(NSView*, Widget*);
-        static void afterMouseDown(NSView*, Widget*);
+        
+        void sendConsumedMouseUp();
+        
+        static void beforeMouseDown(NSView*);
+        static void afterMouseDown(NSView*);
 
         void addToSuperview(NSView* superview);
         void removeFromSuperview();
 
-#if ENABLE(HW_COMP)
-        virtual void hostCompositingLayer(LCLayer* inLayer);
-#endif  // ENABLE(HW_COMP)
-
-#endif // PLATFORM(MAC)
-
-#if PLATFORM(WX)
-        Widget(wxWindow*);
-        wxWindow* nativeWindow() const;
-        virtual void setNativeWindow(wxWindow*);
+        static void setDeferFirstResponderChanges(bool);
 #endif
 
     private:
         WidgetPrivate* data;
     };
 
-} // namespace WebCore
+}
 
-#endif // Widget_h
+#endif

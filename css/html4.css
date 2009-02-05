@@ -2,7 +2,7 @@
  * The default style sheet used to render HTML.
  *
  * Copyright (C) 2000 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -169,6 +169,11 @@ table {
     border-color: gray
 }
 
+table[align="center"] {
+    margin-left: auto;
+    margin-right: auto
+}
+
 thead {
     display: table-header-group;
     vertical-align: middle;
@@ -185,11 +190,6 @@ tfoot {
     display: table-footer-group;
     vertical-align: middle;
     border-color: inherit
-}
-
-/* for tables without table section elements (can happen with XHTML or dynamically created tables) */
-table > tr {
-    vertical-align: middle;
 }
 
 col {
@@ -293,98 +293,53 @@ fieldset {
     border: 2px groove ThreeDFace
 }
 
-button {
-    -webkit-appearance: button;
-}
-
-input, textarea, keygen, select, button, isindex {
-    margin: 0__qem;
-#if !IPHONE
-    font: -webkit-small-control;
-#endif
-    color: initial;
-    letter-spacing: normal;
-    word-spacing: normal;
-    line-height: normal;
-    text-transform: none;
-    text-indent: 0;
-    text-shadow: none;
-    display: inline-block;
-    text-align: -webkit-auto;
-}
-
-#if IPHONE
 input:disabled {
-    opacity: 0.4;
+    opacity:0.4;
 }
-#endif
 
 input[type="hidden"] {
     display: none
 }
 
-input,
-input[type="password"],
-input[type="search"],
-#if IPHONE
-textarea,
-#endif
-isindex {
+input, textarea, select, button, isindex, input[type="file"]::-webkit-file-upload-button {
+    margin: 0__qem;
+/*    font: -webkit-small-control;*/
+    color: initial;
+    
+    text-align: -webkit-auto;
+    letter-spacing: normal;
+    word-spacing: normal;
+    line-height: normal;
+    text-transform: none;
+    text-indent: 0;
+    display: inline-block;
+    
     -webkit-appearance: textfield;
-#if !IPHONE
-    padding: 1px;
-#else
-    padding: 0.2em 0.5em 0.3em 0.5em;
-#endif
-    background-color: white;
-#if IPHONE
     -webkit-border-radius: 5px;
+    
     font: 11px Helvetica;
-    border: 1px solid #4c4c4c;
-#else
-    border: 2px inset;
-#endif
-    -webkit-rtl-ordering: logical;
-    -webkit-user-select: text;
-    cursor: auto;
+    border:1px solid #4c4c4c;
+    padding: 0.2em 0.5em 0.3em 0.5em;
 }
 
 input[type="search"] {
-    -webkit-appearance: searchfield;
     -webkit-box-sizing: border-box;
 }
 
-input[type="search"]::-webkit-search-cancel-button {
-    -webkit-appearance: searchfield-cancel-button;
-}
-
-input[type="search"]::-webkit-search-decoration {
-    -webkit-appearance: searchfield-decoration;
-}
-
-input[type="search"]::-webkit-search-results-decoration {
-    -webkit-appearance: searchfield-results-decoration;
-}
-
-input[type="search"]::-webkit-search-results-button {
-    -webkit-appearance: searchfield-results-button;
+input, textarea, isindex {
+    background-color: white;
+    
+    -webkit-rtl-ordering: logical;
+    -webkit-user-select: text;
 }
 
 textarea {
     -webkit-appearance: textarea;
-#if !IPHONE
-    background-color: white;
-    border: 1px solid;
-    -webkit-rtl-ordering: logical;
-    -webkit-user-select: text;
-#else
+    -webkit-box-orient: vertical;
     -webkit-nbsp-mode: space;
     -webkit-line-break: after-white-space;
-    word-wrap: break-word;
-#endif
-    -webkit-box-orient: vertical;
     resize: auto;
-    cursor: auto;
+    word-wrap: break-word;
 }
 
 input[type="password"] {
@@ -407,102 +362,83 @@ input:-webkit-autofill {
     background-image:none !important;
 }
 
-input[type="radio"], input[type="checkbox"] {
-    margin: 3px 0.5ex;
-#if IPHONE
-    border: 1px solid #4c4c4c;
-    -webkit-box-sizing: border-box;
-#else
-    padding: initial;
-    background-color: initial;
-    border: initial;
-#endif
-}
-
-input[type="button"], input[type="submit"], input[type="reset"], input[type="file"]::-webkit-file-upload-button {
+button, input[type="button"], input[type="submit"], input[type="reset"], input[type="file"]::-webkit-file-upload-button
+{    
     -webkit-appearance: push-button;
-    white-space: pre
-}
-
-input[type="button"], input[type="submit"], input[type="reset"], input[type="file"]::-webkit-file-upload-button, button {
     -webkit-box-align: center;
+    
     text-align: center;
     cursor: default;
     color: ButtonText;
-#if !IPHONE
-    padding: 2px 6px 3px 6px;
-    border: 2px outset ButtonFace;
-    background-color: ButtonFace;
-#else
+    
+    /* We want to be as close to transparent as possible without actually being transparent */
+    background-color:rgba(255, 255, 255, 0.01);
+    
     padding-top: 0px;
     padding-bottom: 0px;
+    
     padding-left: 1.0em !important;
     padding-right: 1.0em !important;
-    border: 1px solid #4c4c4c;
-    /* We want to be as close to background-color:transparent as possible without actually being transparent */
-    background-color: rgba(255, 255, 255, 0.01);
+
     font: 11px Helvetica;
-#endif
+    white-space: pre;
+}
+
+input[type="button"], input[type="submit"], input[type="reset"], input[type="file"]::-webkit-file-upload-button
+{
     -webkit-box-sizing: border-box;
 }
 
-input[type="range"] {
-    -webkit-appearance: slider-horizontal;
-    padding: initial;
-    border: initial;
-    margin: 2px;
+input[type="button"]:disabled, input[type="submit"]:disabled, input[type="reset"]:disabled, input[type="file"]:disabled::-webkit-file-upload-button, button:disabled, select:disabled {
+    color: GrayText;
 }
 
-input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: sliderthumb-horizontal;
+select, button, input[type="button"], input[type="image"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"], input[type="file"]::-webkit-file-upload-button, img {
+    -webkit-user-select: ignore;
 }
-
-input[type="button"]:disabled, input[type="submit"]:disabled, input[type="reset"]:disabled, input[type="file"]:disabled::-webkit-file-upload-button, button:disabled, select:disabled, keygen:disabled, optgroup:disabled, option:disabled {
-    color: GrayText
-}
-
-#if !IPHONE
-input[type="button"]:active, input[type="submit"]:active, input[type="reset"]:active, input[type="file"]:active::-webkit-file-upload-button, button:active {
-    border-style: inset
-}
-
-input[type="button"]:active:disabled, input[type="submit"]:active:disabled, input[type="reset"]:active:disabled, input[type="file"]:active:disabled::-webkit-file-upload-button, button:active:disabled {
-    border-style: outset
-}
-#endif
 
 area, param {
     display: none
 }
 
-input[type="checkbox"] {
-    -webkit-appearance: checkbox;
-#if !IPHONE
-    -webkit-box-sizing: border-box;
-#else
-    -webkit-border-radius: 5px;
-    width: 16px;
-    height: 16px;
-    padding: 0px;
-    /* We want to be as close to background:transparent as possible without actually being transparent */
-    background-color: rgba(255, 255, 255, 0.01);
-#endif
+input[type="radio"], input[type="checkbox"] {
+    margin: 3px 0.5ex;
+    border:1px solid #4c4c4c;
+    -webkit-box-sizing:border-box;
 }
 
-#if IPHONE
+input[type="checkbox"] {
+
+    -webkit-appearance:checkbox;
+    -webkit-border-radius: 5px;
+    
+    width:16px;
+    height:16px;
+
+    padding:0px;
+    
+    /* We want to be as close to transparent as possible without actually being transparent */
+    background:rgba(255, 255, 255, 0.01);
+}
+
 input[type="radio"] {
-    -webkit-appearance: radio;
-    -webkit-border-radius: 8px;
-    width: 16px;
-    height: 16px;
-    padding: 0px;
-    /* We want to be as close to background:transparent as possible without actually being transparent */
-    background-color: rgba(255, 255, 255, 0.01);
+
+    -webkit-appearance:radio;
+    -webkit-border-radius:8px;
+    
+    width:16px;
+    height:16px;
+
+    padding:0px;
+
+    /* We want to be as close to transparent as possible without actually being transparent */
+    background:rgba(255, 255, 255, 0.01);
 }
 
 input[type="checkbox"]:checked, input[type="radio"]:checked {
     background:rgba(0, 0, 0, 0.8);
-    /* We want to be as close to border-color:transparent as possible without actually being transparent */
+    
+    /* We want to be as close to transparent as possible without actually being transparent */
     border-color:rgba(255, 255, 255, 0.01);
 }
 
@@ -510,73 +446,36 @@ input[type="checkbox"]:checked:disabled, input[type="radio"]:checked:disabled {
     opacity:0.4;
     background:rgba(0, 0, 0, 0.8);
 }
-#endif
 
-#if !IPHONE
-input[type="radio"] {
-    -webkit-appearance: radio;
-    -webkit-box-sizing: border-box;
+input[type="checkbox"]:disabled, input[type="radio"]:disabled {
+    opacity:0.4;
 }
-#endif
 
-#if IPHONE
 select:focus {
     border-color: rgb(17, 46, 135);
 }
-#endif
 
-keygen, select {
-#if !IPHONE
-    -webkit-appearance: menulist;
-#endif
-    -webkit-box-sizing: border-box;
-#if IPHONE
-    -webkit-appearance: menulist-button;
+select {
     letter-spacing: normal;
     word-spacing: normal;
     line-height: normal;
-#endif
+
+    -webkit-appearance: menulist-button;
     -webkit-box-align: center;
-#if !IPHONE
-    border: 1px solid;
-#else
-    border: 1px solid #4c4c4c;
-#endif
-    -webkit-border-radius: 5px;
-    white-space: pre;
     -webkit-rtl-ordering: logical;
-#if !IPHONE
-    color: black;
-    background-color: white;
-#else
-    /* We want to be as close to background:transparent as possible without actually being transparent */
-    background-color: rgba(255, 255, 255, 0.01);
+
+    white-space: pre;
+    
+    -webkit-border-radius: 5px;
+    border:1px solid #4c4c4c;
+
+    /* We want to be as close to transparent as possible without actually being transparent */
+    background:rgba(255, 255, 255, 0.01);
+    
+    -webkit-box-sizing: border-box;
     font: 11px Helvetica;
     padding: 0 0.5em 0 0.5em !important;
-#endif
-    cursor: default;
 }
-
-#if !IPHONE
-select[size],
-select[multiple],
-select[size][multiple] {
-    -webkit-appearance: listbox;
-    -webkit-box-align: start;
-    border: 1px inset gray;
-    -webkit-border-radius: initial;
-    white-space: initial;
-}
-
-select[size="0"],
-select[size="1"] {
-    -webkit-appearance: menulist;
-    -webkit-box-align: center;
-    border: 1px solid;
-    -webkit-border-radius: 5px;
-    white-space: pre;
-}
-#endif
 
 optgroup {
     font-weight: bolder;
@@ -637,18 +536,25 @@ nobr {
     white-space: nowrap
 }
 
+wbr {
+    white-space: normal
+}
+
 /* states */
 
 :focus { 
     outline: auto 5px -webkit-focus-ring-color
 }
 
-/* Read-only text fields do not show a focus ring but do still receive focus */
-html:focus, body:focus, input[readonly]:focus { 
+html:focus, body:focus { 
+    outline: none
+}
+
+html:focus, body:focus {
     outline: none
 }
   
-input:focus, textarea:focus, isindex:focus, keygen:focus, select:focus {
+input:focus, textarea:focus, isindex:focus {
     outline-offset: -2px
 }
 
@@ -661,14 +567,14 @@ input[type="radio"]:focus,
 input[type="reset"]:focus,
 input[type="search"]:focus,
 input[type="submit"]:focus,
-input[type="file"]:focus::-webkit-file-upload-button {
+input[type="file"]::-webkit-file-upload-button:focus {
     outline-offset: 0
 }
-    
+
 a:-webkit-any-link {
     color: -webkit-link;
     text-decoration: underline;
-    cursor: auto;
+    -webkit-user-select: ignore
 }
 
 a:-webkit-any-link:active {
@@ -683,85 +589,6 @@ noframes {
 
 frameset, frame {
     display: block
-}
-
-frameset {
-    border-color: inherit
-}
-
-iframe {
-    border: 2px inset
-}
-
-/* media controls */
-/* FIXME this is not the final styling */
-
-audio {
-    width: 200px;
-    height: 16px;
-}
-
-audio::-webkit-media-controls-panel, video::-webkit-media-controls-panel {
-    position: absolute;
-    bottom: 0;
-    width: 100%;
-    height: 16px;
-    -webkit-user-select: none;
-}
-
-audio::-webkit-media-controls-mute-button, video::-webkit-media-controls-mute-button {
-    -webkit-appearance: media-mute-button;
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 17px;
-    height: 16px;
-}
-
-audio::-webkit-media-controls-play-button, video::-webkit-media-controls-play-button {
-    -webkit-appearance: media-play-button;
-    position: absolute;
-    top: 0;
-    left: 16px;
-    width: 17px;
-    height: 16px;
-}
-
-audio::-webkit-media-controls-time-display, video::-webkit-media-controls-time-display {
-    display: none;
-}
-
-audio::-webkit-media-controls-timeline, video::-webkit-media-controls-timeline {
-    -webkit-appearance: media-slider;
-    position: absolute;
-    top: 0;
-    left: 32px;
-    right: 32px;
-    height: 16px;
-    padding: 0px 2px;
-}
-
-audio::-webkit-media-controls-seek-back-button, video::-webkit-media-controls-seek-back-button {
-    -webkit-appearance: media-seek-back-button;
-    position: absolute;
-    top: 0;
-    right: 16px;
-    width: 17px;
-    height: 16px;
-}
-
-
-audio::-webkit-media-controls-seek-forward-button, video::-webkit-media-controls-seek-forward-button {
-    -webkit-appearance: media-seek-forward-button;
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 17px;
-    height: 16px;
-}
-
-audio::-webkit-media-controls-fullscreen-button, video::-webkit-media-controls-fullscreen-button {
-    display: none;
 }
 
 /* noscript is handled internally, as it depends on settings */

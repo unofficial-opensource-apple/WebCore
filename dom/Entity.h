@@ -16,13 +16,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef Entity_h
-#define Entity_h
+#ifndef Entity_H
+#define Entity_H
 
 #include "ContainerNode.h"
 
@@ -36,9 +36,9 @@ public:
     Entity(Document*, const String& publicId, const String& systemId, const String& notationName);
 
     // DOM methods & attributes for Entity
-    String publicId() const { return m_publicId; }
-    String systemId() const { return m_systemId; }
-    String notationName() const { return m_notationName; }
+    String publicId() const { return m_publicId.get(); }
+    String systemId() const { return m_systemId.get(); }
+    String notationName() const { return m_notationName.get(); }
 
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
@@ -47,10 +47,10 @@ public:
     virtual String toString() const;
 
 private:
-    String m_publicId;
-    String m_systemId;
-    String m_notationName;
-    String m_name;
+    RefPtr<StringImpl> m_publicId;
+    RefPtr<StringImpl> m_systemId;
+    RefPtr<StringImpl> m_notationName;
+    RefPtr<StringImpl> m_name;
 };
 
 } //namespace

@@ -1,9 +1,11 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,8 +19,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 #include "config.h"
 #include "Attr.h"
@@ -36,28 +38,25 @@ Attr::Attr(Element* element, Document* docPtr, Attribute* a)
       m_attribute(a),
       m_ignoreChildrenChanged(0)
 {
-    ASSERT(!m_attribute->attr());
+    assert(!m_attribute->attr());
     m_attribute->m_impl = this;
-    m_attrWasSpecifiedOrElementHasRareData = true;
+    m_specified = true;
 }
 
 Attr::~Attr()
 {
-    ASSERT(m_attribute->attr() == this);
+    assert(m_attribute->attr() == this);
     m_attribute->m_impl = 0;
 }
 
 void Attr::createTextChild()
 {
-    ASSERT(refCount());
+    assert(refCount());
     if (!m_attribute->value().isEmpty()) {
-        RefPtr<Text> textNode = document()->createTextNode(m_attribute->value().domString());
-
-        // This does everything appendChild() would do in this situation (assuming m_ignoreChildrenChanged was set),
-        // but much more efficiently.
-        textNode->setParent(this);
-        setFirstChild(textNode.get());
-        setLastChild(textNode.get());
+        ExceptionCode ec = 0;
+        m_ignoreChildrenChanged++;
+        appendChild(document()->createTextNode(m_attribute->value().impl()), ec);
+        m_ignoreChildrenChanged--;
     }
 }
 
@@ -88,7 +87,6 @@ const AtomicString& Attr::prefix() const
 
 void Attr::setPrefix(const AtomicString &_prefix, ExceptionCode& ec)
 {
-    ec = 0;
     checkSetPrefix(_prefix, ec);
     if (ec)
         return;
@@ -113,10 +111,16 @@ void Attr::setValue( const String& v, ExceptionCode& ec)
         return;
     }
 
+    // ### what to do on 0 ?
+    if (v.isNull()) {
+        ec = DOMSTRING_SIZE_ERR;
+        return;
+    }
+
     int e = 0;
     m_ignoreChildrenChanged++;
     removeChildren();
-    appendChild(document()->createTextNode(v), e);
+    appendChild(document()->createTextNode(v.impl()), e);
     m_ignoreChildrenChanged--;
     
     m_attribute->setValue(v.impl());
@@ -149,9 +153,9 @@ bool Attr::childTypeAllowed(NodeType type)
     }
 }
 
-void Attr::childrenChanged(bool changedByParser)
+void Attr::childrenChanged()
 {
-    Node::childrenChanged(changedByParser);
+    Node::childrenChanged();
     
     if (m_ignoreChildrenChanged > 0)
         return;

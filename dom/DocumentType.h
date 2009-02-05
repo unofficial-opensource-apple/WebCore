@@ -18,12 +18,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-#ifndef DocumentType_h
-#define DocumentType_h
+#ifndef DOM_DocumentTypeImpl_h
+#define DOM_DocumentTypeImpl_h
 
 #include "Node.h"
 
@@ -47,8 +47,6 @@ public:
     String publicId() const { return m_publicId; }
     String systemId() const { return m_systemId; }
     String internalSubset() const { return m_subset; }
-
-    virtual String baseURI() const;
 
     // Other methods (not part of DOM)
     DOMImplementation *implementation() const { return m_implementation.get(); }

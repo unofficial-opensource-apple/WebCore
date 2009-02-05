@@ -22,86 +22,78 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
-
+#import "GraphicsServices/GraphicsServices.h"
+#import "WKWindow.h"
 #import "config.h"
 #import "PlatformMouseEvent.h"
-
-#import "PlatformScreen.h"
+#import "Screen.h"
 
 #import <GraphicsServices/GraphicsServices.h>
-#import "WKWindow.h"
 
 namespace WebCore {
 
-static MouseButton mouseButtonForEvent(GSEventRef event)
-{
-    switch (GSEventGetType (event)) {
-        case kGSEventLeftMouseDown:
-        case kGSEventLeftMouseUp:
-        case kGSEventLeftMouseDragged:
-        default:
-            return LeftButton;
-    }
-}
+const PlatformMouseEvent::CurrentEventTag PlatformMouseEvent::currentEvent = {};
 
-static int clickCountForEvent(GSEventRef event)
-{
-    if (GSEventIsMouseEventType(event)) {
-        return GSEventGetClickCount(event);
+    static MouseButton mouseButtonForEvent(GSEventRef event)
+    {
+        switch (GSEventGetType (event)) {
+            case kGSEventLeftMouseDown:
+            case kGSEventLeftMouseUp:
+            case kGSEventLeftMouseDragged:
+            default:
+                return LeftButton;
+        }
     }
-    return 0;
-}
+    
+    static IntPoint positionForEvent(GSEventRef event)
+    {
+        if (GSEventIsMouseEventType (event) || GSEventGetType (event) == kGSEventScrollWheel)
+            return IntPoint (GSEventGetLocationInWindow (event));
+        return IntPoint ();
+    }
 
-IntPoint pointForEvent(GSEventRef event)
+static IntPoint globalPositionForEvent(GSEventRef event)
 {
     if (GSEventIsMouseEventType(event) || GSEventGetType(event) == kGSEventScrollWheel)
         return IntPoint(GSEventGetLocationInWindow(event));
-    return IntPoint();
-}
-
-IntPoint globalPointForEvent(GSEventRef event)
-{
-    // Aspen WebKit works as if it is full screen. Therefore Web coords are Global coords.
-    return pointForEvent(event);
-}
-
-int eventNumberForEvent(GSEventRef event)
-{
-    if (GSEventIsMouseEventType(event) || GSEventGetType(event) == kGSEventScrollWheel)
-        return GSEventGetEventNumber(event);
     else
-        return 0;
+        return IntPoint();
 }
     
-static MouseEventType mouseEventForNSEvent(GSEventRef event) 
+static int clickCountForEvent(GSEventRef event)
 {
-    switch (GSEventGetType (event)) {
-        case kGSEventScrollWheel:
-            return MouseEventScroll;
-        case kGSEventLeftMouseDragged:
-            return MouseEventMoved;
-        case kGSEventLeftMouseDown:
-            return MouseEventPressed;
-        case kGSEventLeftMouseUp:
-            return MouseEventReleased;
-        default:
-            return MouseEventMoved;
+    if (GSEventIsMouseEventType (event)) {
+        return GSEventGetClickCount (event);
     }
+    return 0;
 }
-
-PlatformMouseEvent::PlatformMouseEvent(GSEventRef event)
-    : m_position(pointForEvent(event))
-    , m_globalPosition(globalPointForEvent(event))
+    
+    PlatformMouseEvent::PlatformMouseEvent(GSEventRef event)
+    : m_position(positionForEvent(event))
+    , m_globalPosition(globalPositionForEvent(event))
     , m_button(mouseButtonForEvent(event))
-    , m_eventType(mouseEventForNSEvent(event))
     , m_clickCount(clickCountForEvent(event))
     , m_shiftKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskShift)
     , m_ctrlKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskControl)
     , m_altKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskAlternate)
     , m_metaKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskCommand)
-    , m_timestamp(GSEventGetTimestamp(event))
-    , m_eventNumber(GSEventGetEventNumber(event))
 {
+}
+
+PlatformMouseEvent::PlatformMouseEvent(const CurrentEventTag&)
+    : m_button(LeftButton), m_clickCount(0), m_shiftKey(false), m_ctrlKey(false), m_altKey(false), m_metaKey(false)
+{
+        GSEventRef event = WKEventGetCurrentEvent();
+        if (event) {
+            m_position = positionForEvent(event);
+            m_globalPosition = globalPositionForEvent(event);
+            m_button = mouseButtonForEvent(event);
+            m_clickCount = clickCountForEvent(event);
+            m_shiftKey = GSEventGetModifierFlags(event) & kGSEventFlagMaskShift;
+            m_ctrlKey = GSEventGetModifierFlags(event) & kGSEventFlagMaskControl;
+            m_altKey = GSEventGetModifierFlags(event) & kGSEventFlagMaskAlternate;
+            m_metaKey = GSEventGetModifierFlags(event) & kGSEventFlagMaskCommand;
+        }
 }
 
 }

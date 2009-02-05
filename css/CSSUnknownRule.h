@@ -17,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSUnknownRule_h
-#define CSSUnknownRule_h
+#ifndef CSSUnknownRule_H
+#define CSSUnknownRule_H
 
 #include "CSSRule.h"
 
@@ -30,16 +30,11 @@ namespace WebCore {
 
 class CSSUnknownRule : public CSSRule {
 public:
-    CSSUnknownRule(StyleBase* parent)
-        : CSSRule(parent)
-    {
-    }
+    CSSUnknownRule(StyleBase* parent) : CSSRule(parent) { }
 
     virtual bool isUnknownRule() { return true; }
-
-    virtual unsigned short type() const { return UNKNOWN_RULE; }
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSUnknownRule_h
+#endif

@@ -32,8 +32,8 @@
 #include "Attr.h"
 #include "Document.h"
 #include "ExceptionCode.h"
-#include "CSSHelper.h"
-#include "HTMLFrameElementBase.h"
+#include "HTMLFrameElement.h"
+#include "HTMLIFrameElement.h"
 #include "HTMLNames.h"
 #include "PlatformString.h"
 #include "kjs_binding.h"
@@ -49,11 +49,15 @@ void JSAttr::setValue(KJS::ExecState* exec, KJS::JSValue* value)
     String attrValue = valueToStringWithNullCheck(exec, value);
 
     Element* ownerElement = imp->ownerElement();
-    if (ownerElement && (ownerElement->hasTagName(iframeTag) || ownerElement->hasTagName(frameTag))) {
-        if (equalIgnoringCase(imp->name(), "src") && parseURL(attrValue).startsWith("javascript:", false)) {
-            if (!checkNodeSecurity(exec, static_cast<HTMLFrameElementBase*>(ownerElement)->contentDocument()))
-                return;
-        }
+    if (ownerElement && ownerElement->hasTagName(iframeTag) && equalIgnoringCase(imp->name(), "src") && attrValue.startsWith("javascript:", false)) {
+        HTMLIFrameElement* frame = static_cast<HTMLIFrameElement*>(ownerElement);
+        if (!checkNodeSecurity(exec, frame->contentDocument()))
+            return;
+    }
+    if (ownerElement && ownerElement->hasTagName(frameTag) && equalIgnoringCase(imp->name(), "src") && attrValue.startsWith("javascript:", false)) {
+        HTMLFrameElement* frame = static_cast<HTMLFrameElement*>(ownerElement);
+        if (!checkNodeSecurity(exec, frame->contentDocument()))
+            return;
     }
 
     ExceptionCode ec = 0;

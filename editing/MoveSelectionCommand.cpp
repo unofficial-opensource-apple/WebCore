@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,8 +31,8 @@
 
 namespace WebCore {
 
-MoveSelectionCommand::MoveSelectionCommand(PassRefPtr<DocumentFragment> fragment, const Position& position, bool smartMove) 
-    : CompositeEditCommand(position.node()->document()), m_fragment(fragment), m_position(position), m_smartMove(smartMove)
+MoveSelectionCommand::MoveSelectionCommand(Document *document, DocumentFragment *fragment, Position &position, bool smartMove) 
+    : CompositeEditCommand(document), m_fragment(fragment), m_position(position), m_smartMove(smartMove)
 {
     ASSERT(m_fragment);
 }
@@ -73,8 +73,9 @@ void MoveSelectionCommand::doApply()
     if (!pos.node()->inDocument())
         pos = endingSelection().start();
 
-    setEndingSelection(Selection(pos, endingSelection().affinity()));
-    applyCommandToComposite(new ReplaceSelectionCommand(positionNode->document(), m_fragment.get(), true, m_smartMove));
+    setEndingSelection(pos, endingSelection().affinity());
+    EditCommandPtr cmd(new ReplaceSelectionCommand(document(), m_fragment.get(), true, m_smartMove));
+    applyCommandToComposite(cmd);
 }
 
 EditAction MoveSelectionCommand::editingAction() const

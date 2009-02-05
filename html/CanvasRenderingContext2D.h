@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef CanvasRenderingContext2D_h
-#define CanvasRenderingContext2D_h
+#ifndef HTMLCanvas2DContext_h
+#define HTMLCanvas2DContext_h
 
 #include "FloatSize.h"
 #include "GraphicsTypes.h"
@@ -32,7 +32,7 @@
 #include "PlatformString.h"
 #include <wtf/Vector.h>
 
-#if PLATFORM(CG)
+#if __APPLE__
 #include <CoreGraphics/CoreGraphics.h>
 #endif
 
@@ -48,7 +48,7 @@ namespace WebCore {
 
     typedef int ExceptionCode;
 
-    class CanvasRenderingContext2D : public RefCounted<CanvasRenderingContext2D> {
+    class CanvasRenderingContext2D : public Shared<CanvasRenderingContext2D> {
     public:
         CanvasRenderingContext2D(HTMLCanvasElement*);
 
@@ -96,7 +96,6 @@ namespace WebCore {
         void scale(float sx, float sy);
         void rotate(float angleInRadians);
         void translate(float tx, float ty);
-        void transform(float m11, float m12, float m21, float m22, float dx, float dy);
 
         void setStrokeColor(const String& color);
         void setStrokeColor(float grayLevel);
@@ -126,8 +125,6 @@ namespace WebCore {
         void fill();
         void stroke();
         void clip();
-
-        bool isPointInPath(const float x, const float y);
 
         void clearRect(float x, float y, float width, float height, ExceptionCode&);
         void fillRect(float x, float y, float width, float height, ExceptionCode&);
@@ -184,7 +181,7 @@ namespace WebCore {
             CompositeOperator m_globalComposite;
             bool m_appliedStrokePattern;
             bool m_appliedFillPattern;
-#if PLATFORM(CG)
+#if __APPLE__
             CGAffineTransform m_strokeStylePatternTransform;
             CGAffineTransform m_fillStylePatternTransform;
 #endif
@@ -201,10 +198,6 @@ namespace WebCore {
 
         void applyStrokePattern();
         void applyFillPattern();
-
-#if ENABLE(DASHBOARD_SUPPORT)
-        void clearPathForDashboardBackwardCompatibilityMode();
-#endif
 
         HTMLCanvasElement* m_canvas;
         Vector<State, 1> m_stateStack;

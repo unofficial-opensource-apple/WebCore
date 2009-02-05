@@ -14,20 +14,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef Plugin_h
-#define Plugin_h
+#ifndef PLUGIN_H
+#define PLUGIN_H
 
-#include <wtf/RefCounted.h>
+#include "Shared.h"
+#include <wtf/Noncopyable.h>
 
 namespace WebCore {
 
     class Widget;
 
-    class Plugin : public RefCounted<Plugin> {
+    class Plugin : public Shared<Plugin>, Noncopyable {
     public:
         Plugin(Widget* view) : m_view(view) { }
         Widget* view() const { return m_view; }
@@ -38,4 +39,4 @@ namespace WebCore {
     
 } // namespace WebCore
 
-#endif // Plugin_h
+#endif // PLUGIN_H

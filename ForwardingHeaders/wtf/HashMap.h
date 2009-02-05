@@ -1,1 +1,1 @@
-#include <JavaScriptCore/HashMap.h>
+#import <JavaScriptCore/HashMap.h>

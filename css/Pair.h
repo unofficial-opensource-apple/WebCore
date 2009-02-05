@@ -16,14 +16,14 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef Pair_h
-#define Pair_h
+#ifndef Pair_H
+#define Pair_H
 
-#include <wtf/RefCounted.h>
+#include "Shared.h"
 #include "CSSPrimitiveValue.h"
 #include <wtf/PassRefPtr.h>
 
@@ -33,7 +33,7 @@ namespace WebCore {
 // and border-spacing (all of which are space-separated sets of two values).  At the moment we are only using it for
 // border-radius and background-size, but (FIXME) border-spacing and background-position could be converted over to use
 // it (eliminating some extra -webkit- internal properties).
-class Pair : public RefCounted<Pair> {
+class Pair : public Shared<Pair> {
 public:
     Pair() : m_first(0), m_second(0) { }
     Pair(PassRefPtr<CSSPrimitiveValue> first, PassRefPtr<CSSPrimitiveValue> second)

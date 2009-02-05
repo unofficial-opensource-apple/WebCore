@@ -18,13 +18,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLHtmlElement_h
-#define HTMLHtmlElement_h
+#ifndef HTMLHtmlElement_H
+#define HTMLHtmlElement_H
 
 #include "HTMLElement.h"
 
@@ -42,10 +42,6 @@ public:
 
     String version() const;
     void setVersion(const String&);
-
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-    virtual void insertedIntoDocument();
-#endif
 };
 
 } //namespace

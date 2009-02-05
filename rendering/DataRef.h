@@ -18,26 +18,26 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #ifndef DataRef_h
 #define DataRef_h
 
+#include <assert.h>
+
 namespace WebCore {
 
-template <typename T> class DataRef {
+template <typename T> class DataRef
+{
 public:
-    DataRef()
-        : m_data(0)
-    {
-    }
+    DataRef() : m_data(0) { }
 
     DataRef(const DataRef<T>& d)
     {
-        ASSERT(d.m_data);
+        assert(d.m_data);
         m_data = d.m_data;
         m_data->ref();
     }
@@ -65,14 +65,14 @@ public:
 
     void init()
     {
-        ASSERT(!m_data);
+        assert(!m_data);
         m_data = new T;
         m_data->ref();
     }
 
     DataRef<T>& operator=(const DataRef<T>& d)
     {
-        ASSERT(d.m_data);
+        assert(d.m_data);
         d.m_data->ref();
         if (m_data)
             m_data->deref();
@@ -82,15 +82,15 @@ public:
 
     bool operator==(const DataRef<T>& o) const
     {
-        ASSERT(m_data);
-        ASSERT(o.m_data);
+        assert(m_data);
+        assert(o.m_data);
         return m_data == o.m_data || *m_data == *o.m_data;
     }
     
     bool operator!=(const DataRef<T>& o) const
     {
-        ASSERT(m_data);
-        ASSERT(o.m_data);
+        assert(m_data);
+        assert(o.m_data);
         return m_data != o.m_data && *m_data != *o.m_data;
     }
 
@@ -98,6 +98,6 @@ private:
     T* m_data;
 };
 
-} // namespace WebCore
+}
 
-#endif // DataRef_h
+#endif

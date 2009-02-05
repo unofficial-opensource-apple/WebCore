@@ -16,33 +16,30 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef TableLayout_h
-#define TableLayout_h
+#ifndef TableLayout_H
+#define TableLayout_H
 
 namespace WebCore {
 
 class RenderTable;
 
-class TableLayout {
+class TableLayout
+{
 public:
-    TableLayout(RenderTable* table)
-        : m_table(table)
-    {
-    }
+    TableLayout(RenderTable* t) : m_table(t) {}
+    virtual ~TableLayout() {};
 
-    virtual ~TableLayout() { }
-
-    virtual void calcPrefWidths(int& minWidth, int& maxWidth) = 0;
+    virtual void calcMinMaxWidth() = 0;
     virtual void layout() = 0;
 
 protected:
     RenderTable* m_table;
 };
 
-} // namespace WebCore
+}
 
-#endif // TableLayout_h
+#endif

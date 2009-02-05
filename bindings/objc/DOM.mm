@@ -1,7 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2006 Apple Computer, Inc.  All rights reserved.
  * Copyright (C) 2006 James G. Speth (speth@end.com)
- * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,600 +28,487 @@
 #import "DOM.h"
 
 #import "CDATASection.h"
-#import "CSSHelper.h"
+#import "csshelper.h"
 #import "CSSStyleSheet.h"
 #import "Comment.h"
-#import "DOMHTMLCanvasElement.h"
+#import "DOMEventsInternal.h"
+#import "DOMImplementationFront.h"
 #import "DOMInternal.h"
 #import "DOMPrivate.h"
 #import "Document.h"
 #import "DocumentFragment.h"
 #import "DocumentType.h"
+#import "Entity.h"
 #import "EntityReference.h"
 #import "Event.h"
 #import "EventListener.h"
-#import "EventTarget.h"
-#import "ExceptionHandlers.h"
-#import "FloatQuad.h"
 #import "FoundationExtras.h"
-#import "Frame.h"
-#import "FrameView.h"
+#import "FrameMac.h"
+#import "HTMLInputElement.h"
 #import "HTMLDocument.h"
 #import "HTMLNames.h"
 #import "HTMLPlugInElement.h"
-#import "Image.h"
-#import "IntRect.h"
 #import "NodeFilter.h"
 #import "NodeFilterCondition.h"
 #import "NodeIterator.h"
 #import "NodeList.h"
+#import "Notation.h"
 #import "ProcessingInstruction.h"
 #import "QualifiedName.h"
 #import "Range.h"
 #import "RenderBlock.h"
 #import "RenderImage.h"
-#import "RenderView.h"
-#import "SimpleFontData.h"
-#import "Text.h"
 #import "TreeWalker.h"
 #import "WebScriptObjectPrivate.h"
 #import <objc/objc-class.h>
-#import <wtf/HashMap.h>
 
-#if ENABLE(SVG)
-#import "SVGDocument.h"
-#import "SVGElement.h"
-#import "SVGNames.h"
-#import "DOMSVG.h"
-#endif
-
-#import "KeyboardEvent.h"
-#import "KURL.h"
 #import "WAKAppKitStubs.h"
 #import "WAKWindow.h"
 #import "WebCoreFrameBridge.h"
 #import "WebCoreThreadMessage.h"
 #import "WKWindowPrivate.h"
 #import "ThreadSafeWrapper.h"
-#import "Touch.h"
-using namespace WebCore;
 
-namespace WebCore {
+using WebCore::AtomicString;
+using WebCore::AtomicStringImpl;
+using WebCore::Attr;
+using WebCore::CharacterData;
+using WebCore::DeprecatedValueList;
+using WebCore::Document;
+using WebCore::DocumentFragment;
+using WebCore::DocumentType;
+using WebCore::DOMImplementationFront;
+using WebCore::Element;
+using WebCore::Entity;
+using WebCore::Event;
+using WebCore::EventListener;
+using WebCore::ExceptionCode;
+using WebCore::HTMLDocument;
+using WebCore::HTMLElement;
+using WebCore::HTMLInputElement;
+using WebCore::FrameMac;
+using WebCore::IntRect;
+using WebCore::KURL;
+using WebCore::NamedNodeMap;
+using WebCore::Node;
+using WebCore::NodeFilter;
+using WebCore::NodeFilterCondition;
+using WebCore::NodeIterator;
+using WebCore::NodeList;
+using WebCore::Notation;
+using WebCore::ProcessingInstruction;
+using WebCore::QualifiedName;
+using WebCore::Range;
+using WebCore::RenderBlock;
+using WebCore::RenderImage;
+using WebCore::RenderObject;
+using WebCore::String;
+using WebCore::Text;
+using WebCore::TreeWalker;
+
+using WebCore::RenderStyle;
+
+using namespace WebCore::HTMLNames;
+
+@interface DOMAttr (WebCoreInternal)
++ (DOMAttr *)_attrWith:(Attr *)impl;
+- (Attr *)_attr;
+@end
+
+@interface DOMDocumentType (WebCoreInternal)
+- (DocumentType *)_documentType;
+@end
+
+@interface DOMImplementation (WebCoreInternal)
++ (DOMImplementation *)_DOMImplementationWith:(DOMImplementationFront *)impl;
+- (DOMImplementationFront *)_DOMImplementation;
+@end
 
 class ObjCEventListener : public EventListener {
 public:
-    static ObjCEventListener* find(id <DOMEventListener>);
-    static ObjCEventListener* create(id <DOMEventListener>);
+    static ObjCEventListener *find(id <DOMEventListener>);
+    static ObjCEventListener *create(id <DOMEventListener>);
 
 private:
     ObjCEventListener(id <DOMEventListener>);
     virtual ~ObjCEventListener();
 
-    virtual void handleEvent(Event*, bool isWindowEvent);
+    virtual void handleEvent(Event *, bool isWindowEvent);
 
     id <DOMEventListener> m_listener;
 };
 
 typedef HashMap<id, ObjCEventListener*> ListenerMap;
+typedef HashMap<AtomicStringImpl*, Class> ObjCClassMap;
+
+static ObjCClassMap* elementClassMap;
 static ListenerMap* listenerMap;
 
-} // namespace WebCore
+//------------------------------------------------------------------------------------------
+// DOMObject
 
+@implementation DOMObject
+
+// Prevent creation of DOM objects by clients who just "[[xxx alloc] init]".
+- (id)init
+{
+    [NSException raise:NSGenericException format:@"+[%@ init]: should never be used", NSStringFromClass([self class])];
+    [self release];
+    return nil;
+}
+
+- (void)dealloc
+{
+    if (_internal) {
+        removeDOMWrapper(_internal);
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        removeDOMWrapper(_internal);
+    }
+    [super finalize];
+}
+
+- (id)copyWithZone:(NSZone *)zone
+{
+    return [self retain];
+}
+
+@end
+
+@implementation DOMObject (WebCoreInternal)
+
+- (id)_init
+{
+    return [super _init];
+}
+
+- (void)release 
+{ 
+    WebThreadAdoptAndReleaseIfNeeded 
+    [super release];
+}
+
+@end
 
 //------------------------------------------------------------------------------------------
 // DOMNode
 
-namespace WebCore {
+@implementation DOMNode
 
-typedef HashMap<const QualifiedName::QualifiedNameImpl*, Class> ObjCClassMap;
-static ObjCClassMap* elementClassMap;
-
-static void addElementClass(const QualifiedName& tag, Class objCClass)
+- (void)dealloc
 {
-    elementClassMap->set(tag.impl(), objCClass);
-}
-
-static void createElementClassMap()
-{
-    // Create the table.
-    elementClassMap = new ObjCClassMap;
-
-    // FIXME: Reflect marquee once the API has been determined.
-
-    // Populate it with HTML and SVG element classes.
-    addElementClass(HTMLNames::aTag, [DOMHTMLAnchorElement class]);
-    addElementClass(HTMLNames::appletTag, [DOMHTMLAppletElement class]);
-    addElementClass(HTMLNames::areaTag, [DOMHTMLAreaElement class]);
-    addElementClass(HTMLNames::baseTag, [DOMHTMLBaseElement class]);
-    addElementClass(HTMLNames::basefontTag, [DOMHTMLBaseFontElement class]);
-    addElementClass(HTMLNames::bodyTag, [DOMHTMLBodyElement class]);
-    addElementClass(HTMLNames::brTag, [DOMHTMLBRElement class]);
-    addElementClass(HTMLNames::buttonTag, [DOMHTMLButtonElement class]);
-    addElementClass(HTMLNames::canvasTag, [DOMHTMLCanvasElement class]);
-    addElementClass(HTMLNames::captionTag, [DOMHTMLTableCaptionElement class]);
-    addElementClass(HTMLNames::colTag, [DOMHTMLTableColElement class]);
-    addElementClass(HTMLNames::colgroupTag, [DOMHTMLTableColElement class]);
-    addElementClass(HTMLNames::delTag, [DOMHTMLModElement class]);
-    addElementClass(HTMLNames::dirTag, [DOMHTMLDirectoryElement class]);
-    addElementClass(HTMLNames::divTag, [DOMHTMLDivElement class]);
-    addElementClass(HTMLNames::dlTag, [DOMHTMLDListElement class]);
-    addElementClass(HTMLNames::embedTag, [DOMHTMLEmbedElement class]);
-    addElementClass(HTMLNames::fieldsetTag, [DOMHTMLFieldSetElement class]);
-    addElementClass(HTMLNames::fontTag, [DOMHTMLFontElement class]);
-    addElementClass(HTMLNames::formTag, [DOMHTMLFormElement class]);
-    addElementClass(HTMLNames::frameTag, [DOMHTMLFrameElement class]);
-    addElementClass(HTMLNames::framesetTag, [DOMHTMLFrameSetElement class]);
-    addElementClass(HTMLNames::h1Tag, [DOMHTMLHeadingElement class]);
-    addElementClass(HTMLNames::h2Tag, [DOMHTMLHeadingElement class]);
-    addElementClass(HTMLNames::h3Tag, [DOMHTMLHeadingElement class]);
-    addElementClass(HTMLNames::h4Tag, [DOMHTMLHeadingElement class]);
-    addElementClass(HTMLNames::h5Tag, [DOMHTMLHeadingElement class]);
-    addElementClass(HTMLNames::h6Tag, [DOMHTMLHeadingElement class]);
-    addElementClass(HTMLNames::headTag, [DOMHTMLHeadElement class]);
-    addElementClass(HTMLNames::hrTag, [DOMHTMLHRElement class]);
-    addElementClass(HTMLNames::htmlTag, [DOMHTMLHtmlElement class]);
-    addElementClass(HTMLNames::iframeTag, [DOMHTMLIFrameElement class]);
-    addElementClass(HTMLNames::imgTag, [DOMHTMLImageElement class]);
-    addElementClass(HTMLNames::inputTag, [DOMHTMLInputElement class]);
-    addElementClass(HTMLNames::insTag, [DOMHTMLModElement class]);
-    addElementClass(HTMLNames::isindexTag, [DOMHTMLIsIndexElement class]);
-    addElementClass(HTMLNames::labelTag, [DOMHTMLLabelElement class]);
-    addElementClass(HTMLNames::legendTag, [DOMHTMLLegendElement class]);
-    addElementClass(HTMLNames::liTag, [DOMHTMLLIElement class]);
-    addElementClass(HTMLNames::linkTag, [DOMHTMLLinkElement class]);
-    addElementClass(HTMLNames::listingTag, [DOMHTMLPreElement class]);
-    addElementClass(HTMLNames::mapTag, [DOMHTMLMapElement class]);
-    addElementClass(HTMLNames::marqueeTag, [DOMHTMLMarqueeElement class]);
-    addElementClass(HTMLNames::menuTag, [DOMHTMLMenuElement class]);
-    addElementClass(HTMLNames::metaTag, [DOMHTMLMetaElement class]);
-    addElementClass(HTMLNames::objectTag, [DOMHTMLObjectElement class]);
-    addElementClass(HTMLNames::olTag, [DOMHTMLOListElement class]);
-    addElementClass(HTMLNames::optgroupTag, [DOMHTMLOptGroupElement class]);
-    addElementClass(HTMLNames::optionTag, [DOMHTMLOptionElement class]);
-    addElementClass(HTMLNames::pTag, [DOMHTMLParagraphElement class]);
-    addElementClass(HTMLNames::paramTag, [DOMHTMLParamElement class]);
-    addElementClass(HTMLNames::preTag, [DOMHTMLPreElement class]);
-    addElementClass(HTMLNames::qTag, [DOMHTMLQuoteElement class]);
-    addElementClass(HTMLNames::scriptTag, [DOMHTMLScriptElement class]);
-    addElementClass(HTMLNames::keygenTag, [DOMHTMLSelectElement class]);
-    addElementClass(HTMLNames::selectTag, [DOMHTMLSelectElement class]);
-    addElementClass(HTMLNames::styleTag, [DOMHTMLStyleElement class]);
-    addElementClass(HTMLNames::tableTag, [DOMHTMLTableElement class]);
-    addElementClass(HTMLNames::tbodyTag, [DOMHTMLTableSectionElement class]);
-    addElementClass(HTMLNames::tdTag, [DOMHTMLTableCellElement class]);
-    addElementClass(HTMLNames::textareaTag, [DOMHTMLTextAreaElement class]);
-    addElementClass(HTMLNames::tfootTag, [DOMHTMLTableSectionElement class]);
-    addElementClass(HTMLNames::thTag, [DOMHTMLTableCellElement class]);
-    addElementClass(HTMLNames::theadTag, [DOMHTMLTableSectionElement class]);
-    addElementClass(HTMLNames::titleTag, [DOMHTMLTitleElement class]);
-    addElementClass(HTMLNames::trTag, [DOMHTMLTableRowElement class]);
-    addElementClass(HTMLNames::ulTag, [DOMHTMLUListElement class]);
-    addElementClass(HTMLNames::xmpTag, [DOMHTMLPreElement class]);
-
-#if ENABLE(SVG)
-    addElementClass(SVGNames::aTag, [DOMSVGAElement class]);
-#if ENABLE(SVG_ANIMATION)
-    addElementClass(SVGNames::animateTag, [DOMSVGAnimateElement class]);
-    addElementClass(SVGNames::animateColorTag, [DOMSVGAnimateColorElement class]);
-    addElementClass(SVGNames::animateTransformTag, [DOMSVGAnimateTransformElement class]);
-#endif
-    addElementClass(SVGNames::circleTag, [DOMSVGCircleElement class]);
-    addElementClass(SVGNames::clipPathTag, [DOMSVGClipPathElement class]);
-    addElementClass(SVGNames::cursorTag, [DOMSVGCursorElement class]);
-#if ENABLE(SVG_FONTS)
-    addElementClass(SVGNames::definition_srcTag, [DOMSVGDefinitionSrcElement class]);
-#endif
-    addElementClass(SVGNames::defsTag, [DOMSVGDefsElement class]);
-    addElementClass(SVGNames::descTag, [DOMSVGDescElement class]);
-    addElementClass(SVGNames::ellipseTag, [DOMSVGEllipseElement class]);
-#if ENABLE(SVG_FILTERS)
-    addElementClass(SVGNames::feBlendTag, [DOMSVGFEBlendElement class]);
-    addElementClass(SVGNames::feColorMatrixTag, [DOMSVGFEColorMatrixElement class]);
-    addElementClass(SVGNames::feComponentTransferTag, [DOMSVGFEComponentTransferElement class]);
-    addElementClass(SVGNames::feCompositeTag, [DOMSVGFECompositeElement class]);
-    addElementClass(SVGNames::feDiffuseLightingTag, [DOMSVGFEDiffuseLightingElement class]);
-    addElementClass(SVGNames::feDisplacementMapTag, [DOMSVGFEDisplacementMapElement class]);
-    addElementClass(SVGNames::feDistantLightTag, [DOMSVGFEDistantLightElement class]);
-    addElementClass(SVGNames::feFloodTag, [DOMSVGFEFloodElement class]);
-    addElementClass(SVGNames::feFuncATag, [DOMSVGFEFuncAElement class]);
-    addElementClass(SVGNames::feFuncBTag, [DOMSVGFEFuncBElement class]);
-    addElementClass(SVGNames::feFuncGTag, [DOMSVGFEFuncGElement class]);
-    addElementClass(SVGNames::feFuncRTag, [DOMSVGFEFuncRElement class]);
-    addElementClass(SVGNames::feGaussianBlurTag, [DOMSVGFEGaussianBlurElement class]);
-    addElementClass(SVGNames::feImageTag, [DOMSVGFEImageElement class]);
-    addElementClass(SVGNames::feMergeTag, [DOMSVGFEMergeElement class]);
-    addElementClass(SVGNames::feMergeNodeTag, [DOMSVGFEMergeNodeElement class]);
-    addElementClass(SVGNames::feOffsetTag, [DOMSVGFEOffsetElement class]);
-    addElementClass(SVGNames::fePointLightTag, [DOMSVGFEPointLightElement class]);
-    addElementClass(SVGNames::feSpecularLightingTag, [DOMSVGFESpecularLightingElement class]);
-    addElementClass(SVGNames::feSpotLightTag, [DOMSVGFESpotLightElement class]);
-    addElementClass(SVGNames::feTileTag, [DOMSVGFETileElement class]);
-    addElementClass(SVGNames::feTurbulenceTag, [DOMSVGFETurbulenceElement class]);
-    addElementClass(SVGNames::filterTag, [DOMSVGFilterElement class]);
-#endif
-#if ENABLE(SVG_FONTS)
-    addElementClass(SVGNames::fontTag, [DOMSVGFontElement class]);
-    addElementClass(SVGNames::font_faceTag, [DOMSVGFontFaceElement class]);
-    addElementClass(SVGNames::font_face_formatTag, [DOMSVGFontFaceFormatElement class]);
-    addElementClass(SVGNames::font_face_nameTag, [DOMSVGFontFaceNameElement class]);
-    addElementClass(SVGNames::font_face_srcTag, [DOMSVGFontFaceSrcElement class]);
-    addElementClass(SVGNames::font_face_uriTag, [DOMSVGFontFaceUriElement class]);
-    addElementClass(SVGNames::glyphTag, [DOMSVGGlyphElement class]);
-#endif
-    addElementClass(SVGNames::gTag, [DOMSVGGElement class]);
-    addElementClass(SVGNames::imageTag, [DOMSVGImageElement class]);
-    addElementClass(SVGNames::lineTag, [DOMSVGLineElement class]);
-    addElementClass(SVGNames::linearGradientTag, [DOMSVGLinearGradientElement class]);
-    addElementClass(SVGNames::markerTag, [DOMSVGMarkerElement class]);
-    addElementClass(SVGNames::maskTag, [DOMSVGMaskElement class]);
-    addElementClass(SVGNames::metadataTag, [DOMSVGMetadataElement class]);
-#if ENABLE(SVG_FONTS)
-    addElementClass(SVGNames::missing_glyphTag, [DOMSVGMissingGlyphElement class]);
-#endif
-    addElementClass(SVGNames::pathTag, [DOMSVGPathElement class]);
-    addElementClass(SVGNames::patternTag, [DOMSVGPatternElement class]);
-    addElementClass(SVGNames::polygonTag, [DOMSVGPolygonElement class]);
-    addElementClass(SVGNames::polylineTag, [DOMSVGPolylineElement class]);
-    addElementClass(SVGNames::radialGradientTag, [DOMSVGRadialGradientElement class]);
-    addElementClass(SVGNames::rectTag, [DOMSVGRectElement class]);
-    addElementClass(SVGNames::scriptTag, [DOMSVGScriptElement class]);
-    addElementClass(SVGNames::setTag, [DOMSVGSetElement class]);
-    addElementClass(SVGNames::stopTag, [DOMSVGStopElement class]);
-    addElementClass(SVGNames::styleTag, [DOMSVGStyleElement class]);
-    addElementClass(SVGNames::svgTag, [DOMSVGSVGElement class]);
-    addElementClass(SVGNames::switchTag, [DOMSVGSwitchElement class]);
-    addElementClass(SVGNames::symbolTag, [DOMSVGSymbolElement class]);
-    addElementClass(SVGNames::textTag, [DOMSVGTextElement class]);
-    addElementClass(SVGNames::titleTag, [DOMSVGTitleElement class]);
-    addElementClass(SVGNames::trefTag, [DOMSVGTRefElement class]);
-    addElementClass(SVGNames::tspanTag, [DOMSVGTSpanElement class]);
-    addElementClass(SVGNames::textPathTag, [DOMSVGTextPathElement class]);
-    addElementClass(SVGNames::useTag, [DOMSVGUseElement class]);
-    addElementClass(SVGNames::viewTag, [DOMSVGViewElement class]);
-#endif
-}
-
-static Class lookupElementClass(const QualifiedName& tag)
-{
-    // Do a special lookup to ignore element prefixes
-    if (tag.hasPrefix())
-        return elementClassMap->get(QualifiedName(nullAtom, tag.localName(), tag.namespaceURI()).impl());
-    
-    return elementClassMap->get(tag.impl());
-}
-
-static Class elementClass(const QualifiedName& tag, Class defaultClass)
-{
-    if (!elementClassMap)
-        createElementClassMap();
-    Class objcClass = lookupElementClass(tag);
-    if (!objcClass)
-        objcClass = defaultClass;
-    return objcClass;
-}
-
-static NSArray *kit(const Vector<IntRect>& rects)
-{
-    size_t size = rects.size();
-    NSMutableArray *array = [NSMutableArray arrayWithCapacity:size];
-    for (size_t i = 0; i < size; ++i)
-        [array addObject:[NSValue valueWithRect:rects[i]]];
-    return array;
-}
-
-static WKQuad wkQuadFromFloatQuad(const FloatQuad& inQuad)
-{
-    WKQuad  theQuad;
-    theQuad.p1 = inQuad.p1();
-    theQuad.p2 = inQuad.p2();
-    theQuad.p3 = inQuad.p3();
-    theQuad.p4 = inQuad.p4();
-    
-    return theQuad;
-}
-
-static NSArray *kit(const Vector<FloatQuad>& quads)
-{
-    size_t size = quads.size();
-    NSMutableArray *array = [NSMutableArray arrayWithCapacity:size];
-    for (size_t i = 0; i < size; ++i) {
-        WKQuadObject* quadObject = [[WKQuadObject alloc] initWithQuad:wkQuadFromFloatQuad(quads[i])];
-        [array addObject:quadObject];
-        [quadObject release];
+    if (_internal) {
+        DOM_cast<Node *>(_internal)->deref();
     }
-    return array;
+    [super dealloc];
 }
 
-static inline float min4(float a, float b, float c, float d)
+- (void)finalize
 {
-    return std::min(std::min(a, b), std::min(c, d));
-}
-
-static inline float max4(float a, float b, float c, float d)
-{
-    return std::max(std::max(a, b), std::max(c, d));
-}
-
-static inline WKQuad emptyQuad()
-{
-    WKQuad zeroQuad =
-        { CGPointZero, CGPointZero, CGPointZero, CGPointZero, };
-    return zeroQuad;
-}
-
-} // namespace WebCore
-
-
-@implementation WKQuadObject
-
-- (id)initWithQuad:(WKQuad)quad
-{
-    if ((self = [super init]))
-    {
-        _quad = quad;
+    if (_internal) {
+        DOM_cast<Node *>(_internal)->deref();
     }
-    return self;
+    [super finalize];
 }
 
-- (WKQuad)quad
-{
-    return _quad;
-}
-
-- (CGRect)boundingBox
-{
-    float left      = WebCore::min4(_quad.p1.x, _quad.p2.x, _quad.p3.x, _quad.p4.x);
-    float top       = WebCore::min4(_quad.p1.y, _quad.p2.y, _quad.p3.y, _quad.p4.y);
-
-    float right     = WebCore::max4(_quad.p1.x, _quad.p2.x, _quad.p3.x, _quad.p4.x);
-    float bottom    = WebCore::max4(_quad.p1.y, _quad.p2.y, _quad.p3.y, _quad.p4.y);
-    
-    return CGRectMake(left, top, right - left, bottom - top);
-}
-
-@end
-
-@implementation DOMNode (WebCoreInternal)
-
-// FIXME: should this go in the main implementation?
 - (NSString *)description
 {
-    if (!_internal)
-        return [NSString stringWithFormat:@"<%@: null>", [[self class] description], self];
-
+    if (!_internal) {
+        return [NSString stringWithFormat:@"<%@: null>",
+            [[self class] description], self];
+    }
     NSString *value = [self nodeValue];
-    if (value)
+    if (value) {
         return [NSString stringWithFormat:@"<%@ [%@]: %p '%@'>",
             [[self class] description], [self nodeName], _internal, value];
-
-    return [NSString stringWithFormat:@"<%@ [%@]: %p>", [[self class] description], [self nodeName], _internal];
-}
-
-- (id)_initWithNode:(WebCore::Node *)impl
-{
-    ASSERT(impl);
-
-    [super _init];
-    _internal = reinterpret_cast<DOMObjectInternal*>(impl);
-    impl->ref();
-    WebCore::addDOMWrapper(self, impl);
-    return self;
-}
-
-+ (DOMNode *)_wrapNode:(WebCore::Node *)impl
-{
-    if (!impl)
-        return nil;
-
-    id cachedInstance;
-    cachedInstance = WebCore::getDOMWrapper(impl);
-    if (cachedInstance)
-        return [[cachedInstance retain] autorelease];
-
-    Class wrapperClass = nil;
-    switch (impl->nodeType()) {
-        case WebCore::Node::ELEMENT_NODE:
-            if (impl->isHTMLElement())
-                wrapperClass = WebCore::elementClass(static_cast<WebCore::HTMLElement*>(impl)->tagQName(), [DOMHTMLElement class]);
-#if ENABLE(SVG)
-            else if (impl->isSVGElement())
-                wrapperClass = WebCore::elementClass(static_cast<WebCore::SVGElement*>(impl)->tagQName(), [DOMSVGElement class]);
-#endif
-            else
-                wrapperClass = [DOMElement class];
-            break;
-        case WebCore::Node::ATTRIBUTE_NODE:
-            wrapperClass = [DOMAttr class];
-            break;
-        case WebCore::Node::TEXT_NODE:
-            wrapperClass = [DOMText class];
-            break;
-        case WebCore::Node::CDATA_SECTION_NODE:
-            wrapperClass = [DOMCDATASection class];
-            break;
-        case WebCore::Node::ENTITY_REFERENCE_NODE:
-            wrapperClass = [DOMEntityReference class];
-            break;
-        case WebCore::Node::ENTITY_NODE:
-            wrapperClass = [DOMEntity class];
-            break;
-        case WebCore::Node::PROCESSING_INSTRUCTION_NODE:
-            wrapperClass = [DOMProcessingInstruction class];
-            break;
-        case WebCore::Node::COMMENT_NODE:
-            wrapperClass = [DOMComment class];
-            break;
-        case WebCore::Node::DOCUMENT_NODE:
-            if (static_cast<WebCore::Document*>(impl)->isHTMLDocument())
-                wrapperClass = [DOMHTMLDocument class];
-#if ENABLE(SVG)
-            else if (static_cast<WebCore::Document*>(impl)->isSVGDocument())
-                wrapperClass = [DOMSVGDocument class];
-#endif
-            else
-                wrapperClass = [DOMDocument class];
-            break;
-        case WebCore::Node::DOCUMENT_TYPE_NODE:
-            wrapperClass = [DOMDocumentType class];
-            break;
-        case WebCore::Node::DOCUMENT_FRAGMENT_NODE:
-            wrapperClass = [DOMDocumentFragment class];
-            break;
-        case WebCore::Node::NOTATION_NODE:
-            wrapperClass = [DOMNotation class];
-            break;
-        case WebCore::Node::XPATH_NAMESPACE_NODE:
-            // FIXME: Create an XPath objective C wrapper
-            // See http://bugs.webkit.org/show_bug.cgi?id=8755
-            return nil;
     }
-    return [[[wrapperClass alloc] _initWithNode:impl] autorelease];
+    return [NSString stringWithFormat:@"<%@ [%@]: %p>",
+        [[self class] description], [self nodeName], _internal];
 }
 
-+ (id <DOMEventTarget>)_wrapEventTarget:(WebCore::EventTarget *)eventTarget
+- (NSString *)nodeName
 {
-    if (!eventTarget)
-        return nil;
+    return [self _node]->nodeName();
+}
+
+- (NSString *)nodeValue
+{
+    // Documentation says we can raise a DOMSTRING_SIZE_ERR.
+    // However, the lower layer does not report that error up to us.
+    return [self _node]->nodeValue();
+}
+
+- (void)setNodeValue:(NSString *)string
+{
+    ASSERT(string);
     
-    // We don't have an ObjC binding for XMLHttpRequest
-    return [DOMNode _wrapNode:eventTarget->toNode()];
+    ExceptionCode ec = 0;
+    [self _node]->setNodeValue(string, ec);
+    raiseOnDOMError(ec);
 }
 
-- (WebCore::Node *)_node
+- (unsigned short)nodeType
 {
-    return reinterpret_cast<WebCore::Node*>(_internal);
+    return [self _node]->nodeType();
 }
 
-- (KJS::Bindings::RootObject*)_rootObject
+- (DOMNode *)parentNode
 {
-    if (WebCore::Node *n = [self _node]) {
-        if (WebCore::Frame* frame = n->document()->frame())
-            return frame->bindingRootObject();
-    }
-    return 0;
+    return [DOMNode _nodeWith:[self _node]->parentNode()];
 }
 
-@end
-
-@implementation DOMNode (DOMNodeExtensions)
-
-// FIXME: This should be implemented in Node so we don't have to fetch the renderer.
-// If it was, we could even autogenerate.
-- (CGRect)boundingBox
+- (DOMNodeList *)childNodes
 {
-    [self _node]->document()->updateLayoutIgnorePendingStylesheets();
+    return [DOMNodeList _nodeListWith:[self _node]->childNodes().get()];
+}
+
+- (DOMNode *)firstChild
+{
+    return [DOMNode _nodeWith:[self _node]->firstChild()];
+}
+
+- (DOMNode *)lastChild
+{
+    return [DOMNode _nodeWith:[self _node]->lastChild()];
+}
+
+- (DOMNode *)previousSibling
+{
+    return [DOMNode _nodeWith:[self _node]->previousSibling()];
+}
+
+- (DOMNode *)nextSibling
+{
+    return [DOMNode _nodeWith:[self _node]->nextSibling()];
+}
+
+- (DOMNamedNodeMap *)attributes
+{
+    // DOM level 2 core specification says: 
+    // A NamedNodeMap containing the attributes of this node (if it is an Element) or null otherwise.
+    return nil;
+}
+
+- (DOMDocument *)ownerDocument
+{
+    return [DOMDocument _documentWith:[self _node]->document()];
+}
+
+- (DOMNode *)insertBefore:(DOMNode *)newChild :(DOMNode *)refChild
+{
+    ASSERT(newChild);
+    ASSERT(refChild);
+
+    ExceptionCode ec = 0;
+    if ([self _node]->insertBefore([newChild _node], [refChild _node], ec))
+        return newChild;
+    raiseOnDOMError(ec);
+    return nil;
+}
+
+- (DOMNode *)replaceChild:(DOMNode *)newChild :(DOMNode *)oldChild
+{
+    ASSERT(newChild);
+    ASSERT(oldChild);
+
+    ExceptionCode ec = 0;
+    if ([self _node]->replaceChild([newChild _node], [oldChild _node], ec))
+        return oldChild;
+    raiseOnDOMError(ec);
+    return nil;
+}
+
+- (DOMNode *)removeChild:(DOMNode *)oldChild
+{
+    ASSERT(oldChild);
+
+    ExceptionCode ec = 0;
+    if ([self _node]->removeChild([oldChild _node], ec))
+        return oldChild;
+    raiseOnDOMError(ec);
+    return nil;
+}
+
+- (DOMNode *)appendChild:(DOMNode *)newChild
+{
+    ASSERT(newChild);
+
+    ExceptionCode ec = 0;
+    if ([self _node]->appendChild([newChild _node], ec))
+        return newChild;
+    raiseOnDOMError(ec);
+    return nil;
+}
+
+- (BOOL)hasChildNodes
+{
+    return [self _node]->hasChildNodes();
+}
+
+- (DOMNode *)cloneNode:(BOOL)deep
+{
+    return [DOMNode _nodeWith:[self _node]->cloneNode(deep).get()];
+}
+
+- (void)normalize
+{
+    [self _node]->normalize();
+}
+
+- (BOOL)isSupported:(NSString *)feature :(NSString *)version
+{
+    ASSERT(feature);
+    ASSERT(version);
+
+    return [self _node]->isSupported(feature, version);
+}
+
+- (NSString *)namespaceURI
+{
+    return [self _node]->namespaceURI();
+}
+
+- (NSString *)prefix
+{
+    return [self _node]->prefix();
+}
+
+- (void)setPrefix:(NSString *)prefix
+{
+    ASSERT(prefix);
+
+    ExceptionCode ec = 0;
+    String prefixStr(prefix);
+    [self _node]->setPrefix(prefixStr.impl(), ec);
+    raiseOnDOMError(ec);
+}
+
+- (NSString *)localName
+{
+    return [self _node]->localName();
+}
+
+- (BOOL)hasAttributes
+{
+    return [self _node]->hasAttributes();
+}
+
+- (BOOL)isSameNode:(DOMNode *)other
+{
+    return [self _node]->isSameNode([other _node]);
+}
+
+- (BOOL)isEqualNode:(DOMNode *)other
+{
+    return [self _node]->isEqualNode([other _node]);
+}
+
+- (BOOL)isDefaultNamespace:(NSString *)namespaceURI
+{
+    return [self _node]->isDefaultNamespace(namespaceURI);
+}
+
+- (NSString *)lookupPrefix:(NSString *)namespaceURI
+{
+    return [self _node]->lookupPrefix(namespaceURI);
+}
+
+- (NSString *)lookupNamespaceURI:(NSString *)prefix
+{
+    return [self _node]->lookupNamespaceURI(prefix);
+}
+
+- (NSString *)textContent
+{
+    return [self _node]->textContent();
+}
+
+- (void)setTextContent:(NSString *)text
+{
+    ExceptionCode ec = 0;
+    [self _node]->setTextContent(text, ec);
+    raiseOnDOMError(ec);
+}
+
+- (NSRect)boundingBox
+{
     WebCore::RenderObject *renderer = [self _node]->renderer();
-    if (renderer) {
-#if ENABLE(HW_COMP)
-        WebCore::FloatQuad   pageQuad = renderer->absoluteQuadWithTransforms();
-        return enclosingIntRect(pageQuad.boundingBox());
-#else
+    if (renderer)
         return renderer->absoluteBoundingBoxRect();
-#endif
-    }
-    return CGRectZero;
+    return NSZeroRect;
 }
 
-// FIXME: This should be implemented in Node so we don't have to fetch the renderer.
-// If it was, we could even autogenerate.
 - (NSArray *)lineBoxRects
 {
-    [self _node]->document()->updateLayoutIgnorePendingStylesheets();
     WebCore::RenderObject *renderer = [self _node]->renderer();
     if (renderer) {
-        Vector<WebCore::IntRect> rects;
-        renderer->addLineBoxRects(rects);
-        return kit(rects);
+        NSMutableArray *results = [[NSMutableArray alloc] init];
+        DeprecatedValueList<IntRect> rects = renderer->lineBoxRects();
+        if (!rects.isEmpty()) {
+            for (DeprecatedValueList<IntRect>::ConstIterator it = rects.begin(); it != rects.end(); ++it)
+                [results addObject:[NSValue valueWithRect:CGRectMake((*it).x(), (*it).y(), (*it).width(), (*it).height())]];
+        }
+        return [results autorelease];
     }
     return nil;
 }
 
-// quad in page coordinates, taking transforms into account. c.f. - (NSRect)boundingBox;
-- (WKQuad)absoluteQuad
-{
-    [self _node]->document()->updateLayoutIgnorePendingStylesheets();
-    WebCore::RenderObject *renderer = [self _node]->renderer();
-    if (renderer) {
-        return wkQuadFromFloatQuad(renderer->absoluteQuadWithTransforms());
-    }
 
-    return WebCore::emptyQuad();
+- (DOMElement *)rootEditableElement
+{
+    Element *element = [self _node]->rootEditableElement();
+    return element ? [DOMElement _elementWith:element] : nil;    
+    //if we ever need a wrapper of a more specific class, consider this: 
+    //return static_cast<DOMElement *>([DOMNode _nodeWithImpl:[self _nodeImpl]->rootEditableElement()]);
 }
 
-// returns array of WKQuadObject
-- (NSArray *)lineBoxQuads
+- (Element *)_cachedLink
 {
-    [self _node]->document()->updateLayoutIgnorePendingStylesheets();
-    WebCore::RenderObject *renderer = [self _node]->renderer();
-    if (renderer) {
-        Vector<WebCore::FloatQuad> quads;
-        renderer->addLineBoxQuads(quads);
-        return kit(quads);
-    }
-    return nil;
-}
-
-- (Element *)_linkElement
-{
-    WebCore::Node* node = [self _node];
+    if(!_link)
+    {
+        WebCore::Node* node= [self _node];
     
-    while (node) {
-        if (node->isLink())
-            return static_cast<WebCore::Element*>(node);
-        node = node->parentNode();
+        do { if(node->isLink()) return static_cast<Element*>(_link= node); }
+        while((node= node->parentNode()));
     }
     
-    return 0;
+    return static_cast<Element *>(_link);
 }
-
 - (NSURL *)hrefURL
 {
-    Element *link= [self _linkElement];
+    Element *link= [self _cachedLink];
+    
     if(link) return KURL(link->document()->completeURL(parseURL(link->getAttribute("href")).deprecatedString())).getNSURL();
-    
-    return nil;
-}
-
-- (NSString *)hrefTarget
-{
-    Element *target = [self _linkElement];
-    
-    if(target) return target->getAttribute("target");
     
     return nil;
 }
 
 - (CGRect)hrefFrame
 {
-    RenderObject *renderer = [self _linkElement]->renderer();
+    RenderObject *renderer = [self _cachedLink]->renderer();
     
     if(renderer) return renderer->absoluteBoundingBoxRect();
     
     return NSZeroRect;
 }
 
-- (WKQuad)hrefQuad     // takes transforms into account
-{
-    RenderObject *renderer = [self _linkElement]->renderer();
-    
-    if (renderer)
-        return wkQuadFromFloatQuad(renderer->absoluteQuadWithTransforms());
-
-    return emptyQuad();
-}
-
 - (NSString *)hrefLabel
 {
-    Element *link= [self _linkElement];
+    Element *link= [self _cachedLink];
     
     if (!link) return nil;
-    
+
     return link->textContent();
 }
 
 - (NSString *)hrefTitle
 {
-    Element *link= [self _linkElement];
+    Element *link= [self _cachedLink];
     
     if (!link) return nil;
     
@@ -634,139 +520,913 @@ static inline WKQuad emptyQuad()
     return [self boundingBox];
 }
 
-- (WKQuad)boundingFrameQuad    // takes transforms into account
-{
-    return [self absoluteQuad];
-}
-
 - (CGRect)innerFrame
 {
 	Node * node = [self _node];
 	RenderObject * renderer = node->renderer();
 	
 	if (!renderer) return CGRectZero;
-    
+
 	RenderStyle * style = renderer->style();
 	CGRect innerFrame = [self boundingFrame];
 	
 	innerFrame.origin.x += style->borderLeftWidth();
 	innerFrame.size.width -= style->borderLeftWidth() + style->borderRightWidth();
-    
-	innerFrame.origin.y += style->borderBottomWidth();  // not top?
+
+	innerFrame.origin.y += style->borderBottomWidth();
 	innerFrame.size.height -= style->borderBottomWidth() + style->borderTopWidth();
 	
 	return innerFrame;
 }
 
-- (WKQuad)innerFrameQuad       // takes transforms into account
-{
-	Node * node = [self _node];
-	RenderObject * renderer = node->renderer();
-	
-	if (!renderer) return emptyQuad();
-    
-	RenderStyle * style = renderer->style();
-
-    int x, y;
-    renderer->absolutePosition(x, y);
-
-    IntRect r = renderer->absoluteBoundingBoxRect();
-    r.move(style->borderLeftWidth(), style->borderBottomWidth());   // bottom, not top, following innerFrame
-    r.setWidth(r.width() - (style->borderLeftWidth() + style->borderRightWidth()));
-    r.setHeight(r.height() - (style->borderBottomWidth() + style->borderTopWidth()));
-
-    return wkQuadFromFloatQuad(renderer->convertRectToPageQuad(r, x, y));
-}
-
 - (float)computedFontSize
 {
-    Node *node = [self _node];
-    RenderStyle *style = node->renderStyle();
-    if (!style)
-        return 0.0;
-    return style->fontDescription().computedSize();
+    return [self _node]->renderStyle()->fontDescription().computedSize();
+}
+
+- (void)simulateCompleteClick
+{
+    APPLY_ON_WEBTHREAD {
+    
+        HTMLElement *targetElement= nil;
+
+        // We can only simulate a complete click if we are an HTML Element ourselves...
+        if([self isKindOfClass: [DOMHTMLElement class]]) targetElement= static_cast<HTMLElement *>([self _node]);
+        // Or if we have a parent HTML Element link.
+        else if([self _cachedLink] && [[DOMNode _nodeWith: [self _cachedLink]] isKindOfClass: [DOMHTMLElement class]]) targetElement= static_cast<HTMLElement *>([self _cachedLink]);
+        // If neither is true, then simply return.
+        else return;
+
+        targetElement->click(YES, NO);
+    }
 }
 
 - (DOMNode *)nextFocusNode
 {
-    KeyboardEvent key;
-    return [DOMNode _wrapNode:[self _node]->document()->nextFocusableNode([self _node], &key)];
+    return [DOMNode _nodeWith:[self _node]->document()->nextFocusNode([self _node])];
 }
 
 - (DOMNode *)previousFocusNode
 {
-    KeyboardEvent key;
-    return [DOMNode _wrapNode:[self _node]->document()->previousFocusableNode([self _node], &key)];
+    return [DOMNode _nodeWith:[self _node]->document()->previousFocusNode([self _node])];
 }
 
 
 @end
 
-@implementation DOMRange (DOMRangeExtensions)
-
-- (CGRect)boundingBox
+static void addElementClass(const QualifiedName& tag, Class objCClass)
 {
-    [self _range]->ownerDocument()->updateLayoutIgnorePendingStylesheets();
-    return [self _range]->boundingBox();
+    elementClassMap->set(tag.localName().impl(), objCClass);
 }
 
-- (NSArray *)lineBoxRects
+static void createHTMLElementClassMap()
 {
-    Vector<WebCore::IntRect> rects;
-    [self _range]->ownerDocument()->updateLayoutIgnorePendingStylesheets();
-    [self _range]->addLineBoxRects(rects);
-    return kit(rects);
-}
-
-@end
-
-// FIXME: this should be auto-generated
-@implementation DOMNode (DOMEventTarget)
-
-- (void)addEventListener:(NSString *)type listener:(id <DOMEventListener>)listener useCapture:(BOOL)useCapture
-{
-    if (![self _node]->isEventTargetNode()) {
-        NSLog(@"%@ addEventListener %@ for %@", self, type, listener);
-        WebCore::raiseDOMException(DOM_NOT_SUPPORTED_ERR);
-}
+    // Create the table.
+    elementClassMap = new ObjCClassMap;
     
-    WebCore::EventListener *wrapper = WebCore::ObjCEventListener::create(listener);
-    WebCore::EventTargetNodeCast([self _node])->addEventListener(type, wrapper, useCapture);
-    wrapper->deref();
+    // Populate it with HTML element classes.
+    addElementClass(aTag, [DOMHTMLAnchorElement class]);
+    addElementClass(appletTag, [DOMHTMLAppletElement class]);
+    addElementClass(areaTag, [DOMHTMLAreaElement class]);
+    addElementClass(baseTag, [DOMHTMLBaseElement class]);
+    addElementClass(basefontTag, [DOMHTMLBaseFontElement class]);
+    addElementClass(bodyTag, [DOMHTMLBodyElement class]);
+    addElementClass(brTag, [DOMHTMLBRElement class]);
+    addElementClass(buttonTag, [DOMHTMLButtonElement class]);
+    addElementClass(canvasTag, [DOMHTMLImageElement class]);
+    addElementClass(captionTag, [DOMHTMLTableCaptionElement class]);
+    addElementClass(colTag, [DOMHTMLTableColElement class]);
+    addElementClass(colgroupTag, [DOMHTMLTableColElement class]);
+    addElementClass(dirTag, [DOMHTMLDirectoryElement class]);
+    addElementClass(divTag, [DOMHTMLDivElement class]);
+    addElementClass(dlTag, [DOMHTMLDListElement class]);
+    addElementClass(embedTag, [DOMHTMLEmbedElement class]);
+    addElementClass(fieldsetTag, [DOMHTMLFieldSetElement class]);
+    addElementClass(fontTag, [DOMHTMLFontElement class]);
+    addElementClass(formTag, [DOMHTMLFormElement class]);
+    addElementClass(frameTag, [DOMHTMLFrameElement class]);
+    addElementClass(framesetTag, [DOMHTMLFrameSetElement class]);
+    addElementClass(h1Tag, [DOMHTMLHeadingElement class]);
+    addElementClass(h2Tag, [DOMHTMLHeadingElement class]);
+    addElementClass(h3Tag, [DOMHTMLHeadingElement class]);
+    addElementClass(h4Tag, [DOMHTMLHeadingElement class]);
+    addElementClass(h5Tag, [DOMHTMLHeadingElement class]);
+    addElementClass(h6Tag, [DOMHTMLHeadingElement class]);
+    addElementClass(headTag, [DOMHTMLHeadElement class]);
+    addElementClass(hrTag, [DOMHTMLHRElement class]);
+    addElementClass(htmlTag, [DOMHTMLHtmlElement class]);
+    addElementClass(iframeTag, [DOMHTMLIFrameElement class]);
+    addElementClass(imgTag, [DOMHTMLImageElement class]);
+    addElementClass(inputTag, [DOMHTMLInputElement class]);
+    addElementClass(isindexTag, [DOMHTMLIsIndexElement class]);
+    addElementClass(labelTag, [DOMHTMLLabelElement class]);
+    addElementClass(legendTag, [DOMHTMLLegendElement class]);
+    addElementClass(liTag, [DOMHTMLLIElement class]);
+    addElementClass(linkTag, [DOMHTMLLinkElement class]);
+    addElementClass(listingTag, [DOMHTMLPreElement class]);
+    addElementClass(mapTag, [DOMHTMLMapElement class]);
+    addElementClass(menuTag, [DOMHTMLMenuElement class]);
+    addElementClass(metaTag, [DOMHTMLMetaElement class]);
+    addElementClass(objectTag, [DOMHTMLObjectElement class]);
+    addElementClass(olTag, [DOMHTMLOListElement class]);
+    addElementClass(optgroupTag, [DOMHTMLOptGroupElement class]);
+    addElementClass(optionTag, [DOMHTMLOptionElement class]);
+    addElementClass(pTag, [DOMHTMLParagraphElement class]);
+    addElementClass(paramTag, [DOMHTMLParamElement class]);
+    addElementClass(preTag, [DOMHTMLPreElement class]);
+    addElementClass(qTag, [DOMHTMLQuoteElement class]);
+    addElementClass(scriptTag, [DOMHTMLScriptElement class]);
+    addElementClass(selectTag, [DOMHTMLSelectElement class]);
+    addElementClass(styleTag, [DOMHTMLStyleElement class]);
+    addElementClass(tableTag, [DOMHTMLTableElement class]);
+    addElementClass(tbodyTag, [DOMHTMLTableSectionElement class]);
+    addElementClass(tdTag, [DOMHTMLTableCellElement class]);
+    addElementClass(textareaTag, [DOMHTMLTextAreaElement class]);
+    addElementClass(tfootTag, [DOMHTMLTableSectionElement class]);
+    addElementClass(theadTag, [DOMHTMLTableSectionElement class]);
+    addElementClass(titleTag, [DOMHTMLTitleElement class]);
+    addElementClass(trTag, [DOMHTMLTableRowElement class]);
+    addElementClass(ulTag, [DOMHTMLUListElement class]);
+
+    // FIXME: Reflect marquee once the API has been determined.
 }
+
+static Class elementClass(const AtomicString& tagName)
+{
+    if (!elementClassMap)
+        createHTMLElementClassMap();
+    Class objcClass = elementClassMap->get(tagName.impl());
+    if (!objcClass)
+        objcClass = [DOMHTMLElement class];
+    return objcClass;
+}
+
+@implementation DOMNode (WebCoreInternal)
+
+- (id)_initWithNode:(Node *)impl
+{
+    ASSERT(impl);
+    
+    [super _init];
+    
+    _internal = DOM_cast<DOMObjectInternal *>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMNode *)_nodeWith:(Node *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    Class wrapperClass = nil;
+    switch (impl->nodeType()) {
+        case Node::ELEMENT_NODE:
+            if (impl->isHTMLElement())
+                wrapperClass = elementClass(static_cast<HTMLElement*>(impl)->localName());
+            else
+                wrapperClass = [DOMElement class];
+            break;
+        case Node::ATTRIBUTE_NODE:
+            wrapperClass = [DOMAttr class];
+            break;
+        case Node::TEXT_NODE:
+            wrapperClass = [DOMText class];
+            break;
+        case Node::CDATA_SECTION_NODE:
+            wrapperClass = [DOMCDATASection class];
+            break;
+        case Node::ENTITY_REFERENCE_NODE:
+            wrapperClass = [DOMEntityReference class];
+            break;
+        case Node::ENTITY_NODE:
+            wrapperClass = [DOMEntity class];
+            break;
+        case Node::PROCESSING_INSTRUCTION_NODE:
+            wrapperClass = [DOMProcessingInstruction class];
+            break;
+        case Node::COMMENT_NODE:
+            wrapperClass = [DOMComment class];
+            break;
+        case Node::DOCUMENT_NODE:
+            if (static_cast<Document*>(impl)->isHTMLDocument())
+                wrapperClass = [DOMHTMLDocument class];
+            else
+                wrapperClass = [DOMDocument class];
+            break;
+        case Node::DOCUMENT_TYPE_NODE:
+            wrapperClass = [DOMDocumentType class];
+            break;
+        case Node::DOCUMENT_FRAGMENT_NODE:
+            wrapperClass = [DOMDocumentFragment class];
+            break;
+        case Node::NOTATION_NODE:
+            wrapperClass = [DOMNotation class];
+            break;
+        case Node::XPATH_NAMESPACE_NODE:
+            // FIXME: Create an XPath objective C wrapper
+            // See http://bugzilla.opendarwin.org/show_bug.cgi?id=8755
+            return nil;
+    }
+    return [[[wrapperClass alloc] _initWithNode:impl] autorelease];
+}
+
+- (Node *)_node
+{
+    return DOM_cast<Node *>(_internal);
+}
+
+- (BOOL)isContentEditable
+{
+    return [self _node]->isContentEditable();
+}
+
+- (const KJS::Bindings::RootObject *)_executionContext
+{
+    if (Node *n = [self _node])
+        if (FrameMac *f = Mac(n->document()->frame()))
+            return f->executionContextForDOM();
+
+    return 0;
+}
+
+@end
+
+@implementation DOMNode (DOMEventTarget)
 
 - (void)addEventListener:(NSString *)type :(id <DOMEventListener>)listener :(BOOL)useCapture
 {
-    // FIXME: this method can be removed once Mail changes to use the new method <rdar://problem/4746649>
-    [self addEventListener:type listener:listener useCapture:useCapture];
-}
-
-- (void)removeEventListener:(NSString *)type listener:(id <DOMEventListener>)listener useCapture:(BOOL)useCapture
-{
     if (![self _node]->isEventTargetNode()) {
-        NSLog(@"%@ removeEventListener %@ for %@", self, type, listener);
-        WebCore::raiseDOMException(DOM_NOT_SUPPORTED_ERR);
+        NSLog(@"%@ addEventListener %@ for %@", self, type, listener);
+        raiseDOMException(DOM_NOT_SUPPORTED_ERR);
     }
-
-    if (WebCore::EventListener *wrapper = WebCore::ObjCEventListener::find(listener))
-        WebCore::EventTargetNodeCast([self _node])->removeEventListener(type, wrapper, useCapture);
+    
+    EventListener *wrapper = ObjCEventListener::create(listener);
+    EventTargetNodeCast([self _node])->addEventListener(type, wrapper, useCapture);
+    wrapper->deref();
 }
 
 - (void)removeEventListener:(NSString *)type :(id <DOMEventListener>)listener :(BOOL)useCapture
 {
-    // FIXME: this method can be removed once Mail changes to use the new method <rdar://problem/4746649>
-    [self removeEventListener:type listener:listener useCapture:useCapture];
+    if (![self _node]->isEventTargetNode()) {
+        NSLog(@"%@ removeEventListener %@ for %@", self, type, listener);
+        raiseDOMException(DOM_NOT_SUPPORTED_ERR);
+    }
+
+    if (EventListener *wrapper = ObjCEventListener::find(listener))
+        EventTargetNodeCast([self _node])->removeEventListener(type, wrapper, useCapture);
+}
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMNamedNodeMap
+
+@implementation DOMNamedNodeMap
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<NamedNodeMap *>(_internal)->deref();
+    }
+    [super dealloc];
 }
 
-- (BOOL)dispatchEvent:(DOMEvent *)event
+- (void)finalize
 {
-    if (![self _node]->isEventTargetNode())
-        WebCore::raiseDOMException(DOM_NOT_SUPPORTED_ERR);
+    if (_internal) {
+        DOM_cast<NamedNodeMap *>(_internal)->deref();
+    }
+    [super finalize];
+}
 
-    WebCore::ExceptionCode ec = 0;
-    BOOL result = WebCore::EventTargetNodeCast([self _node])->dispatchEvent([event _event], ec);
-    WebCore::raiseOnDOMError(ec);
+- (NamedNodeMap *)_namedNodeMap
+{
+    return DOM_cast<NamedNodeMap *>(_internal);
+}
+
+- (DOMNode *)getNamedItem:(NSString *)name
+{
+    ASSERT(name);
+
+    return [DOMNode _nodeWith:[self _namedNodeMap]->getNamedItem(name).get()];
+}
+
+- (DOMNode *)setNamedItem:(DOMNode *)arg
+{
+    ASSERT(arg);
+
+    int exception = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _namedNodeMap]->setNamedItem([arg _node], exception).get()];
+    raiseOnDOMError(exception);
     return result;
+}
+
+- (DOMNode *)removeNamedItem:(NSString *)name
+{
+    ASSERT(name);
+
+    int exception = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _namedNodeMap]->removeNamedItem(name, exception).get()];
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMNode *)item:(unsigned)index
+{
+    return [DOMNode _nodeWith:[self _namedNodeMap]->item(index).get()];
+}
+
+- (unsigned)length
+{
+    return [self _namedNodeMap]->length();
+}
+
+- (DOMNode *)getNamedItemNS:(NSString *)namespaceURI :(NSString *)localName
+{
+    if (!namespaceURI || !localName) {
+        return nil;
+    }
+
+    return [DOMNode _nodeWith:[self _namedNodeMap]->getNamedItemNS(namespaceURI, localName).get()];
+}
+
+- (DOMNode *)setNamedItemNS:(DOMNode *)arg
+{
+    ASSERT(arg);
+
+    int exception = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _namedNodeMap]->setNamedItemNS([arg _node], exception).get()];
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMNode *)removeNamedItemNS:(NSString *)namespaceURI :(NSString *)localName
+{
+    ASSERT(namespaceURI);
+    ASSERT(localName);
+
+    int exception = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _namedNodeMap]->removeNamedItemNS(namespaceURI, localName, exception).get()];
+    raiseOnDOMError(exception);
+    return result;
+}
+
+@end
+
+@implementation DOMNamedNodeMap (WebCoreInternal)
+
+- (id)_initWithNamedNodeMap:(NamedNodeMap *)impl
+{
+    ASSERT(impl);
+
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal *>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMNamedNodeMap *)_namedNodeMapWith:(NamedNodeMap *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithNamedNodeMap:impl] autorelease];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMNodeList
+
+@implementation DOMNodeList
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<NodeList *>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<NodeList *>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (NodeList *)_nodeList
+{
+    return DOM_cast<NodeList *>(_internal);
+}
+
+- (DOMNode *)item:(unsigned)index
+{
+    return [DOMNode _nodeWith:[self _nodeList]->item(index)];
+}
+
+- (unsigned)length
+{
+    return [self _nodeList]->length();
+}
+
+@end
+
+@implementation DOMNodeList (WebCoreInternal)
+
+- (id)_initWithNodeList:(NodeList *)impl
+{
+    ASSERT(impl);
+
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal *>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMNodeList *)_nodeListWith:(NodeList *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithNodeList:impl] autorelease];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMImplementation
+
+@implementation DOMImplementation
+
+- (void)dealloc
+{
+    if (_internal)
+        DOM_cast<DOMImplementationFront *>(_internal)->deref();
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal)
+        DOM_cast<DOMImplementationFront *>(_internal)->deref();
+    [super finalize];
+}
+
+- (BOOL)hasFeature:(NSString *)feature :(NSString *)version
+{
+    ASSERT(feature);
+    ASSERT(version);
+
+    return [self _DOMImplementation]->hasFeature(feature, version);
+}
+
+- (DOMDocumentType *)createDocumentType:(NSString *)qualifiedName :(NSString *)publicId :(NSString *)systemId
+{
+    ASSERT(qualifiedName);
+    ASSERT(publicId);
+    ASSERT(systemId);
+
+    ExceptionCode ec = 0;
+    RefPtr<DocumentType> impl = [self _DOMImplementation]->createDocumentType(qualifiedName, publicId, systemId, ec);
+    raiseOnDOMError(ec);
+    return static_cast<DOMDocumentType *>([DOMNode _nodeWith:impl.get()]);
+}
+
+- (DOMDocument *)createDocument:(NSString *)namespaceURI :(NSString *)qualifiedName :(DOMDocumentType *)doctype
+{
+    ASSERT(namespaceURI);
+    ASSERT(qualifiedName);
+
+    ExceptionCode ec = 0;
+    RefPtr<Document> impl = [self _DOMImplementation]->createDocument(namespaceURI, qualifiedName, [doctype _documentType], ec);
+    raiseOnDOMError(ec);
+    return static_cast<DOMDocument *>([DOMNode _nodeWith:impl.get()]);
+}
+
+- (DOMHTMLDocument *)createHTMLDocument:(NSString *)title
+{
+    RefPtr<HTMLDocument> impl = [self _DOMImplementation]->createHTMLDocument(title);
+    return static_cast<DOMHTMLDocument *>([DOMNode _nodeWith:impl.get()]);
+}
+@end
+
+@implementation DOMImplementation (DOMImplementationCSS)
+
+- (DOMCSSStyleSheet *)createCSSStyleSheet:(NSString *)title :(NSString *)media
+{
+    ASSERT(title);
+    ASSERT(media);
+
+    ExceptionCode ec = 0;
+    DOMCSSStyleSheet *result = [DOMCSSStyleSheet _CSSStyleSheetWith:[self _DOMImplementation]->createCSSStyleSheet(title, media, ec).get()];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+@end
+ 
+@implementation DOMImplementation (WebCoreInternal)
+
+- (id)_initWithDOMImplementation:(DOMImplementationFront *)impl
+{
+    ASSERT(impl);
+
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal *>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMImplementation *)_DOMImplementationWith:(DOMImplementationFront *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithDOMImplementation:impl] autorelease];
+}
+
+- (DOMImplementationFront *)_DOMImplementation
+{
+    return DOM_cast<DOMImplementationFront *>(_internal);
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMDocumentFragment
+
+@implementation DOMDocumentFragment
+
+@end
+
+@implementation DOMDocumentFragment (WebCoreInternal)
+
++ (DOMDocumentFragment *)_documentFragmentWith:(DocumentFragment *)impl
+{
+    return static_cast<DOMDocumentFragment *>([DOMNode _nodeWith:impl]);
+}
+
+- (DocumentFragment *)_fragment
+{
+    return static_cast<DocumentFragment *>(DOM_cast<Node *>(_internal));
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMDocument
+
+@implementation DOMDocument
+
+- (DOMNode *)adoptNode:(DOMNode *)source
+{
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _document]->adoptNode([source _node], ec).get()];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (DOMDocumentType *)doctype
+{
+    return static_cast<DOMDocumentType *>([DOMNode _nodeWith:[self _document]->doctype()]);
+}
+
+- (DOMImplementation *)implementation
+{
+    return [DOMImplementation _DOMImplementationWith:implementationFront([self _document])];
+}
+
+- (DOMElement *)documentElement
+{
+    return static_cast<DOMElement *>([DOMNode _nodeWith:[self _document]->documentElement()]);
+}
+
+- (DOMElement *)createElement:(NSString *)tagName
+{
+    ASSERT(tagName);
+
+    ExceptionCode ec = 0;
+    DOMElement *result = static_cast<DOMElement *>([DOMNode _nodeWith:[self _document]->createElement(tagName, ec).get()]);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (DOMDocumentFragment *)createDocumentFragment
+{
+    return static_cast<DOMDocumentFragment *>([DOMNode _nodeWith:[self _document]->createDocumentFragment().get()]);
+}
+
+- (DOMText *)createTextNode:(NSString *)data
+{
+    ASSERT(data);
+    return static_cast<DOMText *>([DOMNode _nodeWith:[self _document]->createTextNode(data).get()]);
+}
+
+- (DOMComment *)createComment:(NSString *)data
+{
+    ASSERT(data);
+    return static_cast<DOMComment *>([DOMNode _nodeWith:[self _document]->createComment(data).get()]);
+}
+
+- (DOMCDATASection *)createCDATASection:(NSString *)data
+{
+    ASSERT(data);
+    int exception = 0;
+    DOMCDATASection *result = static_cast<DOMCDATASection *>([DOMNode _nodeWith:[self _document]->createCDATASection(data, exception).get()]);
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMProcessingInstruction *)createProcessingInstruction:(NSString *)target :(NSString *)data
+{
+    ASSERT(target);
+    ASSERT(data);
+    int exception = 0;
+    DOMProcessingInstruction *result = static_cast<DOMProcessingInstruction *>([DOMNode _nodeWith:[self _document]->createProcessingInstruction(target, data, exception).get()]);
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMAttr *)createAttribute:(NSString *)name
+{
+    ASSERT(name);
+    int exception = 0;
+    DOMAttr *result = [DOMAttr _attrWith:[self _document]->createAttribute(name, exception).get()];
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMEntityReference *)createEntityReference:(NSString *)name
+{
+    ASSERT(name);
+    int exception = 0;
+    DOMEntityReference *result = static_cast<DOMEntityReference *>([DOMNode _nodeWith:[self _document]->createEntityReference(name, exception).get()]);
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMNodeList *)getElementsByTagName:(NSString *)tagname
+{
+    ASSERT(tagname);
+    return [DOMNodeList _nodeListWith:[self _document]->getElementsByTagName(tagname).get()];
+}
+
+- (DOMNode *)importNode:(DOMNode *)importedNode :(BOOL)deep
+{
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _document]->importNode([importedNode _node], deep, ec).get()];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (DOMElement *)createElementNS:(NSString *)namespaceURI :(NSString *)qualifiedName
+{
+    ASSERT(namespaceURI);
+    ASSERT(qualifiedName);
+
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _document]->createElementNS(namespaceURI, qualifiedName, ec).get()];
+    raiseOnDOMError(ec);
+    return static_cast<DOMElement *>(result);
+}
+
+- (DOMAttr *)createAttributeNS:(NSString *)namespaceURI :(NSString *)qualifiedName
+{
+    ASSERT(namespaceURI);
+    ASSERT(qualifiedName);
+
+    int exception = 0;
+    DOMAttr *result = [DOMAttr _attrWith:[self _document]->createAttributeNS(namespaceURI, qualifiedName, exception).get()];
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMNodeList *)getElementsByTagNameNS:(NSString *)namespaceURI :(NSString *)localName
+{
+    ASSERT(namespaceURI);
+    ASSERT(localName);
+
+    return [DOMNodeList _nodeListWith:[self _document]->getElementsByTagNameNS(namespaceURI, localName).get()];
+}
+
+- (DOMElement *)getElementById:(NSString *)elementId
+{
+    ASSERT(elementId);
+
+    return static_cast<DOMElement *>([DOMNode _nodeWith:[self _document]->getElementById(elementId)]);
+}
+
+@end
+
+@implementation DOMDocument (DOMDocumentRange)
+
+- (DOMRange *)createRange
+{
+    return [DOMRange _rangeWith:[self _document]->createRange().get()];
+}
+
+@end
+
+@implementation DOMDocument (DOMDocumentCSS)
+
+- (DOMCSSStyleDeclaration *)getOverrideStyle:(DOMElement *)elt :(NSString *)pseudoElt
+{
+    Element *element = [elt _element];
+    String pseudoEltString(pseudoElt);
+    return [DOMCSSStyleDeclaration _styleDeclarationWith:[self _document]->getOverrideStyle(element, pseudoEltString.impl())];
+}
+
+@end
+
+@implementation DOMDocument (DOMDocumentStyle)
+
+- (DOMStyleSheetList *)styleSheets
+{
+    return [DOMStyleSheetList _styleSheetListWith:[self _document]->styleSheets()];
+}
+
+@end
+
+@implementation DOMDocument (DOMDocumentExtensions)
+
+- (DOMCSSStyleDeclaration *)createCSSStyleDeclaration
+{
+    return [DOMCSSStyleDeclaration _styleDeclarationWith:[self _document]->createCSSStyleDeclaration().get()];
+}
+
+@end
+
+@implementation DOMDocument (WebCoreInternal)
+
++ (DOMDocument *)_documentWith:(Document *)impl
+{
+    return static_cast<DOMDocument *>([DOMNode _nodeWith:impl]);
+}
+
+- (Document *)_document
+{
+    return static_cast<Document *>(DOM_cast<Node *>(_internal));
+}
+
+- (DOMElement *)_ownerElement
+{
+    return [DOMElement _elementWith:[self _document]->ownerElement()];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCharacterData
+
+@implementation DOMCharacterData
+
+- (CharacterData *)_characterData
+{
+    return static_cast<CharacterData *>(DOM_cast<Node *>(_internal));
+}
+
+- (NSString *)data
+{
+    // Documentation says we can raise a DOMSTRING_SIZE_ERR.
+    // However, the lower layer does not report that error up to us.
+    return [self _characterData]->data();
+}
+
+- (void)setData:(NSString *)data
+{
+    ASSERT(data);
+    
+    ExceptionCode ec = 0;
+    [self _characterData]->setData(data, ec);
+    raiseOnDOMError(ec);
+}
+
+- (unsigned)length
+{
+    return [self _characterData]->length();
+}
+
+- (NSString *)substringData:(unsigned)offset :(unsigned)count
+{
+    ExceptionCode ec = 0;
+    NSString *result = [self _characterData]->substringData(offset, count, ec);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (void)appendData:(NSString *)arg
+{
+    ASSERT(arg);
+    
+    ExceptionCode ec = 0;
+    [self _characterData]->appendData(arg, ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)insertData:(unsigned)offset :(NSString *)arg
+{
+    ASSERT(arg);
+    
+    ExceptionCode ec = 0;
+    [self _characterData]->insertData(offset, arg, ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)deleteData:(unsigned)offset :(unsigned) count
+{
+    ExceptionCode ec = 0;
+    [self _characterData]->deleteData(offset, count, ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)replaceData:(unsigned)offset :(unsigned)count :(NSString *)arg
+{
+    ASSERT(arg);
+
+    ExceptionCode ec = 0;
+    [self _characterData]->replaceData(offset, count, arg, ec);
+    raiseOnDOMError(ec);
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMAttr
+
+@implementation DOMAttr
+
+- (NSString *)name
+{
+    return [self _attr]->nodeName();
+}
+
+- (BOOL)specified
+{
+    return [self _attr]->specified();
+}
+
+- (NSString *)value
+{
+    return [self _attr]->nodeValue();
+}
+
+- (void)setValue:(NSString *)value
+{
+    ASSERT(value);
+
+    ExceptionCode ec = 0;
+    [self _attr]->setValue(value, ec);
+    raiseOnDOMError(ec);
+}
+
+- (DOMElement *)ownerElement
+{
+    return [DOMElement _elementWith:[self _attr]->ownerElement()];
+}
+
+- (DOMCSSStyleDeclaration *)style
+{
+    return [DOMCSSStyleDeclaration _styleDeclarationWith: [self _attr]->style()];
+}
+
+@end
+
+@implementation DOMAttr (WebCoreInternal)
+
++ (DOMAttr *)_attrWith:(Attr *)impl
+{
+    return static_cast<DOMAttr *>([DOMNode _nodeWith:impl]);
+}
+
+- (Attr *)_attr
+{
+    return static_cast<Attr *>(DOM_cast<Node *>(_internal));
 }
 
 @end
@@ -774,87 +1434,648 @@ static inline WKQuad emptyQuad()
 //------------------------------------------------------------------------------------------
 // DOMElement
 
-// FIXME: this should be auto-generated in DOMElement.mm
-@implementation DOMElement (DOMElementAppKitExtensions)
+@implementation DOMElement
 
-// FIXME: this should be implemented in the implementation
+- (NSString *)tagName
+{
+    return [self _element]->nodeName();
+}
+
+- (DOMNamedNodeMap *)attributes
+{
+    return [DOMNamedNodeMap _namedNodeMapWith:[self _element]->attributes()];
+}
+
+- (NSString *)getAttribute:(NSString *)name
+{
+    ASSERT(name);
+    return [self _element]->getAttribute(name);
+}
+
+- (void)setAttribute:(NSString *)name :(NSString *)value
+{
+    ASSERT(name);
+    ASSERT(value);
+
+    int exception = 0;
+    [self _element]->setAttribute(name, value, exception);
+    raiseOnDOMError(exception);
+}
+
+- (void)removeAttribute:(NSString *)name
+{
+    ASSERT(name);
+
+    int exception = 0;
+    [self _element]->removeAttribute(name, exception);
+    raiseOnDOMError(exception);
+}
+
+- (DOMAttr *)getAttributeNode:(NSString *)name
+{
+    ASSERT(name);
+
+    return [DOMAttr _attrWith:[self _element]->getAttributeNode(name).get()];
+}
+
+- (DOMAttr *)setAttributeNode:(DOMAttr *)newAttr
+{
+    ASSERT(newAttr);
+
+    int exception = 0;
+    DOMAttr *result = [DOMAttr _attrWith:[self _element]->setAttributeNode([newAttr _attr], exception).get()];
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMAttr *)removeAttributeNode:(DOMAttr *)oldAttr
+{
+    ASSERT(oldAttr);
+
+    int exception = 0;
+    DOMAttr *result = [DOMAttr _attrWith:[self _element]->removeAttributeNode([oldAttr _attr], exception).get()];
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMNodeList *)getElementsByTagName:(NSString *)name
+{
+    ASSERT(name);
+
+    return [DOMNodeList _nodeListWith:[self _element]->getElementsByTagName(name).get()];
+}
+
+- (NSString *)getAttributeNS:(NSString *)namespaceURI :(NSString *)localName
+{
+    ASSERT(namespaceURI);
+    ASSERT(localName);
+
+    return [self _element]->getAttributeNS(namespaceURI, localName);
+}
+
+- (void)setAttributeNS:(NSString *)namespaceURI :(NSString *)qualifiedName :(NSString *)value
+{
+    ASSERT(namespaceURI);
+    ASSERT(qualifiedName);
+    ASSERT(value);
+
+    int exception = 0;
+    [self _element]->setAttributeNS(namespaceURI, qualifiedName, value, exception);
+    raiseOnDOMError(exception);
+}
+
+- (void)removeAttributeNS:(NSString *)namespaceURI :(NSString *)localName
+{
+    ASSERT(namespaceURI);
+    ASSERT(localName);
+
+    int exception = 0;
+    [self _element]->removeAttributeNS(namespaceURI, localName, exception);
+    raiseOnDOMError(exception);
+}
+
+- (DOMAttr *)getAttributeNodeNS:(NSString *)namespaceURI :(NSString *)localName
+{
+    ASSERT(namespaceURI);
+    ASSERT(localName);
+
+    return [DOMAttr _attrWith:[self _element]->getAttributeNodeNS(namespaceURI, localName).get()];
+}
+
+- (DOMAttr *)setAttributeNodeNS:(DOMAttr *)newAttr
+{
+    ASSERT(newAttr);
+
+    int exception = 0;
+    DOMAttr *result = [DOMAttr _attrWith:[self _element]->setAttributeNodeNS([newAttr _attr], exception).get()];
+    raiseOnDOMError(exception);
+    return result;
+}
+
+- (DOMNodeList *)getElementsByTagNameNS:(NSString *)namespaceURI :(NSString *)localName
+{
+    ASSERT(namespaceURI);
+    ASSERT(localName);
+
+    return [DOMNodeList _nodeListWith:[self _element]->getElementsByTagNameNS(namespaceURI, localName).get()];
+}
+
+- (BOOL)hasAttribute:(NSString *)name
+{
+    ASSERT(name);
+
+    return [self _element]->hasAttribute(name);
+}
+
+- (BOOL)hasAttributeNS:(NSString *)namespaceURI :(NSString *)localName
+{
+    ASSERT(namespaceURI);
+    ASSERT(localName);
+
+    return [self _element]->hasAttributeNS(namespaceURI, localName);
+}
+
+- (void)focus
+{
+    APPLY_ON_WEBTHREAD
+        [self _element]->focus();
+}
+
+- (void)blur
+{
+    APPLY_ON_WEBTHREAD
+        [self _element]->blur();
+}
+
+@end
+
+@implementation DOMElement (DOMElementCSSInlineStyle)
+
+- (DOMCSSStyleDeclaration *)style
+{
+    return [DOMCSSStyleDeclaration _styleDeclarationWith:[self _element]->style()];
+}
+
+@end
+
+@implementation DOMElement (DOMElementExtensions)
+
+
+- (void)scrollIntoView:(BOOL)alignTop
+{
+    [self _element]->scrollIntoView(alignTop);
+}
+
+- (void)scrollIntoViewIfNeeded:(BOOL)centerIfNeeded
+{
+    [self _element]->scrollIntoViewIfNeeded(centerIfNeeded);
+}
+
+@end
+
+@implementation DOMElement (WebCoreInternal)
+
++ (DOMElement *)_elementWith:(Element *)impl
+{
+    return static_cast<DOMElement *>([DOMNode _nodeWith:impl]);
+}
+
+- (Element *)_element
+{
+    return static_cast<Element *>(DOM_cast<Node *>(_internal));
+}
 
 @end
 
 @implementation DOMElement (WebPrivate)
 
-// FIXME: this should be implemented in the implementation
 - (GSFontRef)_font
 {
     RenderObject *renderer = [self _element]->renderer();
-    if (renderer)
-        return renderer->style()->font().primaryFont()->getGSFont();
+    if (renderer) {
+        return renderer->style()->font().getFont();
+    }
     return nil;
 }
 
-// FIXME: this should be implemented in the implementation
-
-- (CGRect)_windowClipRect
-{
-    WebCore::RenderObject* renderer = [self _element]->renderer();
-    if (renderer && renderer->view()) {
-        WebCore::FrameView* frameView = renderer->view()->frameView();
-        if (!frameView)
-            return WebCore::IntRect();
-        return frameView->windowClipRectForLayer(renderer->enclosingLayer(), true);
-    }
-    return WebCore::IntRect();
-}
-
-// FIXME: this should be implemented in the implementation
 - (NSURL *)_getURLAttribute:(NSString *)name
 {
     ASSERT(name);
-    WebCore::Element* element = [self _element];
-    ASSERT(element);
-    return WebCore::KURL(element->document()->completeURL(parseURL(element->getAttribute(name)).deprecatedString())).getNSURL();
+    Element *e = [self _element];
+    ASSERT(e);
+    return KURL(e->document()->completeURL(parseURL(e->getAttribute(name)).deprecatedString())).getNSURL();
 }
 
-// FIXME: this should be implemented in the implementation
-#if ENABLE(NETSCAPE_API)
-- (void *)_NPObject
-{
-#if USE(NPOBJECT)
-    WebCore::Element* element = [self _element];
-    if (element->hasTagName(WebCore::HTMLNames::appletTag) || element->hasTagName(WebCore::HTMLNames::embedTag) || element->hasTagName(WebCore::HTMLNames::objectTag))
-        return static_cast<WebCore::HTMLPlugInElement*>(element)->getNPObject();
-#endif
-    return 0;
-}
-#endif
 
-// FIXME: this should be implemented in the implementation
 - (BOOL)isFocused
 {
-    WebCore::Element* impl = [self _element];
-    if (impl->document()->focusedNode() == impl)
+    Element* impl = [self _element];
+    if (impl->document()->focusNode() == impl)
         return YES;
     return NO;
 }
 
 @end
 
+//------------------------------------------------------------------------------------------
+// DOMText
+
+@implementation DOMText
+
+- (Text *)_text
+{
+    return static_cast<Text *>(DOM_cast<Node *>(_internal));
+}
+
+- (DOMText *)splitText:(unsigned)offset
+{
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _text]->splitText(offset, ec)];
+    raiseOnDOMError(ec);
+    return static_cast<DOMText *>(result);
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMComment
+
+@implementation DOMComment
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCDATASection
+
+@implementation DOMCDATASection
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMDocumentType
+
+@implementation DOMDocumentType
+
+- (NSString *)name
+{
+    return [self _documentType]->publicId();
+}
+
+- (DOMNamedNodeMap *)entities
+{
+    return [DOMNamedNodeMap _namedNodeMapWith:[self _documentType]->entities()];
+}
+
+- (DOMNamedNodeMap *)notations
+{
+    return [DOMNamedNodeMap _namedNodeMapWith:[self _documentType]->notations()];
+}
+
+- (NSString *)publicId
+{
+    return [self _documentType]->publicId();
+}
+
+- (NSString *)systemId
+{
+    return [self _documentType]->systemId();
+}
+
+- (NSString *)internalSubset
+{
+    return [self _documentType]->internalSubset();
+}
+
+@end
+
+@implementation DOMDocumentType (WebCoreInternal)
+
+- (DocumentType *)_documentType
+{
+    return static_cast<DocumentType *>(DOM_cast<Node *>(_internal));
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMNotation
+
+@implementation DOMNotation
+
+- (Notation *)_notation
+{
+    return static_cast<Notation *>(DOM_cast<Node *>(_internal));
+}
+
+- (NSString *)publicId
+{
+    return [self _notation]->publicId();
+}
+
+- (NSString *)systemId
+{
+    return [self _notation]->systemId();
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMEntity
+
+@implementation DOMEntity
+
+- (Entity *)_entity
+{
+    return static_cast<Entity *>(DOM_cast<Node *>(_internal));
+}
+
+- (NSString *)publicId
+{
+    return [self _entity]->publicId();
+}
+
+- (NSString *)systemId
+{
+    return [self _entity]->systemId();
+}
+
+- (NSString *)notationName
+{
+    return [self _entity]->notationName();
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMEntityReference
+
+@implementation DOMEntityReference
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMProcessingInstruction
+
+@implementation DOMProcessingInstruction
+
+- (ProcessingInstruction *)_processingInstruction
+{
+    return static_cast<ProcessingInstruction *>(DOM_cast<Node *>(_internal));
+}
+
+- (NSString *)target
+{
+    return [self _processingInstruction]->target();
+}
+
+- (NSString *)data
+{
+    return [self _processingInstruction]->data();
+}
+
+- (void)setData:(NSString *)data
+{
+    ASSERT(data);
+
+    ExceptionCode ec = 0;
+    [self _processingInstruction]->setData(data, ec);
+    raiseOnDOMError(ec);
+}
+
+@end
 
 //------------------------------------------------------------------------------------------
 // DOMRange
 
-@implementation DOMRange (WebPrivate)
+@implementation DOMRange
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<Range *>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<Range *>(_internal)->deref();
+    }
+    [super finalize];
+}
 
 - (NSString *)description
 {
     if (!_internal)
         return @"<DOMRange: null>";
     return [NSString stringWithFormat:@"<DOMRange: %@ %d %@ %d>",
-               [self startContainer], [self startOffset], [self endContainer], [self endOffset]];
+        [self startContainer], [self startOffset],
+        [self endContainer], [self endOffset]];
 }
 
-// FIXME: this should be removed as soon as all internal Apple uses of it have been replaced with
-// calls to the public method - (NSString *)text.
+- (DOMNode *)startContainer
+{
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _range]->startContainer(ec)];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (int)startOffset
+{
+    ExceptionCode ec = 0;
+    int result = [self _range]->startOffset(ec);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (DOMNode *)endContainer
+{
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _range]->endContainer(ec)];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (int)endOffset
+{
+    ExceptionCode ec = 0;
+    int result = [self _range]->endOffset(ec);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (BOOL)collapsed
+{
+    ExceptionCode ec = 0;
+    BOOL result = [self _range]->collapsed(ec);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (DOMNode *)commonAncestorContainer
+{
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _range]->commonAncestorContainer(ec)];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (void)setStart:(DOMNode *)refNode :(int)offset
+{
+    ExceptionCode ec = 0;
+    [self _range]->setStart([refNode _node], offset, ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)setEnd:(DOMNode *)refNode :(int)offset
+{
+    ExceptionCode ec = 0;
+    [self _range]->setEnd([refNode _node], offset, ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)setStartBefore:(DOMNode *)refNode
+{
+    ExceptionCode ec = 0;
+    [self _range]->setStartBefore([refNode _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)setStartAfter:(DOMNode *)refNode
+{
+    ExceptionCode ec = 0;
+    [self _range]->setStartAfter([refNode _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)setEndBefore:(DOMNode *)refNode
+{
+    ExceptionCode ec = 0;
+    [self _range]->setEndBefore([refNode _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)setEndAfter:(DOMNode *)refNode
+{
+    ExceptionCode ec = 0;
+    [self _range]->setEndAfter([refNode _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)collapse:(BOOL)toStart
+{
+    ExceptionCode ec = 0;
+    [self _range]->collapse(toStart, ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)selectNode:(DOMNode *)refNode
+{
+    ExceptionCode ec = 0;
+    [self _range]->selectNode([refNode _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)selectNodeContents:(DOMNode *)refNode
+{
+    ExceptionCode ec = 0;
+    [self _range]->selectNodeContents([refNode _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (short)compareBoundaryPoints:(unsigned short)how :(DOMRange *)sourceRange
+{
+    ExceptionCode ec = 0;
+    short result = [self _range]->compareBoundaryPoints(static_cast<Range::CompareHow>(how), [sourceRange _range], ec);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (void)deleteContents
+{
+    ExceptionCode ec = 0;
+    [self _range]->deleteContents(ec);
+    raiseOnDOMError(ec);
+}
+
+- (DOMDocumentFragment *)extractContents
+{
+    ExceptionCode ec = 0;
+    DOMDocumentFragment *result = [DOMDocumentFragment _documentFragmentWith:[self _range]->extractContents(ec).get()];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (DOMDocumentFragment *)cloneContents
+{
+    ExceptionCode ec = 0;
+    DOMDocumentFragment *result = [DOMDocumentFragment _documentFragmentWith:[self _range]->cloneContents(ec).get()];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (void)insertNode:(DOMNode *)newNode
+{
+    ExceptionCode ec = 0;
+    [self _range]->insertNode([newNode _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)surroundContents:(DOMNode *)newParent
+{
+    ExceptionCode ec = 0;
+    [self _range]->surroundContents([newParent _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (DOMRange *)cloneRange
+{
+    ExceptionCode ec = 0;
+    DOMRange *result = [DOMRange _rangeWith:[self _range]->cloneRange(ec).get()];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (NSString *)toString
+{
+    ExceptionCode ec = 0;
+    NSString *result = [self _range]->toString(ec);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (NSString *)text
+{
+    return [self _range]->text();
+}
+
+- (void)detach
+{
+    ExceptionCode ec = 0;
+    [self _range]->detach(ec);
+    raiseOnDOMError(ec);
+}
+
+@end
+
+@implementation DOMRange (WebCoreInternal)
+
+- (id)_initWithRange:(Range *)impl
+{
+    ASSERT(impl);
+
+    [super _init];
+    
+    _internal = DOM_cast<DOMObjectInternal *>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMRange *)_rangeWith:(Range *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithRange:impl] autorelease];
+}
+
+- (Range *)_range
+{
+    return DOM_cast<Range *>(_internal);
+}
+
+@end
+
+@implementation DOMRange (WebPrivate)
+
 - (NSString *)_text
 {
     return [self text];
@@ -862,54 +2083,52 @@ static inline WKQuad emptyQuad()
 
 @end
 
+//------------------------------------------------------------------------------------------
 
 //------------------------------------------------------------------------------------------
-// DOMNodeFilter
-
-// FIXME: This implementation should be in it's own file.
 
 @implementation DOMNodeFilter
 
-- (id)_initWithNodeFilter:(WebCore::NodeFilter *)impl
+- (id)_initWithNodeFilter:(NodeFilter *)impl
 {
     ASSERT(impl);
 
     [super _init];
-    _internal = reinterpret_cast<DOMObjectInternal*>(impl);
+    _internal = DOM_cast<DOMObjectInternal *>(impl);
     impl->ref();
-    WebCore::addDOMWrapper(self, impl);
+    addDOMWrapper(self, impl);
     return self;
 }
 
-+ (DOMNodeFilter *)_wrapNodeFilter:(WebCore::NodeFilter *)impl
++ (DOMNodeFilter *)_nodeFilterWith:(NodeFilter *)impl
 {
     if (!impl)
         return nil;
     
     id cachedInstance;
-    cachedInstance = WebCore::getDOMWrapper(impl);
+    cachedInstance = getDOMWrapper(impl);
     if (cachedInstance)
         return [[cachedInstance retain] autorelease];
     
     return [[[self alloc] _initWithNodeFilter:impl] autorelease];
 }
 
-- (WebCore::NodeFilter *)_nodeFilter
+- (NodeFilter *)_nodeFilter
 {
-    return reinterpret_cast<WebCore::NodeFilter*>(_internal);
+    return DOM_cast<NodeFilter *>(_internal);
 }
 
 - (void)dealloc
 {
     if (_internal)
-        reinterpret_cast<WebCore::NodeFilter*>(_internal)->deref();
+        DOM_cast<NodeFilter *>(_internal)->deref();
     [super dealloc];
 }
 
 - (void)finalize
 {
     if (_internal)
-        reinterpret_cast<WebCore::NodeFilter*>(_internal)->deref();
+        DOM_cast<NodeFilter *>(_internal)->deref();
     [super finalize];
 }
 
@@ -920,18 +2139,250 @@ static inline WKQuad emptyQuad()
 
 @end
 
-//------------------------------------------------------------------------------------------
-// ObjCNodeFilterCondition
 
-class ObjCNodeFilterCondition : public WebCore::NodeFilterCondition {
+@implementation DOMNodeIterator
+
+- (id)_initWithNodeIterator:(NodeIterator *)impl filter:(id <DOMNodeFilter>)filter
+{
+    ASSERT(impl);
+
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal *>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    m_filter = [filter retain];
+    return self;
+}
+
+- (NodeIterator *)_nodeIterator
+{
+    return DOM_cast<NodeIterator *>(_internal);
+}
+
+- (void)dealloc
+{
+    [m_filter release];
+    if (_internal) {
+        [self detach];
+        DOM_cast<NodeIterator *>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        [self detach];
+        DOM_cast<NodeIterator *>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (DOMNode *)root
+{
+    return [DOMNode _nodeWith:[self _nodeIterator]->root()];
+}
+
+- (unsigned)whatToShow
+{
+    return [self _nodeIterator]->whatToShow();
+}
+
+- (id <DOMNodeFilter>)filter
+{
+    if (m_filter)
+        // This node iterator was created from the objc side
+        return [[m_filter retain] autorelease];
+
+    // This node iterator was created from the c++ side
+    return [DOMNodeFilter _nodeFilterWith:[self _nodeIterator]->filter()];
+}
+
+- (BOOL)expandEntityReferences
+{
+    return [self _nodeIterator]->expandEntityReferences();
+}
+
+- (DOMNode *)nextNode
+{
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _nodeIterator]->nextNode(ec)];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (DOMNode *)previousNode
+{
+    ExceptionCode ec = 0;
+    DOMNode *result = [DOMNode _nodeWith:[self _nodeIterator]->previousNode(ec)];
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (void)detach
+{
+    ExceptionCode ec = 0;
+    [self _nodeIterator]->detach(ec);
+    raiseOnDOMError(ec);
+}
+
+@end
+
+@implementation DOMNodeIterator(WebCoreInternal)
+
++ (DOMNodeIterator *)_nodeIteratorWith:(NodeIterator *)impl filter:(id <DOMNodeFilter>)filter
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithNodeIterator:impl filter:filter] autorelease];
+}
+
+@end
+
+@implementation DOMTreeWalker
+
+- (id)_initWithTreeWalker:(TreeWalker *)impl filter:(id <DOMNodeFilter>)filter
+{
+    ASSERT(impl);
+
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal *>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    m_filter = [filter retain];
+    return self;
+}
+
+- (TreeWalker *)_treeWalker
+{
+    return DOM_cast<TreeWalker *>(_internal);
+}
+
+- (void)dealloc
+{
+    if (m_filter)
+        [m_filter release];
+    if (_internal) {
+        DOM_cast<TreeWalker *>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<TreeWalker *>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (DOMNode *)root
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->root()];
+}
+
+- (unsigned)whatToShow
+{
+    return [self _treeWalker]->whatToShow();
+}
+
+- (id <DOMNodeFilter>)filter
+{
+    if (m_filter)
+        // This tree walker was created from the objc side
+        return [[m_filter retain] autorelease];
+
+    // This tree walker was created from the c++ side
+    return [DOMNodeFilter _nodeFilterWith:[self _treeWalker]->filter()];
+}
+
+- (BOOL)expandEntityReferences
+{
+    return [self _treeWalker]->expandEntityReferences();
+}
+
+- (DOMNode *)currentNode
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->currentNode()];
+}
+
+- (void)setCurrentNode:(DOMNode *)currentNode
+{
+    ExceptionCode ec = 0;
+    [self _treeWalker]->setCurrentNode([currentNode _node], ec);
+    raiseOnDOMError(ec);
+}
+
+- (DOMNode *)parentNode
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->parentNode()];
+}
+
+- (DOMNode *)firstChild
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->firstChild()];
+}
+
+- (DOMNode *)lastChild
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->lastChild()];
+}
+
+- (DOMNode *)previousSibling
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->previousSibling()];
+}
+
+- (DOMNode *)nextSibling
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->nextSibling()];
+}
+
+- (DOMNode *)previousNode
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->previousNode()];
+}
+
+- (DOMNode *)nextNode
+{
+    return [DOMNode _nodeWith:[self _treeWalker]->nextNode()];
+}
+
+@end
+
+@implementation DOMTreeWalker (WebCoreInternal)
+
++ (DOMTreeWalker *)_treeWalkerWith:(TreeWalker *)impl filter:(id <DOMNodeFilter>)filter
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithTreeWalker:impl filter:filter] autorelease];
+}
+
+@end
+
+class ObjCNodeFilterCondition : public NodeFilterCondition 
+{
 public:
     ObjCNodeFilterCondition(id <DOMNodeFilter>);
     virtual ~ObjCNodeFilterCondition();
-    virtual short acceptNode(WebCore::Node*) const;
+    virtual short acceptNode(Node*) const;
 
 private:
-    ObjCNodeFilterCondition(const ObjCNodeFilterCondition&);
-    ObjCNodeFilterCondition &operator=(const ObjCNodeFilterCondition&);
+    ObjCNodeFilterCondition(const ObjCNodeFilterCondition &);
+    ObjCNodeFilterCondition &operator=(const ObjCNodeFilterCondition &);
 
     id <DOMNodeFilter> m_filter;
 };
@@ -940,82 +2391,57 @@ ObjCNodeFilterCondition::ObjCNodeFilterCondition(id <DOMNodeFilter> filter)
     : m_filter(filter)
 {
     ASSERT(m_filter);
-    HardRetain(m_filter);
+    CFRetain(m_filter);
 }
 
 ObjCNodeFilterCondition::~ObjCNodeFilterCondition()
 {
-    HardRelease(m_filter);
+    CFRelease(m_filter);
 }
 
-short ObjCNodeFilterCondition::acceptNode(WebCore::Node* node) const
+short ObjCNodeFilterCondition::acceptNode(Node* node) const
 {
     if (!node)
-        return WebCore::NodeFilter::FILTER_REJECT;
-    return [m_filter acceptNode:[DOMNode _wrapNode:node]];
+        return NodeFilter::FILTER_REJECT;
+    return [m_filter acceptNode:[DOMNode _nodeWith:node]];
 }
 
-
-//------------------------------------------------------------------------------------------
-// DOMDocument (DOMDocumentTraversal)
-
-// FIXME: this should be auto-generated in DOMDocument.mm
 @implementation DOMDocument (DOMDocumentTraversal)
-
-- (DOMNodeIterator *)createNodeIterator:(DOMNode *)root whatToShow:(unsigned)whatToShow filter:(id <DOMNodeFilter>)filter expandEntityReferences:(BOOL)expandEntityReferences
-{
-    WebCore::NodeFilter* cppFilter = 0;
-    if (filter)
-        cppFilter = new WebCore::NodeFilter(new ObjCNodeFilterCondition(filter));
-    WebCore::ExceptionCode ec = 0;
-    RefPtr<WebCore::NodeIterator> impl = [self _document]->createNodeIterator([root _node], whatToShow, cppFilter, expandEntityReferences, ec);
-    WebCore::raiseOnDOMError(ec);
-    return [DOMNodeIterator _wrapNodeIterator:impl.get() filter:filter];
-}
-
-- (DOMTreeWalker *)createTreeWalker:(DOMNode *)root whatToShow:(unsigned)whatToShow filter:(id <DOMNodeFilter>)filter expandEntityReferences:(BOOL)expandEntityReferences
-{
-    WebCore::NodeFilter* cppFilter = 0;
-    if (filter)
-        cppFilter = new WebCore::NodeFilter(new ObjCNodeFilterCondition(filter));
-    WebCore::ExceptionCode ec = 0;
-    RefPtr<WebCore::TreeWalker> impl = [self _document]->createTreeWalker([root _node], whatToShow, cppFilter, expandEntityReferences, ec);
-    WebCore::raiseOnDOMError(ec);
-    return [DOMTreeWalker _wrapTreeWalker:impl.get() filter:filter];
-}
-
-@end
-
-@implementation DOMDocument (DOMDocumentTraversalDeprecated)
 
 - (DOMNodeIterator *)createNodeIterator:(DOMNode *)root :(unsigned)whatToShow :(id <DOMNodeFilter>)filter :(BOOL)expandEntityReferences
 {
-    return [self createNodeIterator:root whatToShow:whatToShow filter:filter expandEntityReferences:expandEntityReferences];
+    RefPtr<NodeFilter> cppFilter;
+    if (filter)
+        cppFilter = new NodeFilter(new ObjCNodeFilterCondition(filter));
+    ExceptionCode ec = 0;
+    RefPtr<NodeIterator> impl = [self _document]->createNodeIterator([root _node], whatToShow, cppFilter, expandEntityReferences, ec);
+    raiseOnDOMError(ec);
+    return [DOMNodeIterator _nodeIteratorWith:impl.get() filter:filter];
 }
 
 - (DOMTreeWalker *)createTreeWalker:(DOMNode *)root :(unsigned)whatToShow :(id <DOMNodeFilter>)filter :(BOOL)expandEntityReferences
 {
-    return [self createTreeWalker:root whatToShow:whatToShow filter:filter expandEntityReferences:expandEntityReferences];
+    RefPtr<NodeFilter> cppFilter;
+    if (filter)
+        cppFilter = new NodeFilter(new ObjCNodeFilterCondition(filter));
+    ExceptionCode ec = 0;
+    RefPtr<TreeWalker> impl = [self _document]->createTreeWalker([root _node], whatToShow, cppFilter, expandEntityReferences, ec);
+    raiseOnDOMError(ec);
+    return [DOMTreeWalker _treeWalkerWith:impl.get() filter:filter];
 }
 
 @end
-
-
-//------------------------------------------------------------------------------------------
-// ObjCEventListener
-
-namespace WebCore {
 
 ObjCEventListener* ObjCEventListener::find(id <DOMEventListener> listener)
 {
     if (ListenerMap* map = listenerMap)
         return map->get(listener);
-    return 0;
+    return NULL;
 }
 
 ObjCEventListener *ObjCEventListener::create(id <DOMEventListener> listener)
 {
-    ObjCEventListener* wrapper = find(listener);
+    ObjCEventListener *wrapper = find(listener);
     if (!wrapper)
         wrapper = new ObjCEventListener(listener);
     wrapper->ref();
@@ -1039,9 +2465,7 @@ ObjCEventListener::~ObjCEventListener()
     [m_listener release];
 }
 
-void ObjCEventListener::handleEvent(Event* event, bool)
+void ObjCEventListener::handleEvent(Event *event, bool)
 {
-    [m_listener handleEvent:[DOMEvent _wrapEvent:event]];
+    [m_listener handleEvent:[DOMEvent _eventWith:event]];
 }
-
-} // namespace WebCore

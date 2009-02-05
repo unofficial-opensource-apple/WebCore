@@ -1,7 +1,6 @@
 /*
  * Copyright (C) 2004-2006 Apple Computer, Inc.  All rights reserved.
  * Copyright (C) 2006 James G. Speth (speth@end.com)
- * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,54 +27,126 @@
 #import "config.h"
 #import "DOMCSS.h"
 
+#import "DOMCSSInternal.h"
 #import "CSSCharsetRule.h"
 #import "CSSFontFaceRule.h"
 #import "CSSImportRule.h"
 #import "CSSMediaRule.h"
 #import "CSSPageRule.h"
-#import "CSSPrimitiveValue.h"
 #import "CSSRule.h"
 #import "CSSRuleList.h"
-#import "CSSStyleDeclaration.h"
 #import "CSSStyleRule.h"
 #import "CSSStyleSheet.h"
 #import "CSSValueList.h"
+#import "Counter.h"
 #import "DOMInternal.h"
-#import "DOMPrivate.h"
+#import "DOMWindow.h"
+#import "Document.h"
+#import "FoundationExtras.h"
+#import "HTMLLinkElement.h"
+#import "HTMLStyleElement.h"
+#import "MediaList.h"
+#import "ProcessingInstruction.h"
+#import "RectImpl.h"
 #import "StyleSheet.h"
+#import "StyleSheetList.h"
+
 #import <objc/objc-class.h>
 
-#if ENABLE(SVG)
-#import "DOMSVGColor.h"
-#import "DOMSVGPaint.h"
-#endif
+
+#import "WebCoreThread.h"
+#import "ThreadSafeWrapper.h"
+
+using namespace WebCore;
+
+typedef DOMWindow AbstractView;
 
 //------------------------------------------------------------------------------------------
 // DOMStyleSheet
 
-@implementation DOMStyleSheet (WebCoreInternal)
+@implementation DOMStyleSheet
 
-- (WebCore::StyleSheet *)_styleSheet
+- (void)dealloc
 {
-    return reinterpret_cast<WebCore::StyleSheet*>(_internal);
+    if (_internal) {
+        DOM_cast<StyleSheet*>(_internal)->deref();
+    }
+    [super dealloc];
 }
 
-- (id)_initWithStyleSheet:(WebCore::StyleSheet *)impl
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<StyleSheet*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (StyleSheet *)_DOMStyleSheet
+{
+    return DOM_cast<StyleSheet*>(_internal);
+}
+
+- (NSString *)type
+{
+    return [self _DOMStyleSheet]->type();
+}
+
+- (BOOL)disabled
+{
+    return [self _DOMStyleSheet]->disabled();
+}
+
+- (void)setDisabled:(BOOL)disabled
+{
+    [self _DOMStyleSheet]->setDisabled(disabled);
+}
+
+- (DOMNode *)ownerNode
+{
+    return [DOMNode _nodeWith:[self _DOMStyleSheet]->ownerNode()];
+}
+
+- (DOMStyleSheet *)parentStyleSheet
+{
+    return [DOMStyleSheet _DOMStyleSheetWith:[self _DOMStyleSheet]->parentStyleSheet()];
+}
+
+- (NSString *)href
+{
+    return [self _DOMStyleSheet]->href();
+}
+
+- (NSString *)title
+{
+    return [self _DOMStyleSheet]->title();
+}
+
+- (DOMMediaList *)media
+{
+    return nil;
+}
+
+@end
+
+@implementation DOMStyleSheet (WebCoreInternal)
+
+- (id)_initWithStyleSheet:(StyleSheet *)impl
 {
     [super _init];
-    _internal = reinterpret_cast<DOMObjectInternal*>(impl);
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
     impl->ref();
-    WebCore::addDOMWrapper(self, impl);
+    addDOMWrapper(self, impl);
     return self;
 }
 
-+ (DOMStyleSheet *)_wrapStyleSheet:(WebCore::StyleSheet *)impl
++ (DOMStyleSheet *)_DOMStyleSheetWith:(StyleSheet *)impl
 {
     if (!impl)
         return nil;
-
+    
     id cachedInstance;
-    cachedInstance = WebCore::getDOMWrapper(impl);
+    cachedInstance = getDOMWrapper(impl);
     if (cachedInstance)
         return [[cachedInstance retain] autorelease];
     
@@ -90,38 +161,347 @@
 @end
 
 //------------------------------------------------------------------------------------------
-// DOMCSSRule
+// DOMStyleSheetList
 
-@implementation DOMCSSRule (WebCoreInternal)
+@implementation DOMStyleSheetList
 
-- (WebCore::CSSRule *)_CSSRule
+- (void)dealloc
 {
-    return reinterpret_cast<WebCore::CSSRule*>(_internal);
+    if (_internal) {
+        DOM_cast<StyleSheetList*>(_internal)->deref();
+    }
+    [super dealloc];
 }
 
-- (id)_initWithCSSRule:(WebCore::CSSRule *)impl
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<StyleSheetList*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (StyleSheetList *)_styleSheetList
+{
+    return DOM_cast<StyleSheetList*>(_internal);
+}
+
+- (unsigned)length
+{
+    return [self _styleSheetList]->length();
+}
+
+- (DOMStyleSheet *)item:(unsigned)index
+{
+    return [DOMStyleSheet _DOMStyleSheetWith:[self _styleSheetList]->item(index)];
+}
+
+@end
+
+@implementation DOMStyleSheetList (WebCoreInternal)
+
+- (id)_initWithStyleSheetList:(StyleSheetList *)impl
 {
     [super _init];
-    _internal = reinterpret_cast<DOMObjectInternal*>(impl);
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
     impl->ref();
-    WebCore::addDOMWrapper(self, impl);
+    addDOMWrapper(self, impl);
     return self;
 }
 
-+ (DOMCSSRule *)_wrapCSSRule:(WebCore::CSSRule *)impl
++ (DOMStyleSheetList *)_styleSheetListWith:(StyleSheetList *)impl
 {
     if (!impl)
         return nil;
-
+    
     id cachedInstance;
-    cachedInstance = WebCore::getDOMWrapper(impl);
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithStyleSheetList:impl] autorelease];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSStyleSheet
+
+@implementation DOMCSSStyleSheet
+
+- (CSSStyleSheet *)_CSSStyleSheet
+{
+    return DOM_cast<CSSStyleSheet*>(_internal);
+}
+
+- (DOMCSSRule *)ownerRule
+{
+    return [DOMCSSRule _ruleWith:[self _CSSStyleSheet]->ownerRule()];
+}
+
+- (DOMCSSRuleList *)cssRules
+{
+    return [DOMCSSRuleList _ruleListWith:[self _CSSStyleSheet]->cssRules()];
+}
+
+- (unsigned)insertRule:(NSString *)rule :(unsigned)index
+{
+    ExceptionCode ec;
+    unsigned result = [self _CSSStyleSheet]->insertRule(rule, index, ec);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (void)deleteRule:(unsigned)index
+{
+    ExceptionCode ec;
+    [self _CSSStyleSheet]->deleteRule(index, ec);
+    raiseOnDOMError(ec);
+}
+
+@end
+
+@implementation DOMCSSStyleSheet (WebCoreInternal)
+
++ (DOMCSSStyleSheet *)_CSSStyleSheetWith:(CSSStyleSheet *)impl
+{
+    return (DOMCSSStyleSheet *)[DOMStyleSheet _DOMStyleSheetWith:impl];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMMediaList
+
+@implementation DOMMediaList
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<MediaList*>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<MediaList*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (MediaList *)_mediaList
+{
+    return DOM_cast<MediaList*>(_internal);
+}
+
+- (NSString *)mediaText
+{
+    return [self _mediaList]->mediaText();
+}
+
+- (void)setMediaText:(NSString *)mediaText
+{
+    ExceptionCode ec = 0;
+    [self _mediaList]->setMediaText(mediaText, ec);
+    raiseOnDOMError(ec);
+}
+
+- (unsigned)length
+{
+    return [self _mediaList]->length();
+}
+
+- (NSString *)item:(unsigned)index
+{
+    return [self _mediaList]->item(index);
+}
+
+- (void)deleteMedium:(NSString *)oldMedium
+{
+    ExceptionCode ec = 0;
+    [self _mediaList]->deleteMedium(oldMedium, ec);
+    raiseOnDOMError(ec);
+}
+
+- (void)appendMedium:(NSString *)newMedium
+{
+    ExceptionCode ec = 0;
+    [self _mediaList]->appendMedium(newMedium, ec);
+    raiseOnDOMError(ec);
+}
+
+@end
+
+@implementation DOMMediaList (WebCoreInternal)
+
+- (id)_initWithMediaList:(MediaList *)impl
+{
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMMediaList *)_mediaListWith:(MediaList *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithMediaList:impl] autorelease];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSRuleList
+
+@implementation DOMCSSRuleList
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<CSSRuleList*>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<CSSRuleList*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (CSSRuleList *)_ruleList
+{
+    return DOM_cast<CSSRuleList*>(_internal);
+}
+
+- (unsigned)length
+{
+    return [self _ruleList]->length();
+}
+
+- (DOMCSSRule *)item:(unsigned)index
+{
+    return [DOMCSSRule _ruleWith:[self _ruleList]->item(index)];
+}
+
+@end
+
+@implementation DOMCSSRuleList (WebCoreInternal)
+
+- (id)_initWithRuleList:(CSSRuleList *)impl
+{
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMCSSRuleList *)_ruleListWith:(CSSRuleList *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithRuleList:impl] autorelease];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSRule
+
+@implementation DOMCSSRule
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<CSSRule*>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<CSSRule*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (CSSRule *)_rule
+{
+    return DOM_cast<CSSRule*>(_internal);
+}
+
+- (unsigned short)type
+{
+    return [self _rule]->type();
+}
+
+- (NSString *)cssText
+{
+    return [self _rule]->cssText();
+}
+
+- (void)setCssText:(NSString *)cssText
+{
+    [self _rule]->setCssText(cssText);
+}
+
+- (DOMCSSStyleSheet *)parentStyleSheet
+{
+    return [DOMCSSStyleSheet _CSSStyleSheetWith:[self _rule]->parentStyleSheet()];
+}
+
+- (DOMCSSRule *)parentRule
+{
+    return [DOMCSSRule _ruleWith:[self _rule]->parentRule()];
+}
+
+@end
+
+@implementation DOMCSSRule (WebCoreInternal)
+
+- (id)_initWithRule:(CSSRule *)impl
+{
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMCSSRule *)_ruleWith:(CSSRule *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
     if (cachedInstance)
         return [[cachedInstance retain] autorelease];
 
     Class wrapperClass = nil;
     switch (impl->type()) {
         case DOM_UNKNOWN_RULE:
-            wrapperClass = [DOMCSSUnknownRule class];
+            wrapperClass = [DOMCSSRule class];
             break;
         case DOM_STYLE_RULE:
             wrapperClass = [DOMCSSStyleRule class];
@@ -142,71 +522,725 @@
             wrapperClass = [DOMCSSPageRule class];
             break;
     }
-    return [[[wrapperClass alloc] _initWithCSSRule:impl] autorelease];
+    return [[[wrapperClass alloc] _initWithRule:impl] autorelease];
 }
 
 @end
 
+//------------------------------------------------------------------------------------------
+// DOMCSSStyleRule
+
+@implementation DOMCSSStyleRule
+
+- (CSSStyleRule *)_styleRule
+{
+    return static_cast<CSSStyleRule*>(DOM_cast<CSSRule*>(_internal));
+}
+
+- (NSString *)selectorText
+{
+    return [self _styleRule]->selectorText();
+}
+
+- (void)setSelectorText:(NSString *)selectorText
+{
+    [self _styleRule]->setSelectorText(selectorText);
+}
+
+- (DOMCSSStyleDeclaration *)style
+{
+    return [DOMCSSStyleDeclaration _styleDeclarationWith:[self _styleRule]->style()];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSMediaRule
+
+@implementation DOMCSSMediaRule
+
+- (CSSMediaRule *)_mediaRule
+{
+    return static_cast<CSSMediaRule*>(DOM_cast<CSSRule*>(_internal));
+}
+
+- (DOMMediaList *)media
+{
+    return [DOMMediaList _mediaListWith:[self _mediaRule]->media()];
+}
+
+- (DOMCSSRuleList *)cssRules
+{
+    return [DOMCSSRuleList _ruleListWith:[self _mediaRule]->cssRules()];
+}
+
+- (unsigned)insertRule:(NSString *)rule :(unsigned)index
+{
+    return [self _mediaRule]->insertRule(rule, index);
+}
+
+- (void)deleteRule:(unsigned)index
+{
+    [self _mediaRule]->deleteRule(index);
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSFontFaceRule
+
+@implementation DOMCSSFontFaceRule
+
+- (CSSFontFaceRule *)_fontFaceRule
+{
+    return static_cast<CSSFontFaceRule*>(DOM_cast<CSSRule*>(_internal));
+}
+
+- (DOMCSSStyleDeclaration *)style
+{
+    return [DOMCSSStyleDeclaration _styleDeclarationWith:[self _fontFaceRule]->style()];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSPageRule
+
+@implementation DOMCSSPageRule
+
+- (CSSPageRule *)_pageRule
+{
+    return static_cast<CSSPageRule*>(DOM_cast<CSSRule*>(_internal));
+}
+
+- (NSString *)selectorText
+{
+    return [self _pageRule]->selectorText();
+}
+
+- (void)setSelectorText:(NSString *)selectorText
+{
+    [self _pageRule]->setSelectorText(selectorText);
+}
+
+- (DOMCSSStyleDeclaration *)style
+{
+    return [DOMCSSStyleDeclaration _styleDeclarationWith:[self _pageRule]->style()];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSImportRule
+
+@implementation DOMCSSImportRule
+
+- (CSSImportRule *)_importRule
+{
+    return static_cast<CSSImportRule*>(DOM_cast<CSSRule*>(_internal));
+}
+
+- (DOMMediaList *)media
+{
+    return [DOMMediaList _mediaListWith:[self _importRule]->media()];
+}
+
+- (NSString *)href
+{
+    return [self _importRule]->href();
+}
+
+- (DOMCSSStyleSheet *)styleSheet
+{
+    return [DOMCSSStyleSheet _CSSStyleSheetWith:[self _importRule]->styleSheet()];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSCharsetRule
+
+@implementation DOMCSSCharsetRule
+
+- (CSSCharsetRule *)_importRule
+{
+    return static_cast<CSSCharsetRule*>(DOM_cast<CSSRule*>(_internal));
+}
+
+- (NSString *)encoding
+{
+    return [self _importRule]->encoding();
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSUnknownRule
+
+@implementation DOMCSSUnknownRule
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCSSStyleDeclaration
+
+@implementation DOMCSSStyleDeclaration
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<CSSStyleDeclaration*>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<CSSStyleDeclaration*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (NSString *)description
+{
+    return [NSString stringWithFormat:@"DOMCSSStyleDeclaration: %@", [self cssText]];
+}
+
+- (NSString *)cssText
+{
+    return [self _styleDeclaration]->cssText();
+}
+
+- (void)setCssText:(NSString *)cssText
+{
+    ExceptionCode ec;
+    [self _styleDeclaration]->setCssText(cssText, ec);
+    raiseOnDOMError(ec);
+}
+
+- (NSString *)getPropertyValue:(NSString *)propertyName
+{
+    return [self _styleDeclaration]->getPropertyValue(propertyName);
+}
+
+- (DOMCSSValue *)getPropertyCSSValue:(NSString *)propertyName
+{
+    return [DOMCSSValue _valueWith:[self _styleDeclaration]->getPropertyCSSValue(propertyName).get()];
+}
+
+- (NSString *)removeProperty:(NSString *)propertyName
+{
+    ExceptionCode ec = 0;
+    String result = [self _styleDeclaration]->removeProperty(propertyName, ec);
+    raiseOnDOMError(ec);
+    return result;
+}
+
+- (NSString *)getPropertyPriority:(NSString *)propertyName
+{
+    return [self _styleDeclaration]->getPropertyPriority(propertyName);
+}
+
+- (NSString *)getPropertyShorthand:(NSString *)propertyName
+{
+    return [self _styleDeclaration]->getPropertyShorthand(propertyName);
+}
+
+- (BOOL)isPropertyImplicit:(NSString *)propertyName
+{
+    return [self _styleDeclaration]->isPropertyImplicit(propertyName);
+}
+
+- (void)setProperty:(NSString *)propertyName :(NSString *)value :(NSString *)priority
+{
+    ExceptionCode ec;
+    [self _styleDeclaration]->setProperty(propertyName, value, priority, ec);
+    raiseOnDOMError(ec);
+}
+
+- (unsigned)length
+{
+    return [self _styleDeclaration]->length();
+}
+
+- (NSString *)item:(unsigned)index
+{
+    return [self _styleDeclaration]->item(index);
+}
+
+- (DOMCSSRule *)parentRule
+{
+    return [DOMCSSRule _ruleWith:[self _styleDeclaration]->parentRule()];
+}
+
+@end
+
+@implementation DOMCSSStyleDeclaration (WebCoreInternal)
+
+- (id)_initWithStyleDeclaration:(CSSStyleDeclaration *)impl
+{
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMCSSStyleDeclaration *)_styleDeclarationWith:(CSSStyleDeclaration *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithStyleDeclaration:impl] autorelease];
+}
+
+- (CSSStyleDeclaration *)_styleDeclaration
+{
+    return DOM_cast<CSSStyleDeclaration*>(_internal);
+}
+
+@end
 
 //------------------------------------------------------------------------------------------
 // DOMCSSValue
 
-@implementation DOMCSSValue (WebCoreInternal)
+@implementation DOMCSSValue
 
-- (WebCore::CSSValue *)_CSSValue
+- (void)dealloc
 {
-    return reinterpret_cast<WebCore::CSSValue*>(_internal);
+    if (_internal) {
+        DOM_cast<CSSValue*>(_internal)->deref();
+    }
+    [super dealloc];
 }
 
-- (id)_initWithCSSValue:(WebCore::CSSValue *)impl
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<CSSValue*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (CSSValue *)_value
+{
+    return DOM_cast<CSSValue*>(_internal);
+}
+
+- (NSString *)cssText
+{
+    return [self _value]->cssText();
+}
+
+- (void)setCssText:(NSString *)cssText
+{
+    [self _value]->setCssText(cssText);
+}
+
+- (unsigned short)cssValueType
+{
+    return [self _value]->cssValueType();
+}
+
+@end
+
+@implementation DOMCSSValue (WebCoreInternal)
+
+- (id)_initWithValue:(CSSValue *)impl
 {
     [super _init];
-    _internal = reinterpret_cast<DOMObjectInternal*>(impl);
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
     impl->ref();
-    WebCore::addDOMWrapper(self, impl);
+    addDOMWrapper(self, impl);
     return self;
 }
 
-+ (DOMCSSValue *)_wrapCSSValue:(WebCore::CSSValue *)impl
++ (DOMCSSValue *)_valueWith:(CSSValue *)impl
 {
     if (!impl)
         return nil;
-
+    
     id cachedInstance;
-    cachedInstance = WebCore::getDOMWrapper(impl);
+    cachedInstance = getDOMWrapper(impl);
     if (cachedInstance)
         return [[cachedInstance retain] autorelease];
-
+    
     Class wrapperClass = nil;
     switch (impl->cssValueType()) {
+        case DOM_CSS_INHERIT:
+            wrapperClass = [DOMCSSValue class];
+            break;
         case DOM_CSS_PRIMITIVE_VALUE:
             wrapperClass = [DOMCSSPrimitiveValue class];
             break;
         case DOM_CSS_VALUE_LIST:
             wrapperClass = [DOMCSSValueList class];
             break;
-        case DOM_CSS_INHERIT:
+        case DOM_CSS_CUSTOM:
             wrapperClass = [DOMCSSValue class];
             break;
-        case DOM_CSS_CUSTOM:
-#if ENABLE(SVG)
-            if (impl->isSVGPaint())
-                wrapperClass = [DOMSVGPaint class];
-            else if (impl->isSVGColor())
-                wrapperClass = [DOMSVGColor class];
-            else
-#endif
-                wrapperClass = [DOMCSSValue class];
-            break;
     }
-    return [[[wrapperClass alloc] _initWithCSSValue:impl] autorelease];
+    return [[[wrapperClass alloc] _initWithValue:impl] autorelease];
 }
 
 @end
 
+//------------------------------------------------------------------------------------------
+// DOMCSSPrimitiveValue
+
+@implementation DOMCSSPrimitiveValue
+
++ (DOMCSSPrimitiveValue *)_valueWith:(CSSValue *)impl
+{
+    return (DOMCSSPrimitiveValue *)([DOMCSSValue _valueWith: impl]);
+}
+
+- (CSSPrimitiveValue *)_primitiveValue
+{
+    return static_cast<CSSPrimitiveValue*>(DOM_cast<CSSValue*>(_internal));
+}
+
+- (unsigned short)primitiveType
+{
+    return [self _primitiveValue]->primitiveType();
+}
+
+- (void)setFloatValue:(unsigned short)unitType :(float)floatValue
+{
+    ExceptionCode ec;
+    [self _primitiveValue]->setFloatValue(unitType, floatValue, ec);
+    raiseOnDOMError(ec);
+}
+
+- (float)getFloatValue:(unsigned short)unitType
+{
+    return [self _primitiveValue]->getFloatValue(unitType);
+}
+
+- (void)setStringValue:(unsigned short)stringType :(NSString *)stringValue
+{
+    ExceptionCode ec;
+    String string(stringValue);
+    [self _primitiveValue]->setStringValue(stringType, string, ec);
+    raiseOnDOMError(ec);
+}
+
+- (NSString *)getStringValue
+{
+    return String([self _primitiveValue]->getStringValue());
+}
+
+- (DOMCounter *)getCounterValue
+{
+    return [DOMCounter _counterWith:[self _primitiveValue]->getCounterValue()];
+}
+
+- (DOMRect *)getRectValue
+{
+    return [DOMRect _rectWith:[self _primitiveValue]->getRectValue()];
+}
+
+- (DOMRGBColor *)getRGBColorValue
+{
+    return [DOMRGBColor _RGBColorWithRGB:[self _primitiveValue]->getRGBColorValue()];
+}
+
+@end
 
 //------------------------------------------------------------------------------------------
-// DOMCSSStyleDeclaration CSS2 Properties
+// DOMCSSValueList
+
+@implementation DOMCSSValueList
+
+- (CSSValueList *)_valueList
+{
+    return static_cast<CSSValueList*>(DOM_cast<CSSValue*>(_internal));
+}
+
+- (unsigned)length
+{
+    return [self _valueList]->length();
+}
+
+- (DOMCSSValue *)item:(unsigned)index
+{
+    return [DOMCSSValue _valueWith:[self _valueList]->item(index)];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMRGBColor
+
+
+id getWrapperForRGB(RGBA32 value)
+{
+    // ASSERT(WebThreadContextIsCurrent());
+    WebThreadContext *threadContext = WebThreadCurrentContext();
+    if (!threadContext->RGBWrapperCache)
+        return nil;
+    return (id)CFDictionaryGetValue((CFMutableDictionaryRef)threadContext->RGBWrapperCache, reinterpret_cast<const void*>(value));
+}
+
+void setWrapperForRGB(id wrapper, RGBA32 value)
+{
+    // ASSERT(WebThreadContextIsCurrent());
+    WebThreadContext *threadContext = WebThreadCurrentContext();
+    if (!threadContext->RGBWrapperCache) {
+        // No need to retain/free either impl key, or id value.  Items will be removed
+        // from the cache in dealloc methods.
+        threadContext->RGBWrapperCache = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
+    }
+    CFDictionarySetValue((CFMutableDictionaryRef)threadContext->RGBWrapperCache, reinterpret_cast<const void*>(value), wrapper);
+}
+
+void removeWrapperForRGB(RGBA32 value)
+{
+    // ASSERT(WebThreadContextIsCurrent());
+    WebThreadContext *threadContext = WebThreadCurrentContext();
+    if (!threadContext->RGBWrapperCache)
+        return;
+    CFDictionaryRemoveValue((CFMutableDictionaryRef)threadContext->RGBWrapperCache, reinterpret_cast<const void*>(value));
+}
+
+
+@implementation DOMRGBColor
+
+- (void)dealloc
+{
+    removeWrapperForRGB(reinterpret_cast<uintptr_t>(_internal));
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    removeWrapperForRGB(reinterpret_cast<uintptr_t>(_internal));
+    [super finalize];
+}
+
+- (DOMCSSPrimitiveValue *)red
+{
+    RGBA32 rgb = reinterpret_cast<uintptr_t>(_internal);
+    int value = (rgb >> 16) & 0xFF;
+    return [DOMCSSPrimitiveValue _valueWith:new CSSPrimitiveValue(value, CSSPrimitiveValue::CSS_NUMBER)];
+}
+
+- (DOMCSSPrimitiveValue *)green
+{
+    RGBA32 rgb = reinterpret_cast<uintptr_t>(_internal);
+    int value = (rgb >> 8) & 0xFF;
+    return [DOMCSSPrimitiveValue _valueWith:new CSSPrimitiveValue(value, CSSPrimitiveValue::CSS_NUMBER)];
+}
+
+- (DOMCSSPrimitiveValue *)blue
+{
+    RGBA32 rgb = reinterpret_cast<uintptr_t>(_internal);
+    int value = rgb & 0xFF;
+    return [DOMCSSPrimitiveValue _valueWith:new CSSPrimitiveValue(value, CSSPrimitiveValue::CSS_NUMBER)];
+}
+
+- (id)copyWithZone:(NSZone *)zone
+{
+    return [self retain];
+}
+
+@end
+
+@implementation DOMRGBColor (WebCoreInternal)
+
+- (id)_initWithRGB:(RGBA32)value
+{
+    [super _init];
+    _internal = reinterpret_cast<DOMObjectInternal*>(value);
+    setWrapperForRGB(self, value);
+    return self;
+}
+
++ (DOMRGBColor *)_RGBColorWithRGB:(RGBA32)value
+{
+    id cachedInstance;
+    cachedInstance = getWrapperForRGB(value);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithRGB:value] autorelease];
+}
+
+@end
+
+@implementation DOMRGBColor (DOMRGBColorExtensions)
+
+- (DOMCSSPrimitiveValue *)alpha
+{
+    RGBA32 rgb = reinterpret_cast<uintptr_t>(_internal);
+    float value = (float)Color(rgb).alpha() / 0xFF;
+    return [DOMCSSPrimitiveValue _valueWith:new CSSPrimitiveValue(value, CSSPrimitiveValue::CSS_NUMBER)];
+    
+}
+
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMRect
+
+@implementation DOMRect
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<RectImpl*>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<RectImpl*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (RectImpl *)_rect
+{
+    return DOM_cast<RectImpl*>(_internal);
+}
+
+- (DOMCSSPrimitiveValue *)top
+{
+    return [DOMCSSPrimitiveValue _valueWith:[self _rect]->top()];
+}
+
+- (DOMCSSPrimitiveValue *)right
+{
+    return [DOMCSSPrimitiveValue _valueWith:[self _rect]->right()];
+}
+
+- (DOMCSSPrimitiveValue *)bottom
+{
+    return [DOMCSSPrimitiveValue _valueWith:[self _rect]->bottom()];
+}
+
+- (DOMCSSPrimitiveValue *)left
+{
+    return [DOMCSSPrimitiveValue _valueWith:[self _rect]->left()];
+}
+
+- (id)copyWithZone:(NSZone *)zone
+{
+    return [self retain];
+}
+
+@end
+
+@implementation DOMRect (WebCoreInternal)
+
+- (id)_initWithRect:(RectImpl *)impl
+{
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMRect *)_rectWith:(RectImpl *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithRect:impl] autorelease];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+// DOMCounter
+
+@implementation DOMCounter
+
+- (void)dealloc
+{
+    if (_internal) {
+        DOM_cast<Counter*>(_internal)->deref();
+    }
+    [super dealloc];
+}
+
+- (void)finalize
+{
+    if (_internal) {
+        DOM_cast<Counter*>(_internal)->deref();
+    }
+    [super finalize];
+}
+
+- (Counter *)_counter
+{
+    return DOM_cast<Counter*>(_internal);
+}
+
+- (NSString *)identifier
+{
+    return [self _counter]->identifier();
+}
+
+- (NSString *)listStyle
+{
+    return [self _counter]->listStyle();
+}
+
+- (NSString *)separator
+{
+    return [self _counter]->separator();
+}
+
+- (id)copyWithZone:(NSZone *)zone
+{
+    return [self retain];
+}
+
+@end
+
+@implementation DOMCounter (WebCoreInternal)
+
+- (id)_initWithCounter:(Counter *)impl
+{
+    [super _init];
+    _internal = DOM_cast<DOMObjectInternal*>(impl);
+    impl->ref();
+    addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMCounter *)_counterWith:(Counter *)impl
+{
+    if (!impl)
+        return nil;
+    
+    id cachedInstance;
+    cachedInstance = getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+    
+    return [[[self alloc] _initWithCounter:impl] autorelease];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
 
 @implementation DOMCSSStyleDeclaration (DOMCSS2Properties)
 
@@ -217,7 +1251,7 @@
 
 - (void)setAzimuth:(NSString *)azimuth
 {
-    [self setProperty:@"azimuth" value:azimuth priority:@""];
+    [self setProperty:@"azimuth" :azimuth :@""];
 }
 
 - (NSString *)background
@@ -227,7 +1261,7 @@
 
 - (void)setBackground:(NSString *)background
 {
-    [self setProperty:@"background" value:background priority:@""];
+    [self setProperty:@"background" :background :@""];
 }
 
 - (NSString *)backgroundAttachment
@@ -237,7 +1271,7 @@
 
 - (void)setBackgroundAttachment:(NSString *)backgroundAttachment
 {
-    [self setProperty:@"background-attachment" value:backgroundAttachment priority:@""];
+    [self setProperty:@"background-attachment" :backgroundAttachment :@""];
 }
 
 - (NSString *)backgroundColor
@@ -247,7 +1281,7 @@
 
 - (void)setBackgroundColor:(NSString *)backgroundColor
 {
-    [self setProperty:@"background-color" value:backgroundColor priority:@""];
+    [self setProperty:@"background-color" :backgroundColor :@""];
 }
 
 - (NSString *)backgroundImage
@@ -257,7 +1291,7 @@
 
 - (void)setBackgroundImage:(NSString *)backgroundImage
 {
-    [self setProperty:@"background-image" value:backgroundImage priority:@""];
+    [self setProperty:@"background-image" :backgroundImage :@""];
 }
 
 - (NSString *)backgroundPosition
@@ -267,7 +1301,7 @@
 
 - (void)setBackgroundPosition:(NSString *)backgroundPosition
 {
-    [self setProperty:@"background-position" value:backgroundPosition priority:@""];
+    [self setProperty:@"background-position" :backgroundPosition :@""];
 }
 
 - (NSString *)backgroundRepeat
@@ -277,7 +1311,7 @@
 
 - (void)setBackgroundRepeat:(NSString *)backgroundRepeat
 {
-    [self setProperty:@"background-repeat" value:backgroundRepeat priority:@""];
+    [self setProperty:@"background-repeat" :backgroundRepeat :@""];
 }
 
 - (NSString *)border
@@ -287,7 +1321,7 @@
 
 - (void)setBorder:(NSString *)border
 {
-    [self setProperty:@"border" value:border priority:@""];
+    [self setProperty:@"border" :border :@""];
 }
 
 - (NSString *)borderCollapse
@@ -297,7 +1331,7 @@
 
 - (void)setBorderCollapse:(NSString *)borderCollapse
 {
-    [self setProperty:@"border-collapse" value:borderCollapse priority:@""];
+    [self setProperty:@"border-collapse" :borderCollapse :@""];
 }
 
 - (NSString *)borderColor
@@ -307,7 +1341,7 @@
 
 - (void)setBorderColor:(NSString *)borderColor
 {
-    [self setProperty:@"border-color" value:borderColor priority:@""];
+    [self setProperty:@"border-color" :borderColor :@""];
 }
 
 - (NSString *)borderSpacing
@@ -317,7 +1351,7 @@
 
 - (void)setBorderSpacing:(NSString *)borderSpacing
 {
-    [self setProperty:@"border-spacing" value:borderSpacing priority:@""];
+    [self setProperty:@"border-spacing" :borderSpacing :@""];
 }
 
 - (NSString *)borderStyle
@@ -327,7 +1361,7 @@
 
 - (void)setBorderStyle:(NSString *)borderStyle
 {
-    [self setProperty:@"border-style" value:borderStyle priority:@""];
+    [self setProperty:@"border-style" :borderStyle :@""];
 }
 
 - (NSString *)borderTop
@@ -337,7 +1371,7 @@
 
 - (void)setBorderTop:(NSString *)borderTop
 {
-    [self setProperty:@"border-top" value:borderTop priority:@""];
+    [self setProperty:@"border-top" :borderTop :@""];
 }
 
 - (NSString *)borderRight
@@ -347,7 +1381,7 @@
 
 - (void)setBorderRight:(NSString *)borderRight
 {
-    [self setProperty:@"border-right" value:borderRight priority:@""];
+    [self setProperty:@"border-right" :borderRight :@""];
 }
 
 - (NSString *)borderBottom
@@ -357,7 +1391,7 @@
 
 - (void)setBorderBottom:(NSString *)borderBottom
 {
-    [self setProperty:@"border-bottom" value:borderBottom priority:@""];
+    [self setProperty:@"border-bottom" :borderBottom :@""];
 }
 
 - (NSString *)borderLeft
@@ -367,7 +1401,7 @@
 
 - (void)setBorderLeft:(NSString *)borderLeft
 {
-    [self setProperty:@"border-left" value:borderLeft priority:@""];
+    [self setProperty:@"border-left" :borderLeft :@""];
 }
 
 - (NSString *)borderTopColor
@@ -377,7 +1411,7 @@
 
 - (void)setBorderTopColor:(NSString *)borderTopColor
 {
-    [self setProperty:@"border-top-color" value:borderTopColor priority:@""];
+    [self setProperty:@"border-top-color" :borderTopColor :@""];
 }
 
 - (NSString *)borderRightColor
@@ -387,7 +1421,7 @@
 
 - (void)setBorderRightColor:(NSString *)borderRightColor
 {
-    [self setProperty:@"border-right-color" value:borderRightColor priority:@""];
+    [self setProperty:@"border-right-color" :borderRightColor :@""];
 }
 
 - (NSString *)borderBottomColor
@@ -397,7 +1431,7 @@
 
 - (void)setBorderBottomColor:(NSString *)borderBottomColor
 {
-    [self setProperty:@"border-bottom-color" value:borderBottomColor priority:@""];
+    [self setProperty:@"border-bottom-color" :borderBottomColor :@""];
 }
 
 - (NSString *)borderLeftColor
@@ -407,7 +1441,7 @@
 
 - (void)setBorderLeftColor:(NSString *)borderLeftColor
 {
-    [self setProperty:@"border-left-color" value:borderLeftColor priority:@""];
+    [self setProperty:@"border-left-color" :borderLeftColor :@""];
 }
 
 - (NSString *)borderTopStyle
@@ -417,7 +1451,7 @@
 
 - (void)setBorderTopStyle:(NSString *)borderTopStyle
 {
-    [self setProperty:@"border-top-style" value:borderTopStyle priority:@""];
+    [self setProperty:@"border-top-style" :borderTopStyle :@""];
 }
 
 - (NSString *)borderRightStyle
@@ -427,7 +1461,7 @@
 
 - (void)setBorderRightStyle:(NSString *)borderRightStyle
 {
-    [self setProperty:@"border-right-style" value:borderRightStyle priority:@""];
+    [self setProperty:@"border-right-style" :borderRightStyle :@""];
 }
 
 - (NSString *)borderBottomStyle
@@ -437,7 +1471,7 @@
 
 - (void)setBorderBottomStyle:(NSString *)borderBottomStyle
 {
-    [self setProperty:@"border-bottom-style" value:borderBottomStyle priority:@""];
+    [self setProperty:@"border-bottom-style" :borderBottomStyle :@""];
 }
 
 - (NSString *)borderLeftStyle
@@ -447,7 +1481,7 @@
 
 - (void)setBorderLeftStyle:(NSString *)borderLeftStyle
 {
-    [self setProperty:@"border-left-style" value:borderLeftStyle priority:@""];
+    [self setProperty:@"border-left-style" :borderLeftStyle :@""];
 }
 
 - (NSString *)borderTopWidth
@@ -457,7 +1491,7 @@
 
 - (void)setBorderTopWidth:(NSString *)borderTopWidth
 {
-    [self setProperty:@"border-top-width" value:borderTopWidth priority:@""];
+    [self setProperty:@"border-top-width" :borderTopWidth :@""];
 }
 
 - (NSString *)borderRightWidth
@@ -467,7 +1501,7 @@
 
 - (void)setBorderRightWidth:(NSString *)borderRightWidth
 {
-    [self setProperty:@"border-right-width" value:borderRightWidth priority:@""];
+    [self setProperty:@"border-right-width" :borderRightWidth :@""];
 }
 
 - (NSString *)borderBottomWidth
@@ -477,7 +1511,7 @@
 
 - (void)setBorderBottomWidth:(NSString *)borderBottomWidth
 {
-    [self setProperty:@"border-bottom-width" value:borderBottomWidth priority:@""];
+    [self setProperty:@"border-bottom-width" :borderBottomWidth :@""];
 }
 
 - (NSString *)borderLeftWidth
@@ -487,7 +1521,7 @@
 
 - (void)setBorderLeftWidth:(NSString *)borderLeftWidth
 {
-    [self setProperty:@"border-left-width" value:borderLeftWidth priority:@""];
+    [self setProperty:@"border-left-width" :borderLeftWidth :@""];
 }
 
 - (NSString *)borderWidth
@@ -497,7 +1531,7 @@
 
 - (void)setBorderWidth:(NSString *)borderWidth
 {
-    [self setProperty:@"border-width" value:borderWidth priority:@""];
+    [self setProperty:@"border-width" :borderWidth :@""];
 }
 
 - (NSString *)bottom
@@ -507,7 +1541,7 @@
 
 - (void)setBottom:(NSString *)bottom
 {
-    [self setProperty:@"bottom" value:bottom priority:@""];
+    [self setProperty:@"bottom" :bottom :@""];
 }
 
 - (NSString *)captionSide
@@ -517,7 +1551,7 @@
 
 - (void)setCaptionSide:(NSString *)captionSide
 {
-    [self setProperty:@"caption-side" value:captionSide priority:@""];
+    [self setProperty:@"caption-side" :captionSide :@""];
 }
 
 - (NSString *)clear
@@ -527,7 +1561,7 @@
 
 - (void)setClear:(NSString *)clear
 {
-    [self setProperty:@"clear" value:clear priority:@""];
+    [self setProperty:@"clear" :clear :@""];
 }
 
 - (NSString *)clip
@@ -537,7 +1571,7 @@
 
 - (void)setClip:(NSString *)clip
 {
-    [self setProperty:@"clip" value:clip priority:@""];
+    [self setProperty:@"clip" :clip :@""];
 }
 
 - (NSString *)color
@@ -547,7 +1581,7 @@
 
 - (void)setColor:(NSString *)color
 {
-    [self setProperty:@"color" value:color priority:@""];
+    [self setProperty:@"color" :color :@""];
 }
 
 - (NSString *)content
@@ -557,7 +1591,7 @@
 
 - (void)setContent:(NSString *)content
 {
-    [self setProperty:@"content" value:content priority:@""];
+    [self setProperty:@"content" :content :@""];
 }
 
 - (NSString *)counterIncrement
@@ -567,7 +1601,7 @@
 
 - (void)setCounterIncrement:(NSString *)counterIncrement
 {
-    [self setProperty:@"counter-increment" value:counterIncrement priority:@""];
+    [self setProperty:@"counter-increment" :counterIncrement :@""];
 }
 
 - (NSString *)counterReset
@@ -577,7 +1611,7 @@
 
 - (void)setCounterReset:(NSString *)counterReset
 {
-    [self setProperty:@"counter-reset" value:counterReset priority:@""];
+    [self setProperty:@"counter-reset" :counterReset :@""];
 }
 
 - (NSString *)cue
@@ -587,7 +1621,7 @@
 
 - (void)setCue:(NSString *)cue
 {
-    [self setProperty:@"cue" value:cue priority:@""];
+    [self setProperty:@"cue" :cue :@""];
 }
 
 - (NSString *)cueAfter
@@ -597,7 +1631,7 @@
 
 - (void)setCueAfter:(NSString *)cueAfter
 {
-    [self setProperty:@"cue-after" value:cueAfter priority:@""];
+    [self setProperty:@"cue-after" :cueAfter :@""];
 }
 
 - (NSString *)cueBefore
@@ -607,7 +1641,7 @@
 
 - (void)setCueBefore:(NSString *)cueBefore
 {
-    [self setProperty:@"cue-before" value:cueBefore priority:@""];
+    [self setProperty:@"cue-before" :cueBefore :@""];
 }
 
 - (NSString *)cursor
@@ -617,7 +1651,7 @@
 
 - (void)setCursor:(NSString *)cursor
 {
-    [self setProperty:@"cursor" value:cursor priority:@""];
+    [self setProperty:@"cursor" :cursor :@""];
 }
 
 - (NSString *)direction
@@ -627,7 +1661,7 @@
 
 - (void)setDirection:(NSString *)direction
 {
-    [self setProperty:@"direction" value:direction priority:@""];
+    [self setProperty:@"direction" :direction :@""];
 }
 
 - (NSString *)display
@@ -637,7 +1671,7 @@
 
 - (void)setDisplay:(NSString *)display
 {
-    [self setProperty:@"display" value:display priority:@""];
+    [self setProperty:@"display" :display :@""];
 }
 
 - (NSString *)elevation
@@ -647,7 +1681,7 @@
 
 - (void)setElevation:(NSString *)elevation
 {
-    [self setProperty:@"elevation" value:elevation priority:@""];
+    [self setProperty:@"elevation" :elevation :@""];
 }
 
 - (NSString *)emptyCells
@@ -657,7 +1691,7 @@
 
 - (void)setEmptyCells:(NSString *)emptyCells
 {
-    [self setProperty:@"empty-cells" value:emptyCells priority:@""];
+    [self setProperty:@"empty-cells" :emptyCells :@""];
 }
 
 - (NSString *)cssFloat
@@ -667,7 +1701,7 @@
 
 - (void)setCssFloat:(NSString *)cssFloat
 {
-    [self setProperty:@"css-float" value:cssFloat priority:@""];
+    [self setProperty:@"css-float" :cssFloat :@""];
 }
 
 - (NSString *)font
@@ -677,7 +1711,7 @@
 
 - (void)setFont:(NSString *)font
 {
-    [self setProperty:@"font" value:font priority:@""];
+    [self setProperty:@"font" :font :@""];
 }
 
 - (NSString *)fontFamily
@@ -687,7 +1721,7 @@
 
 - (void)setFontFamily:(NSString *)fontFamily
 {
-    [self setProperty:@"font-family" value:fontFamily priority:@""];
+    [self setProperty:@"font-family" :fontFamily :@""];
 }
 
 - (NSString *)fontSize
@@ -697,7 +1731,7 @@
 
 - (void)setFontSize:(NSString *)fontSize
 {
-    [self setProperty:@"font-size" value:fontSize priority:@""];
+    [self setProperty:@"font-size" :fontSize :@""];
 }
 
 - (NSString *)fontSizeAdjust
@@ -707,7 +1741,7 @@
 
 - (void)setFontSizeAdjust:(NSString *)fontSizeAdjust
 {
-    [self setProperty:@"font-size-adjust" value:fontSizeAdjust priority:@""];
+    [self setProperty:@"font-size-adjust" :fontSizeAdjust :@""];
 }
 
 - (NSString *)_fontSizeDelta
@@ -717,7 +1751,7 @@
 
 - (void)_setFontSizeDelta:(NSString *)fontSizeDelta
 {
-    [self setProperty:@"-webkit-font-size-delta" value:fontSizeDelta priority:@""];
+    [self setProperty:@"-webkit-font-size-delta" :fontSizeDelta :@""];
 }
 
 - (NSString *)fontStretch
@@ -727,7 +1761,7 @@
 
 - (void)setFontStretch:(NSString *)fontStretch
 {
-    [self setProperty:@"font-stretch" value:fontStretch priority:@""];
+    [self setProperty:@"font-stretch" :fontStretch :@""];
 }
 
 - (NSString *)fontStyle
@@ -737,7 +1771,7 @@
 
 - (void)setFontStyle:(NSString *)fontStyle
 {
-    [self setProperty:@"font-style" value:fontStyle priority:@""];
+    [self setProperty:@"font-style" :fontStyle :@""];
 }
 
 - (NSString *)fontVariant
@@ -747,7 +1781,7 @@
 
 - (void)setFontVariant:(NSString *)fontVariant
 {
-    [self setProperty:@"font-variant" value:fontVariant priority:@""];
+    [self setProperty:@"font-variant" :fontVariant :@""];
 }
 
 - (NSString *)fontWeight
@@ -757,7 +1791,7 @@
 
 - (void)setFontWeight:(NSString *)fontWeight
 {
-    [self setProperty:@"font-weight" value:fontWeight priority:@""];
+    [self setProperty:@"font-weight" :fontWeight :@""];
 }
 
 - (NSString *)height
@@ -767,7 +1801,7 @@
 
 - (void)setHeight:(NSString *)height
 {
-    [self setProperty:@"height" value:height priority:@""];
+    [self setProperty:@"height" :height :@""];
 }
 
 - (NSString *)left
@@ -777,7 +1811,7 @@
 
 - (void)setLeft:(NSString *)left
 {
-    [self setProperty:@"left" value:left priority:@""];
+    [self setProperty:@"left" :left :@""];
 }
 
 - (NSString *)letterSpacing
@@ -787,7 +1821,7 @@
 
 - (void)setLetterSpacing:(NSString *)letterSpacing
 {
-    [self setProperty:@"letter-spacing" value:letterSpacing priority:@""];
+    [self setProperty:@"letter-spacing" :letterSpacing :@""];
 }
 
 - (NSString *)lineHeight
@@ -797,7 +1831,7 @@
 
 - (void)setLineHeight:(NSString *)lineHeight
 {
-    [self setProperty:@"line-height" value:lineHeight priority:@""];
+    [self setProperty:@"line-height" :lineHeight :@""];
 }
 
 - (NSString *)listStyle
@@ -807,7 +1841,7 @@
 
 - (void)setListStyle:(NSString *)listStyle
 {
-    [self setProperty:@"list-style" value:listStyle priority:@""];
+    [self setProperty:@"list-style" :listStyle :@""];
 }
 
 - (NSString *)listStyleImage
@@ -817,7 +1851,7 @@
 
 - (void)setListStyleImage:(NSString *)listStyleImage
 {
-    [self setProperty:@"list-style-image" value:listStyleImage priority:@""];
+    [self setProperty:@"list-style-image" :listStyleImage :@""];
 }
 
 - (NSString *)listStylePosition
@@ -827,7 +1861,7 @@
 
 - (void)setListStylePosition:(NSString *)listStylePosition
 {
-    [self setProperty:@"list-style-position" value:listStylePosition priority:@""];
+    [self setProperty:@"list-style-position" :listStylePosition :@""];
 }
 
 - (NSString *)listStyleType
@@ -837,7 +1871,7 @@
 
 - (void)setListStyleType:(NSString *)listStyleType
 {
-    [self setProperty:@"list-style-type" value:listStyleType priority:@""];
+    [self setProperty:@"list-style-type" :listStyleType :@""];
 }
 
 - (NSString *)margin
@@ -847,7 +1881,7 @@
 
 - (void)setMargin:(NSString *)margin
 {
-    [self setProperty:@"margin" value:margin priority:@""];
+    [self setProperty:@"margin" :margin :@""];
 }
 
 - (NSString *)marginTop
@@ -857,7 +1891,7 @@
 
 - (void)setMarginTop:(NSString *)marginTop
 {
-    [self setProperty:@"margin-top" value:marginTop priority:@""];
+    [self setProperty:@"margin-top" :marginTop :@""];
 }
 
 - (NSString *)marginRight
@@ -867,7 +1901,7 @@
 
 - (void)setMarginRight:(NSString *)marginRight
 {
-    [self setProperty:@"margin-right" value:marginRight priority:@""];
+    [self setProperty:@"margin-right" :marginRight :@""];
 }
 
 - (NSString *)marginBottom
@@ -877,7 +1911,7 @@
 
 - (void)setMarginBottom:(NSString *)marginBottom
 {
-    [self setProperty:@"margin-bottom" value:marginBottom priority:@""];
+    [self setProperty:@"margin-bottom" :marginBottom :@""];
 }
 
 - (NSString *)marginLeft
@@ -887,7 +1921,7 @@
 
 - (void)setMarginLeft:(NSString *)marginLeft
 {
-    [self setProperty:@"margin-left" value:marginLeft priority:@""];
+    [self setProperty:@"margin-left" :marginLeft :@""];
 }
 
 - (NSString *)markerOffset
@@ -897,7 +1931,7 @@
 
 - (void)setMarkerOffset:(NSString *)markerOffset
 {
-    [self setProperty:@"marker-offset" value:markerOffset priority:@""];
+    [self setProperty:@"marker-offset" :markerOffset :@""];
 }
 
 - (NSString *)marks
@@ -907,7 +1941,7 @@
 
 - (void)setMarks:(NSString *)marks
 {
-    [self setProperty:@"marks" value:marks priority:@""];
+    [self setProperty:@"marks" :marks :@""];
 }
 
 - (NSString *)maxHeight
@@ -917,7 +1951,7 @@
 
 - (void)setMaxHeight:(NSString *)maxHeight
 {
-    [self setProperty:@"max-height" value:maxHeight priority:@""];
+    [self setProperty:@"max-height" :maxHeight :@""];
 }
 
 - (NSString *)maxWidth
@@ -927,7 +1961,7 @@
 
 - (void)setMaxWidth:(NSString *)maxWidth
 {
-    [self setProperty:@"max-width" value:maxWidth priority:@""];
+    [self setProperty:@"max-width" :maxWidth :@""];
 }
 
 - (NSString *)minHeight
@@ -937,7 +1971,7 @@
 
 - (void)setMinHeight:(NSString *)minHeight
 {
-    [self setProperty:@"min-height" value:minHeight priority:@""];
+    [self setProperty:@"min-height" :minHeight :@""];
 }
 
 - (NSString *)minWidth
@@ -947,7 +1981,7 @@
 
 - (void)setMinWidth:(NSString *)minWidth
 {
-    [self setProperty:@"min-width" value:minWidth priority:@""];
+    [self setProperty:@"min-width" :minWidth :@""];
 }
 
 - (NSString *)orphans
@@ -957,7 +1991,7 @@
 
 - (void)setOrphans:(NSString *)orphans
 {
-    [self setProperty:@"orphans" value:orphans priority:@""];
+    [self setProperty:@"orphans" :orphans :@""];
 }
 
 - (NSString *)outline
@@ -967,7 +2001,7 @@
 
 - (void)setOutline:(NSString *)outline
 {
-    [self setProperty:@"outline" value:outline priority:@""];
+    [self setProperty:@"outline" :outline :@""];
 }
 
 - (NSString *)outlineColor
@@ -977,7 +2011,7 @@
 
 - (void)setOutlineColor:(NSString *)outlineColor
 {
-    [self setProperty:@"outline-color" value:outlineColor priority:@""];
+    [self setProperty:@"outline-color" :outlineColor :@""];
 }
 
 - (NSString *)outlineStyle
@@ -987,7 +2021,7 @@
 
 - (void)setOutlineStyle:(NSString *)outlineStyle
 {
-    [self setProperty:@"outline-style" value:outlineStyle priority:@""];
+    [self setProperty:@"outline-style" :outlineStyle :@""];
 }
 
 - (NSString *)outlineWidth
@@ -997,7 +2031,7 @@
 
 - (void)setOutlineWidth:(NSString *)outlineWidth
 {
-    [self setProperty:@"outline-width" value:outlineWidth priority:@""];
+    [self setProperty:@"outline-width" :outlineWidth :@""];
 }
 
 - (NSString *)overflow
@@ -1007,7 +2041,7 @@
 
 - (void)setOverflow:(NSString *)overflow
 {
-    [self setProperty:@"overflow" value:overflow priority:@""];
+    [self setProperty:@"overflow" :overflow :@""];
 }
 
 - (NSString *)padding
@@ -1017,7 +2051,7 @@
 
 - (void)setPadding:(NSString *)padding
 {
-    [self setProperty:@"padding" value:padding priority:@""];
+    [self setProperty:@"padding" :padding :@""];
 }
 
 - (NSString *)paddingTop
@@ -1027,7 +2061,7 @@
 
 - (void)setPaddingTop:(NSString *)paddingTop
 {
-    [self setProperty:@"padding-top" value:paddingTop priority:@""];
+    [self setProperty:@"padding-top" :paddingTop :@""];
 }
 
 - (NSString *)paddingRight
@@ -1037,7 +2071,7 @@
 
 - (void)setPaddingRight:(NSString *)paddingRight
 {
-    [self setProperty:@"padding-right" value:paddingRight priority:@""];
+    [self setProperty:@"padding-right" :paddingRight :@""];
 }
 
 - (NSString *)paddingBottom
@@ -1047,7 +2081,7 @@
 
 - (void)setPaddingBottom:(NSString *)paddingBottom
 {
-    [self setProperty:@"padding-bottom" value:paddingBottom priority:@""];
+    [self setProperty:@"padding-bottom" :paddingBottom :@""];
 }
 
 - (NSString *)paddingLeft
@@ -1057,7 +2091,7 @@
 
 - (void)setPaddingLeft:(NSString *)paddingLeft
 {
-    [self setProperty:@"padding-left" value:paddingLeft priority:@""];
+    [self setProperty:@"padding-left" :paddingLeft :@""];
 }
 
 - (NSString *)page
@@ -1067,7 +2101,7 @@
 
 - (void)setPage:(NSString *)page
 {
-    [self setProperty:@"page" value:page priority:@""];
+    [self setProperty:@"page" :page :@""];
 }
 
 - (NSString *)pageBreakAfter
@@ -1077,7 +2111,7 @@
 
 - (void)setPageBreakAfter:(NSString *)pageBreakAfter
 {
-    [self setProperty:@"page-break-after" value:pageBreakAfter priority:@""];
+    [self setProperty:@"page-break-after" :pageBreakAfter :@""];
 }
 
 - (NSString *)pageBreakBefore
@@ -1087,7 +2121,7 @@
 
 - (void)setPageBreakBefore:(NSString *)pageBreakBefore
 {
-    [self setProperty:@"page-break-before" value:pageBreakBefore priority:@""];
+    [self setProperty:@"page-break-before" :pageBreakBefore :@""];
 }
 
 - (NSString *)pageBreakInside
@@ -1097,7 +2131,7 @@
 
 - (void)setPageBreakInside:(NSString *)pageBreakInside
 {
-    [self setProperty:@"page-break-inside" value:pageBreakInside priority:@""];
+    [self setProperty:@"page-break-inside" :pageBreakInside :@""];
 }
 
 - (NSString *)pause
@@ -1107,7 +2141,7 @@
 
 - (void)setPause:(NSString *)pause
 {
-    [self setProperty:@"pause" value:pause priority:@""];
+    [self setProperty:@"pause" :pause :@""];
 }
 
 - (NSString *)pauseAfter
@@ -1117,7 +2151,7 @@
 
 - (void)setPauseAfter:(NSString *)pauseAfter
 {
-    [self setProperty:@"pause-after" value:pauseAfter priority:@""];
+    [self setProperty:@"pause-after" :pauseAfter :@""];
 }
 
 - (NSString *)pauseBefore
@@ -1127,7 +2161,7 @@
 
 - (void)setPauseBefore:(NSString *)pauseBefore
 {
-    [self setProperty:@"pause-before" value:pauseBefore priority:@""];
+    [self setProperty:@"pause-before" :pauseBefore :@""];
 }
 
 - (NSString *)pitch
@@ -1137,7 +2171,7 @@
 
 - (void)setPitch:(NSString *)pitch
 {
-    [self setProperty:@"pitch" value:pitch priority:@""];
+    [self setProperty:@"pitch" :pitch :@""];
 }
 
 - (NSString *)pitchRange
@@ -1147,7 +2181,7 @@
 
 - (void)setPitchRange:(NSString *)pitchRange
 {
-    [self setProperty:@"pitch-range" value:pitchRange priority:@""];
+    [self setProperty:@"pitch-range" :pitchRange :@""];
 }
 
 - (NSString *)playDuring
@@ -1157,7 +2191,7 @@
 
 - (void)setPlayDuring:(NSString *)playDuring
 {
-    [self setProperty:@"play-during" value:playDuring priority:@""];
+    [self setProperty:@"play-during" :playDuring :@""];
 }
 
 - (NSString *)position
@@ -1167,7 +2201,7 @@
 
 - (void)setPosition:(NSString *)position
 {
-    [self setProperty:@"position" value:position priority:@""];
+    [self setProperty:@"position" :position :@""];
 }
 
 - (NSString *)quotes
@@ -1177,7 +2211,7 @@
 
 - (void)setQuotes:(NSString *)quotes
 {
-    [self setProperty:@"quotes" value:quotes priority:@""];
+    [self setProperty:@"quotes" :quotes :@""];
 }
 
 - (NSString *)richness
@@ -1187,7 +2221,7 @@
 
 - (void)setRichness:(NSString *)richness
 {
-    [self setProperty:@"richness" value:richness priority:@""];
+    [self setProperty:@"richness" :richness :@""];
 }
 
 - (NSString *)right
@@ -1197,7 +2231,7 @@
 
 - (void)setRight:(NSString *)right
 {
-    [self setProperty:@"right" value:right priority:@""];
+    [self setProperty:@"right" :right :@""];
 }
 
 - (NSString *)size
@@ -1207,7 +2241,7 @@
 
 - (void)setSize:(NSString *)size
 {
-    [self setProperty:@"size" value:size priority:@""];
+    [self setProperty:@"size" :size :@""];
 }
 
 - (NSString *)speak
@@ -1217,7 +2251,7 @@
 
 - (void)setSpeak:(NSString *)speak
 {
-    [self setProperty:@"speak" value:speak priority:@""];
+    [self setProperty:@"speak" :speak :@""];
 }
 
 - (NSString *)speakHeader
@@ -1227,7 +2261,7 @@
 
 - (void)setSpeakHeader:(NSString *)speakHeader
 {
-    [self setProperty:@"speak-header" value:speakHeader priority:@""];
+    [self setProperty:@"speak-header" :speakHeader :@""];
 }
 
 - (NSString *)speakNumeral
@@ -1237,7 +2271,7 @@
 
 - (void)setSpeakNumeral:(NSString *)speakNumeral
 {
-    [self setProperty:@"speak-numeral" value:speakNumeral priority:@""];
+    [self setProperty:@"speak-numeral" :speakNumeral :@""];
 }
 
 - (NSString *)speakPunctuation
@@ -1247,7 +2281,7 @@
 
 - (void)setSpeakPunctuation:(NSString *)speakPunctuation
 {
-    [self setProperty:@"speak-punctuation" value:speakPunctuation priority:@""];
+    [self setProperty:@"speak-punctuation" :speakPunctuation :@""];
 }
 
 - (NSString *)speechRate
@@ -1257,7 +2291,7 @@
 
 - (void)setSpeechRate:(NSString *)speechRate
 {
-    [self setProperty:@"speech-rate" value:speechRate priority:@""];
+    [self setProperty:@"speech-rate" :speechRate :@""];
 }
 
 - (NSString *)stress
@@ -1267,7 +2301,7 @@
 
 - (void)setStress:(NSString *)stress
 {
-    [self setProperty:@"stress" value:stress priority:@""];
+    [self setProperty:@"stress" :stress :@""];
 }
 
 - (NSString *)tableLayout
@@ -1277,7 +2311,7 @@
 
 - (void)setTableLayout:(NSString *)tableLayout
 {
-    [self setProperty:@"table-layout" value:tableLayout priority:@""];
+    [self setProperty:@"table-layout" :tableLayout :@""];
 }
 
 - (NSString *)textAlign
@@ -1287,7 +2321,7 @@
 
 - (void)setTextAlign:(NSString *)textAlign
 {
-    [self setProperty:@"text-align" value:textAlign priority:@""];
+    [self setProperty:@"text-align" :textAlign :@""];
 }
 
 - (NSString *)textDecoration
@@ -1297,7 +2331,7 @@
 
 - (void)setTextDecoration:(NSString *)textDecoration
 {
-    [self setProperty:@"text-decoration" value:textDecoration priority:@""];
+    [self setProperty:@"text-decoration" :textDecoration :@""];
 }
 
 - (NSString *)textIndent
@@ -1307,7 +2341,7 @@
 
 - (void)setTextIndent:(NSString *)textIndent
 {
-    [self setProperty:@"text-indent" value:textIndent priority:@""];
+    [self setProperty:@"text-indent" :textIndent :@""];
 }
 
 - (NSString *)textShadow
@@ -1317,7 +2351,7 @@
 
 - (void)setTextShadow:(NSString *)textShadow
 {
-    [self setProperty:@"text-shadow" value:textShadow priority:@""];
+    [self setProperty:@"text-shadow" :textShadow :@""];
 }
 
 - (NSString *)textTransform
@@ -1327,7 +2361,7 @@
 
 - (void)setTextTransform:(NSString *)textTransform
 {
-    [self setProperty:@"text-transform" value:textTransform priority:@""];
+    [self setProperty:@"text-transform" :textTransform :@""];
 }
 
 - (NSString *)top
@@ -1337,7 +2371,7 @@
 
 - (void)setTop:(NSString *)top
 {
-    [self setProperty:@"top" value:top priority:@""];
+    [self setProperty:@"top" :top :@""];
 }
 
 - (NSString *)unicodeBidi
@@ -1347,7 +2381,7 @@
 
 - (void)setUnicodeBidi:(NSString *)unicodeBidi
 {
-    [self setProperty:@"unicode-bidi" value:unicodeBidi priority:@""];
+    [self setProperty:@"unicode-bidi" :unicodeBidi :@""];
 }
 
 - (NSString *)verticalAlign
@@ -1357,7 +2391,7 @@
 
 - (void)setVerticalAlign:(NSString *)verticalAlign
 {
-    [self setProperty:@"vertical-align" value:verticalAlign priority:@""];
+    [self setProperty:@"vertical-align" :verticalAlign :@""];
 }
 
 - (NSString *)visibility
@@ -1367,7 +2401,7 @@
 
 - (void)setVisibility:(NSString *)visibility
 {
-    [self setProperty:@"visibility" value:visibility priority:@""];
+    [self setProperty:@"visibility" :visibility :@""];
 }
 
 - (NSString *)voiceFamily
@@ -1377,7 +2411,7 @@
 
 - (void)setVoiceFamily:(NSString *)voiceFamily
 {
-    [self setProperty:@"voice-family" value:voiceFamily priority:@""];
+    [self setProperty:@"voice-family" :voiceFamily :@""];
 }
 
 - (NSString *)volume
@@ -1387,7 +2421,7 @@
 
 - (void)setVolume:(NSString *)volume
 {
-    [self setProperty:@"volume" value:volume priority:@""];
+    [self setProperty:@"volume" :volume :@""];
 }
 
 - (NSString *)whiteSpace
@@ -1397,7 +2431,7 @@
 
 - (void)setWhiteSpace:(NSString *)whiteSpace
 {
-    [self setProperty:@"white-space" value:whiteSpace priority:@""];
+    [self setProperty:@"white-space" :whiteSpace :@""];
 }
 
 - (NSString *)widows
@@ -1407,7 +2441,7 @@
 
 - (void)setWidows:(NSString *)widows
 {
-    [self setProperty:@"widows" value:widows priority:@""];
+    [self setProperty:@"widows" :widows :@""];
 }
 
 - (NSString *)width
@@ -1417,7 +2451,7 @@
 
 - (void)setWidth:(NSString *)width
 {
-    [self setProperty:@"width" value:width priority:@""];
+    [self setProperty:@"width" :width :@""];
 }
 
 - (NSString *)wordSpacing
@@ -1427,7 +2461,7 @@
 
 - (void)setWordSpacing:(NSString *)wordSpacing
 {
-    [self setProperty:@"word-spacing" value:wordSpacing priority:@""];
+    [self setProperty:@"word-spacing" :wordSpacing :@""];
 }
 
 - (NSString *)zIndex
@@ -1437,7 +2471,56 @@
 
 - (void)setZIndex:(NSString *)zIndex
 {
-    [self setProperty:@"z-index" value:zIndex priority:@""];
+    [self setProperty:@"z-index" :zIndex :@""];
+}
+
+@end
+
+//------------------------------------------------------------------------------------------
+
+@implementation DOMObject (DOMLinkStyle)
+
+- (DOMStyleSheet *)sheet
+{
+    StyleSheet *sheet;
+
+    if ([self isKindOfClass:[DOMProcessingInstruction class]])
+        sheet = static_cast<ProcessingInstruction*>([(DOMProcessingInstruction *)self _node])->sheet();
+    else if ([self isKindOfClass:[DOMHTMLLinkElement class]])
+        sheet = static_cast<HTMLLinkElement*>([(DOMHTMLLinkElement *)self _node])->sheet();
+    else if ([self isKindOfClass:[DOMHTMLStyleElement class]])
+        sheet = static_cast<HTMLStyleElement*>([(DOMHTMLStyleElement *)self _node])->sheet();
+    else
+        return nil;
+
+    return [DOMStyleSheet _DOMStyleSheetWith:sheet];
+}
+
+@end
+
+@implementation DOMDocument (DOMViewCSS)
+
+- (DOMCSSStyleDeclaration *)getComputedStyle:(DOMElement *)elt :(NSString *)pseudoElt
+{
+    Element* element = [elt _element];
+    AbstractView* defaultView = [self _document]->defaultView();
+    String pseudoEltString(pseudoElt);
+    
+    if (!defaultView)
+        return nil;
+    
+    return [DOMCSSStyleDeclaration _styleDeclarationWith:defaultView->getComputedStyle(element, pseudoEltString.impl()).get()];
+}
+
+- (DOMCSSRuleList *)getMatchedCSSRules:(DOMElement *)elt :(NSString *)pseudoElt
+{
+    AbstractView* defaultView = [self _document]->defaultView();
+
+    if (!defaultView)
+        return nil;
+    
+    // The parameter of "false" is handy for the DOM inspector and lets us see user agent and user rules.
+    return [DOMCSSRuleList _ruleListWith:defaultView->getMatchedCSSRules([elt _element], String(pseudoElt).impl(), false).get()];
 }
 
 @end

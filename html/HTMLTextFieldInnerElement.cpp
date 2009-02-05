@@ -16,37 +16,33 @@
  * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+                                        * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+                                        * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
- 
+
 #include "config.h"
 #include "HTMLTextFieldInnerElement.h"
 
 #include "BeforeTextInsertedEvent.h"
-#include "Document.h"
-#include "EventHandler.h"
 #include "EventNames.h"
-#include "Frame.h"
 #include "HTMLInputElement.h"
 #include "HTMLTextAreaElement.h"
-#include "MouseEvent.h"
 #include "RenderTextControl.h"
 
 namespace WebCore {
-
-using namespace EventNames;
-
-HTMLTextFieldInnerElement::HTMLTextFieldInnerElement(Document* doc, Node* shadowParent)
+    
+    using namespace EventNames;
+    
+    HTMLTextFieldInnerElement::HTMLTextFieldInnerElement(Document* doc, Node* shadowParent)
     : HTMLDivElement(doc), m_shadowParent(shadowParent)
 {
 }
 
 HTMLTextFieldInnerTextElement::HTMLTextFieldInnerTextElement(Document* doc, Node* shadowParent)
-    : HTMLTextFieldInnerElement(doc, shadowParent)
+: HTMLTextFieldInnerElement(doc, shadowParent)
 {
 }
 
@@ -61,7 +57,7 @@ void HTMLTextFieldInnerTextElement::defaultEventHandler(Event* evt)
                 static_cast<HTMLInputElement*>(shadowAncestor)->defaultEventHandler(evt);
             else
                 static_cast<HTMLTextAreaElement*>(shadowAncestor)->defaultEventHandler(evt);
-        if (evt->type() == webkitEditableContentChangedEvent)
+        if (evt->type() == khtmlEditableContentChangedEvent)
             static_cast<RenderTextControl*>(shadowAncestor->renderer())->subtreeHasChanged();
     }
     if (!evt->defaultHandled())
@@ -69,7 +65,7 @@ void HTMLTextFieldInnerTextElement::defaultEventHandler(Event* evt)
 }
 
 HTMLSearchFieldResultsButtonElement::HTMLSearchFieldResultsButtonElement(Document* doc)
-    : HTMLTextFieldInnerElement(doc)
+: HTMLTextFieldInnerElement(doc)
 {
 }
 
@@ -77,7 +73,7 @@ void HTMLSearchFieldResultsButtonElement::defaultEventHandler(Event* evt)
 {
     // On mousedown, bring up a menu, if needed
     HTMLInputElement* input = static_cast<HTMLInputElement*>(shadowAncestorNode());
-    if (evt->type() == mousedownEvent && evt->isMouseEvent() && static_cast<MouseEvent*>(evt)->button() == LeftButton) {
+    if (evt->type() == mousedownEvent) {
         input->focus();
         input->select();
         evt->setDefaultHandled();
@@ -87,8 +83,7 @@ void HTMLSearchFieldResultsButtonElement::defaultEventHandler(Event* evt)
 }
 
 HTMLSearchFieldCancelButtonElement::HTMLSearchFieldCancelButtonElement(Document* doc)
-    : HTMLTextFieldInnerElement(doc)
-    , m_capturing(false)
+: HTMLTextFieldInnerElement(doc)
 {
 }
 
@@ -96,23 +91,15 @@ void HTMLSearchFieldCancelButtonElement::defaultEventHandler(Event* evt)
 {
     // If the element is visible, on mouseup, clear the value, and set selection
     HTMLInputElement* input = static_cast<HTMLInputElement*>(shadowAncestorNode());
-    if (evt->type() == mousedownEvent && evt->isMouseEvent() && static_cast<MouseEvent*>(evt)->button() == LeftButton) {
+    if (evt->type() == mousedownEvent) {
         input->focus();
         input->select();
         evt->setDefaultHandled();
-        if (Frame* frame = document()->frame())
-            frame->eventHandler()->setCapturingMouseEventsNode(this);
-        m_capturing = true;
-    } else if (evt->type() == mouseupEvent && evt->isMouseEvent() && static_cast<MouseEvent*>(evt)->button() == LeftButton) {
-        if (m_capturing && renderer() && renderer()->style()->visibility() == VISIBLE) {
-            if (hovered()) {
-                input->setValue("");
-                input->onSearch();
-                evt->setDefaultHandled();
-            }
-            if (Frame* frame = document()->frame())
-                frame->eventHandler()->setCapturingMouseEventsNode(0);
-            m_capturing = false;
+    } else if (evt->type() == mouseupEvent) {
+        if (renderer() && renderer()->style()->visibility() == VISIBLE) {
+            input->setValue("");
+            //input->onSearch();
+            evt->setDefaultHandled();
         }
     }
     if (!evt->defaultHandled())

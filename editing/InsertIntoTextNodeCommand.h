@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,23 +23,28 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef InsertIntoTextNodeCommand_h
-#define InsertIntoTextNodeCommand_h
+#ifndef insert_into_text_node_command_h__
+#define insert_into_text_node_command_h__
 
 #include "EditCommand.h"
 
 namespace WebCore {
+    class Text;
+    class String;
+}
 
-class Text;
+namespace WebCore {
 
-class InsertIntoTextNodeCommand : public EditCommand {
+class InsertIntoTextNodeCommand : public EditCommand
+{
 public:
-    InsertIntoTextNodeCommand(Text* node, int offset, const String& text);
+    InsertIntoTextNodeCommand(Document *document, Text *, int, const String &);
+    virtual ~InsertIntoTextNodeCommand() { }
 
     virtual void doApply();
     virtual void doUnapply();
 
-    Text* node() const { return m_node.get(); }
+    Text *node() const { return m_node.get(); }
     int offset() const { return m_offset; }
     String text() const { return m_text; }
 
@@ -51,4 +56,4 @@ private:
 
 } // namespace WebCore
 
-#endif // InsertIntoTextNodeCommand_h
+#endif // __insert_into_text_node_command_h__

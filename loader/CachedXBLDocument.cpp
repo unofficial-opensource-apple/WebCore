@@ -19,8 +19,8 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
+    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+    Boston, MA 02111-1307, USA.
 
     This class provides all functionality needed for loading images, style sheets and html
     pages from the web. It has a memory cache for these objects.
@@ -28,20 +28,20 @@
 
 #include "config.h"
 
-#if ENABLE(XBL)
+#ifndef KHTML_NO_XBL
 
 #include "CachedXBLDocument.h"
 
 #include "Cache.h"
 #include "CachedResourceClientWalker.h"
-#include "TextResourceDecoder.h"
+#include "Decoder.h"
 #include "loader.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
-CachedXBLDocument::CachedXBLDocument(DocLoader* dl, const String &url)
-: CachedResource(url, XBL), m_document(0)
+CachedXBLDocument::CachedXBLDocument(DocLoader* dl, const String &url, CachePolicy cachePolicy)
+: CachedResource(url, XBL, cachePolicy), m_document(0)
 {
     // It's XML we want.
     setAccept("text/xml, application/xml, application/xhtml+xml, text/xsl, application/rss+xml, application/atom+xml");
@@ -49,7 +49,7 @@ CachedXBLDocument::CachedXBLDocument(DocLoader* dl, const String &url)
     // Load the file
     Cache::loader()->load(dl, this, false);
     m_loading = true;
-    m_decoder = new TextResourceDecoder("application/xml");
+    m_decoder = new Decoder;
 }
 
 CachedXBLDocument::~CachedXBLDocument()
@@ -65,14 +65,10 @@ void CachedXBLDocument::ref(CachedResourceClient *c)
         c->setXBLDocument(m_url, m_document);
 }
 
-void CachedXBLDocument::setEncoding(const String& chs)
+void CachedXBLDocument::setCharset( const DeprecatedString &chs )
 {
-    m_decoder->setEncoding(chs, TextResourceDecoder::EncodingFromHTTPHeader);
-}
-
-String CachedXBLDocument::encoding() const
-{
-    return m_decoder->encoding().name();
+    if (!chs.isEmpty())
+        m_decoder->setEncoding(chs.latin1(), Decoder::EncodingFromHTTPHeader);
 }
 
 void CachedXBLDocument::data(Vector<char>& data, bool )
@@ -80,7 +76,7 @@ void CachedXBLDocument::data(Vector<char>& data, bool )
     if (!allDataReceived)
         return;
     
-    ASSERT(!m_document);
+    assert(!m_document);
     
     m_document = new XBL::XBLDocument();
     m_document->ref();
@@ -108,7 +104,6 @@ void CachedXBLDocument::checkNotify()
 void CachedXBLDocument::error()
 {
     m_loading = false;
-    m_errorOccurred = true;
     checkNotify();
 }
 

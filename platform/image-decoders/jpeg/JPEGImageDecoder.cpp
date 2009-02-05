@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Alternatively, the contents of this file may be used under the terms
  * of either the Mozilla Public License Version 1.1, found at
@@ -38,8 +38,6 @@
 #include "config.h"
 #include "JPEGImageDecoder.h"
 #include <assert.h>
-
-#if PLATFORM(CAIRO) || PLATFORM(QT) || PLATFORM(WX)
 
 extern "C" {
 #include "jpeglib.h"
@@ -128,7 +126,7 @@ public:
     void close() {
         decoder_source_mgr* src = (decoder_source_mgr*)m_info.src;
         if (src)
-            fastFree(src);
+            free(src);
         m_info.src = 0;
 
         jpeg_destroy_decompress(&m_info);
@@ -393,7 +391,7 @@ JPEGImageDecoder::~JPEGImageDecoder()
 }
 
 // Take the data and store it.
-void JPEGImageDecoder::setData(SharedBuffer* data, bool allDataReceived)
+void JPEGImageDecoder::setData(const Vector<char>& data, bool allDataReceived)
 {
     if (m_failed)
         return;
@@ -443,7 +441,7 @@ void JPEGImageDecoder::decode(bool sizeOnly) const
     if (m_failed)
         return;
 
-    m_failed = !m_reader->decode(m_data->buffer(), sizeOnly);
+    m_failed = !m_reader->decode(m_data, sizeOnly);
 
     if (m_failed || (!m_frameBufferCache.isEmpty() && m_frameBufferCache[0].status() == RGBA32Buffer::FrameComplete)) {
         delete m_reader;
@@ -506,5 +504,3 @@ void JPEGImageDecoder::jpegComplete()
 }
 
 }
-
-#endif // PLATFORM(CAIRO)

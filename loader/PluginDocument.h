@@ -34,7 +34,7 @@ class FrameView;
 class PluginDocument : public HTMLDocument
 {
 public:
-    PluginDocument(DOMImplementation*, Frame*);
+    PluginDocument(DOMImplementation*, FrameView* = 0);
 
     virtual bool isPluginDocument() const { return true; }
         

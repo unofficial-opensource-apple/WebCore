@@ -1,7 +1,7 @@
 /*
  * This file is part of the select element renderer in WebCore.
  *
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,36 +15,28 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderMenuList_h
-#define RenderMenuList_h
+#ifndef RenderMenuList_H
+#define RenderMenuList_H
 
 #include "RenderFlexibleBox.h"
-#include "PopupMenuClient.h"
-
-#if PLATFORM(MAC)
-#define POPUP_MENU_PULLS_DOWN 0
-#else
-#define POPUP_MENU_PULLS_DOWN 1
-#endif
 
 namespace WebCore {
 
 class HTMLSelectElement;
-class PopupMenu;
 
-class RenderMenuList : public RenderFlexibleBox, private PopupMenuClient {
+class RenderMenuList : public RenderFlexibleBox {
 public:
     RenderMenuList(HTMLSelectElement*);
     ~RenderMenuList();
 
     virtual bool isMenuList() const { return true; }
 
-    virtual void addChild(RenderObject* newChild, RenderObject* beforeChild = 0);
+    virtual void addChild(RenderObject* newChild, RenderObject *beforeChild = 0);
     virtual void removeChild(RenderObject*);
     virtual bool createsAnonymousWrapper() const { return true; }
     virtual bool canHaveChildren() const { return false; }
@@ -52,58 +44,35 @@ public:
     virtual void setStyle(RenderStyle*);
     virtual void updateFromElement();
 
-    virtual bool hasControlClip() const { return true; }
-    virtual IntRect controlClipRect(int tx, int ty) const;
-
     virtual const char* renderName() const { return "RenderMenuList"; }
 
-    virtual void calcPrefWidths();
-
+    virtual void calcMinMaxWidth();
+    bool popupIsVisible() const { return m_popupIsVisible; }
+    void showPopup();
     void hidePopup();
 
-    void setOptionsChanged(bool changed) { m_optionsChanged = changed; }
+    void setOptionsChanged(bool c) { m_optionsChanged = c; }
+    void valueChanged(unsigned listIndex, bool fireOnChange = true);
 
-    String text() const;
+    String text();
+    void setTextFromOption(int optionIndex);
     
     bool multiple() const;
-
-private:
-    // PopupMenuClient methods
-    virtual String itemText(unsigned listIndex) const;
-    virtual bool itemIsEnabled(unsigned listIndex) const;
-    virtual Color itemBackgroundColor(unsigned listIndex) const;
-    virtual RenderStyle* itemStyle(unsigned listIndex) const;
-    virtual RenderStyle* clientStyle() const;
-    virtual Document* clientDocument() const;
-    virtual int clientInsetLeft() const;
-    virtual int clientInsetRight() const;
-    virtual int clientPaddingLeft() const;
-    virtual int clientPaddingRight() const;
-    virtual int listSize() const;
-    virtual int selectedIndex() const;
-    virtual bool itemIsSeparator(unsigned listIndex) const;
-    virtual bool itemIsLabel(unsigned listIndex) const;
-    virtual bool itemIsSelected(unsigned listIndex) const;
-    virtual void setTextFromItem(unsigned listIndex);
-    virtual bool valueShouldChangeOnHotTrack() const { return true; }
-    virtual bool shouldPopOver() const { return !POPUP_MENU_PULLS_DOWN; }
-    virtual void valueChanged(unsigned listIndex, bool fireOnChange = true);
-    virtual FontSelector* fontSelector() const;
-
+    
+protected:
     virtual bool hasLineIfEmpty() const { return true; }
 
+private:
     void createInnerBlock();
     void adjustInnerStyle();
     void setText(const String&);
-    void setTextFromOption(int optionIndex);
-    void updateOptionsWidth();
 
     RenderText* m_buttonText;
     RenderBlock* m_innerBlock;
 
     bool m_optionsChanged;
     int m_optionsWidth;
-
+    bool m_popupIsVisible;
 };
 
 }

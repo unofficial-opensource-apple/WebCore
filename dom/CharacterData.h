@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,13 +17,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef CharacterData_h
-#define CharacterData_h
+#ifndef DOM_CharacterDataImpl_h
+#define DOM_CharacterDataImpl_h
 
 #include "EventTargetNode.h"
 
@@ -35,43 +37,48 @@ public:
 
     // DOM methods & attributes for CharacterData
 
-    String data() const { return m_data; }
-    void setData(const String&, ExceptionCode&);
-    unsigned length() const { return m_data->length(); }
-    String substringData(unsigned offset, unsigned count, ExceptionCode&);
-    void appendData(const String&, ExceptionCode&);
-    void insertData(unsigned offset, const String&, ExceptionCode&);
-    void deleteData(unsigned offset, unsigned count, ExceptionCode&);
-    void replaceData(unsigned offset, unsigned count, const String &arg, ExceptionCode&);
+    virtual String data() const;
+    virtual void setData(const String&, ExceptionCode&);
+    virtual unsigned length() const;
+    virtual String substringData(unsigned offset, unsigned count, ExceptionCode&);
+    virtual void appendData(const String&, ExceptionCode&);
+    virtual void insertData(unsigned offset, const String&, ExceptionCode&);
+    virtual void deleteData(unsigned offset, unsigned count, ExceptionCode&);
+    virtual void replaceData(unsigned offset, unsigned count, const String &arg, ExceptionCode&);
 
     bool containsOnlyWhitespace() const;
-
-    // DOM methods overridden from parent classes
+    bool containsOnlyWhitespace(unsigned from, unsigned len) const;
+    
+    // DOM methods overridden from  parent classes
 
     virtual String nodeValue() const;
     virtual void setNodeValue(const String&, ExceptionCode&);
-    
+
     // Other methods (not part of DOM)
 
-    virtual bool isCharacterDataNode() const { return true; }
-    virtual int maxCharacterOffset() const;
-    StringImpl* string() { return m_data.get(); }
+    StringImpl* string() { return str; }
     virtual void checkCharDataOperation(unsigned offset, ExceptionCode&);
 
+    virtual int maxOffset() const;
+    virtual int caretMinOffset() const;
+    virtual int caretMaxOffset() const;
+    virtual unsigned caretMaxRenderedOffset() const;
     virtual bool offsetInCharacters() const;
     virtual bool rendererIsNeeded(RenderStyle*);
     
 #ifndef NDEBUG
-    virtual void dump(TextStream*, DeprecatedString indent = "") const;
+    virtual void dump(TextStream*, DeprecatedString ind = "") const;
 #endif
 
 protected:
-    RefPtr<StringImpl> m_data;
+    // note: since DOMStrings are shared, str should always be copied when making
+    // a change or returning a string
+    StringImpl* str;
 
-    void dispatchModifiedEvent(StringImpl* oldValue);
+    void dispatchModifiedEvent(StringImpl* prevValue);
 };
 
 } // namespace WebCore
 
-#endif // CharacterData_h
+#endif // DOM_CharacterDataImpl_h
 

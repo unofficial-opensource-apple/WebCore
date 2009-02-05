@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2007 Alp Toker <alp@atoker.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,21 +23,16 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef HTMLCanvasElement_h
-#define HTMLCanvasElement_h
+#ifndef HTMLCanvasElement_H
+#define HTMLCanvasElement_H
 
 #include "HTMLElement.h"
 #include "IntSize.h"
 
-#if PLATFORM(CG)
-// FIXME: CG-specific parts need to move to the platform directory.
+#if __APPLE__
+// FIXME: Mac-specific parts need to move to the platform directory.
 typedef struct CGContext* CGContextRef;
 typedef struct CGImage* CGImageRef;
-#elif PLATFORM(QT)
-class QImage;
-class QPainter;
-#elif PLATFORM(CAIRO)
-typedef struct _cairo_surface cairo_surface_t;
 #endif
 
 namespace WebCore {
@@ -46,17 +40,11 @@ namespace WebCore {
 class CanvasRenderingContext2D;
 typedef CanvasRenderingContext2D CanvasRenderingContext;
 class FloatRect;
-class GraphicsContext;
 
 class HTMLCanvasElement : public HTMLElement {
 public:
     HTMLCanvasElement(Document*);
     virtual ~HTMLCanvasElement();
-
-#if ENABLE(DASHBOARD_SUPPORT)
-    virtual HTMLTagStatus endTagRequirement() const;
-    virtual int tagPriority() const;
-#endif
 
     int width() const { return m_size.width(); }
     int height() const { return m_size.height(); }
@@ -76,19 +64,13 @@ public:
 
     GraphicsContext* drawingContext() const;
 
-#if PLATFORM(CG)
+#if __APPLE__
     CGImageRef createPlatformImage() const;
-#elif PLATFORM(QT)
-    QImage createPlatformImage() const;
-#elif PLATFORM(CAIRO)
-    cairo_surface_t* createPlatformImage() const;
 #endif
 
 private:
     void createDrawingContext() const;
     void reset();
-
-    bool m_rendererIsCanvas;
 
     RefPtr<CanvasRenderingContext2D> m_2DContext;
     IntSize m_size;
@@ -97,17 +79,7 @@ private:
     // if we ever drew any images outside the domain, so we can disable toDataURL.
 
     mutable bool m_createdDrawingContext;
-#if PLATFORM(CG)
     mutable void* m_data;
-#elif PLATFORM(QT)
-    mutable QImage* m_data;
-    mutable QPainter* m_painter;
-#elif PLATFORM(CAIRO)
-    mutable void* m_data;
-    mutable cairo_surface_t* m_surface;
-#else
-    mutable void* m_data;
-#endif
     mutable GraphicsContext* m_drawingContext;
 };
 

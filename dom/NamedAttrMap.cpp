@@ -1,10 +1,11 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
- *           (C) 2007 Eric Seidel (eric@webkit.org)
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,15 +19,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "NamedAttrMap.h"
 
 #include "Document.h"
-#include "Element.h"
 #include "ExceptionCode.h"
 #include "HTMLNames.h"
 
@@ -34,9 +33,9 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-static inline bool shouldIgnoreAttributeCase(const Element* e)
+static inline bool inHTMLDocument(const Element* e)
 {
-    return e && e->document()->isHTMLDocument() && e->isHTMLElement();
+    return e && e->document()->isHTMLDocument();
 }
 
 NamedAttrMap::NamedAttrMap(Element *e)
@@ -58,7 +57,7 @@ bool NamedAttrMap::isMappedAttributeMap() const
 
 PassRefPtr<Node> NamedAttrMap::getNamedItem(const String& name) const
 {
-    String localName = shouldIgnoreAttributeCase(element) ? name.lower() : name;
+    String localName = inHTMLDocument(element) ? name.lower() : name;
     Attribute* a = getAttributeItem(localName);
     if (!a)
         return 0;
@@ -68,12 +67,12 @@ PassRefPtr<Node> NamedAttrMap::getNamedItem(const String& name) const
 
 PassRefPtr<Node> NamedAttrMap::getNamedItemNS(const String& namespaceURI, const String& localName) const
 {
-    return getNamedItem(QualifiedName(nullAtom, localName, namespaceURI));
+    return getNamedItem(QualifiedName(nullAtom, localName.impl(), namespaceURI.impl()));
 }
 
 PassRefPtr<Node> NamedAttrMap::removeNamedItem(const String& name, ExceptionCode& ec)
 {
-    String localName = shouldIgnoreAttributeCase(element) ? name.lower() : name;
+    String localName = inHTMLDocument(element) ? name.lower() : name;
     Attribute* a = getAttributeItem(localName);
     if (!a) {
         ec = NOT_FOUND_ERR;
@@ -85,7 +84,7 @@ PassRefPtr<Node> NamedAttrMap::removeNamedItem(const String& name, ExceptionCode
 
 PassRefPtr<Node> NamedAttrMap::removeNamedItemNS(const String& namespaceURI, const String& localName, ExceptionCode& ec)
 {
-    return removeNamedItem(QualifiedName(nullAtom, localName, namespaceURI), ec);
+    return removeNamedItem(QualifiedName(nullAtom, localName.impl(), namespaceURI.impl()), ec);
 }
 
 PassRefPtr<Node> NamedAttrMap::getNamedItem(const QualifiedName& name) const
@@ -99,7 +98,7 @@ PassRefPtr<Node> NamedAttrMap::getNamedItem(const QualifiedName& name) const
 
 PassRefPtr<Node> NamedAttrMap::setNamedItem(Node* arg, ExceptionCode& ec)
 {
-    if (!element || !arg) {
+    if (!element) {
         ec = NOT_FOUND_ERR;
         return 0;
     }
@@ -264,24 +263,31 @@ NamedAttrMap& NamedAttrMap::operator=(const NamedAttrMap& other)
     return *this;
 }
 
-void NamedAttrMap::addAttribute(PassRefPtr<Attribute> prpAttribute)
+void NamedAttrMap::addAttribute(Attribute *attribute)
 {
-    Attribute* attribute = prpAttribute.releaseRef(); // The attrs array will own this pointer.
-
     // Add the attribute to the list
-    attrs = static_cast<Attribute**>(fastRealloc(attrs, (len + 1) * sizeof(Attribute*)));
+    Attribute **newAttrs = static_cast<Attribute **>(fastMalloc((len + 1) * sizeof(Attribute *)));
+    if (attrs) {
+      for (unsigned i = 0; i < len; i++)
+        newAttrs[i] = attrs[i];
+      fastFree(attrs);
+    }
+    attrs = newAttrs;
     attrs[len++] = attribute;
+    attribute->ref();
 
-    if (Attr* attr = attribute->attr())
+    Attr * const attr = attribute->attr();
+    if (attr)
         attr->m_element = element;
 
     // Notify the element that the attribute has been added, and dispatch appropriate mutation events
     // Note that element may be null here if we are called from insertAttr() during parsing
     if (element) {
-        element->attributeChanged(attribute);
+        RefPtr<Attribute> a = attribute;
+        element->attributeChanged(a.get());
         // Because of our updateStyleAttributeIfNeeded() style modification events are never sent at the right time, so don't bother sending them.
-        if (attribute->name() != styleAttr) {
-            element->dispatchAttrAdditionEvent(attribute);
+        if (a->name() != styleAttr) {
+            element->dispatchAttrAdditionEvent(a.get());
             element->dispatchSubtreeModifiedEvent(false);
         }
     }
@@ -350,11 +356,6 @@ bool NamedAttrMap::mapsEquivalent(const NamedAttrMap* otherMap) const
     }
     
     return true;
-}
-
-bool NamedAttrMap::isReadOnlyNode()
-{
-    return element && element->isReadOnlyNode();
 }
 
 }

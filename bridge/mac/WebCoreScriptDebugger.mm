@@ -26,19 +26,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "config.h"
+#include "config.h"
 #import "WebCoreScriptDebugger.h"
+#import "WebScriptObjectPrivate.h"
+
+#import <JavaScriptCore/debugger.h>
+#import <JavaScriptCore/context.h>
 
 #import "DeprecatedString.h"
 #import "KURL.h"
-#import "PlatformString.h"
-#import "WebCoreObjCExtras.h"
-#import "WebScriptObjectPrivate.h"
-#import <JavaScriptCore/ExecState.h>
-#import <JavaScriptCore/JSGlobalObject.h>
-#import <JavaScriptCore/debugger.h>
-#import <JavaScriptCore/function.h>
-#import <JavaScriptCore/interpreter.h>
 
 using namespace KJS;
 using namespace WebCore;
@@ -65,7 +61,12 @@ static NSString *toNSString(const UString &s)
     return [NSString stringWithCharacters:(const unichar *)s.data() length:s.size()];
 }
 
-// debugger code removed
+// convert UString to NSURL
+static NSURL *toNSURL(const UString &s)
+{
+    if (s.isEmpty()) return nil;
+    return KURL(DeprecatedString(s)).getNSURL();
+}
 
 // C++ interface to KJS debugger callbacks
 
@@ -78,36 +79,49 @@ class WebCoreScriptDebuggerImp : public KJS::Debugger {
 
   public:
     // constructor
-    WebCoreScriptDebuggerImp(WebCoreScriptDebugger *objc, JSGlobalObject* globalObject) : _objc(objc) {
+    WebCoreScriptDebuggerImp(WebCoreScriptDebugger *objc, Interpreter *interp) : _objc(objc) {
         _nested = true;
-        _current = [_objc _enterFrame:globalObject->globalExec()];
-        attach(globalObject);
+        _current = [_objc _enterFrame:interp->globalExec()];
+        attach(interp);
         [[_objc delegate] enteredFrame:_current sourceId:-1 line:-1];
         _nested = false;
     }
 
     // callbacks - relay to delegate
-    virtual bool sourceParsed(ExecState*, const SourceCode&, int, const UString&) {
-        // debuger code removed
+    virtual bool sourceParsed(ExecState *state, int sid, const UString &url, const UString &source, int lineNumber, int errorLine, const UString &errorMsg) {
+        if (!_nested) {
+            _nested = true;
+            [[_objc delegate] parsedSource:toNSString(source) fromURL:toNSURL(url) sourceId:sid startLine:lineNumber errorLine:errorLine errorMessage:toNSString(errorMsg)];
+            _nested = false;
+        }
         return true;
     }
-    virtual bool callEvent(ExecState*, intptr_t, int lineno, JSObject *func, const List &args) {
-        // debuger code removed
+    virtual bool callEvent(ExecState *state, int sid, int lineno, JSObject *func, const List &args) {
+        if (!_nested) {
+            _nested = true;
+            _current = [_objc _enterFrame:state];
+            [[_objc delegate] enteredFrame:_current sourceId:sid line:lineno];
+            _nested = false;
+        }
         return true;
     }
-    virtual bool atStatement(ExecState*, intptr_t, int lineno, int lastLine) {
-        // debuger code removed
+    virtual bool atStatement(ExecState *state, int sid, int lineno, int lastLine) {
+        if (!_nested) {
+            _nested = true;
+            [[_objc delegate] hitStatement:_current sourceId:sid line:lineno];
+            _nested = false;
+        }
         return true;
     }
-    virtual bool returnEvent(ExecState*, intptr_t, int lineno, JSObject *func) {
-        // debuger code removed
+    virtual bool returnEvent(ExecState *state, int sid, int lineno, JSObject *func) {
+        if (!_nested) {
+            _nested = true;
+            [[_objc delegate] leavingFrame:_current sourceId:sid line:lineno];
+            _current = [_objc _leaveFrame];
+            _nested = false;
+        }
         return true;
     }
-    virtual bool exception(ExecState*, intptr_t, int lineno, JSValue *exception) {
-        // debuger code removed
-        return true;
-    }
-
 };
 
 
@@ -117,24 +131,17 @@ class WebCoreScriptDebuggerImp : public KJS::Debugger {
 // This is the main (behind-the-scenes) debugger class in WebCore.
 //
 // The WebCoreScriptDebugger has two faces, one for Objective-C (this class), and another (WebCoreScriptDebuggerImp)
-// for C++.  The ObjC side creates the C++ side, which does the real work of attaching to the global object and
+// for C++.  The ObjC side creates the C++ side, which does the real work of attaching to the interpreter and
 // forwarding the KJS debugger callbacks to the delegate.
 
 @implementation WebCoreScriptDebugger
-
-#ifndef BUILDING_ON_TIGER
-+ (void)initialize
-{
-    WebCoreObjCFinalizeOnMainThread(self);
-}
-#endif
 
 - (WebCoreScriptDebugger *)initWithDelegate:(id<WebScriptDebugger>)delegate
 {
     if ((self = [super init])) {
         _delegate   = delegate;
         _globalObj = [_delegate globalObject];
-        _debugger  = new WebCoreScriptDebuggerImp(self, [_globalObj _rootObject]->globalObject());
+        _debugger  = new WebCoreScriptDebuggerImp(self, [_globalObj _executionContext]->interpreter());
     }
     return self;
 }
@@ -209,21 +216,17 @@ class WebCoreScriptDebuggerImp : public KJS::Debugger {
 
 - (id)_convertValueToObjcValue:(JSValue *)value
 {
-    if (!value)
+    if (!value) {
         return nil;
+    }
 
-    if (value == [_globalObj _imp])
+    if (value == [_globalObj _imp]) {
         return _globalObj;
+    }
 
-    Bindings::RootObject* root1 = [_globalObj _originRootObject];
-    if (!root1)
-        return nil;
-
-    Bindings::RootObject* root2 = [_globalObj _rootObject];
-    if (!root2)
-        return nil;
-
-    return [WebScriptObject _convertValueToObjcValue:value originRootObject:root1 rootObject:root2];
+    const Bindings::RootObject *root1 = [_globalObj _originExecutionContext];
+    const Bindings::RootObject *root2 = [_globalObj _executionContext];
+    return [WebScriptObject _convertValueToObjcValue:value originExecutionContext:root1 executionContext:root2];
 }
 
 @end
@@ -257,11 +260,13 @@ class WebCoreScriptDebuggerImp : public KJS::Debugger {
 
 - (NSArray *)scopeChain
 {
-    if (!_state->scopeNode()) {  // global frame
+    Context* context = _state->context();
+
+    if (!context) {  // global frame
         return [NSArray arrayWithObject:_globalObj];
     }
 
-    ScopeChain      chain  = _state->scopeChain();
+    ScopeChain      chain  = context->scopeChain();
     NSMutableArray *scopes = [[NSMutableArray alloc] init];
 
     while (!chain.isEmpty()) {
@@ -280,11 +285,11 @@ class WebCoreScriptDebuggerImp : public KJS::Debugger {
 
 - (NSString *)functionName
 {
-    if (_state->scopeNode()) {
-        FunctionImp *func = _state->function();
+    Context* context = _state->context();
+
+    if (context) {
+        FunctionImp *func = context->function();
         if (func) {
-            // FIXME: <rdar://problem/5891568> Remove JSLock in -[WebCoreScriptCallFrame functionName]
-            JSLock lock;
             Identifier fn = func->functionName();
             return toNSString(fn.ustring());
         }
@@ -308,13 +313,44 @@ class WebCoreScriptDebuggerImp : public KJS::Debugger {
 // Calling this method on the global frame is not quite the same as calling the WebScriptObject
 // method of the same name, due to the treatment of exceptions.
 
-// FIXME: If "script" contains var declarations, the machinery to handle local variables
-// efficiently in JavaScriptCore will not work properly. This could lead to crashes or
-// incorrect variable values. So this is not appropriate for evaluating arbitrary script.
 - (id)evaluateWebScript:(NSString *)script
 {
-    // debugger code removed
-    return 0;
+    UString code(DeprecatedString::fromNSString(script));
+
+    ExecState   *state   = _state;
+    Interpreter *interp  = state->dynamicInterpreter();
+    JSObject   *globObj = interp->globalObject();
+
+    // find "eval"
+    JSObject *eval = NULL;
+    if (state->context()) {  // "eval" won't work without context (i.e. at global scope)
+        JSValue *v = globObj->get(state, "eval");
+        if (v->isObject() && static_cast<JSObject *>(v)->implementsCall())
+            eval = static_cast<JSObject *>(v);
+        else
+            // no "eval" - fallback operates on global exec state
+            state = interp->globalExec();
+    }
+
+    JSValue *savedException = state->exception();
+    state->clearException();
+
+    // evaluate
+    JSValue *result;
+    if (eval) {
+        JSLock lock;
+        List args;
+        args.append(jsString(code));
+        result = eval->call(state, NULL, args);
+    } else
+        // no "eval", or no context (i.e. global scope) - use global fallback
+        result = interp->evaluate(UString(), 0, code.data(), code.size(), globObj).value();
+
+    if (state->hadException())
+        result = state->exception();    // (may be redundant depending on which eval path was used)
+    state->setException(savedException);
+
+    return [self _convertValueToObjcValue:result];
 }
 
 @end

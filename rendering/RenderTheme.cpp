@@ -1,7 +1,7 @@
 /**
  * This file is part of the theme implementation for form controls in WebCore.
  *
- * Copyright (C) 2005, 2006, 2007, 2008 Apple Computer, Inc.
+ * Copyright (C) 2005 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,22 +15,18 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
 #include "RenderTheme.h"
 
 #include "Document.h"
-#include "FocusController.h"
-#include "Frame.h"
 #include "GraphicsContext.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
-#include "Page.h"
 #include "RenderStyle.h"
-#include "SelectionController.h"
 
 // The methods in this file are shared by all themes on every platform.
 
@@ -38,18 +34,19 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e,
+void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e, 
                               bool UAHasAppearance, const BorderData& border, const BackgroundLayer& background, const Color& backgroundColor)
 {
+
     // Force inline and table display styles to be inline-block (except for table- which is block)
-    if (style->display() == INLINE || style->display() == INLINE_TABLE || style->display() == TABLE_ROW_GROUP ||
+    if (style->display() == INLINE || style->display() == INLINE_TABLE || style->display() == TABLE_ROW_GROUP || 
         style->display() == TABLE_HEADER_GROUP || style->display() == TABLE_FOOTER_GROUP ||
-        style->display() == TABLE_ROW || style->display() == TABLE_COLUMN_GROUP || style->display() == TABLE_COLUMN ||
+        style->display() == TABLE_ROW || style->display() == TABLE_COLUMN_GROUP || style->display() == TABLE_COLUMN || 
         style->display() == TABLE_CELL || style->display() == TABLE_CAPTION)
         style->setDisplay(INLINE_BLOCK);
     else if (style->display() == COMPACT || style->display() == RUN_IN || style->display() == LIST_ITEM || style->display() == TABLE)
         style->setDisplay(BLOCK);
-
+    
     if (UAHasAppearance && theme()->isControlStyled(style, border, background, backgroundColor)) {
         if (style->appearance() == MenulistAppearance)
             style->setAppearance(MenulistButtonAppearance);
@@ -75,68 +72,36 @@ void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, El
             return adjustMenuListStyle(selector, style, e);
         case MenulistButtonAppearance:
             return adjustMenuListButtonStyle(selector, style, e);
-        case MediaSliderAppearance:
-        case SliderHorizontalAppearance:
-        case SliderVerticalAppearance:
-            return adjustSliderTrackStyle(selector, style, e);
-        case SliderThumbHorizontalAppearance:
-        case SliderThumbVerticalAppearance:
-            return adjustSliderThumbStyle(selector, style, e);
         default:
             break;
     }
 }
 
-bool RenderTheme::paint(RenderObject* o, const RenderObject::PaintInfo& paintInfo, const IntRect& r)
+bool RenderTheme::paint(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
 {
     // If painting is disabled, but we aren't updating control tints, then just bail.
     // If we are updating control tints, just schedule a repaint if the theme supports tinting
     // for that control.
-    if (paintInfo.context->updatingControlTints()) {
+    if (i.p->updatingControlTints()) {
         if (controlSupportsTints(o))
             o->repaint();
         return false;
     }
-    if (paintInfo.context->paintingDisabled())
+    if (i.p->paintingDisabled())
         return false;
-
+        
     // Call the appropriate paint method based off the appearance value.
     switch (o->style()->appearance()) {
         case CheckboxAppearance:
-            return paintCheckbox(o, paintInfo, r);
+            return paintCheckbox(o, i, r);
         case RadioAppearance:
-            return paintRadio(o, paintInfo, r);
+            return paintRadio(o, i, r);
         case PushButtonAppearance:
         case SquareButtonAppearance:
         case ButtonAppearance:
-            return paintButton(o, paintInfo, r);
+            return paintButton(o, i, r);
         case MenulistAppearance:
-            return paintMenuList(o, paintInfo, r);
-        case SliderHorizontalAppearance:
-        case SliderVerticalAppearance:
-            return paintSliderTrack(o, paintInfo, r);
-        case SliderThumbHorizontalAppearance:
-        case SliderThumbVerticalAppearance:
-            if (o->parent()->isSlider())
-                return paintSliderThumb(o, paintInfo, r);
-            // We don't support drawing a slider thumb without a parent slider
-            break;
-        case MediaFullscreenButtonAppearance:
-            return paintMediaFullscreenButton(o, paintInfo, r);
-        case MediaPlayButtonAppearance:
-            return paintMediaPlayButton(o, paintInfo, r);
-        case MediaMuteButtonAppearance:
-            return paintMediaMuteButton(o, paintInfo, r);
-        case MediaSeekBackButtonAppearance:
-            return paintMediaSeekBackButton(o, paintInfo, r);
-        case MediaSeekForwardButtonAppearance:
-            return paintMediaSeekForwardButton(o, paintInfo, r);
-        case MediaSliderAppearance:
-            return paintMediaSliderTrack(o, paintInfo, r);
-        case MediaSliderThumbAppearance:
-            if (o->parent()->isSlider())
-                return paintMediaSliderThumb(o, paintInfo, r);
-            break;
+            return paintMenuList(o, i, r);
         case MenulistButtonAppearance:
         case TextFieldAppearance:
         case TextAreaAppearance:
@@ -145,64 +110,65 @@ bool RenderTheme::paint(RenderObject* o, const RenderObject::PaintInfo& paintInf
         default:
             break;
     }
-
+    
     return true; // We don't support the appearance, so let the normal background/border paint.
 }
 
-bool RenderTheme::paintBorderOnly(RenderObject* o, const RenderObject::PaintInfo& paintInfo, const IntRect& r)
+bool RenderTheme::paintBorderOnly(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
 {
-    if (paintInfo.context->paintingDisabled())
+    if (i.p->paintingDisabled())
         return false;
-
+    
     return o->style()->appearance() != NoAppearance;
-    return false;
 }
 
-bool RenderTheme::paintDecorations(RenderObject* o, const RenderObject::PaintInfo& paintInfo, const IntRect& r)
+bool RenderTheme::paintDecorations(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
 {
-    if (paintInfo.context->paintingDisabled())
+    if (i.p->paintingDisabled())
         return false;
-
-// FIXME: These should NOT be PLATFORM(IPHONE), they should really migrate back to TOT
-// FIXME: MIGRATE
+    
     // Call the appropriate paint method based off the appearance value.
     switch (o->style()->appearance()) {
         case MenulistButtonAppearance:
-            return paintMenuListButtonDecorations(o, paintInfo, r);
+            return paintMenuListButtonDecorations(o, i, r);
         case TextFieldAppearance:
-			return paintTextFieldDecorations(o, paintInfo, r);
+			return paintTextFieldDecorations(o, i, r);
         case TextAreaAppearance:
-			return paintTextAreaDecorations(o, paintInfo, r);
+			return paintTextAreaDecorations(o, i, r);
         case CheckboxAppearance:
-			return paintCheckboxDecorations(o, paintInfo, r);
+			return paintCheckboxDecorations(o, i, r);
         case RadioAppearance:
-			return paintRadioDecorations(o, paintInfo, r);
+			return paintRadioDecorations(o, i, r);
         case PushButtonAppearance:
-			return paintPushButtonDecorations(o, paintInfo, r);
+			return paintPushButtonDecorations(o, i, r);
         case SquareButtonAppearance:
-			return paintSquareButtonDecorations(o, paintInfo, r);
+			return paintSquareButtonDecorations(o, i, r);
         case ButtonAppearance:
-			return paintButtonDecorations(o, paintInfo, r);
+			return paintButtonDecorations(o, i, r);
         case MenulistAppearance:
-			return paintMenuListDecorations(o, paintInfo, r);
+			return paintMenuListDecorations(o, i, r);
         default:
             break;
     }
+    
     return false;
 }
 
+
 Color RenderTheme::activeSelectionBackgroundColor() const
 {
-    if (!m_activeSelectionColor.isValid())
-        m_activeSelectionColor = platformActiveSelectionBackgroundColor().blendWithWhite();
-    return m_activeSelectionColor;
+    static Color activeSelectionColor;
+    if (!activeSelectionColor.isValid())
+        activeSelectionColor = platformActiveSelectionBackgroundColor().blendWithWhite();
+    return activeSelectionColor;
 }
 
 Color RenderTheme::inactiveSelectionBackgroundColor() const
 {
-    if (!m_inactiveSelectionColor.isValid())
-        m_inactiveSelectionColor = platformInactiveSelectionBackgroundColor().blendWithWhite();
-    return m_inactiveSelectionColor;
+    static Color inactiveSelectionColor;
+    if (!inactiveSelectionColor.isValid())
+        inactiveSelectionColor = platformInactiveSelectionBackgroundColor().blendWithWhite();
+    return inactiveSelectionColor;
 }
 
 Color RenderTheme::platformActiveSelectionBackgroundColor() const
@@ -210,18 +176,18 @@ Color RenderTheme::platformActiveSelectionBackgroundColor() const
     // Use a blue color by default if the platform theme doesn't define anything.
     return Color(0, 0, 255);
 }
-
+    
 Color RenderTheme::platformInactiveSelectionBackgroundColor() const
 {
     // Use a grey color by default if the platform theme doesn't define anything.
     return Color(128, 128, 128);
 }
-
+   
 Color RenderTheme::platformActiveSelectionForegroundColor() const
 {
     return Color();
 }
-
+    
 Color RenderTheme::platformInactiveSelectionForegroundColor() const
 {
     return Color();
@@ -270,17 +236,18 @@ bool RenderTheme::isControlStyled(const RenderStyle* style, const BorderData& bo
         case ButtonAppearance:
         case ListboxAppearance:
         case MenulistAppearance:
-        // FIXME: Uncomment this when making search fields style-able.
-        // case SearchFieldAppearance:
         case TextFieldAppearance:
-        case TextAreaAppearance:
+        case TextAreaAppearance: {
             // Test the style to see if the UA border and background match.
             return (style->border() != border ||
                     *style->backgroundLayers() != background ||
                     style->backgroundColor() != backgroundColor);
+        }
         default:
             return false;
     }
+    
+    return false;
 }
 
 bool RenderTheme::supportsFocusRing(const RenderStyle* style) const
@@ -293,33 +260,14 @@ bool RenderTheme::stateChanged(RenderObject* o, ControlState state) const
     // Default implementation assumes the controls dont respond to changes in :hover state
     if (state == HoverState && !supportsHover(o->style()))
         return false;
-
+        
     // Assume pressed state is only responded to if the control is enabled.
     if (state == PressedState && !isEnabled(o))
         return false;
-
+    
     // Repaint the control.
     o->repaint();
     return true;
-}
-
-// FIXME: It would be nice to set this state on the RenderObjects instead of
-// having to dig up to the FocusController at paint time.
-bool RenderTheme::isActive(const RenderObject* o) const
-{
-    Node* node = o->element();
-    if (!node)
-        return false;
-
-    Frame* frame = node->document()->frame();
-    if (!frame)
-        return false;
-
-    Page* page = frame->page();
-    if (!page)
-        return false;
-
-    return page->focusController()->isActive();
 }
 
 bool RenderTheme::isChecked(const RenderObject* o) const
@@ -345,12 +293,9 @@ bool RenderTheme::isEnabled(const RenderObject* o) const
 
 bool RenderTheme::isFocused(const RenderObject* o) const
 {
-    Node* node = o->element();
-    if (!node)
+    if (!o->element())
         return false;
-    Document* document = node->document();
-    Frame* frame = document->frame();
-    return node == document->focusedNode() && frame && frame->selectionController()->isFocusedAndActive();
+    return o->element() == o->element()->document()->focusNode();
 }
 
 bool RenderTheme::isPressed(const RenderObject* o) const
@@ -383,12 +328,10 @@ void RenderTheme::adjustCheckboxStyle(CSSStyleSelector* selector, RenderStyle* s
 
     // padding - not honored by WinIE, needs to be removed.
     style->resetPadding();
-
+    
     // border - honored by WinIE, but looks terrible (just paints in the control box and turns off the Windows XP theme)
     // for now, we will not honor it.
     style->resetBorder();
-
-    style->setBoxShadow(0);
 }
 
 void RenderTheme::adjustRadioStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
@@ -400,12 +343,10 @@ void RenderTheme::adjustRadioStyle(CSSStyleSelector* selector, RenderStyle* styl
 
     // padding - not honored by WinIE, needs to be removed.
     style->resetPadding();
-
+    
     // border - honored by WinIE, but looks terrible (just paints in the control box and turns off the Windows XP theme)
     // for now, we will not honor it.
     style->resetBorder();
-
-    style->setBoxShadow(0);
 }
 
 void RenderTheme::adjustButtonStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
@@ -431,47 +372,4 @@ void RenderTheme::adjustMenuListButtonStyle(CSSStyleSelector* selector, RenderSt
 {
 }
 
-void RenderTheme::adjustSliderTrackStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
-{
 }
-
-void RenderTheme::adjustSliderThumbStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
-{
-}
-
-void RenderTheme::adjustSliderThumbSize(RenderObject*) const
-{
-}
-
-void RenderTheme::adjustSearchFieldStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
-{
-}
-
-void RenderTheme::adjustSearchFieldCancelButtonStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
-{
-}
-
-void RenderTheme::adjustSearchFieldDecorationStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
-{
-}
-
-void RenderTheme::adjustSearchFieldResultsDecorationStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
-{
-}
-
-void RenderTheme::adjustSearchFieldResultsButtonStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
-{
-}
-
-void RenderTheme::platformColorsDidChange()
-{
-    m_activeSelectionColor = Color();
-    m_inactiveSelectionColor = Color();
-}
-
-Color RenderTheme::platformTextSearchHighlightColor() const
-{
-    return Color(255, 255, 0);
-}
-
-} // namespace WebCore

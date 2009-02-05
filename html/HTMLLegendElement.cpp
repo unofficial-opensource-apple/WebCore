@@ -19,8 +19,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -105,11 +105,10 @@ Element *HTMLLegendElement::formElement()
     return 0;
 }
 
-void HTMLLegendElement::focus(bool)
+void HTMLLegendElement::focus()
 {
-    // to match other browsers, never restore previous selection
     if (Element *element = formElement())
-        element->focus(false);
+        element->focus();
 }
 
 void HTMLLegendElement::accessKeyAction(bool sendToAnyElement)

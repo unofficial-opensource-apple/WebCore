@@ -20,12 +20,10 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef RenderTreeAsText_h
-#define RenderTreeAsText_h
-
+#include "RenderObject.h"
 #include "TextStream.h"
 
 namespace WebCore {
@@ -35,9 +33,4 @@ namespace WebCore {
     DeprecatedString externalRepresentation(RenderObject*);
     void write(TextStream&, const RenderObject&, int indent = 0);
 
-    // Helper function shared with SVGRenderTreeAsText
-    String quoteAndEscapeNonPrintables(const String&);
-
-} // namespace WebCore
-
-#endif // RenderTreeAsText_h
+}

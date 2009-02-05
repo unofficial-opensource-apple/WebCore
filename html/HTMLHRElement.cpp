@@ -17,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 #include "config.h"
@@ -69,7 +69,7 @@ void HTMLHRElement::parseMappedAttribute(MappedAttribute *attr)
         }
     } else if (attr->name() == widthAttr) {
         bool ok;
-        int v = attr->value().toInt(&ok);
+        int v = attr->value().impl()->toInt(&ok);
         if(ok && !v)
             addCSSLength(attr, CSS_PROP_WIDTH, "1");
         else

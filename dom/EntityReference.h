@@ -16,13 +16,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef EntityReference_h
-#define EntityReference_h
+#ifndef EntityReference_H
+#define EntityReference_H
 
 #include "ContainerNode.h"
 
@@ -32,7 +32,7 @@ class EntityReference : public ContainerNode
 {
 public:
     EntityReference(Document*);
-    EntityReference(Document*, const String& entityName);
+    EntityReference(Document*, StringImpl* entityName);
 
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
@@ -41,7 +41,7 @@ public:
     virtual String toString() const;
 
 private:
-    String m_entityName;
+    RefPtr<StringImpl> m_entityName;
 };
 
 } //namespace

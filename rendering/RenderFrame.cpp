@@ -19,20 +19,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-
 #include "config.h"
 #include "RenderFrame.h"
-#include "RenderFrameSet.h"
+
 #include "Document.h"
 #include "Frame.h"
-#include "RenderView.h"
 #include "FrameView.h"
 #include "HTMLFrameSetElement.h"
 #include "HTMLNames.h"
+#include "RenderFrameset.h"
 
 namespace WebCore {
 
@@ -44,18 +43,16 @@ RenderFrame::RenderFrame(HTMLFrameElement* frame)
     setInline(false);
 }
 
-FrameEdgeInfo RenderFrame::edgeInfo() const
-{
-    return FrameEdgeInfo(element()->noResize(), element()->hasFrameBorder());
-}
-
 void RenderFrame::viewCleared()
 {
     if (element() && m_widget && m_widget->isFrameView()) {
         FrameView* view = static_cast<FrameView*>(m_widget);
-        int marginw = element()->getMarginWidth();
-        int marginh = element()->getMarginHeight();
+        HTMLFrameSetElement* frameSet = static_cast<HTMLFrameSetElement*>(element()->parentNode());
+        bool hasBorder = element()->m_frameBorder && frameSet->frameBorder();
+        int marginw = element()->m_marginWidth;
+        int marginh = element()->m_marginHeight;
 
+        view->setHasBorder(hasBorder);
         if (marginw != -1)
             view->setMarginWidth(marginw);
         if (marginh != -1)
@@ -66,7 +63,7 @@ void RenderFrame::viewCleared()
 void RenderFrame::layoutWithFlattening(bool flexibleWidth, bool flexibleHeight)
 {
     FrameView* childFrameView = static_cast<FrameView*>(m_widget);
-    RenderView* childRoot = childFrameView ? static_cast<RenderView*>(childFrameView->frame()->renderer()) : 0;
+    RenderObject* childRoot = childFrameView ? childFrameView->frame()->renderer() : 0;
     // don't expand frames set to have zero width or height
     if (!m_width || !m_height || !childRoot) {
         updateWidgetPosition();
@@ -81,14 +78,14 @@ void RenderFrame::layoutWithFlattening(bool flexibleWidth, bool flexibleHeight)
     
     // need to update to calculate min/max correctly
     updateWidgetPosition();
-    if (childRoot->prefWidthsDirty())
-        childRoot->calcPrefWidths();
+    if (!childRoot->minMaxKnown())
+        childRoot->calcMinMaxWidth();
     
-    bool scrolling = element()->scrollingMode() != ScrollbarAlwaysOff;
+    bool scrolling = element()->scrollingMode() != ScrollBarAlwaysOff;
     
     // if scrollbars are off assume it is ok for this frame to become really narrow
     if (scrolling || flexibleWidth || childFrameView->frame()->isFrameSet())
-         m_width = max(m_width, childRoot->minPrefWidth());
+         m_width = max(m_width, childRoot->minWidth());
  
     // update again to pass the width to the child frame
     updateWidgetPosition();
@@ -111,4 +108,4 @@ void RenderFrame::layoutWithFlattening(bool flexibleWidth, bool flexibleHeight)
     setNeedsLayout(false);
 }
 
-} // namespace WebCore
+}

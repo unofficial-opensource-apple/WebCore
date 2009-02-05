@@ -17,38 +17,31 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderPartObject_h
-#define RenderPartObject_h
+#ifndef RenderPartObject_H
+#define RenderPartObject_H
 
 #include "RenderPart.h"
 
 namespace WebCore {
 
-class RenderPartObject : public RenderPart {
+class RenderPartObject : public RenderPart
+{
 public:
-    RenderPartObject(HTMLFrameOwnerElement*);
-    virtual ~RenderPartObject();
+    RenderPartObject(HTMLElement*);
 
     virtual const char* renderName() const { return "RenderPartObject"; }
 
     virtual void layout();
-
-    void _updateWidget(bool onlyCreateNonNetscapePlugins);
-    bool shouldResizeFrameToContent() const;
-    virtual void calcWidth();
-    virtual void calcHeight();
-    void updateWidget(bool onlyCreateNonNetscapePlugins);
+    virtual void updateWidget();
 
     virtual void viewCleared();
-private:
-    bool m_updatingWidget;
 };
 
-} // namespace WebCore
+}
 
-#endif // RenderPartObject_h
+#endif

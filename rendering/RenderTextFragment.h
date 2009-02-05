@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999 Lars Knoll (knoll@kde.org)
  * (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,13 +17,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderTextFragment_h
-#define RenderTextFragment_h
+#ifndef KHTML_RenderTextFragment_H
+#define KHTML_RenderTextFragment_H
 
 #include "RenderText.h"
 
@@ -31,34 +33,30 @@ namespace WebCore {
 // first letter and that must therefore have different styles (and positions in the render tree).
 // We cache offsets so that text transformations can be applied in such a way that we can recover
 // the original unaltered string from our corresponding DOM node.
-class RenderTextFragment : public RenderText {
+class RenderTextFragment : public RenderText
+{
 public:
-    RenderTextFragment(Node*, StringImpl*, int startOffset, int length);
+    RenderTextFragment(Node*, StringImpl*, int startOffset, int length, RenderObject* firstLetter = 0);
     RenderTextFragment(Node*, StringImpl*);
-
-    virtual bool isTextFragment() const { return true; }
-
+    
+    virtual bool isTextFragment() const;
+    
     virtual void destroy();
 
     unsigned start() const { return m_start; }
     unsigned end() const { return m_end; }
-
     RenderObject* firstLetter() const { return m_firstLetter; }
-    void setFirstLetter(RenderObject* firstLetter) { m_firstLetter = firstLetter; }
-
-    StringImpl* contentString() const { return m_contentString.get(); }
-    virtual PassRefPtr<StringImpl> originalText() const;
-
+    
+    StringImpl* contentString() const { return m_generatedContentStr.get(); }
+    virtual PassRefPtr<StringImpl> originalString() const;
+    
 private:
-    virtual void setTextInternal(PassRefPtr<StringImpl>);
-    virtual UChar previousCharacter();
-
     unsigned m_start;
     unsigned m_end;
-    RefPtr<StringImpl> m_contentString;
+    RefPtr<StringImpl> m_generatedContentStr;
     RenderObject* m_firstLetter;
 };
 
-} // namespace WebCore
+}
 
-#endif // RenderTextFragment_h
+#endif

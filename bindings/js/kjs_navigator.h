@@ -15,11 +15,11 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef kjs_navigator_h
-#define kjs_navigator_h
+#ifndef KJS_Navigator_H
+#define KJS_Navigator_H
 
 #include "kjs_binding.h"
 
@@ -31,25 +31,17 @@ namespace KJS {
 
   class Navigator : public DOMObject {
   public:
-    Navigator(JSObject* prototype, WebCore::Frame*);
-
+    Navigator(ExecState *exec, WebCore::Frame *p);
     virtual bool getOwnPropertySlot(ExecState *, const Identifier&, PropertySlot&);
     JSValue *getValueProperty(ExecState *exec, int token) const;
     virtual const ClassInfo* classInfo() const { return &info; }
     static const ClassInfo info;
     enum { AppCodeName, AppName, AppVersion, Language, UserAgent, Platform,
-           _Plugins, _MimeTypes, Product, ProductSub, Vendor, VendorSub, CookieEnabled
-           , OnLine
-           , Standalone
-           };
+           _Plugins, _MimeTypes, Product, ProductSub, Vendor, VendorSub, CookieEnabled, JavaEnabled };
     WebCore::Frame *frame() const { return m_frame; }
   private:
     WebCore::Frame *m_frame;
   };
-
-  // Functions
-  JSValue* navigatorProtoFuncJavaEnabled(ExecState*, JSObject*, const List&);
-
 } // namespace
 
 #endif

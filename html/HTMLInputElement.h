@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,16 +18,15 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLInputElement_h
-#define HTMLInputElement_h
+#ifndef HTML_HTMLInputElement_H
+#define HTML_HTMLInputElement_H
 
 #include "HTMLGenericFormElement.h"
-#include <wtf/OwnPtr.h>
 
 // FIXME: Remove these when converting the password field
 #include "RenderStyle.h"
@@ -34,9 +35,9 @@
 namespace WebCore {
 
 class HTMLImageLoader;
-class Selection;
 
-class HTMLInputElement : public HTMLFormControlElementWithState {
+class HTMLInputElement : public HTMLGenericFormElement
+{
 public:
     enum InputType {
         TEXT,
@@ -53,12 +54,6 @@ public:
         SEARCH,
         RANGE
     };
-    
-    enum AutoCompleteSetting {
-        Uninitialized,
-        On,
-        Off
-    };
 
     HTMLInputElement(Document*, HTMLFormElement* = 0);
     HTMLInputElement(const QualifiedName& tagName, Document*, HTMLFormElement* = 0);
@@ -67,21 +62,20 @@ public:
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
     virtual int tagPriority() const { return 0; }
 
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
+    virtual bool isKeyboardFocusable() const;
     virtual bool isMouseFocusable() const;
     virtual bool isEnumeratable() const { return inputType() != IMAGE; }
+    virtual void focus();
     virtual void dispatchFocusEvent();
     virtual void dispatchBlurEvent();
-    virtual void updateFocusAppearance(bool restorePreviousSelection);
+    virtual void updateFocusAppearance();
     virtual void aboutToUnload();
-    virtual bool shouldUseInputMethod() const;
 
     virtual const AtomicString& name() const;
 
-    bool autoComplete() const;
+    bool autoComplete() const { return m_autocomplete; }
 
-    // isChecked is used by the rendering tree/CSS while checked() is used by JS to determine checked state
-    virtual bool isChecked() const { return checked() && (inputType() == CHECKBOX || inputType() == RADIO); }
+    virtual bool isChecked() const { return checked(); }
     virtual bool isIndeterminate() const { return indeterminate(); }
     
     bool readOnly() const { return isReadOnlyControl(); }
@@ -90,7 +84,9 @@ public:
     virtual bool isRadioButton() const { return m_type == RADIO; }
     bool isTextField() const { return m_type == TEXT || m_type == PASSWORD || m_type == SEARCH || m_type == ISINDEX; }
     bool isSearchField() const { return m_type == SEARCH; }
-    virtual bool isInputTypeHidden() const { return m_type == HIDDEN; }
+    // FIXME: When other text fields switch to the non-NSView implementation, we should add them here.
+    // Once all text fields switch over, we should merge this with isTextField.
+    bool isNonWidgetTextField() const { return m_type == TEXT || m_type == SEARCH || m_type == ISINDEX || m_type == PASSWORD; }
 
     bool checked() const { return m_checked; }
     void setChecked(bool, bool sendChangeEvent = false);
@@ -108,11 +104,9 @@ public:
 
     void setValueFromRenderer(const String&);
 
-    virtual bool saveState(String& value) const;
+    virtual String stateValue() const;
     virtual void restoreState(const String&);
 
-    virtual bool canStartSelection() const;
-    
     bool canHaveSelection() const;
     int selectionStart() const;
     int selectionEnd() const;
@@ -120,7 +114,7 @@ public:
     void setSelectionEnd(int);
     void select();
     void setSelectionRange(int start, int end);
-
+    
     virtual void accessKeyAction(bool sendToAnyElement);
 
     virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
@@ -145,6 +139,10 @@ public:
     bool respectHeightAndWidthAttrs() const { return inputType() == IMAGE || inputType() == HIDDEN; }
 
     virtual void reset();
+
+    // used in case input type=image was clicked.
+    int clickX() const { return xPos; }
+    int clickY() const { return yPos; }
 
     virtual void* preDispatchEventHandler(Event*);
     virtual void postDispatchEventHandler(Event*, void* dataFromPreDispatch);
@@ -188,22 +186,15 @@ public:
     void setAutofilled(bool b = true) { m_autofilled = b; }
     
     void cacheSelection(int s, int e) { cachedSelStart = s; cachedSelEnd = e; };
-    void addSearchResult();
-    void onSearch();
-    
-    Selection selection() const;
+
+    virtual bool willRespondToMouseClickEvents();
+    virtual void setDisabled(bool isDisabled) { HTMLGenericFormElement::setDisabled(inputType() == FILE || isDisabled); }
 
     String constrainValue(const String& proposedValue) const;
 
     virtual void didRestoreFromCache();
-
-    virtual bool willRespondToMouseClickEvents();
-    virtual void setDisabled(bool isDisabled) { HTMLGenericFormElement::setDisabled(inputType() == FILE || isDisabled); }
     
 protected:
-    virtual void willMoveToNewOwnerDocument();
-    virtual void didMoveToNewOwnerDocument();
-    
     AtomicString m_name;
 
 private:
@@ -211,21 +202,16 @@ private:
     bool storesValueSeparateFromAttribute() const;
     String constrainValue(const String& proposedValue, int maxLen) const;
     void recheckValue();
-    
-    bool needsCacheCallback();
-    void registerForCacheCallbackIfNeeded();
-    void unregisterForCacheCallbackIfNeeded();
 
     String m_value;
-    String m_originalValue;
     int xPos;
-    int m_maxLen;
+    short m_maxLen;
     short m_size;
     short yPos;
 
     short m_maxResults;
 
-    OwnPtr<HTMLImageLoader> m_imageLoader;
+    HTMLImageLoader* m_imageLoader;
 
     unsigned m_type : 4; // InputType 
     bool m_checked : 1;
@@ -234,7 +220,7 @@ private:
     bool m_indeterminate : 1;
     bool m_haveType : 1;
     bool m_activeSubmit : 1;
-    AutoCompleteSetting m_autocomplete : 2;
+    bool m_autocomplete : 1;
     bool m_autofilled : 1;
     bool m_inited : 1;
     

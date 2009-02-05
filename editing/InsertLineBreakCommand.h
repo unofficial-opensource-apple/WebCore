@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,26 +23,26 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef InsertLineBreakCommand_h
-#define InsertLineBreakCommand_h
+#ifndef InsertLineBreakCommand_H
+#define InsertLineBreakCommand_H
 
 #include "CompositeEditCommand.h"
 
 namespace WebCore {
 
-class InsertLineBreakCommand : public CompositeEditCommand {
+class InsertLineBreakCommand : public CompositeEditCommand
+{
 public:
-    InsertLineBreakCommand(Document*);
+    InsertLineBreakCommand(Document *document);
 
     virtual void doApply();
 
 private:
     virtual bool preservesTypingStyle() const;
-    void insertNodeAfterPosition(Node*, const Position&);
-    void insertNodeBeforePosition(Node*, const Position&);
-    bool shouldUseBreakElement(const Position&);
+    void insertNodeAfterPosition(Node *node, const Position &pos);
+    void insertNodeBeforePosition(Node *node, const Position &pos);
 };
 
 } // namespace WebCore
 
-#endif // InsertLineBreakCommand_h
+#endif // InsertLineBreakCommand_H

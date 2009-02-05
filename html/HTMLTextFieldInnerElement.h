@@ -16,56 +16,54 @@
  * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+                                        * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+                                        * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
- 
+
 #ifndef HTMLTextFieldInnerElement_h
 #define HTMLTextFieldInnerElement_h
 
 #include "HTMLDivElement.h"
 
 namespace WebCore {
-
-class String;
-
-class HTMLTextFieldInnerElement : public HTMLDivElement
-{
-public:
-    HTMLTextFieldInnerElement(Document*, Node* shadowParent = 0);
     
-    virtual bool isMouseFocusable() const { return false; } 
-    virtual bool isShadowNode() const { return m_shadowParent; }
-    virtual Node* shadowParentNode() { return m_shadowParent; }
-    void setShadowParentNode(Node* node) { m_shadowParent = node; }
+    class String;
     
+    class HTMLTextFieldInnerElement : public HTMLDivElement
+    {
+public:
+        HTMLTextFieldInnerElement(Document*, Node* shadowParent = 0);
+        
+        virtual bool isMouseFocusable() const { return false; } 
+        virtual bool isShadowNode() const { return m_shadowParent; }
+        virtual Node* shadowParentNode() { return m_shadowParent; }
+        void setShadowParentNode(Node* node) { m_shadowParent = node; }
+        
 private:
-    Node* m_shadowParent;
-};
-
-class HTMLTextFieldInnerTextElement : public HTMLTextFieldInnerElement {
+            Node* m_shadowParent;
+    };
+    
+    class HTMLTextFieldInnerTextElement : public HTMLTextFieldInnerElement {
 public:
-    HTMLTextFieldInnerTextElement(Document*, Node* shadowParent);        
-    virtual void defaultEventHandler(Event*);
-};
-
-class HTMLSearchFieldResultsButtonElement : public HTMLTextFieldInnerElement {
+        HTMLTextFieldInnerTextElement(Document*, Node* shadowParent);        
+        virtual void defaultEventHandler(Event*);
+    };
+    
+    class HTMLSearchFieldResultsButtonElement : public HTMLTextFieldInnerElement {
 public:
-    HTMLSearchFieldResultsButtonElement(Document*);
-    virtual void defaultEventHandler(Event*);
-};
-
-class HTMLSearchFieldCancelButtonElement : public HTMLTextFieldInnerElement {
+        HTMLSearchFieldResultsButtonElement(Document*);
+        virtual void defaultEventHandler(Event*);
+    };
+    
+    class HTMLSearchFieldCancelButtonElement : public HTMLTextFieldInnerElement {
 public:
-    HTMLSearchFieldCancelButtonElement(Document*);
-    virtual void defaultEventHandler(Event*);
-private:
-    bool m_capturing;
-};
-
+        HTMLSearchFieldCancelButtonElement(Document*);
+        virtual void defaultEventHandler(Event*);
+    };
+    
 } //namespace
 
 #endif

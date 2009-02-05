@@ -4,7 +4,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 #include "config.h"
 #include "HTMLScriptElement.h"
@@ -29,12 +29,9 @@
 #include "Document.h"
 #include "EventNames.h"
 #include "Frame.h"
-#include "FrameLoader.h"
 #include "HTMLNames.h"
 #include "kjs_proxy.h"
-#include "MIMETypeRegistry.h"
 #include "Text.h"
-#include "ScriptSourceCode.h"
 
 namespace WebCore {
 
@@ -60,14 +57,13 @@ bool HTMLScriptElement::isURLAttribute(Attribute *attr) const
     return attr->name() == srcAttr;
 }
 
-void HTMLScriptElement::childrenChanged(bool changedByParser)
+void HTMLScriptElement::childrenChanged()
 {
     // If a node is inserted as a child of the script element
     // and the script element has been inserted in the document
     // we evaluate the script.
     if (!m_createdByParser && inDocument() && firstChild())
-        evaluateScript(document()->url(), text());
-    HTMLElement::childrenChanged(changedByParser);
+        evaluateScript(document()->URL(), text());
 }
 
 void HTMLScriptElement::parseMappedAttribute(MappedAttribute *attr)
@@ -78,17 +74,15 @@ void HTMLScriptElement::parseMappedAttribute(MappedAttribute *attr)
             return;
 
         // FIXME: Evaluate scripts in viewless documents.
-        // See http://bugs.webkit.org/show_bug.cgi?id=5727
+        // See http://bugzilla.opendarwin.org/show_bug.cgi?id=5727
         if (!document()->frame())
             return;
     
         const AtomicString& url = attr->value();
         if (!url.isEmpty()) {
-            m_cachedScript = document()->docLoader()->requestScript(url, getAttribute(charsetAttr));
-            if (m_cachedScript)
-                m_cachedScript->ref(this);
-            else
-                dispatchHTMLEvent(errorEvent, true, false);
+            DeprecatedString charset = getAttribute(charsetAttr).deprecatedString();
+            m_cachedScript = document()->docLoader()->requestScript(url, charset);
+            m_cachedScript->ref(this);
         }
     } else if (attrName == onloadAttr)
         setHTMLEventListener(loadEvent, attr);
@@ -96,42 +90,35 @@ void HTMLScriptElement::parseMappedAttribute(MappedAttribute *attr)
         HTMLElement::parseMappedAttribute(attr);
 }
 
-void HTMLScriptElement::finishParsingChildren()
+void HTMLScriptElement::closeRenderer()
 {
     // The parser just reached </script>. If we have no src and no text,
     // allow dynamic loading later.
     if (getAttribute(srcAttr).isEmpty() && text().isEmpty())
         setCreatedByParser(false);
-    HTMLElement::finishParsingChildren();
+    HTMLElement::closeRenderer();
 }
 
 void HTMLScriptElement::insertedIntoDocument()
 {
     HTMLElement::insertedIntoDocument();
 
-    ASSERT(!m_cachedScript);
+    assert(!m_cachedScript);
 
     if (m_createdByParser)
         return;
     
     // FIXME: Eventually we'd like to evaluate scripts which are inserted into a 
     // viewless document but this'll do for now.
-    // See http://bugs.webkit.org/show_bug.cgi?id=5727
+    // See http://bugzilla.opendarwin.org/show_bug.cgi?id=5727
     if (!document()->frame())
         return;
     
     const AtomicString& url = getAttribute(srcAttr);
     if (!url.isEmpty()) {
-        String scriptSrcCharset = getAttribute(charsetAttr).domString().stripWhiteSpace();
-        if (scriptSrcCharset.isEmpty()) {
-            if (Frame* frame = document()->frame())
-                scriptSrcCharset = frame->loader()->encoding();
-        }
-        m_cachedScript = document()->docLoader()->requestScript(url, scriptSrcCharset);
-        if (m_cachedScript)
-            m_cachedScript->ref(this);
-        else
-            dispatchHTMLEvent(errorEvent, true, false);
+        DeprecatedString charset = getAttribute(charsetAttr).deprecatedString();
+        m_cachedScript = document()->docLoader()->requestScript(url, charset);
+        m_cachedScript->ref(this);
         return;
     }
 
@@ -140,7 +127,7 @@ void HTMLScriptElement::insertedIntoDocument()
     // it should be evaluated, and evaluateScript only evaluates a script once.
     String scriptString = text();    
     if (!scriptString.isEmpty())
-        evaluateScript(document()->url(), scriptString);
+        evaluateScript(document()->URL(), scriptString);
 }
 
 void HTMLScriptElement::removedFromDocument()
@@ -157,7 +144,7 @@ void HTMLScriptElement::notifyFinished(CachedResource* o)
 {
     CachedScript *cs = static_cast<CachedScript *>(o);
 
-    ASSERT(cs == m_cachedScript);
+    assert(cs == m_cachedScript);
 
     // Evaluating the script could lead to a garbage collection which
     // can delete the script element so we need to protect it.
@@ -177,70 +164,17 @@ void HTMLScriptElement::notifyFinished(CachedResource* o)
     }
 }
 
-bool HTMLScriptElement::shouldExecuteAsJavaScript()
-{
-    /*
-         Mozilla 1.8 accepts javascript1.0 - javascript1.7, but WinIE 7 accepts only javascript1.1 - javascript1.3.
-         Mozilla 1.8 and WinIE 7 both accept javascript and livescript.
-         WinIE 7 accepts ecmascript and jscript, but Mozilla 1.8 doesn't.
-         Neither Mozilla 1.8 nor WinIE 7 accept leading or trailing whitespace.
-         We want to accept all the values that either of these browsers accept, but not other values.
-     */
-    static const AtomicString validLanguages[] = {
-        "javascript",
-        "javascript1.0",
-        "javascript1.1",
-        "javascript1.2",
-        "javascript1.3",
-        "javascript1.4",
-        "javascript1.5",
-        "javascript1.6",
-        "javascript1.7",
-        "livescript",
-        "ecmascript",
-        "jscript"
-    };
-    static const unsigned validLanguagesCount = sizeof(validLanguages) / sizeof(validLanguages[0]); 
-
-    const AtomicString& type = getAttribute(typeAttr);
-    if (!type.isEmpty()) {
-        String lowerType = type.domString().stripWhiteSpace().lower();
-        if (MIMETypeRegistry::isSupportedJavaScriptMIMEType(lowerType))
-            return true;
-
-        return false;
-    }
-
-    const AtomicString& language = getAttribute(languageAttr);
-    if (!language.isEmpty()) {
-        String lowerLanguage = language.domString().lower();
-        for (unsigned i = 0; i < validLanguagesCount; ++i)
-            if (lowerLanguage == validLanguages[i])
-                return true;
-
-        return false;
-    }
-
-    // No type or language is specified, so we assume the script to be JavaScript
-    return true;
-}
-
-void HTMLScriptElement::evaluateScript(const String& url, const String& script)
+void HTMLScriptElement::evaluateScript(const String& URL, const String& script)
 {
     if (m_evaluated)
         return;
     
-    if (!shouldExecuteAsJavaScript())
-        return;
-    
     Frame* frame = document()->frame();
     if (frame) {
-        if (frame->scriptProxy()->isEnabled()) {
+        KJSProxy* proxy = frame->jScript();
+        if (proxy) {
             m_evaluated = true;
-            if (m_cachedScript)
-                frame->scriptProxy()->evaluate(ScriptSourceCode(m_cachedScript));
-            else
-                frame->scriptProxy()->evaluate(ScriptSourceCode(script, KURL(url.deprecatedString())));
+            proxy->evaluate(URL, 0, script, 0);
             Document::updateDocumentsRendering();
         }
     }

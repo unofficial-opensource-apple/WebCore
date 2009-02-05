@@ -22,33 +22,56 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
+#import "GraphicsServices/GraphicsServices.h"
+#import "WKWindow.h"
 
 #import "config.h"
 #import "PlatformWheelEvent.h"
-
-#import "PlatformMouseEvent.h"
-#import "WebCoreSystemInterface.h"
-
-#import <GraphicsServices/GraphicsServices.h>
-#import "WKWindow.h"
+#import "Screen.h"
 
 namespace WebCore {
 
+static IntPoint positionForEvent(GSEventRef event)
+{
+    if (GSEventIsMouseEventType (event) || GSEventGetType (event) == kGSEventScrollWheel)
+        return IntPoint (GSEventGetLocationInWindow (event));
+    return IntPoint ();
+}
+
+static IntPoint globalPositionForEvent(GSEventRef event)
+{
+    if (GSEventIsMouseEventType(event) || GSEventGetType(event) == kGSEventScrollWheel)
+        return IntPoint(GSEventGetLocationInWindow(event));
+    else
+        return IntPoint();
+}
+
+static bool eventIsHorizontal(GSEventRef event)
+{
+    if (GSEventGetType (event) == kGSEventScrollWheel) {
+        return GSEventGetDeltaX (event) != 0;
+    }
+    return false;
+}
+
+static int deltaForEvent(GSEventRef event)
+{
+    if (GSEventGetType (event) == kGSEventScrollWheel)
+        return lrint((eventIsHorizontal(event) ? GSEventGetDeltaX (event) : GSEventGetDeltaY (event)) * 120);
+    return 0;
+}
+
 PlatformWheelEvent::PlatformWheelEvent(GSEventRef event)
-    : m_position(pointForEvent(event))
-    , m_globalPosition(globalPointForEvent(event))
-    , m_deltaX(GSEventGetDeltaX(event))
-    , m_deltaY(GSEventGetDeltaY(event))
+    : m_position(positionForEvent(event))
+    , m_globalPosition(globalPositionForEvent(event))
+    , m_delta(deltaForEvent(event))
+    , m_isHorizontal(eventIsHorizontal(event))
     , m_isAccepted(false)
     , m_shiftKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskShift)
     , m_ctrlKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskControl)
     , m_altKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskAlternate)
     , m_metaKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskCommand)
 {
-    // iPhone OS only supports continuous (pixel-mode) scrolling
-    m_isContinuous = true;
-    m_continuousDeltaX = m_deltaX;
-    m_continuousDeltaY = m_deltaY;
 }
 
-} // namespace WebCore
+}

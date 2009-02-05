@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,43 +18,36 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef Node_h
-#define Node_h
+#ifndef DOM_NodeImpl_h_
+#define DOM_NodeImpl_h_
 
-#include "DeprecatedString.h"
 #include "DocPtr.h"
 #include "PlatformString.h"
-#include "TreeShared.h"
-#include "FloatPoint.h"
-#include "FloatQuad.h"
+#include "DeprecatedString.h"
 #include <wtf/Assertions.h>
 #include <wtf/HashSet.h>
-#include <wtf/OwnPtr.h>
 #include <wtf/PassRefPtr.h>
 
 namespace WebCore {
 
 class AtomicString;
 class ContainerNode;
-class WebKitCSSMatrix;
+class DeprecatedStringList;
 class Document;
-class DynamicNodeList;
 class Element;
 class Event;
 class EventListener;
 class IntRect;
-class KeyboardEvent;
 class NamedAttrMap;
 class NodeList;
 class PlatformKeyboardEvent;
 class PlatformMouseEvent;
 class PlatformWheelEvent;
-class PlatformTouchEvent;
 class QualifiedName;
 class RegisteredEventListener;
 class RenderArena;
@@ -60,12 +55,8 @@ class RenderObject;
 class RenderStyle;
 class TextStream;
 class HTMLElement;
-struct NodeListsNodeData;
-class Transform3D;
 
 typedef int ExceptionCode;
-
-enum StyleChangeType { NoStyleChange, InlineStyleChange, FullStyleChange, AnimationStyleChange };
 
 // this class implements nodes, which can have a parent but no children:
 class Node : public TreeShared<Node> {
@@ -87,32 +78,24 @@ public:
         XPATH_NAMESPACE_NODE = 13
     };
 
-    static bool isSupported(const String& feature, const String& version);
-
-    static void startIgnoringLeaks();
-    static void stopIgnoringLeaks();
-
     Node(Document*);
     virtual ~Node();
 
     // DOM methods & attributes for Node
 
-    bool hasTagName(const QualifiedName& name) const { return virtualHasTagName(name); }
+    virtual bool hasTagName(const QualifiedName&) const { return false; }
     virtual String nodeName() const = 0;
     virtual String nodeValue() const;
     virtual void setNodeValue(const String&, ExceptionCode&);
     virtual NodeType nodeType() const = 0;
     Node* parentNode() const { return parent(); }
-    Node* parentElement() const { return parent(); } // IE extension
     Node* previousSibling() const { return m_previous; }
     Node* nextSibling() const { return m_next; }
     virtual PassRefPtr<NodeList> childNodes();
-    Node* firstChild() const { return virtualFirstChild(); }
-    Node* lastChild() const { return virtualLastChild(); }
+    virtual Node* firstChild() const;
+    virtual Node* lastChild() const;
     virtual bool hasAttributes() const;
     virtual NamedAttrMap* attributes() const;
-    
-    virtual String baseURI() const;
 
     // These should all actually return a node, but this is only important for language bindings,
     // which will already know and hold a ref on the right node to return. Returning bool allows
@@ -130,6 +113,7 @@ public:
     virtual const AtomicString& prefix() const;
     virtual void setPrefix(const AtomicString&, ExceptionCode&);
     void normalize();
+    static bool isSupported(const String& feature, const String& version);
 
     bool isSameNode(Node* other) const { return this == other; }
     bool isEqualNode(Node*) const;
@@ -148,27 +132,18 @@ public:
 
     virtual bool isElementNode() const { return false; }
     virtual bool isHTMLElement() const { return false; }
-
-#if ENABLE(SVG)
-    virtual
+#if SVG_SUPPORT
+    virtual bool isSVGElement() const { return false; }
 #endif
-        bool isSVGElement() const { return false; }
-
     virtual bool isStyledElement() const { return false; }
-    virtual bool isFrameOwnerElement() const { return false; }
     virtual bool isAttributeNode() const { return false; }
     virtual bool isTextNode() const { return false; }
     virtual bool isCommentNode() const { return false; }
-    virtual bool isCharacterDataNode() const { return false; }
     virtual bool isDocumentNode() const { return false; }
     virtual bool isEventTargetNode() const { return false; }
     virtual bool isShadowNode() const { return false; }
     virtual Node* shadowParentNode() { return 0; }
     Node* shadowAncestorNode();
-
-    // The node's parent for the purpose of event capture and bubbling.
-    virtual Node* eventParentNode() { return parentNode(); }
-
     bool isBlockFlow() const;
     bool isBlockFlowOrBlockTable() const;
     
@@ -207,6 +182,7 @@ public:
     Element* enclosingInlineElement() const;
     Element* rootEditableElement() const;
     
+    bool inSameRootEditableElement(Node*);
     bool inSameContainingBlockFlowElement(Node*);
     
     // Used by the parser. Checks against the DTD, unlike DOM operations like appendChild().
@@ -220,8 +196,7 @@ public:
     // until they know all of their nested <param>s. [Radar 3603191, 4040848].
     // Also used for script elements and some SVG elements for similar purposes,
     // but making parsing a special case in this respect should be avoided if possible.
-    virtual void finishParsingChildren() { }
-    virtual void beginParsingChildren() { }
+    virtual void closeRenderer() { }
 
     // Called by the frame right before dispatching an unloadEvent. [Radar 4532113]
     // This is needed for HTMLInputElements to tell the frame that it is done editing 
@@ -229,41 +204,43 @@ public:
     virtual void aboutToUnload() { }
 
     // For <link> and <style> elements.
-    virtual bool sheetLoaded() { return true; }
+    virtual void sheetLoaded() { }
 
     bool hasID() const { return m_hasId; }
     bool hasClass() const { return m_hasClass; }
+    bool hasStyle() const { return m_hasStyle; }
     bool active() const { return m_active; }
     bool inActiveChain() const { return m_inActiveChain; }
-    bool inDetach() const { return m_inDetach; }
     bool hovered() const { return m_hovered; }
     bool focused() const { return m_focused; }
     bool attached() const { return m_attached; }
     void setAttached(bool b = true) { m_attached = b; }
-    bool changed() const { return m_styleChange != NoStyleChange; }
-    StyleChangeType styleChangeType() const { return static_cast<StyleChangeType>(m_styleChange); }
+    bool changed() const { return m_changed; }
     bool hasChangedChild() const { return m_hasChangedChild; }
     bool isLink() const { return m_isLink; }
+    bool styleElement() const { return m_styleElement; }
+    bool implicitNode() const { return m_implicit; }
     void setHasID(bool b = true) { m_hasId = b; }
     void setHasClass(bool b = true) { m_hasClass = b; }
+    void setHasStyle(bool b = true) { m_hasStyle = b; }
     void setHasChangedChild( bool b = true ) { m_hasChangedChild = b; }
     void setInDocument(bool b = true) { m_inDocument = b; }
     void setInActiveChain(bool b = true) { m_inActiveChain = b; }
-    void setChanged(StyleChangeType changeType = FullStyleChange);
+    void setChanged(bool b = true);
 
     virtual void setFocus(bool b = true) { m_focused = b; }
     virtual void setActive(bool b = true, bool pause=false) { m_active = b; }
     virtual void setHovered(bool b = true) { m_hovered = b; }
 
-    short tabIndex() const { return m_tabIndex; }
-    void setTabIndex(short i) { m_tabIndex = i; }
+    unsigned short tabIndex() const { return m_tabIndex; }
+    void setTabIndex(unsigned short i) { m_tabIndex = i; }
 
     /**
      * Whether this node can receive the keyboard focus.
      */
     virtual bool supportsFocus() const { return isFocusable(); }
     virtual bool isFocusable() const;
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
+    virtual bool isKeyboardFocusable() const;
     virtual bool isMouseFocusable() const;
 
     virtual bool isControl() const { return false; } // Eventually the notion of what is a control will be extensible.
@@ -274,7 +251,6 @@ public:
 
     virtual bool isContentEditable() const;
     virtual bool isContentRichlyEditable() const;
-    virtual bool shouldUseInputMethod() const;
     virtual IntRect getRect() const;
 
     enum StyleChange { NoChange, NoInherit, Inherit, Detach, Force };
@@ -289,11 +265,10 @@ public:
 
     // Returns the document associated with this node. This method never returns NULL, except in the case 
     // of a DocumentType node that is not used with any Document yet. A Document node returns itself.
-    Document* document() const
-    {
-      ASSERT(this);
+    Document* document() const 
+    { 
       ASSERT(m_document || nodeType() == DOCUMENT_TYPE_NODE && !inDocument());
-      return m_document.get();
+      return m_document.get(); 
     }
     void setDocument(Document*);
 
@@ -349,8 +324,7 @@ public:
     void setRenderer(RenderObject* renderer) { m_renderer = renderer; }
     
     void checkSetPrefix(const AtomicString& prefix, ExceptionCode&);
-    bool isDescendantOrShadowDescendantOf(const Node* otherNode);
-    bool isDescendantOf(const Node*) const;
+    bool isAncestor(const Node*) const;
 
     // These two methods are mutually exclusive.  The former is used to do strict error-checking
     // when adding children via the public DOM API (e.g., appendChild()).  The latter is called only when parsing, 
@@ -358,28 +332,17 @@ public:
     void checkAddChild(Node* newChild, ExceptionCode&); // Error-checking when adding via the DOM API
     virtual bool childAllowed(Node* newChild);          // Error-checking during parsing that checks the DTD
 
-    void checkReplaceChild(Node* newChild, Node* oldChild, ExceptionCode&);
-    virtual bool canReplaceChild(Node* newChild, Node* oldChild);
-    
     // Used to determine whether range offsets use characters or node indices.
     virtual bool offsetInCharacters() const;
-    // Number of DOM 16-bit units contained in node. Note that rendered text length can be different - e.g. because of
-    // css-transform:capitalize breaking up precomposed characters and ligatures.
-    virtual int maxCharacterOffset() const;
+
+    // FIXME: These next 7 functions are mostly editing-specific and should be moved out.
+    virtual int maxOffset() const;
+    virtual int caretMinOffset() const;
+    virtual int caretMaxOffset() const;
+    virtual unsigned caretMaxRenderedOffset() const;
+    virtual int previousOffset(int current) const;
+    virtual int nextOffset(int current) const;
     
-    // FIXME: We should try to find a better location for these methods.
-    virtual bool canSelectAll() const { return false; }
-    virtual void selectAll() { }
-
-    // Whether or not a selection can be started in this object
-    virtual bool canStartSelection() const;
-
-    // Getting points into and out of screen space
-    FloatPoint convertToPage(const FloatPoint& p) const;
-    FloatPoint convertFromPage(const FloatPoint& p) const;
-    
-    FloatQuad convertRectToPageQuad(const FloatRect& inRect) const;
-
 #ifndef NDEBUG
     virtual void dump(TextStream*, DeprecatedString indent = "") const;
 #endif
@@ -404,7 +367,7 @@ public:
     void createRendererIfNeeded();
     virtual RenderStyle* styleForRenderer(RenderObject* parent);
     virtual bool rendererIsNeeded(RenderStyle*);
-#if ENABLE(SVG)
+#if SVG_SUPPORT
     virtual bool childShouldCreateRenderer(Node*) const { return true; }
 #endif
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
@@ -412,8 +375,6 @@ public:
     // Wrapper for nodes that don't have a renderer, but still cache the style (like HTMLOptionElement).
     virtual RenderStyle* renderStyle() const;
     virtual void setRenderStyle(RenderStyle*);
-
-    virtual RenderStyle* computedStyle();
 
     // -----------------------------------------------------------------------------
     // Notification of document structure changes
@@ -448,7 +409,7 @@ public:
      * Notifies the node that it's list of children have changed (either by adding or removing child nodes), or a child
      * node that is of the type CDATA_SECTION_NODE, TEXT_NODE or COMMENT_NODE has changed its value.
      */
-    virtual void childrenChanged(bool changedByParser = false) {};
+    virtual void childrenChanged();
 
     virtual String toString() const = 0;
 
@@ -460,8 +421,8 @@ public:
     void showTreeAndMark(const Node* markedNode1, const char* markedLabel1, const Node* markedNode2 = 0, const char* markedLabel2 = 0) const;
 #endif
 
-    void registerDynamicNodeList(DynamicNodeList*);
-    void unregisterDynamicNodeList(DynamicNodeList*);
+    void registerNodeList(NodeList*);
+    void unregisterNodeList(NodeList*);
     void notifyNodeListsChildrenChanged();
     void notifyLocalNodeListsChildrenChanged();
     void notifyNodeListsAttributeChanged();
@@ -469,19 +430,10 @@ public:
     
     PassRefPtr<NodeList> getElementsByTagName(const String&);
     PassRefPtr<NodeList> getElementsByTagNameNS(const String& namespaceURI, const String& localName);
-    PassRefPtr<NodeList> getElementsByName(const String& elementName);
-    PassRefPtr<NodeList> getElementsByClassName(const String& classNames);
-
+    
     virtual bool willRespondToMouseMoveEvents();
     virtual bool willRespondToMouseWheelEvents();
     virtual bool willRespondToMouseClickEvents();
-
-    PassRefPtr<Element> querySelector(const String& selectors, ExceptionCode&);
-    PassRefPtr<NodeList> querySelectorAll(const String& selectors, ExceptionCode&);
-
-    // use Document::registerForPageCacheNotifications() to subscribe these
-    virtual void documentWillMoveInToPageCache() { }
-    virtual void documentMovedOutFromPageCache() { }
 
 private: // members
     DocPtr<Document> m_document;
@@ -490,42 +442,33 @@ private: // members
     RenderObject* m_renderer;
 
 protected:
-    virtual void willMoveToNewOwnerDocument() { }
-    virtual void didMoveToNewOwnerDocument() { }
+    typedef HashSet<NodeList*> NodeListSet;
+    NodeListSet* m_nodeLists;
 
-    OwnPtr<NodeListsNodeData> m_nodeLists;
-
-    short m_tabIndex;
-
-    // make sure we don't use more than 16 bits here -- adding more would increase the size of all Nodes
+    unsigned short m_tabIndex : 15;
+    bool m_hasTabIndex : 1;
 
     bool m_hasId : 1;
     bool m_hasClass : 1;
+    bool m_hasStyle : 1;
     bool m_attached : 1;
-    unsigned m_styleChange : 2;
+    bool m_changed : 1;
     bool m_hasChangedChild : 1;
     bool m_inDocument : 1;
 
     bool m_isLink : 1;
-    bool m_attrWasSpecifiedOrElementHasRareData : 1; // used in Attr for one thing and Element for another
+    bool m_specified : 1; // used in Attr; accessor functions there
     bool m_focused : 1;
     bool m_active : 1;
     bool m_hovered : 1;
     bool m_inActiveChain : 1;
+    bool m_styleElement : 1; // contains stylesheet text
+    bool m_implicit : 1; // implicitly generated by the parser
 
     bool m_inDetach : 1;
-    bool m_dispatchingSimulatedEvent : 1;
-
-public:
-    bool m_inSubtreeMark : 1;
-    // 0 bits left
 
 private:
     Element* ancestorElement() const;
-
-    virtual Node* virtualFirstChild() const;
-    virtual Node* virtualLastChild() const;
-    virtual bool virtualHasTagName(const QualifiedName&) const;
 };
 
 } //namespace

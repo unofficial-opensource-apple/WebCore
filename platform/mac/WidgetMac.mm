@@ -26,57 +26,34 @@
 #import "config.h"
 #import "Widget.h"
 
-#import "BlockExceptions.h"
 #import "Cursor.h"
-#import "Document.h"
 #import "Font.h"
-#import "Frame.h"
+#import "FoundationExtras.h"
 #import "GraphicsContext.h"
-#import "Page.h"
-#import "PlatformMouseEvent.h"
+#import "BlockExceptions.h"
+#import "FrameMac.h"
 #import "WebCoreFrameBridge.h"
 #import "WebCoreFrameView.h"
 #import "WebCoreView.h"
+#import "WebCoreWidgetHolder.h"
 #import "WidgetClient.h"
 #import "WKGraphics.h"
 
-#if ENABLE(HW_COMP)
-#import "LCLayer.h"
-#endif
-
-#import <wtf/RetainPtr.h>
-
-@interface NSWindow (WindowPrivate)
-- (BOOL) _needsToResetDragMargins;
-- (void) _setNeedsToResetDragMargins:(BOOL)s;
-@end
-
 namespace WebCore {
 
-class WidgetPrivate {
+static bool deferFirstResponderChanges;
+static Widget *deferredFirstResponder;
+
+class WidgetPrivate
+{
 public:
-    RetainPtr<NSView> view;
+    Font font;
+    NSView* view;
     WidgetClient* client;
     bool visible;
     bool mustStayInWindow;
     bool removeFromSuperviewSoon;
 };
-
-static void safeRemoveFromSuperview(NSView *view)
-{
-    // If the the view is the first responder, then set the window's first responder to nil so
-    // we don't leave the window pointing to a view that's no longer in it.
-    NSWindow *window = [view window];
-    NSResponder *firstResponder = [window firstResponder];
-    if ([firstResponder isKindOfClass:[NSView class]] && [(NSView *)firstResponder isDescendantOf:view])
-        [window makeFirstResponder:nil];
-
-    // Suppress the resetting of drag margins since we know we can't affect them.
-    BOOL resetDragMargins = [window _needsToResetDragMargins];
-    [window _setNeedsToResetDragMargins:NO];
-    [view removeFromSuperview];
-    [window _setNeedsToResetDragMargins:resetDragMargins];
-}
 
 Widget::Widget() : data(new WidgetPrivate)
 {
@@ -89,7 +66,7 @@ Widget::Widget() : data(new WidgetPrivate)
 
 Widget::Widget(NSView* view) : data(new WidgetPrivate)
 {
-    data->view = view;
+    data->view = HardRetain(view);
     data->client = 0;
     data->visible = true;
     data->mustStayInWindow = false;
@@ -98,6 +75,13 @@ Widget::Widget(NSView* view) : data(new WidgetPrivate)
 
 Widget::~Widget() 
 {
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    HardRelease(data->view);
+    END_BLOCK_OBJC_EXCEPTIONS;
+
+    if (deferredFirstResponder == this)
+        deferredFirstResponder = 0;
+
     delete data;
 }
 
@@ -119,9 +103,53 @@ IntRect Widget::frameGeometry() const
     return IntRect();
 }
 
-// FIXME: Should move this to Chrome; bad layering that this knows about Frame.
+bool Widget::hasFocus() const
+{
+    return false;
+}
+
 void Widget::setFocus()
 {
+}
+
+void Widget::clearFocus()
+{
+    if (!hasFocus())
+        return;
+    FrameMac::clearDocumentFocus(this);
+}
+
+Widget::FocusPolicy Widget::focusPolicy() const
+{
+    // This provides support for controlling the widgets that take 
+    // part in tab navigation. Widgets must:
+    // 1. not be hidden by css
+    // 2. be enabled
+    // 3. accept first responder
+
+    if (!client())
+        return NoFocus;
+    if (!client()->isVisible(const_cast<Widget*>(this)))
+        return NoFocus;
+    if (!isEnabled())
+        return NoFocus;
+
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    if (![getView() acceptsFirstResponder])
+        return NoFocus;
+    END_BLOCK_OBJC_EXCEPTIONS;
+
+    return TabFocus;
+}
+
+const Font& Widget::font() const
+{
+    return data->font;
+}
+
+void Widget::setFont(const Font& font)
+{
+    data->font = font;
 }
 
 void Widget::setCursor(const Cursor& cursor)
@@ -136,7 +164,7 @@ void Widget::show()
     data->visible = true;
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    [getOuterView() setHidden:NO];
+    [getOuterView() setHidden: NO];
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
@@ -148,7 +176,7 @@ void Widget::hide()
     data->visible = false;
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    [getOuterView() setHidden:YES];
+    [getOuterView() setHidden: YES];
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
@@ -157,32 +185,50 @@ void Widget::setFrameGeometry(const IntRect &rect)
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     NSView *v = getOuterView();
     if (v != nil) {
-    NSRect f = rect;
-    if (!NSEqualRects(f, [v frame])) {
-        [v setFrame:f];
-        [v setNeedsDisplay: NO];
-    }
+        NSRect f = rect;
+        if (!NSEqualRects(f, [v frame])) {
+            [v setFrame:f];
+            [v setNeedsDisplay: NO];
+        }
     }
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
+IntPoint Widget::mapFromGlobal(const IntPoint &p) const
+{
+    NSPoint bp = {0,0};
+
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    bp = [[FrameMac::bridgeForWidget(this) window] convertScreenToBase:[data->view convertPoint:p toView:nil]];
+    return IntPoint(bp);
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return IntPoint();
+}
+
 NSView* Widget::getView() const
 {
-    return data->view.get();
+    return data->view;
 }
 
 void Widget::setView(NSView* view)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    HardRetain(view);
+    HardRelease(data->view);
     data->view = view;
     END_BLOCK_OBJC_EXCEPTIONS;
+}
+
+float Widget::scaleFactor() const
+{
+	return 1.0;
 }
 
 NSView* Widget::getOuterView() const
 {
     // If this widget's view is a WebCoreFrameView the we resize its containing view, a WebFrameView.
 
-    NSView* view = data->view.get();
+    NSView* view = data->view;
     if ([view conformsToProtocol:@protocol(WebCoreFrameView)]) {
         view = [view superview];
         ASSERT(view);
@@ -191,56 +237,64 @@ NSView* Widget::getOuterView() const
     return view;
 }
 
+// FIXME: Get rid of the single use of these next two functions (frame resizing), and remove them.
+
+GraphicsContext* Widget::lockDrawingFocus()
+{
+    PlatformGraphicsContext* platformContext = static_cast<PlatformGraphicsContext*>(WKGetCurrentGraphicsContext());
+    return new GraphicsContext(platformContext);
+}
+
+void Widget::unlockDrawingFocus(GraphicsContext* context)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    [getView() unlockFocus];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    delete context;
+}
+
+void Widget::disableFlushDrawing()
+{
+}
+
+void Widget::enableFlushDrawing()
+{
+}
+
 void Widget::paint(GraphicsContext* p, const IntRect& r)
 {
     if (p->paintingDisabled())
         return;
-    // FIXME: Calling setNeedsDisplayInRect: in Purple seems incorrect here and it causes
-    // zooming to be noticeably slow.
+    // WebCoreTextArea and WebCoreTextField both rely on the fact that we use this particular
+    // NSView display method. If you change this, be sure to update them as well.
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     //[view setNeedsDisplayInRect:[view convertRect:r fromView:[view superview]]];
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
-void Widget::invalidate()
+void Widget::sendConsumedMouseUp()
 {
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    [getView() setNeedsDisplay: YES];
-    END_BLOCK_OBJC_EXCEPTIONS;
+    if (client())
+        client()->sendConsumedMouseUp(this);
 }
 
-void Widget::invalidateRect(const IntRect& r)
-{
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    [getView() setNeedsDisplayInRect: r];
-    END_BLOCK_OBJC_EXCEPTIONS;
-}
-
-// FIXME: Should move this to Chrome; bad layering that this knows about Frame.
 void Widget::setIsSelected(bool isSelected)
 {
-    if (Frame* frame = Frame::frameForWidget(this))
-        [frame->bridge() setIsSelected:isSelected forView:getView()];
+    [FrameMac::bridgeForWidget(this) setIsSelected:isSelected forView:getView()];
 }
 
-void Widget::addToSuperview(NSView *view)
+void Widget::addToSuperview(NSView *superview)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
 
-    ASSERT(view);
+    ASSERT(superview);
     NSView *subview = getOuterView();
     if (!subview)
         return;
-    ASSERT(![view isDescendantOf:subview]);
-    
-    // Suppress the resetting of drag margins since we know we can't affect them.
-    NSWindow* window = [view window];
-    BOOL resetDragMargins = [window _needsToResetDragMargins];
-    [window _setNeedsToResetDragMargins:NO];
-    if ([subview superview] != view)
-        [view addSubview:subview];
+    ASSERT(![superview isDescendantOf:subview]);
+    if ([subview superview] != superview)
+        [superview addSubview:subview];
     data->removeFromSuperviewSoon = false;
-    [window _setNeedsToResetDragMargins:resetDragMargins];
 
     END_BLOCK_OBJC_EXCEPTIONS;
 }
@@ -252,13 +306,15 @@ void Widget::removeFromSuperview()
     else {
         data->removeFromSuperviewSoon = false;
         BEGIN_BLOCK_OBJC_EXCEPTIONS;
-        safeRemoveFromSuperview(getOuterView());
+        [getOuterView() removeFromSuperview];
         END_BLOCK_OBJC_EXCEPTIONS;
     }
 }
 
-void Widget::beforeMouseDown(NSView *view, Widget* widget)
+void Widget::beforeMouseDown(NSView *view)
 {
+    ASSERT([view conformsToProtocol:@protocol(WebCoreWidgetHolder)]);
+    Widget* widget = [(NSView <WebCoreWidgetHolder> *)view widget];
     if (widget) {
         ASSERT(view == widget->getOuterView());
         ASSERT(!widget->data->mustStayInWindow);
@@ -266,17 +322,31 @@ void Widget::beforeMouseDown(NSView *view, Widget* widget)
     }
 }
 
-void Widget::afterMouseDown(NSView *view, Widget* widget)
+void Widget::afterMouseDown(NSView *view)
 {
+    ASSERT([view conformsToProtocol:@protocol(WebCoreWidgetHolder)]);
+    Widget* widget = [(NSView <WebCoreWidgetHolder>*)view widget];
     if (!widget) {
         BEGIN_BLOCK_OBJC_EXCEPTIONS;
-        safeRemoveFromSuperview(view);
+        [view removeFromSuperview];
         END_BLOCK_OBJC_EXCEPTIONS;
     } else {
         ASSERT(widget->data->mustStayInWindow);
         widget->data->mustStayInWindow = false;
         if (widget->data->removeFromSuperviewSoon)
             widget->removeFromSuperview();
+    }
+}
+
+void Widget::setDeferFirstResponderChanges(bool defer)
+{
+    deferFirstResponderChanges = defer;
+    if (!defer) {
+        Widget* r = deferredFirstResponder;
+        deferredFirstResponder = 0;
+        if (r) {
+            r->setFocus();
+        }
     }
 }
 
@@ -289,17 +359,5 @@ WidgetClient* Widget::client() const
 {
     return data->client;
 }
-
-void Widget::removeFromParent()
-{
-}
-
-
-#if ENABLE(HW_COMP)
-// ScrollView overrides to handle scrollview widgets
-void Widget::hostCompositingLayer(LCLayer* inLayer)
-{
-}
-#endif
 
 }

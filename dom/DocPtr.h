@@ -15,21 +15,22 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef DocPtr_h
-#define DocPtr_h
+#ifndef DOM_DocPtr_h
+#define DOM_DocPtr_h
 
 namespace WebCore {
 
-template <class T> class DocPtr {
-public:
+template <class T> class DocPtr
+{
+ public:
     DocPtr() : m_ptr(0) {}
     DocPtr(T *ptr) : m_ptr(ptr) { if (ptr) ptr->selfOnlyRef(); }
-    DocPtr(const DocPtr &o) : m_ptr(o.m_ptr) { if (T *ptr = m_ptr) ptr->selfOnlyRef(); }
+    DocPtr(const DocPtr &o) : m_ptr(o.m_ptr) { if (T *ptr = m_ptr) ptr->selfOnlyRefRef(); }
     ~DocPtr() { if (T *ptr = m_ptr) ptr->selfOnlyDeref(); }
     
     template <class U> DocPtr(const DocPtr<U> &o) : m_ptr(o.get()) { if (T *ptr = m_ptr) ptr->selfOnlyRef(); }
@@ -112,4 +113,4 @@ template <class T> inline bool operator!=(const T *a, const DocPtr<T> &b)
 
 } // namespace WebCore
 
-#endif // DocPtr_h
+#endif // DOM_DocPtr_h

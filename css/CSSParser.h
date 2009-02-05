@@ -16,19 +16,18 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSParser_h
-#define CSSParser_h
+#ifndef CSS_cssparser_h_
+#define CSS_cssparser_h_
 
 #include "AtomicString.h"
 #include "Color.h"
-#include "CSSSelectorList.h"
-#include "MediaQuery.h"
 #include <wtf/HashSet.h>
 #include <wtf/Vector.h>
+#include "MediaQuery.h"
 
 namespace WebCore {
 
@@ -37,27 +36,27 @@ namespace WebCore {
     class CSSProperty;
     class CSSRule;
     class CSSRuleList;
-    class WebKitCSSKeyframeRule;
-    class WebKitCSSKeyframesRule;
     class CSSSelector;
     class CSSStyleSheet;
     class CSSValue;
     class CSSValueList;
     class Document;
     class MediaList;
-    class MediaList;
-    class MediaQueryExp;
     class StyleBase;
     class StyleList;
-    struct Function;
+    class MediaList;
+    class MediaQueryExp;
+
 
     struct ParseString {
         UChar* characters;
         int length;
-
+        
         void lower();
     };
 
+    struct Function;
+    
     struct Value {
         int id;
         bool isInt;
@@ -76,14 +75,10 @@ namespace WebCore {
     };
 
     DeprecatedString deprecatedString(const ParseString&);
-
-    static inline String domString(const ParseString& ps)
-    {
+    static inline String domString(const ParseString& ps) {
         return String(ps.characters, ps.length);
     }
-
-    static inline AtomicString atomicString(const ParseString& ps)
-    {
+    static inline AtomicString atomicString(const ParseString& ps) {
         return AtomicString(ps.characters, ps.length);
     }
 
@@ -91,15 +86,10 @@ namespace WebCore {
     public:
         ValueList() : m_current(0) { }
         ~ValueList();
-
         void addValue(const Value& v) { m_values.append(v); }
         unsigned size() const { return m_values.size(); }
         Value* current() { return m_current < m_values.size() ? &m_values[m_current] : 0; }
         Value* next() { ++m_current; return current(); }
-
-        Value* valueAt(unsigned i) { return i < m_values.size() ? &m_values[i] : 0; }
-        void deleteValueAt(unsigned i) { m_values.remove(i); }
-
     private:
         Vector<Value, 16> m_values;
         unsigned m_current;
@@ -111,17 +101,17 @@ namespace WebCore {
 
         ~Function() { delete args; }
     };
-
-    class CSSParser {
+    
+    class CSSParser
+    {
     public:
         CSSParser(bool strictParsing = true);
         ~CSSParser();
 
         void parseSheet(CSSStyleSheet*, const String&);
         PassRefPtr<CSSRule> parseRule(CSSStyleSheet*, const String&);
-        PassRefPtr<CSSRule> parseKeyframeRule(CSSStyleSheet*, const String&);
-        bool parseValue(CSSMutableStyleDeclaration*, int propId, const String&, bool important);
-        static bool parseColor(RGBA32& color, const String&, bool strict = false);
+        bool parseValue(CSSMutableStyleDeclaration*, int id, const String&, bool important);
+        static RGBA32 parseColor(const String&);
         bool parseColor(CSSMutableStyleDeclaration*, const String&);
         bool parseDeclaration(CSSMutableStyleDeclaration*, const String&);
         bool parseMediaQuery(MediaList*, const String&);
@@ -130,7 +120,7 @@ namespace WebCore {
 
         Document* document() const;
 
-        void addProperty(int propId, PassRefPtr<CSSValue>, bool important);
+        void addProperty(int propId, CSSValue*, bool important);
         void rollbackLastProperties(int num);
         bool hasProperties() const { return numParsedProperties > 0; }
 
@@ -139,73 +129,42 @@ namespace WebCore {
         bool parse4Values(int propId, const int* properties, bool important);
         bool parseContent(int propId, bool important);
 
-        PassRefPtr<CSSValue> parseBackgroundColor();
-        bool parseBackgroundImage(RefPtr<CSSValue>&);
-        PassRefPtr<CSSValue> parseBackgroundPositionXY(bool& xFound, bool& yFound);
-        void parseBackgroundPosition(RefPtr<CSSValue>&, RefPtr<CSSValue>&);
-        PassRefPtr<CSSValue> parseBackgroundSize();
-
-        void parseTransformOrigin(RefPtr<CSSValue>&, RefPtr<CSSValue>&, RefPtr<CSSValue>&);
+        CSSValue* parseBackgroundColor();
+        CSSValue* parseBackgroundImage();
+        CSSValue* parseBackgroundPositionXY(bool& xFound, bool& yFound);
+        void parseBackgroundPosition(CSSValue*& value1, CSSValue*& value2);
+        CSSValue* parseBackgroundSize();
         
-        bool parseBackgroundProperty(int propId, int& propId1, int& propId2, RefPtr<CSSValue>&, RefPtr<CSSValue>&);
+        bool parseBackgroundProperty(int propId, int& propId1, int& propId2, CSSValue*& retValue1, CSSValue*& retValue2);
         bool parseBackgroundShorthand(bool important);
 
-        void addBackgroundValue(RefPtr<CSSValue>& lval, PassRefPtr<CSSValue> rval);
-
-        void addTransitionValue(RefPtr<CSSValue>& lval, PassRefPtr<CSSValue> rval);
-
-        PassRefPtr<CSSValue> parseTransitionDuration();
-        PassRefPtr<CSSValue> parseTransitionIterationCount();
-        PassRefPtr<CSSValue> parseTransitionTimingFunction();
-
-        PassRefPtr<CSSValue> parseAnimationDirection();
-        PassRefPtr<CSSValue> parseAnimationName();
-        PassRefPtr<CSSValue> parseAnimationPlayState();
-
-        bool parseTimingFunctionValue(ValueList*& args, double& result);
-
-        PassRefPtr<CSSValue> parseTransitionProperty();
-        PassRefPtr<CSSValue> parseAnimationDelay();
-        bool parseTransitionProperty(int propId, RefPtr<CSSValue>&);
-
-        bool parseTransitionShorthand(bool important);
-        bool parseAnimationShorthand(bool important);
-        
+        void addBackgroundValue(CSSValue*& lval, CSSValue* rval);
+      
+#if __APPLE__
         bool parseDashboardRegions(int propId, bool important);
+#endif
 
         bool parseShape(int propId, bool important);
-
         bool parseFont(bool important);
-        PassRefPtr<CSSValueList> parseFontFamily();
-
-        bool parseCounter(int propId, int defaultValue, bool important);
-        PassRefPtr<CSSValue> parseCounterContent(ValueList* args, bool counters);
-
+        CSSValueList* parseFontFamily();
         bool parseColorParameters(Value*, int* colorValues, bool parseAlpha);
         bool parseHSLParameters(Value*, double* colorValues, bool parseAlpha);
-        PassRefPtr<CSSPrimitiveValue> parseColor(Value* = 0);
-        bool parseColorFromValue(Value*, RGBA32&, bool = false);
-
-        static bool parseColor(const String&, RGBA32& rgb, bool strict);
-
-        bool parseFontFaceSrc();
-        bool parseFontFaceUnicodeRange();
-
-#if ENABLE(SVG)
+        CSSPrimitiveValue* parseColor();
+        CSSPrimitiveValue* parseColorFromValue(Value*);
+        
+#if SVG_SUPPORT
         bool parseSVGValue(int propId, bool important);
-        PassRefPtr<CSSValue> parseSVGPaint();
-        PassRefPtr<CSSValue> parseSVGColor();
-        PassRefPtr<CSSValue> parseSVGStrokeDasharray();
+        CSSValue* parseSVGPaint();
+        CSSValue* parseSVGColor();
+        CSSValue* parseSVGStrokeDasharray();
 #endif
+
+        static bool parseColor(const DeprecatedString&, RGBA32& rgb);
 
         // CSS3 Parsing Routines (for properties specific to CSS3)
         bool parseShadow(int propId, bool important);
         bool parseBorderImage(int propId, bool important);
-        
-        PassRefPtr<CSSValue> parseTransform();
-        bool parseTransformOrigin(int propId, int& propId1, int& propId2, int& propId3, RefPtr<CSSValue>&, RefPtr<CSSValue>&, RefPtr<CSSValue>&);
-        bool parsePerspectiveOrigin(int propId, int& propId1, int& propId, RefPtr<CSSValue>&, RefPtr<CSSValue>&);
-        
+
         int yyparse();
 
         CSSSelector* createFloatingSelector();
@@ -220,14 +179,10 @@ namespace WebCore {
         Value& sinkFloatingValue(Value&);
 
         MediaList* createMediaList();
-        CSSRule* createCharsetRule(const ParseString&);
         CSSRule* createImportRule(const ParseString&, MediaList*);
         CSSRule* createMediaRule(MediaList*, CSSRuleList*);
         CSSRuleList* createRuleList();
-        WebKitCSSKeyframeRule* createKeyframeRule(float key);
-        CSSRule* createStyleRule(Vector<CSSSelector*>* selectors);
-        CSSRule* createFontFaceRule();
-        WebKitCSSKeyframesRule* createKeyframesRule();
+        CSSRule* createStyleRule(CSSSelector*);
 
         MediaQueryExp* createFloatingMediaQueryExp(const AtomicString&, ValueList*);
         MediaQueryExp* sinkFloatingMediaQueryExp(MediaQueryExp*);
@@ -236,21 +191,18 @@ namespace WebCore {
         MediaQuery* createFloatingMediaQuery(MediaQuery::Restrictor, const String&, Vector<MediaQueryExp*>*);
         MediaQuery* sinkFloatingMediaQuery(MediaQuery*);
 
-        Vector<CSSSelector*>* reusableSelectorVector() { return &m_reusableSelectorVector; }
-        
     public:
         bool strict;
         bool important;
         int id;
         StyleList* styleElement;
         RefPtr<CSSRule> rule;
-        RefPtr<CSSRule> keyframe;
         MediaQuery* mediaQuery;
         ValueList* valueList;
         CSSProperty** parsedProperties;
         int numParsedProperties;
         int maxParsedProperties;
-
+        
         int m_inParseShorthand;
         int m_currentShorthand;
         bool m_implicitShorthand;
@@ -273,8 +225,6 @@ namespace WebCore {
 
         bool inShorthand() const { return m_inParseShorthand; }
 
-        void checkForOrphanedUnits();
-        
         UChar* data;
         UChar* yytext;
         UChar* yy_c_buf_p;
@@ -294,8 +244,6 @@ namespace WebCore {
         MediaQuery* m_floatingMediaQuery;
         MediaQueryExp* m_floatingMediaQueryExp;
         Vector<MediaQueryExp*>* m_floatingMediaQueryExpList;
-        
-        Vector<CSSSelector*> m_reusableSelectorVector;
 
         // defines units allowed for a certain property, used in parseUnit
         enum Units {
@@ -312,15 +260,11 @@ namespace WebCore {
         };
 
         friend inline Units operator|(Units a, Units b)
-        {
-            return static_cast<Units>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
-        }
+            { return static_cast<Units>(static_cast<unsigned>(a) | static_cast<unsigned>(b)); }
 
         static bool validUnit(Value*, Units, bool strict);
-        
-        friend class TransformOperationInfo;
     };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSParser_h
+#endif

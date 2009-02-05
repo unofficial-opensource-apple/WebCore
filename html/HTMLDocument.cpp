@@ -1,7 +1,9 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  * Portions are Copyright (C) 2002 Netscape Communications Corporation.
  * Other contributors: David Baron <dbaron@fas.harvard.edu>
@@ -33,7 +35,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Alternatively, the document type parsing portions of this file may be used
  * under the terms of either the Mozilla Public License Version 1.1, found at
@@ -54,23 +56,15 @@
 #include "HTMLDocument.h"
 
 #include "CSSPropertyNames.h"
-#include "CSSStyleSelector.h"
-#include "CString.h"
 #include "CookieJar.h"
-#include "DocumentLoader.h"
 #include "DocumentType.h"
 #include "ExceptionCode.h"
 #include "Frame.h"
-#include "FrameLoader.h"
-#include "FrameView.h"
-#include "HTMLBodyElement.h"
 #include "HTMLElement.h"
 #include "HTMLElementFactory.h"
 #include "HTMLNames.h"
 #include "HTMLTokenizer.h"
-#include "InspectorController.h"
-#include "KURL.h"
-#include "Page.h"
+#include "cssstyleselector.h"
 
 #include "DocTypeStrings.cpp"
 
@@ -78,196 +72,58 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLDocument::HTMLDocument(DOMImplementation* implementation, Frame* frame)
-    : Document(implementation, frame)
+HTMLDocument::HTMLDocument(DOMImplementation *_implementation, FrameView *v)
+  : Document(_implementation, v)
 {
-    clearXMLVersion();
+    bodyElement = 0;
+    htmlElement = 0;
 }
 
 HTMLDocument::~HTMLDocument()
 {
 }
 
-int HTMLDocument::width()
+String HTMLDocument::lastModified() const
 {
-    updateLayoutIgnorePendingStylesheets();
-    FrameView* frameView = view();
-    return frameView ? frameView->contentsWidth() : 0;
+    if ( frame() )
+        return frame()->lastModified();
+    return String();
 }
 
-int HTMLDocument::height()
+String HTMLDocument::cookie() const
 {
-    updateLayoutIgnorePendingStylesheets();
-    FrameView* frameView = view();
-    return frameView ? frameView->contentsHeight() : 0;
+    return cookies(URL());
 }
 
-String HTMLDocument::dir()
+void HTMLDocument::setCookie(const String& value)
 {
+    setCookies(URL(), m_policyBaseURL.deprecatedString(), value);
+}
+
+void HTMLDocument::setBody(HTMLElement *_body, ExceptionCode& ec)
+{
+    if (!_body) { 
+        ec = HIERARCHY_REQUEST_ERR;
+        return;
+    }
     HTMLElement* b = body();
     if (!b)
-        return String();
-    return b->dir();
-}
-
-void HTMLDocument::setDir(const String& value)
-{
-    HTMLElement* b = body();
-    if (b)
-        b->setDir(value);
-}
-
-String HTMLDocument::designMode() const
-{
-    return inDesignMode() ? "on" : "off";
-}
-
-void HTMLDocument::setDesignMode(const String& value)
-{
-    InheritedBool mode;
-    if (equalIgnoringCase(value, "on"))
-        mode = on;
-    else if (equalIgnoringCase(value, "off"))
-        mode = off;
+        documentElement()->appendChild(_body, ec);
     else
-        mode = inherit;
-    Document::setDesignMode(mode);
-}
-
-String HTMLDocument::compatMode() const
-{
-    return inCompatMode() ? "BackCompat" : "CSS1Compat";
-}
-
-String HTMLDocument::bgColor()
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (!bodyElement)
-        return String();
-    return bodyElement->bgColor();
-}
-
-void HTMLDocument::setBgColor(const String& value)
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (bodyElement)
-        bodyElement->setBgColor(value);
-}
-
-String HTMLDocument::fgColor()
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (!bodyElement)
-        return String();
-    return bodyElement->text();
-}
-
-void HTMLDocument::setFgColor(const String& value)
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (bodyElement)
-        bodyElement->setText(value);
-}
-
-String HTMLDocument::alinkColor()
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (!bodyElement)
-        return String();
-    return bodyElement->aLink();
-}
-
-void HTMLDocument::setAlinkColor(const String& value)
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (bodyElement) {
-        // This check is a bit silly, but some benchmarks like to set the
-        // document's link colors over and over to the same value and we
-        // don't want to incur a style update each time.
-        if (bodyElement->aLink() != value)
-            bodyElement->setALink(value);
-    }
-}
-
-String HTMLDocument::linkColor()
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (!bodyElement)
-        return String();
-    return bodyElement->link();
-}
-
-void HTMLDocument::setLinkColor(const String& value)
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (bodyElement) {
-        // This check is a bit silly, but some benchmarks like to set the
-        // document's link colors over and over to the same value and we
-        // don't want to incur a style update each time.
-        if (bodyElement->link() != value)
-            bodyElement->setLink(value);
-    }
-}
-
-String HTMLDocument::vlinkColor()
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (!bodyElement)
-        return String();
-    return bodyElement->vLink();
-}
-
-void HTMLDocument::setVlinkColor(const String& value)
-{
-    HTMLElement* b = body();
-    HTMLBodyElement* bodyElement = (b && b->hasTagName(bodyTag)) ? static_cast<HTMLBodyElement*>(b) : 0;
-
-    if (bodyElement) {
-        // This check is a bit silly, but some benchmarks like to set the
-        // document's link colors over and over to the same value and we
-        // don't want to incur a style update each time.
-        if (bodyElement->vLink() != value)
-            bodyElement->setVLink(value);
-    }
-}
-
-void HTMLDocument::captureEvents()
-{
-}
-
-void HTMLDocument::releaseEvents()
-{
+        documentElement()->replaceChild(_body, b, ec);
 }
 
 Tokenizer *HTMLDocument::createTokenizer()
 {
-    bool reportErrors = true;
-    return new HTMLTokenizer(this, reportErrors);
+    // FIXME: this should probably pass the frame instead
+    return new HTMLTokenizer(this, true);
 }
 
 // --------------------------------------------------------------------------
 // not part of the DOM
 // --------------------------------------------------------------------------
 
-bool HTMLDocument::childAllowed(Node *newChild)
+bool HTMLDocument::childAllowed( Node *newChild )
 {
     return newChild->hasTagName(htmlTag) || newChild->isCommentNode();
 }
@@ -304,7 +160,7 @@ static void removeItemFromMap(HTMLDocument::NameCountMap& map, const String& nam
         return;
 
     int oldVal = it->second;
-    ASSERT(oldVal != 0);
+    assert(oldVal != 0);
     int newVal = oldVal - 1;
     if (newVal == 0)
         map.remove(it);
@@ -347,10 +203,10 @@ const int PARSEMODE_HAVE_PUBLIC_ID      =       (1<<1);
 const int PARSEMODE_HAVE_SYSTEM_ID      =       (1<<2);
 const int PARSEMODE_HAVE_INTERNAL       =       (1<<3);
 
-static int parseDocTypePart(const String& buffer, int index)
+static int parseDocTypePart(const DeprecatedString& buffer, int index)
 {
     while (true) {
-        UChar ch = buffer[index];
+        DeprecatedChar ch = buffer[index];
         if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
             ++index;
         else if (ch == '-') {
@@ -366,23 +222,23 @@ static int parseDocTypePart(const String& buffer, int index)
     }
 }
 
-static bool containsString(const char* str, const String& buffer, int offset)
+static bool containsString(const char* str, const DeprecatedString& buffer, int offset)
 {
-    String startString(str);
+    DeprecatedString startString(str);
     if (offset + startString.length() > buffer.length())
         return false;
     
-    String bufferString = buffer.substring(offset, startString.length()).lower();
-    String lowerStart = startString.lower();
+    DeprecatedString bufferString = buffer.mid(offset, startString.length()).lower();
+    DeprecatedString lowerStart = startString.lower();
 
     return bufferString.startsWith(lowerStart);
 }
 
-static bool parseDocTypeDeclaration(const String& buffer,
+static bool parseDocTypeDeclaration(const DeprecatedString& buffer,
                                     int* resultFlags,
-                                    String& name,
-                                    String& publicID,
-                                    String& systemID)
+                                    DeprecatedString& name,
+                                    DeprecatedString& publicID,
+                                    DeprecatedString& systemID)
 {
     bool haveDocType = false;
     *resultFlags = 0;
@@ -392,7 +248,7 @@ static bool parseDocTypeDeclaration(const String& buffer,
     do {
         index = buffer.find('<', index);
         if (index == -1) break;
-        UChar nextChar = buffer[index+1];
+        DeprecatedChar nextChar = buffer[index+1];
         if (nextChar == '!') {
             if (containsString("doctype", buffer, index+2)) {
                 haveDocType = true;
@@ -416,7 +272,7 @@ static bool parseDocTypeDeclaration(const String& buffer,
     if (!containsString("html", buffer, index))
         return false;
     
-    name = buffer.substring(index, 4);
+    name = buffer.mid(index, 4);
     index = parseDocTypePart(buffer, index+4);
     bool hasPublic = containsString("public", buffer, index);
     if (hasPublic) {
@@ -425,7 +281,7 @@ static bool parseDocTypeDeclaration(const String& buffer,
         // We've read <!DOCTYPE HTML PUBLIC (not case sensitive).
         // Now we find the beginning and end of the public identifers
         // and system identifiers (assuming they're even present).
-        UChar theChar = buffer[index];
+        DeprecatedChar theChar = buffer[index];
         if (theChar != '\"' && theChar != '\'')
             return false;
         
@@ -436,7 +292,7 @@ static bool parseDocTypeDeclaration(const String& buffer,
         if (publicIDEnd == -1)
             return false;
         index = parseDocTypePart(buffer, publicIDEnd+1);
-        UChar next = buffer[index];
+        DeprecatedChar next = buffer[index];
         if (next == '>') {
             // Public identifier present, but no system identifier.
             // Do nothing.  Note that this is the most common
@@ -449,7 +305,7 @@ static bool parseDocTypeDeclaration(const String& buffer,
             int systemIDEnd = buffer.find(next, systemIDStart);
             if (systemIDEnd == -1)
                 return false;
-            systemID = buffer.substring(systemIDStart, systemIDEnd - systemIDStart);
+            systemID = buffer.mid(systemIDStart, systemIDEnd - systemIDStart);
         }
         else if (next == '[') {
             // We found an internal subset.
@@ -459,7 +315,7 @@ static bool parseDocTypeDeclaration(const String& buffer,
             return false; // Something's wrong.
 
         // We need to trim whitespace off the public identifier.
-        publicID = buffer.substring(publicIDStart, publicIDEnd - publicIDStart);
+        publicID = buffer.mid(publicIDStart, publicIDEnd - publicIDStart);
         publicID = publicID.stripWhiteSpace();
         *resultFlags |= PARSEMODE_HAVE_PUBLIC_ID;
     } else {
@@ -467,18 +323,18 @@ static bool parseDocTypeDeclaration(const String& buffer,
             // Doctype has a system ID but no public ID
             *resultFlags |= PARSEMODE_HAVE_SYSTEM_ID;
             index = parseDocTypePart(buffer, index+6);
-            UChar next = buffer[index];
+            DeprecatedChar next = buffer[index];
             if (next != '\"' && next != '\'')
                 return false;
             int systemIDStart = index+1;
             int systemIDEnd = buffer.find(next, systemIDStart);
             if (systemIDEnd == -1)
                 return false;
-            systemID = buffer.substring(systemIDStart, systemIDEnd - systemIDStart);
+            systemID = buffer.mid(systemIDStart, systemIDEnd - systemIDStart);
             index = parseDocTypePart(buffer, systemIDEnd+1);
         }
 
-        UChar nextChar = buffer[index];
+        DeprecatedChar nextChar = buffer[index];
         if (nextChar == '[')
             *resultFlags |= PARSEMODE_HAVE_INTERNAL;
         else if (nextChar != '>')
@@ -488,7 +344,7 @@ static bool parseDocTypeDeclaration(const String& buffer,
     return true;
 }
 
-void HTMLDocument::determineParseMode(const String& str)
+void HTMLDocument::determineParseMode( const DeprecatedString &str )
 {
     // This code more or less mimics Mozilla's implementation (specifically the
     // doctype parsing implemented by David Baron in Mozilla's nsParser.cpp).
@@ -504,35 +360,35 @@ void HTMLDocument::determineParseMode(const String& str)
     // STRICT - no quirks apply.  Web pages will obey the specifications to
     // the letter.
 
-    String name, systemID, publicID;
+    DeprecatedString name, systemID, publicID;
     int resultFlags = 0;
     if (parseDocTypeDeclaration(str, &resultFlags, name, publicID, systemID)) {
         if (resultFlags & PARSEMODE_HAVE_DOCTYPE)
             setDocType(new DocumentType(this, name, publicID, systemID));
         if (!(resultFlags & PARSEMODE_HAVE_DOCTYPE)) {
             // No doctype found at all.  Default to quirks mode and Html4.
-            setParseMode(Compat);
-            setHTMLMode(Html4);
+            pMode = Compat;
+            hMode = Html4;
         }
         else if ((resultFlags & PARSEMODE_HAVE_INTERNAL) ||
                  !(resultFlags & PARSEMODE_HAVE_PUBLIC_ID)) {
             // Internal subsets always denote full standards, as does
             // a doctype without a public ID.
-            setParseMode(Strict);
-            setHTMLMode(Html4);
+            pMode = Strict;
+            hMode = Html4;
         }
         else {
             // We have to check a list of public IDs to see what we
             // should do.
-            String lowerPubID = publicID.lower();
-            CString pubIDStr = lowerPubID.latin1();
+            DeprecatedString lowerPubID = publicID.lower();
+            const char* pubIDStr = lowerPubID.latin1();
            
             // Look up the entry in our gperf-generated table.
-            const PubIDInfo* doctypeEntry = findDoctypeEntry(pubIDStr.data(), pubIDStr.length());
+            const PubIDInfo* doctypeEntry = findDoctypeEntry(pubIDStr, publicID.length());
             if (!doctypeEntry) {
                 // The DOCTYPE is not in the list.  Assume strict mode.
-                setParseMode(Strict);
-                setHTMLMode(Html4);
+                pMode = Strict;
+                hMode = Html4;
                 return;
             }
 
@@ -541,30 +397,30 @@ void HTMLDocument::determineParseMode(const String& str)
                     doctypeEntry->mode_if_no_sysid)
             {
                 case PubIDInfo::eQuirks3:
-                    setParseMode(Compat);
-                    setHTMLMode(Html3);
+                    pMode = Compat;
+                    hMode = Html3;
                     break;
                 case PubIDInfo::eQuirks:
-                    setParseMode(Compat);
-                    setHTMLMode(Html4);
+                    pMode = Compat;
+                    hMode = Html4;
                     break;
                 case PubIDInfo::eAlmostStandards:
-                    setParseMode(AlmostStrict);
-                    setHTMLMode(Html4);
+                    pMode = AlmostStrict;
+                    hMode = Html4;
                     break;
                  default:
-                    ASSERT(false);
+                    assert(false);
             }
         }   
     }
     else {
         // Malformed doctype implies quirks mode.
-        setParseMode(Compat);
-        setHTMLMode(Html3);
+        pMode = Compat;
+        hMode = Html3;
     }
   
-    styleSelector()->strictParsing = !inCompatMode();
+    m_styleSelector->strictParsing = !inCompatMode();
  
 }
-    
+
 }

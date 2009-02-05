@@ -19,8 +19,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -41,7 +41,7 @@ class NamedAttrMap;
 // the actual Attr (Attr) with its value as textchild
 // is only allocated on demand by the DOM bindings.
 // Any use of Attr inside khtml should be avoided.
-class Attribute : public RefCounted<Attribute> {
+class Attribute : public Shared<Attribute> {
     friend class Attr;
     friend class Element;
     friend class NamedAttrMap;
@@ -75,12 +75,10 @@ public:
     // An extension to get the style information for presentational attributes.
     virtual CSSStyleDeclaration* style() const { return 0; }
     
+private:
     void setValue(const AtomicString& value) { m_value = value; }
     void setPrefix(const AtomicString& prefix) { m_name.setPrefix(prefix); }
 
-    virtual bool isMappedAttribute() { return false; }
-
-private:
     QualifiedName m_name;
     AtomicString m_value;
     Attr* m_impl;

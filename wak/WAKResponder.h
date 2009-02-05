@@ -2,13 +2,13 @@
 //  WAKResponder.h
 //  WebCore
 //
-//  Copyright (C) 2005, 2006, 2007, 2008, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
 //
 
 #import <Foundation/Foundation.h>
-#import <GraphicsServices/GSBase.h>
-#import <JavaScriptCore/Platform.h>
+
 #import "WKTypes.h"
+#import "GraphicsServices/GSBase.h"
 
 @interface WAKResponder : NSObject
 {
@@ -21,11 +21,10 @@
 - (BOOL)tryToPerform:(SEL)anAction with:(id)anObject;
 - (void)mouseEntered:(GSEventRef)theEvent;
 - (void)mouseExited:(GSEventRef)theEvent;
+//- (void)interpretKeyEvents:(NSArray *)eventArray;
+- (void)_wk_interpretKeyEvent:(GSEventRef)event;
 - (void)keyDown:(GSEventRef)event;
 - (void)keyUp:(GSEventRef)event;
-#if ENABLE(TOUCH_EVENTS)
-- (void)touch:(GSEventRef)event;
-#endif
 
 - (void)insertText:(NSString *)text;
 

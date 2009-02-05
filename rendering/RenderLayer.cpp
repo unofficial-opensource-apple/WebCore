@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * Portions are Copyright (C) 1998 Netscape Communications Corporation.
  *
@@ -24,7 +24,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Alternatively, the contents of this file may be used under the terms
  * of either the Mozilla Public License Version 1.1, found at
@@ -44,41 +44,31 @@
 #include "config.h"
 #include "RenderLayer.h"
 
-#include "AffineTransform.h"
-#include "CString.h"
 #include "CSSPropertyNames.h"
-#include "CSSStyleSelector.h"
 #include "Document.h"
-#include "EventHandler.h"
 #include "EventNames.h"
-#include "FloatQuad.h"
-#include "FocusController.h"
+#include "FloatRect.h"
 #include "Frame.h"
-#include "FrameView.h"
 #include "FrameTree.h"
 #include "GraphicsContext.h"
 #include "HTMLMarqueeElement.h"
 #include "HTMLNames.h"
-#include "HitTestRequest.h"
-#include "HitTestResult.h"
 #include "OverflowEvent.h"
-#include "Page.h"
 #include "PlatformMouseEvent.h"
-#include "PlatformScrollBar.h" 
 #include "RenderArena.h"
+#include "RenderFormElement.h"
 #include "RenderInline.h"
 #include "RenderTheme.h"
 #include "RenderView.h"
 #include "SelectionController.h"
 
-#ifndef NDEBUG
-#include "TextStream.h"
-#include "RenderTreeAsText.h"
-#endif
-
-#if ENABLE(SVG)
+#if SVG_SUPPORT
 #include "SVGNames.h"
 #endif
+
+// These match the numbers we use over in WebKit (WebFrameView.m).
+#define LINE_STEP   40
+#define PAGE_KEEP   40
 
 #define MIN_INTERSECT_FOR_REVEAL 32
 
@@ -88,6 +78,8 @@ namespace WebCore {
 
 using namespace EventNames;
 using namespace HTMLNames;
+
+ScrollBar* RenderLayer::gScrollBar = 0;
 
 #ifndef NDEBUG
 static bool inRenderLayerDestroy;
@@ -121,279 +113,122 @@ void ClipRects::destroy(RenderArena* renderArena)
     renderArena->free(*(size_t *)this, this);
 }
 
-#pragma mark -
-
 RenderLayer::RenderLayer(RenderObject* object)
-    : m_object(object)
-    , m_parent(0)
-    , m_previous(0)
-    , m_next(0)
-    , m_first(0)
-    , m_last(0)
-    , m_relX(0)
-    , m_relY(0)
-    , m_x(0)
-    , m_y(0)
-    , m_width(0)
-    , m_height(0)
-    , m_scrollX(0)
-    , m_scrollY(0)
-    , m_scrollOriginX(0)
-    , m_scrollLeftOverflow(0)
-    , m_scrollWidth(0)
-    , m_scrollHeight(0)
-    , m_inResizeMode(false)
-    , m_posZOrderList(0)
-    , m_negZOrderList(0)
-    , m_overflowList(0)
-    , m_clipRects(0) 
-    , m_scrollDimensionsDirty(true)
-    , m_zOrderListsDirty(true)
-    , m_overflowListDirty(true)
-    , m_isOverflowOnly(shouldBeOverflowOnly())
-    , m_usedTransparency(false)
-    , m_inOverflowRelayout(false)
-    , m_needsFullRepaint(false)
-    , m_overflowStatusDirty(true)
-    , m_visibleContentStatusDirty(true)
-    , m_hasVisibleContent(false)
-    , m_visibleDescendantStatusDirty(false)
-    , m_hasVisibleDescendant(false)
-    , m_styleChangePending(false)
-#if ENABLE(HW_COMP)
-    , m_forceCompositingLayer(false)
-    , m_isSimpleContainerCompositingLayer(false)
-    , m_simpleCompositingLayerStatusDirty(true)
-    , m_hasCompositingDescendant(false)
-    , m_compositingContentOffsetDirty(true)
-    , m_rebuildingLayerTree(false)
-#endif
-    , m_marquee(0)
-    , m_staticX(0)
-    , m_staticY(0)
-#if ENABLE(HW_COMP)
-    , m_transformOriginX(0.5f)
-    , m_transformOriginY(0.5f)
-    , m_transformOriginZ(0)
-    , m_layer(0)
-    , m_contentsLayer(0)
-    , m_clippingLayer(0)
-#if PROFILE_LAYER_REBUILD
-    , m_rootLayerUpdateCount(0)
-#endif // PROFILE_LAYER_REBUILD
-#endif
+: m_object(object),
+m_parent(0),
+m_previous(0),
+m_next(0),
+m_first(0),
+m_last(0),
+m_relX(0),
+m_relY(0),
+m_x(0),
+m_y(0),
+m_width(0),
+m_height(0),
+m_scrollX(0),
+m_scrollY(0),
+m_scrollOriginX(0),
+m_scrollLeftOverflow(0),
+m_scrollWidth(0),
+m_scrollHeight(0),
+m_hBar(0),
+m_vBar(0),
+m_inResizeMode(false),
+m_resizeCornerImage(0),
+m_posZOrderList(0),
+m_negZOrderList(0),
+m_overflowList(0),
+m_clipRects(0) ,
+m_scrollDimensionsDirty(true),
+m_zOrderListsDirty(true),
+m_overflowListDirty(true),
+m_isOverflowOnly(shouldBeOverflowOnly()),
+m_usedTransparency(false),
+m_inOverflowRelayout(false),
+m_repaintOverflowOnResize(false),
+m_overflowStatusDirty(true),
+m_marquee(0)
 {
-    if (!object->firstChild() && object->style()) {
-        m_visibleContentStatusDirty = false;
-        m_hasVisibleContent = object->style()->visibility() == VISIBLE;
-    }
 }
 
 RenderLayer::~RenderLayer()
 {
-    if (inResizeMode() && !renderer()->documentBeingDestroyed()) {
-        if (Frame* frame = renderer()->document()->frame())
-            frame->eventHandler()->resizeLayerDestroyed();
-    }
-
-    destroyScrollbar(HorizontalScrollbar);
-    destroyScrollbar(VerticalScrollbar);
-
     // Child layers will be deleted by their corresponding render objects, so
-    // we don't need to delete them ourselves.
-
+    // our destructor doesn't have to do anything.
+    delete m_hBar;
+    delete m_vBar;
+    delete m_resizeCornerImage;
     delete m_posZOrderList;
     delete m_negZOrderList;
     delete m_overflowList;
     delete m_marquee;
     
-#if ENABLE(HW_COMP)
-    m_object = 0;
-    destroyCompositingLayer();
-#endif
-    
     // Make sure we have no lingering clip rects.
-    ASSERT(!m_clipRects);
+    assert(!m_clipRects);
+}
+
+void RenderLayer::checkForRepaintOnResize()
+{
+    m_repaintOverflowOnResize = m_object->selfNeedsLayout() || m_object->hasOverflowClip() && m_object->normalChildNeedsLayout();
+    for (RenderLayer* child = firstChild(); child; child = child->nextSibling())
+        child->checkForRepaintOnResize();
 }
 
 void RenderLayer::updateLayerPositions(bool doFullRepaint, bool checkForRepaint)
 {
     if (doFullRepaint) {
         m_object->repaint();
-#if ENABLE(HW_COMP)
-        checkForRepaint = false;
-        // we need the full repaint to propagate to child layers if we are hardware compositing
-        if (!inCompositingMode())
-            doFullRepaint = false;
-#else
         checkForRepaint = doFullRepaint = false;
-#endif
     }
     
     updateLayerPosition(); // For relpositioned layers or non-positioned layers,
                            // we need to keep in sync, since we may have shifted relative
                            // to our parent layer.
-    
-    positionOverflowControls();
 
-    updateVisibilityStatus();
+    positionResizeControl();
+    if (m_hBar || m_vBar) {
+        // Need to position the scrollbars.
+        int x = 0;
+        int y = 0;
+        convertToLayerCoords(root(), x, y);
+        IntRect layerBounds = IntRect(x,y,width(),height());
+        positionScrollbars(layerBounds);
+    }
 
-    updateTransform();
-     
-    if (m_hasVisibleContent) {
-        RenderView* view = m_object->view();
-        ASSERT(view);
-        // FIXME: Optimize using LayoutState and remove the disableLayoutState() call
-        // from updateScrollInfoAfterLayout().
-        ASSERT(!view->layoutState());
-
-        IntRect newRect = m_object->absoluteClippedOverflowRect();
-        IntRect newOutlineBox = m_object->absoluteOutlineBox();
+    // FIXME: Child object could override visibility.
+    if (m_object->style()->visibility() == VISIBLE) {
+        int x, y;
+        m_object->absolutePosition(x, y);
+        IntRect newRect, newFullRect;
+        m_object->getAbsoluteRepaintRectIncludingFloats(newRect, newFullRect);
         if (checkForRepaint) {
-            if (view && !view->printing()) {
-                if (m_needsFullRepaint) {
-                    view->repaintViewRectangle(m_repaintRect);
-                    if (newRect != m_repaintRect)
-                        view->repaintViewRectangle(newRect);
-                } else
-                    m_object->repaintAfterLayoutIfNeeded(m_repaintRect, m_outlineBox);
+            RenderView *c = m_object->view();
+            if (c && !c->printingMode()) {
+                bool didMove = x != m_repaintX || y != m_repaintY;
+                if (!didMove && !m_repaintOverflowOnResize)
+                    m_object->repaintAfterLayoutIfNeeded(m_repaintRect, m_fullRepaintRect);
+                else if (didMove || newRect != m_repaintRect) {
+                    c->repaintViewRectangle(m_fullRepaintRect);
+                    c->repaintViewRectangle(newFullRect);
+                }
             }
         }
         m_repaintRect = newRect;
-        m_outlineBox = newOutlineBox;
+        m_fullRepaintRect = newFullRect;
+        m_repaintX = x;
+        m_repaintY = y;
     } else {
         m_repaintRect = IntRect();
-        m_outlineBox = IntRect();
+        m_fullRepaintRect = IntRect();
     }
-
-    m_needsFullRepaint = false;
     
     for (RenderLayer* child = firstChild(); child; child = child->nextSibling())
         child->updateLayerPositions(doFullRepaint, checkForRepaint);
-
-#if ENABLE(HW_COMP)
-    // Once all of our child layers have had their positions updated, update the
-    // compositing layer position (since it uses the union of the bounds of all
-    // non-compositing sublayers).
-    if (hasCompositingLayer())
-        updateCompositingLayerPosition();
-#endif
         
     // With all our children positioned, now update our marquee if we need to.
     if (m_marquee)
         m_marquee->updateMarqueePosition();
-}
-
-void RenderLayer::updateTransform()
-{
-#if !ENABLE(HW_COMP)
-    bool hasTransform = renderer()->hasTransform();
-    bool hadTransform = m_transform;
-    if (hasTransform != hadTransform) {
-        if (hasTransform)
-            m_transform.set(new AffineTransform);
-        else
-            m_transform.clear();
-    }
-    
-    if (hasTransform) {
-        Transform3D transform3D;
-        renderer()->style()->applyTransform(transform3D, renderer()->borderBox().size(), true);
-        m_transform.set(new AffineTransform(transform3D.affineTransform()));
-    }
-#endif
-}
-
-void RenderLayer::setHasVisibleContent(bool b)
-{ 
-    if (m_hasVisibleContent == b && !m_visibleContentStatusDirty)
-        return;
-    m_visibleContentStatusDirty = false; 
-    m_hasVisibleContent = b;
-    if (m_hasVisibleContent) {
-        m_repaintRect = renderer()->absoluteClippedOverflowRect();
-        m_outlineBox = renderer()->absoluteOutlineBox();
-        if (!isOverflowOnly()) {
-            dirtyStackingContextZOrderList();
-        }
-    }
-    if (parent())
-        parent()->childVisibilityChanged(m_hasVisibleContent);
-}
-
-void RenderLayer::dirtyVisibleContentStatus() 
-{ 
-    m_visibleContentStatusDirty = true; 
-    if (parent())
-        parent()->dirtyVisibleDescendantStatus();
-}
-
-void RenderLayer::childVisibilityChanged(bool newVisibility) 
-{ 
-    if (m_hasVisibleDescendant == newVisibility || m_visibleDescendantStatusDirty)
-        return;
-    if (newVisibility) {
-        RenderLayer* l = this;
-        while (l && !l->m_visibleDescendantStatusDirty && !l->m_hasVisibleDescendant) {
-            l->m_hasVisibleDescendant = true;
-            l = l->parent();
-        }
-    } else 
-        dirtyVisibleDescendantStatus();
-}
-
-void RenderLayer::dirtyVisibleDescendantStatus()
-{
-    RenderLayer* l = this;
-    while (l && !l->m_visibleDescendantStatusDirty) {
-        l->m_visibleDescendantStatusDirty = true;
-        l = l->parent();
-    }
-}
-
-void RenderLayer::updateVisibilityStatus()
-{
-    if (m_visibleDescendantStatusDirty) {
-        m_hasVisibleDescendant = false;
-        for (RenderLayer* child = firstChild(); child; child = child->nextSibling()) {
-            child->updateVisibilityStatus();        
-            if (child->m_hasVisibleContent || child->m_hasVisibleDescendant) {
-                m_hasVisibleDescendant = true;
-                break;
-            }
-        }
-        m_visibleDescendantStatusDirty = false;
-    }
-
-    if (m_visibleContentStatusDirty) {
-        if (m_object->style()->visibility() == VISIBLE)
-            m_hasVisibleContent = true;
-        else {
-            // layer may be hidden but still have some visible content, check for this
-            m_hasVisibleContent = false;
-            RenderObject* r = m_object->firstChild();
-            while (r) {
-                if (r->style()->visibility() == VISIBLE && !r->hasLayer()) {
-                    m_hasVisibleContent = true;
-                    break;
-                }
-                if (r->firstChild() && !r->hasLayer())
-                    r = r->firstChild();
-                else if (r->nextSibling())
-                    r = r->nextSibling();
-                else {
-                    do {
-                        r = r->parent();
-                        if (r==m_object)
-                            r = 0;
-                    } while (r && !r->nextSibling());
-                    if (r)
-                        r = r->nextSibling();
-                }
-            }
-        }    
-        m_visibleContentStatusDirty = false; 
-    }
 }
 
 void RenderLayer::updateLayerPosition()
@@ -401,14 +236,19 @@ void RenderLayer::updateLayerPosition()
     // Clear our cached clip rect information.
     clearClipRect();
 
+    // The canvas is sized to the docWidth/Height over in RenderView::layout, so we
+    // don't need to ever update our layer position here.
+    if (renderer()->isRenderView())
+        return;
+    
     int x = m_object->xPos();
     int y = m_object->yPos() - m_object->borderTopExtra();
 
-    if (!m_object->isPositioned() && m_object->parent()) {
+    if (!m_object->isPositioned()) {
         // We must adjust our position by walking up the render tree looking for the
         // nearest enclosing object with a layer.
         RenderObject* curr = m_object->parent();
-        while (curr && !curr->hasLayer()) {
+        while (curr && !curr->layer()) {
             if (!curr->isTableRow()) {
                 // Rows and cells share the same coordinate space (that of the section).
                 // Omit them when computing our xpos/ypos.
@@ -439,12 +279,39 @@ void RenderLayer::updateLayerPosition()
         // For positioned layers, we subtract out the enclosing positioned layer's scroll offset.
         positionedParent->subtractScrollOffset(x, y);
         
-        if (m_object->isPositioned()) {
-            IntSize offset = static_cast<RenderBox*>(m_object)->offsetForPositionedInContainer(positionedParent->renderer());
-            x += offset.width();
-            y += offset.height();
+        if (m_object->isPositioned() && positionedParent->renderer()->isRelPositioned() &&
+            positionedParent->renderer()->isInlineFlow()) {
+            // When we have an enclosing relpositioned inline, we need to add in the offset of the first line
+            // box from the rest of the content, but only in the cases where we know we're positioned
+            // relative to the inline itself.
+            RenderFlow* flow = static_cast<RenderFlow*>(positionedParent->renderer());
+            int sx = 0, sy = 0;
+            if (flow->firstLineBox()) {
+                sx = flow->firstLineBox()->xPos();
+                sy = flow->firstLineBox()->yPos();
+            }
+            else {
+                sx = flow->staticX();
+                sy = flow->staticY();
+            }
+            bool isInlineType = m_object->style()->isOriginalDisplayInlineType();
+            
+            if (!m_object->hasStaticX())
+                x += sx;
+            
+            // This is not terribly intuitive, but we have to match other browsers.  Despite being a block display type inside
+            // an inline, we still keep our x locked to the left of the relative positioned inline.  Arguably the correct
+            // behavior would be to go flush left to the block that contains the inline, but that isn't what other browsers
+            // do.
+            if (m_object->hasStaticX() && !isInlineType)
+                // Avoid adding in the left border/padding of the containing block twice.  Subtract it out.
+                x += sx - (m_object->containingBlock()->borderLeft() + m_object->containingBlock()->paddingLeft());
+            
+            if (!m_object->hasStaticY())
+                y += sy;
         }
-    } else if (parent())
+    }
+    else if (parent())
         parent()->subtractScrollOffset(x, y);
     
     setPos(x,y);
@@ -460,33 +327,12 @@ void RenderLayer::updateLayerPosition()
     }
 }
 
-#if !ENABLE(HW_COMP)
-Transform3D RenderLayer::currentTransform() const
-{
-    Transform3D t;
-    const TransformOperations& transformOps = m_object->style()->transform();
-    for (unsigned i = 0; i < transformOps.size(); ++i)
-        transformOps[i].get()->apply(t, IntSize(renderer()->width(), renderer()->height()));
-
-    return t;
-}
-
-float RenderLayer::currentOpacity() const
-{
-    return renderer()->opacity();
-}
-#endif
-
 RenderLayer *RenderLayer::stackingContext() const
 {
     RenderLayer* curr = parent();
     for ( ; curr && !curr->m_object->isRenderView() && !curr->m_object->isRoot() &&
-#if ENABLE(HW_COMP)
-          !curr->isStackingContext();
-#else
           curr->m_object->style()->hasAutoZIndex();
-#endif
-          curr = curr->parent()) { };
+          curr = curr->parent());
     return curr;
 }
 
@@ -494,106 +340,64 @@ RenderLayer*
 RenderLayer::enclosingPositionedAncestor() const
 {
     RenderLayer* curr = parent();
-    for ( ; curr && !curr->m_object->isRenderView() && !curr->m_object->isPositioned() && !curr->m_object->isRelPositioned() && !curr->m_object->hasTransform();
-         curr = curr->parent()) { };
-    return curr;
-}
-
-RenderLayer*
-RenderLayer::enclosingDocumentLayer() const
-{
-    RenderLayer* curr = const_cast<RenderLayer*>(this);
-    for ( ; curr && !curr->isDocumentLayer();
-         curr = curr->parent()) { }
+    for ( ; curr && !curr->m_object->isRenderView() && !curr->m_object->isRoot() &&
+         !curr->m_object->isPositioned() && !curr->m_object->isRelPositioned();
+         curr = curr->parent());
+         
     return curr;
 }
 
 bool
 RenderLayer::isTransparent() const
 {
-#if ENABLE(SVG)
+#if SVG_SUPPORT
     if (m_object->node()->namespaceURI() == SVGNames::svgNamespaceURI)
         return false;
 #endif
     return m_object->isTransparent();
 }
 
-bool
-RenderLayer::isTransparentForDrawing() const
-{
-#if ENABLE(HW_COMP)
-    // composting layers handle transparency themselves, so when drawing into a compositing layer,
-    // we draw opaquely
-    return isTransparent() && !hasCompositingLayer();
-#else
-    return isTransparent();
-#endif
-}
-
 RenderLayer*
 RenderLayer::transparentAncestor()
 {
-    if (hasCompositingLayer())
-        return 0;
-
     RenderLayer* curr = parent();
-    for ( ; curr && !curr->hasCompositingLayer() && !curr->isTransparentForDrawing(); curr = curr->parent());
+    for ( ; curr && !curr->isTransparent(); curr = curr->parent());
     return curr;
 }
 
-static IntRect transparencyClipBox(const AffineTransform& enclosingTransform, const RenderLayer* l, const RenderLayer* rootLayer)
+static IntRect transparencyClipBox(RenderLayer* l)
 {
-    // FIXME: Although this function completely ignores CSS-imposed clipping, we did already intersect with the
+    // FIXME: Although this completely ignores clipping, we ultimately intersect with the
     // paintDirtyRect, and that should cut down on the amount we have to paint.  Still it
     // would be better to respect clips.
-    
-#if !ENABLE(HW_COMP)
-    AffineTransform* t = l->transform();
-    if (t) {
-        // The best we can do here is to use enclosed bounding boxes to establish a "fuzzy" enough clip to encompass
-        // the transformed layer and all of its children.
-        int x = 0;
-        int y = 0;
-        l->convertToLayerCoords(rootLayer, x, y);
-        AffineTransform transform;
-        transform.translate(x, y);
-        transform = *t * transform;
-        transform = transform * enclosingTransform;
-       
-        // We now have a transform that will produce a rectangle in our view's space.
-        IntRect clipRect = transform.mapRect(l->boundingBox(l));
-        
-        // Now shift the root layer to be us and pass down the new enclosing transform.
-        for (RenderLayer* curr = l->firstChild(); curr; curr = curr->nextSibling())
-            clipRect.unite(transparencyClipBox(transform, curr, l));
-            
-        return clipRect;
-    }
-#endif
+    IntRect clipRect = l->absoluteBoundingBox();
     
     // Note: we don't have to walk z-order lists since transparent elements always establish
-    // a stacking context.  This means we can just walk the layer tree directly.
-    IntRect clipRect = l->boundingBox(rootLayer);
-    for (RenderLayer* curr = l->firstChild(); curr; curr = curr->nextSibling())
-        clipRect.unite(transparencyClipBox(enclosingTransform, curr, rootLayer));
+    // a stacking context.  This means we can just walk the layer tree directly. 
+    for (RenderLayer* curr = l->firstChild(); curr; curr = curr->nextSibling()) {
+        // Transparent children paint in a different transparency layer, and so we exclude them.
+        if (!curr->isTransparent())
+            clipRect.unite(curr->absoluteBoundingBox());
+    }
     
     return clipRect;
 }
 
-void RenderLayer::beginTransparencyLayers(GraphicsContext* p, const RenderLayer* rootLayer)
+void RenderLayer::beginTransparencyLayers(GraphicsContext* p, const IntRect& paintDirtyRect)
 {
-
-    if (p->paintingDisabled() || (isTransparentForDrawing() && m_usedTransparency))
+    if (p->paintingDisabled() || (isTransparent() && m_usedTransparency))
         return;
     
     RenderLayer* ancestor = transparentAncestor();
     if (ancestor)
-        ancestor->beginTransparencyLayers(p, rootLayer);
+        ancestor->beginTransparencyLayers(p, paintDirtyRect);
     
-    if (isTransparentForDrawing()) {
+    if (isTransparent()) {
         m_usedTransparency = true;
+        IntRect clipRect = transparencyClipBox(this);
+        clipRect.intersect(paintDirtyRect);
         p->save();
-        p->clip(transparencyClipBox(AffineTransform(), this, rootLayer));
+        p->addClip(clipRect);
         p->beginTransparencyLayer(renderer()->opacity());
     }
 }
@@ -605,7 +409,7 @@ void* RenderLayer::operator new(size_t sz, RenderArena* renderArena) throw()
 
 void RenderLayer::operator delete(void* ptr, size_t sz)
 {
-    ASSERT(inRenderLayerDestroy);
+    assert(inRenderLayerDestroy);
     
     // Stash size where destroy can find it.
     *(size_t *)ptr = sz;
@@ -625,54 +429,39 @@ void RenderLayer::destroy(RenderArena* renderArena)
     renderArena->free(*(size_t *)this, this);
 }
 
-void RenderLayer::addChild(RenderLayer* child, RenderLayer* beforeChild)
+void RenderLayer::addChild(RenderLayer *child, RenderLayer* beforeChild)
 {
     RenderLayer* prevSibling = beforeChild ? beforeChild->previousSibling() : lastChild();
     if (prevSibling) {
         child->setPreviousSibling(prevSibling);
         prevSibling->setNextSibling(child);
-    } else
+    }
+    else
         setFirstChild(child);
 
     if (beforeChild) {
         beforeChild->setPreviousSibling(child);
         child->setNextSibling(beforeChild);
-    } else
+    }
+    else
         setLastChild(child);
-
+   
     child->setParent(this);
 
     if (child->isOverflowOnly())
         dirtyOverflowList();
-
-    if (!child->isOverflowOnly() || child->firstChild()) {
+    else {
         // Dirty the z-order list in which we are contained.  The stackingContext() can be null in the
         // case where we're building up generated content layers.  This is ok, since the lists will start
         // off dirty in that case anyway.
-        child->dirtyStackingContextZOrderList();
+        RenderLayer* stackingContext = child->stackingContext();
+        if (stackingContext)
+            stackingContext->dirtyZOrderLists();
     }
-
-    child->updateVisibilityStatus();
-    if (child->m_hasVisibleContent || child->m_hasVisibleDescendant)
-        childVisibilityChanged(true);
-    
-#if ENABLE(HW_COMP)
-    if (isDocumentLayer() && hasCompositingLayer()) {
-        // odd to hook up to the root layer here. maybe RenderView should
-        // take care of this somehow.
-        parentInRootLayer();
-    }
-
-    m_simpleCompositingLayerStatusDirty = true;
-#endif
 }
 
 RenderLayer* RenderLayer::removeChild(RenderLayer* oldChild)
 {
-#if ENABLE(HW_COMP)
-    unparentChildsLayer(oldChild);
-#endif
-    
     // remove the child
     if (oldChild->previousSibling())
         oldChild->previousSibling()->setNextSibling(oldChild->nextSibling());
@@ -686,20 +475,18 @@ RenderLayer* RenderLayer::removeChild(RenderLayer* oldChild)
 
     if (oldChild->isOverflowOnly())
         dirtyOverflowList();
-    if (!oldChild->isOverflowOnly() || oldChild->firstChild()) { 
+    else { 
         // Dirty the z-order list in which we are contained.  When called via the
         // reattachment process in removeOnlyThisLayer, the layer may already be disconnected
         // from the main layer tree, so we need to null-check the |stackingContext| value.
-        oldChild->dirtyStackingContextZOrderList();
+        RenderLayer* stackingContext = oldChild->stackingContext();
+        if (stackingContext)
+            stackingContext->dirtyZOrderLists();
     }
 
     oldChild->setPreviousSibling(0);
     oldChild->setNextSibling(0);
     oldChild->setParent(0);
-    
-    oldChild->updateVisibilityStatus();
-    if (oldChild->m_hasVisibleContent || oldChild->m_hasVisibleDescendant)
-        childVisibilityChanged(false);
     
     return oldChild;
 }
@@ -709,16 +496,6 @@ void RenderLayer::removeOnlyThisLayer()
     if (!m_parent)
         return;
     
-#if ENABLE(HW_COMP)
-    if (hasCompositingLayer()) {
-        RenderLayer* compLayer = enclosingCompositingAncestor();
-        if (compLayer) {
-            IntRect dummyRect;
-            IntRect ancestorRect = calculateCompositingLayerBounds(compLayer, dummyRect);
-            compLayer->setNeedsRepaintInRect(ancestorRect);
-        }
-    }
-#endif
     // Dirty the clip rects.
     clearClipRects();
 
@@ -829,7 +606,7 @@ void RenderLayer::scrollToOffset(int x, int y, bool updateScrollbars, bool repai
             }
         }
     }
-    
+
     // FIXME: Eventually, we will want to perform a blit.  For now never
     // blit, since the check for blitting is going to be very
     // complicated (since it will involve testing whether our layer
@@ -843,21 +620,14 @@ void RenderLayer::scrollToOffset(int x, int y, bool updateScrollbars, bool repai
         child->updateLayerPositions(false, false);
     
     RenderView* view = renderer()->view();
-    
-    // We should have a RenderView if we're trying to scroll.
-    ASSERT(view);
     if (view) {
-#if ENABLE(DASHBOARD_SUPPORT)
+#if __APPLE__
         // Update dashboard regions, scrolling may change the clip of a
         // particular region.
         view->frameView()->updateDashboardRegions();
 #endif
-#if ENABLE(TOUCH_EVENTS)
-        if (m_object->document()->touchEventListeners().size() > 0)
-            m_object->document()->setTouchEventListenersDirty(true);
-#endif
 
-        view->updateWidgetPositions();
+        m_object->view()->updateWidgetPositions();
     }
 
     // Just schedule a full repaint of our object.
@@ -871,10 +641,8 @@ void RenderLayer::scrollToOffset(int x, int y, bool updateScrollbars, bool repai
             m_vBar->setValue(m_scrollY);
     }
 
-    // Schedule the scroll DOM event.
-    if (view)
-        if (FrameView* frameView = view->frameView())
-            frameView->scheduleEvent(new Event(scrollEvent, true, false), EventTargetNodeCast(renderer()->element()), true);
+    // Fire the scroll DOM event.
+    EventTargetNodeCast(m_object->element())->dispatchHTMLEvent(scrollEvent, true, false);
 }
 
 void RenderLayer::scrollRectToVisible(const IntRect &rect, const ScrollAlignment& alignX, const ScrollAlignment& alignY)
@@ -882,92 +650,58 @@ void RenderLayer::scrollRectToVisible(const IntRect &rect, const ScrollAlignment
     RenderLayer* parentLayer = 0;
     IntRect newRect = rect;
     int xOffset = 0, yOffset = 0;
-
-    // We may end up propagating a scroll event. It is important that we suspend events until 
-    // the end of the function since they could delete the layer or the layer's m_object.
-    FrameView* frameView = m_object->document()->view();
-    if (frameView)
-        frameView->pauseScheduledEvents();
-
-    bool restrictedByLineClamp = false;
-    if (m_object->parent()) {
-        parentLayer = m_object->parent()->enclosingLayer();
-        restrictedByLineClamp = m_object->parent()->style()->lineClamp() >= 0;
-    }
-
-    if (m_object->hasOverflowClip() && !restrictedByLineClamp) {
-        // Don't scroll to reveal an overflow layer that is restricted by the -webkit-line-clamp property.
-        // This will prevent us from revealing text hidden by the slider in Safari RSS.
-        int x, y;
-        m_object->absolutePosition(x, y);
-        x += m_object->borderLeft();
-        y += m_object->borderTop();
-
-        IntRect layerBounds = IntRect(x + scrollXOffset(), y + scrollYOffset(), m_object->clientWidth(), m_object->clientHeight());
+    
+    if (m_object->hasOverflowClip()) {
+        IntRect layerBounds = IntRect(xPos() + scrollXOffset(), yPos() + scrollYOffset(), 
+                                      width() - verticalScrollbarWidth(), height() - horizontalScrollbarHeight());
         IntRect exposeRect = IntRect(rect.x() + scrollXOffset(), rect.y() + scrollYOffset(), rect.width(), rect.height());
         IntRect r = getRectToExpose(layerBounds, exposeRect, alignX, alignY);
         
-        xOffset = r.x() - x;
-        yOffset = r.y() - y;
+        xOffset = r.x() - xPos();
+        yOffset = r.y() - yPos();
         // Adjust offsets if they're outside of the allowable range.
-        xOffset = max(0, min(scrollWidth() - layerBounds.width(), xOffset));
-        yOffset = max(0, min(scrollHeight() - layerBounds.height(), yOffset));
+        xOffset = max(0, min(scrollWidth() - width(), xOffset));
+        yOffset = max(0, min(scrollHeight() - height(), yOffset));
         
         if (xOffset != scrollXOffset() || yOffset != scrollYOffset()) {
             int diffX = scrollXOffset();
             int diffY = scrollYOffset();
             scrollToOffset(xOffset, yOffset);
+            // FIXME: At this point a scroll event fired, which could have deleted this layer.
+            // Need to handle this case.
             diffX = scrollXOffset() - diffX;
             diffY = scrollYOffset() - diffY;
             newRect.setX(rect.x() - diffX);
             newRect.setY(rect.y() - diffY);
         }
-    } else if (!parentLayer) {
-        if (frameView) {
+    
+        if (m_object->parent())
+            parentLayer = m_object->parent()->enclosingLayer();
+    } else {
+        FrameView* view = m_object->document()->view();
+        if (view) {
+            IntRect viewRect = enclosingIntRect(view->visibleContentRect());
+            IntRect r = getRectToExpose(viewRect, rect, alignX, alignY);
+            
+            xOffset = r.x();
+            yOffset = r.y();
+            // Adjust offsets if they're outside of the allowable range.
+            xOffset = max(0, min(view->contentsWidth(), xOffset));
+            yOffset = max(0, min(view->contentsHeight(), yOffset));
+
             if (m_object->document() && m_object->document()->ownerElement() && m_object->document()->ownerElement()->renderer()) {
-                IntRect viewRect = enclosingIntRect(frameView->visibleContentRect());
-                IntRect r = getRectToExpose(viewRect, rect, alignX, alignY);
-                
-                xOffset = r.x();
-                yOffset = r.y();
-                // Adjust offsets if they're outside of the allowable range.
-                xOffset = max(0, min(frameView->contentsWidth(), xOffset));
-                yOffset = max(0, min(frameView->contentsHeight(), yOffset));
-
-                frameView->setContentsPos(xOffset, yOffset);
+                view->setContentsPos(xOffset, yOffset);
                 parentLayer = m_object->document()->ownerElement()->renderer()->enclosingLayer();
-                newRect.setX(rect.x() - frameView->contentsX() + frameView->x());
-                newRect.setY(rect.y() - frameView->contentsY() + frameView->y());
+                newRect.setX(rect.x() - view->contentsX() + view->x());
+                newRect.setY(rect.y() - view->contentsY() + view->y());
             } else {
-                IntRect viewRect = enclosingIntRect(frameView->visibleContentRectConsideringExternalScrollers());
-                IntRect r = getRectToExpose(viewRect, rect, alignX, alignY);
-                
-                // Purple Note: This line of code causes a crash on
-                // Purple in the simulator that is difficult to
-                // reproduce. We think the problem is tied to the speed with
-                // which you can type on a standard USB keyboard. We do not
-                // see this bug on the hardware. Formerly, we had this code
-                // commented out in the (mistaken) belief that we could live
-                // without it. This bug told us we were wrong:
-                //
-                // <rdar://problem/5113022> intra-page links not jumping
-                //
-                // Other related bugs:
-                // <rdar://problem/5071319> Crash while quickly entering text into host name field
-                // <rdar://problem/5082381> Fix ScrollViewMac::scrollPointRecursively on Purple
-
-                // If this is the outermost view that RenderLayer needs to scroll, then we should scroll the view recursively
-                // Other apps, like Mail, rely on this feature.
-                frameView->scrollRectIntoViewRecursively(r);
+                view->scrollPointRecursively(xOffset, yOffset);
             }
         }
     }
     
     if (parentLayer)
         parentLayer->scrollRectToVisible(newRect, alignX, alignY);
-
-    if (frameView)
-        frameView->resumeScheduledEvents();
 }
 
 IntRect RenderLayer::getRectToExpose(const IntRect &visibleRect, const IntRect &exposeRect, const ScrollAlignment& alignX, const ScrollAlignment& alignY)
@@ -1044,97 +778,101 @@ IntRect RenderLayer::getRectToExpose(const IntRect &visibleRect, const IntRect &
 }
 
 void RenderLayer::autoscroll()
-{
-    Frame* frame = renderer()->document()->frame();
-    if (!frame)
-        return;
+{    
+    int xOffset = scrollXOffset();
+    int yOffset = scrollYOffset();
 
-    FrameView* frameView = frame->view();
-    if (!frameView)
-        return;
+    // Get the rectangle for the extent of the selection
+    SelectionController sel = renderer()->document()->frame()->selection();
+    IntRect extentRect = SelectionController(sel.extent(), sel.affinity()).caretRect();
+    extentRect.move(xOffset, yOffset);
 
-    frame->eventHandler()->updateSelectionForMouseDrag();
+    IntRect bounds = IntRect(xPos() + xOffset, yPos() + yOffset, width() - verticalScrollbarWidth(), height() - horizontalScrollbarHeight());
+    
+    // Calculate how much the layer should scroll horizontally.
+    int diffX = 0;
+    if (extentRect.right() > bounds.right())
+        diffX = extentRect.right() - bounds.right();
+    else if (extentRect.x() < bounds.x())
+        diffX = extentRect.x() - bounds.x();
+        
+    // Calculate how much the layer should scroll vertically.
+    int diffY = 0;
+    if (extentRect.bottom() > bounds.bottom())
+        diffY = extentRect.bottom() - bounds.bottom();
+    else if (extentRect.y() < bounds.y())
+        diffY = extentRect.y() - bounds.y();
 
-    IntPoint currentDocumentPosition = frameView->windowToContents(frame->eventHandler()->currentMousePosition());
-    scrollRectToVisible(IntRect(currentDocumentPosition, IntSize(1, 1)), gAlignToEdgeIfNeeded, gAlignToEdgeIfNeeded);    
+    scrollToOffset(xOffset + diffX, yOffset + diffY);
 }
 
-void RenderLayer::resize(const PlatformMouseEvent& evt, const IntSize& oldOffset)
+bool RenderLayer::shouldAutoscroll()
 {
-    if (!inResizeMode() || !m_object->hasOverflowClip())
+    if (renderer()->hasOverflowClip() && (m_object->scrollsOverflow() || renderer()->node()->isContentEditable()))
+        return true;
+    return false;
+}
+
+void RenderLayer::resize(const PlatformMouseEvent& evt, const IntSize& offsetFromResizeCorner)
+{
+    if (!inResizeMode() || !renderer()->hasOverflowClip() || m_object->style()->resize() == RESIZE_NONE)
         return;
 
-    // Set the width and height of the shadow ancestor node if there is one.
-    // This is necessary for textarea elements since the resizable layer is in the shadow content.
-    Element* element = static_cast<Element*>(m_object->node()->shadowAncestorNode());
-    RenderBox* renderer = static_cast<RenderBox*>(element->renderer());
-
-    EResize resize = renderer->style()->resize();
-    if (resize == RESIZE_NONE)
+    if (!m_object->document()->frame()->view()->mousePressed())
         return;
 
-    Document* document = element->document();
-    if (!document->frame()->eventHandler()->mousePressed())
-        return;
+    // FIXME Radar 4118559: This behaves very oddly for textareas that are in blocks with right-aligned text; you have
+    // to drag the bottom-right corner to make the bottom-left corner move.
+    // FIXME Radar 4118564: ideally we'd autoscroll the window as necessary to keep the point under
+    // the cursor in view.
 
-    IntSize newOffset = offsetFromResizeCorner(document->view()->windowToContents(evt.pos()));
+    IntPoint currentPoint = m_object->document()->view()->viewportToContents(evt.pos());
+    currentPoint += offsetFromResizeCorner;
 
-    IntSize currentSize = IntSize(renderer->width(), renderer->height());
-
-    IntSize minimumSize = element->minimumSizeForResizing().shrunkTo(currentSize);
-    element->setMinimumSizeForResizing(minimumSize);
-
-    IntSize difference = (currentSize + newOffset - oldOffset).expandedTo(minimumSize) - currentSize;
-
-    CSSStyleDeclaration* style = element->style();
-    bool isBoxSizingBorder = renderer->style()->boxSizing() == BORDER_BOX;
-
-    ExceptionCode ec;
-
-    if (difference.width()) {
-        if (element && element->isControl()) {
-            // Make implicit margins from the theme explicit (see <http://bugs.webkit.org/show_bug.cgi?id=9547>).
+    int x;
+    int y;
+    m_object->absolutePosition(x, y);
+    int right = x + m_object->width();
+    int bottom = y + m_object->height();
+    int diffWidth =  max(currentPoint.x() - right, min(0, MinimumWidthWhileResizing - m_object->width()));
+    int diffHeight = max(currentPoint.y() - bottom, min(0, MinimumHeightWhileResizing - m_object->height()));
+    
+    ExceptionCode ec = 0;
+    // Set the width and height for the shadow ancestor node.  This is necessary for textareas since the resizable layer is on the inner div.
+    // For non-shadow content, this will set the width and height on the original node.
+    RenderObject* renderer = m_object->node()->shadowAncestorNode()->renderer();
+    if (diffWidth && (m_object->style()->resize() == RESIZE_HORIZONTAL || m_object->style()->resize() == RESIZE_BOTH)) {
+        CSSStyleDeclaration* style = static_cast<Element*>(m_object->node()->shadowAncestorNode())->style();
+        if (renderer->style()->hasAppearance() || renderer->isFormElement() && static_cast<RenderFormElement*>(renderer)->canHaveIntrinsicMargins()) {
             style->setProperty(CSS_PROP_MARGIN_LEFT, String::number(renderer->marginLeft()) + "px", false, ec);
             style->setProperty(CSS_PROP_MARGIN_RIGHT, String::number(renderer->marginRight()) + "px", false, ec);
         }
-        int baseWidth = renderer->width() - (isBoxSizingBorder ? 0
-            : renderer->borderLeft() + renderer->paddingLeft() + renderer->borderRight() + renderer->paddingRight());
-        style->setProperty(CSS_PROP_WIDTH, String::number(baseWidth + difference.width()) + "px", false, ec);
+        int baseWidth = renderer->width() - (renderer->style()->boxSizing() == BORDER_BOX ? 0 : renderer->borderLeft() + renderer->paddingLeft() + renderer->borderRight() + renderer->paddingRight());
+        style->setProperty(CSS_PROP_WIDTH, String::number(baseWidth + diffWidth) + "px", false, ec);
     }
 
-    if (difference.height()) {
-        if (element && element->isControl()) {
-            // Make implicit margins from the theme explicit (see <http://bugs.webkit.org/show_bug.cgi?id=9547>).
+    if (diffHeight && (m_object->style()->resize() == RESIZE_VERTICAL || m_object->style()->resize() == RESIZE_BOTH)) {
+        CSSStyleDeclaration* style = static_cast<Element*>(m_object->node()->shadowAncestorNode())->style();
+        if (renderer->style()->hasAppearance() || renderer->isFormElement() && static_cast<RenderFormElement*>(renderer)->canHaveIntrinsicMargins()) {
             style->setProperty(CSS_PROP_MARGIN_TOP, String::number(renderer->marginTop()) + "px", false, ec);
             style->setProperty(CSS_PROP_MARGIN_BOTTOM, String::number(renderer->marginBottom()) + "px", false, ec);
         }
-        int baseHeight = renderer->height() - (isBoxSizingBorder ? 0
-            : renderer->borderTop() + renderer->paddingTop() + renderer->borderBottom() + renderer->paddingBottom());
-        style->setProperty(CSS_PROP_HEIGHT, String::number(baseHeight + difference.height()) + "px", false, ec);
+        int baseHeight = renderer->height() - (renderer->style()->boxSizing() == BORDER_BOX ? 0 : renderer->borderTop() + renderer->paddingTop() + renderer->borderBottom() + renderer->paddingBottom());
+        style->setProperty(CSS_PROP_HEIGHT, String::number(baseHeight + diffHeight) + "px", false, ec);
     }
+    
+    ASSERT(ec == 0);
 
-    document->updateLayout();
-
-    // FIXME (Radar 4118564): We should also autoscroll the window as necessary to keep the point under the cursor in view.
+    if (m_object->style()->resize() != RESIZE_NONE) {
+        m_object->setNeedsLayout(true);
+        m_object->node()->shadowAncestorNode()->renderer()->setNeedsLayout(true);
+        m_object->document()->updateLayout();
+    }
 }
 
-PlatformScrollbar* RenderLayer::horizontalScrollbarWidget() const
+void RenderLayer::valueChanged(Widget*)
 {
-    if (m_hBar && m_hBar->isWidget())
-        return static_cast<PlatformScrollbar*>(m_hBar.get());
-    return 0;
-}
-
-PlatformScrollbar* RenderLayer::verticalScrollbarWidget() const
-{
-    if (m_vBar && m_vBar->isWidget())
-        return static_cast<PlatformScrollbar*>(m_vBar.get());
-    return 0;
-}
-
-void RenderLayer::valueChanged(Scrollbar*)
-{
-    // Update scroll position from scrollbars.
+    // Update scroll position from scroll bars.
 
     bool needUpdate = false;
     int newX = scrollXOffset();
@@ -1156,62 +894,29 @@ void RenderLayer::valueChanged(Scrollbar*)
         scrollToOffset(newX, newY, false);
 }
 
-IntRect RenderLayer::windowClipRect() const
-{
-    RenderView* view = renderer()->view();
-    ASSERT(view);
-    FrameView* frameView = view->frameView();
-    if (!frameView)
-        return IntRect();
-    return frameView->windowClipRectForLayer(this, false);
-}
-
-bool RenderLayer::isActive() const
-{
-    Page* page = renderer()->document()->frame()->page();
-    return page && page->focusController()->isActive();
-}
-
-PassRefPtr<Scrollbar> RenderLayer::createScrollbar(ScrollbarOrientation orientation)
-{
-    if (Scrollbar::hasPlatformScrollbars()) {
-        RefPtr<PlatformScrollbar> widget = new PlatformScrollbar(this, orientation, RegularScrollbar);
-        m_object->document()->view()->addChild(widget.get());
-        return widget.release();
-    }
-    
-    // FIXME: Create scrollbars using the engine.
-    return 0;
-}
-
-void RenderLayer::destroyScrollbar(ScrollbarOrientation orientation)
-{
-    RefPtr<Scrollbar>& scrollbar = orientation == HorizontalScrollbar ? m_hBar : m_vBar;
-    if (scrollbar) {
-        if (scrollbar->isWidget())
-            static_cast<PlatformScrollbar*>(scrollbar.get())->removeFromParent();
-        scrollbar->setClient(0);
-
-        // FIXME: Destroy the engine scrollbar.
-        scrollbar = 0;
-    }
-}
-
 void RenderLayer::setHasHorizontalScrollbar(bool hasScrollbar)
 {
     if (hasScrollbar == (m_hBar != 0))
         return;
 
-    if (hasScrollbar)
-        m_hBar = createScrollbar(HorizontalScrollbar);
-    else
-        destroyScrollbar(HorizontalScrollbar);
+    if (hasScrollbar) {
+        FrameView* scrollView = m_object->element()->document()->view();
+        m_hBar = new ScrollBar(HorizontalScrollBar);
+        m_hBar->setClient(this);
+        scrollView->addChild(m_hBar, 0, -50000);
+    } else {
+        FrameView* scrollView = m_object->element()->document()->view();
+        scrollView->removeChild(m_hBar);
+        delete m_hBar;
+        m_hBar = 0;
+    }
 
-#if ENABLE(DASHBOARD_SUPPORT)
+#if __APPLE__
     // Force an update since we know the scrollbars have changed things.
     if (m_object->document()->hasDashboardRegions())
         m_object->document()->setDashboardRegionsDirty(true);
 #endif
+
 }
 
 void RenderLayer::setHasVerticalScrollbar(bool hasScrollbar)
@@ -1219,30 +924,47 @@ void RenderLayer::setHasVerticalScrollbar(bool hasScrollbar)
     if (hasScrollbar == (m_vBar != 0))
         return;
 
-    if (hasScrollbar)
-        m_vBar = createScrollbar(VerticalScrollbar);
-    else
-        destroyScrollbar(VerticalScrollbar);
+    if (hasScrollbar) {
+        FrameView* scrollView = m_object->document()->view();
+        m_vBar = new ScrollBar(VerticalScrollBar);
+        m_vBar->setClient(this);
+        scrollView->addChild(m_vBar, 0, -50000);
+    } else {
+        FrameView* scrollView = m_object->document()->view();
+        scrollView->removeChild(m_vBar);
+        delete m_vBar;
+        m_vBar = 0;
+    }
 
-#if ENABLE(DASHBOARD_SUPPORT)
+#if __APPLE__
     // Force an update since we know the scrollbars have changed things.
     if (m_object->document()->hasDashboardRegions())
         m_object->document()->setDashboardRegionsDirty(true);
 #endif
+    
 }
 
-int RenderLayer::verticalScrollbarWidth() const
+int
+RenderLayer::verticalScrollbarWidth()
 {
     if (!m_vBar)
         return 0;
+
     return m_vBar->width();
 }
 
-int RenderLayer::horizontalScrollbarHeight() const
+int
+RenderLayer::horizontalScrollbarHeight()
 {
     if (!m_hBar)
         return 0;
+
     return m_hBar->height();
+}
+
+bool RenderLayer::isPointInResizeControl(const IntPoint& p)
+{
+    return resizeControlRect().contains(IntRect(p, IntSize()));
 }
 
 IntSize RenderLayer::offsetFromResizeCorner(const IntPoint& p) const
@@ -1251,44 +973,39 @@ IntSize RenderLayer::offsetFromResizeCorner(const IntPoint& p) const
     int x = width();
     int y = height();
     convertToLayerCoords(root(), x, y);
-    return p - IntPoint(x, y);
+    return IntSize(x - p.x(), y - p.y());
 }
 
-static IntRect scrollCornerRect(RenderObject* renderer, const IntRect& absBounds)
+void RenderLayer::positionResizeControl()
 {
-    int resizerWidth = PlatformScrollbar::verticalScrollbarWidth();
-    int resizerHeight = PlatformScrollbar::horizontalScrollbarHeight();
-    return IntRect(absBounds.right() - resizerWidth - renderer->style()->borderRightWidth(), 
-                   absBounds.bottom() - resizerHeight - renderer->style()->borderBottomWidth(), resizerWidth, resizerHeight);
+    if (m_object->hasOverflowClip() && m_object->style()->resize() != RESIZE_NONE) {
+        // FIXME: needs to be updated for RTL.
+        int x = 0;
+        int y = 0;
+        convertToLayerCoords(root(), x, y);
+        // FIXME: get the potential scrollbar size from the theme
+        int scrollbarSize = 15;
+        setResizeControlRect(IntRect(x + width() - scrollbarSize - m_object->style()->borderRightWidth() - 1, 
+                             y + height() - scrollbarSize - m_object->style()->borderBottomWidth() - 1, scrollbarSize, scrollbarSize));
+    }
 }
 
-void RenderLayer::positionOverflowControls()
+void
+RenderLayer::positionScrollbars(const IntRect& absBounds)
 {
-    if (!m_hBar && !m_vBar && (!m_object->hasOverflowClip() || m_object->style()->resize() == RESIZE_NONE))
-        return;
-    
-    int x = 0;
-    int y = 0;
-    convertToLayerCoords(root(), x, y);
-    IntRect absBounds(x, y, m_object->width(), m_object->height());
-    
-    IntRect resizeControlRect;
-    if (m_object->style()->resize() != RESIZE_NONE)
-        resizeControlRect = scrollCornerRect(m_object, absBounds);
-    
-    int resizeControlSize = max(resizeControlRect.height(), 0);
-    if (m_vBar)
-        m_vBar->setRect(IntRect(absBounds.right() - m_object->borderRight() - m_vBar->width(),
-                                absBounds.y() + m_object->borderTop(),
-                                m_vBar->width(),
-                                absBounds.height() - (m_object->borderTop() + m_object->borderBottom()) - (m_hBar ? m_hBar->height() : resizeControlSize)));
+    int resizeControlSize = max(resizeControlRect().height() - 1, 0);
+    if (m_vBar) {
+        m_vBar->move(absBounds.right() - m_object->borderRight() - m_vBar->width(),
+            absBounds.y() + m_object->borderTop());
+        m_vBar->resize(m_vBar->width(), absBounds.height() - (m_object->borderTop() + m_object->borderBottom()) - (m_hBar ? m_hBar->height() - 1 : resizeControlSize));
+    }
 
-    resizeControlSize = max(resizeControlRect.width(), 0);
-    if (m_hBar)
-        m_hBar->setRect(IntRect(absBounds.x() + m_object->borderLeft(),
-                                absBounds.bottom() - m_object->borderBottom() - m_hBar->height(),
-                                absBounds.width() - (m_object->borderLeft() + m_object->borderRight()) - (m_vBar ? m_vBar->width() : resizeControlSize),
-                                m_hBar->height()));
+    resizeControlSize = max(resizeControlRect().width() - 1, 0);
+    if (m_hBar) {
+        m_hBar->move(absBounds.x() + m_object->borderLeft(),
+            absBounds.bottom() - m_object->borderBottom() - m_hBar->height());
+        m_hBar->resize(absBounds.width() - (m_object->borderLeft() + m_object->borderRight()) - (m_vBar ? m_vBar->width() - 1 : resizeControlSize), m_hBar->height());
+    }
 }
 
 int RenderLayer::scrollWidth()
@@ -1349,9 +1066,8 @@ void RenderLayer::updateOverflowStatus(bool horizontalOverflow, bool verticalOve
         m_horizontalOverflow = horizontalOverflow;
         m_verticalOverflow = verticalOverflow;
         
-        if (FrameView* frameView = m_object->document()->view())
-            frameView->scheduleEvent(new OverflowEvent(horizontalOverflowChanged, horizontalOverflow, verticalOverflowChanged, verticalOverflow),
-            EventTargetNodeCast(m_object->element()), true);
+        m_object->element()->document()->frame()->view()->scheduleEvent(new OverflowEvent(horizontalOverflowChanged, horizontalOverflow, verticalOverflowChanged, verticalOverflow),
+                                                                        EventTargetNodeCast(m_object->element()), true);
     }
 }
 
@@ -1369,19 +1085,11 @@ RenderLayer::updateScrollInfoAfterLayout()
         int newX = max(0, min(scrollXOffset(), scrollWidth() - m_object->clientWidth()));
         int newY = max(0, min(m_scrollY, scrollHeight() - m_object->clientHeight()));
         setAdjustForPurpleCaretWhenScrolling(true);
-        if (newX != scrollXOffset() || newY != m_scrollY) {
-            RenderView* view = m_object->view();
-            ASSERT(view);
-            // scrollToOffset() may call updateLayerPositions(), which doesn't work
-            // with LayoutState.
-            // FIXME: Remove the disableLayoutState/enableLayoutState if the above changes.
-            if (view)
-                view->disableLayoutState();
+        if (newX != scrollXOffset() || newY != m_scrollY)
             scrollToOffset(newX, newY);
-            if (view)
-                view->enableLayoutState();
-        }
         setAdjustForPurpleCaretWhenScrolling(false);
+        // FIXME: At this point a scroll event fired, which could have deleted this layer.
+        // Need to handle this case.
     }
 
     bool haveHorizontalBar = m_hBar;
@@ -1398,8 +1106,8 @@ RenderLayer::updateScrollInfoAfterLayout()
     if (m_object->style()->overflowX() == OHIDDEN && haveHorizontalBar)
         setHasHorizontalScrollbar(false);
     if (m_object->style()->overflowY() == OHIDDEN && haveVerticalBar)
-        setHasVerticalScrollbar(false);
-    
+        setHasVerticalScrollbar(false);    
+        
     // overflow:auto may need to lay out again if scrollbars got added/removed.
     bool scrollbarsChanged = (m_object->hasAutoHorizontalScrollbar() && haveHorizontalBar != horizontalOverflow) || 
                              (m_object->hasAutoVerticalScrollbar() && haveVerticalBar != verticalOverflow);    
@@ -1409,7 +1117,7 @@ RenderLayer::updateScrollInfoAfterLayout()
         if (m_object->hasAutoVerticalScrollbar())
             setHasVerticalScrollbar(verticalOverflow);
 
-#if ENABLE(DASHBOARD_SUPPORT)
+#if __APPLE__
         // Force an update since we know the scrollbars have changed things.
         if (m_object->document()->hasDashboardRegions())
             m_object->document()->setDashboardRegionsDirty(true);
@@ -1430,12 +1138,6 @@ RenderLayer::updateScrollInfoAfterLayout()
             }
         }
     }
-    
-    // If overflow:scroll is turned into overflow:auto a bar might still be disabled (Bug 11985).
-    if (m_hBar && m_object->hasAutoHorizontalScrollbar())
-        m_hBar->setEnabled(true);
-    if (m_vBar && m_object->hasAutoVerticalScrollbar())
-        m_vBar->setEnabled(true);
 
     // Set up the range (and page step/line step).
     if (m_hBar) {
@@ -1443,7 +1145,7 @@ RenderLayer::updateScrollInfoAfterLayout()
         int pageStep = (clientWidth-PAGE_KEEP);
         if (pageStep < 0) pageStep = clientWidth;
         m_hBar->setSteps(LINE_STEP, pageStep);
-        m_hBar->setProportion(clientWidth, m_scrollWidth);
+        m_hBar->setKnobProportion(clientWidth, m_scrollWidth);
         m_hBar->setValue(scrollXOffset());
     }
     if (m_vBar) {
@@ -1451,130 +1153,48 @@ RenderLayer::updateScrollInfoAfterLayout()
         int pageStep = (clientHeight-PAGE_KEEP);
         if (pageStep < 0) pageStep = clientHeight;
         m_vBar->setSteps(LINE_STEP, pageStep);
-        m_vBar->setProportion(clientHeight, m_scrollHeight);
+        m_vBar->setKnobProportion(clientHeight, m_scrollHeight);
+        m_object->repaintRectangle(IntRect(m_object->borderLeft() + m_object->clientWidth(),
+                                   m_object->borderTop(), verticalScrollbarWidth(), 
+                                   m_object->height() - m_object->borderTop() - m_object->borderBottom()));
     }
- 
-    if (m_object->element() && m_object->document()->hasListenerType(Document::OVERFLOWCHANGED_LISTENER))
+
+    if (m_object->element() && m_object->element()->document()->hasListenerType(Document::OVERFLOWCHANGED_LISTENER))
         updateOverflowStatus(horizontalOverflow, verticalOverflow);
 }
 
-void RenderLayer::paintOverflowControls(GraphicsContext* p, int tx, int ty, const IntRect& damageRect)
+void
+RenderLayer::paintScrollbars(GraphicsContext* p, const IntRect& damageRect)
 {
-    // Don't do anything if we have no overflow.
-    if (!m_object->hasOverflowClip())
-        return;
-    
-    // Move the scrollbar widgets if necessary.  We normally move and resize widgets during layout, but sometimes
+    // Move the widgets if necessary.  We normally move and resize widgets during layout, but sometimes
     // widgets can move without layout occurring (most notably when you scroll a document that
     // contains fixed positioned elements).
-    positionOverflowControls();
+    positionResizeControl();
+    if (m_hBar || m_vBar) {
+        int x = 0;
+        int y = 0;
+        convertToLayerCoords(root(), x, y);
+        IntRect layerBounds = IntRect(x, y, width(), height());
+        positionScrollbars(layerBounds);
+    }
 
     // Now that we're sure the scrollbars are in the right place, paint them.
     if (m_hBar)
         m_hBar->paint(p, damageRect);
     if (m_vBar)
         m_vBar->paint(p, damageRect);
-    
-    // We fill our scroll corner with white if we have a scrollbar that doesn't run all the way up to the
-    // edge of the box.
-    IntRect paddingBox(m_object->xPos() + m_object->borderLeft() + tx, 
-                       m_object->yPos() + m_object->borderTop() + ty, 
-                       m_object->width() - m_object->borderLeft() - m_object->borderRight(),
-                       m_object->height() - m_object->borderTop() - m_object->borderBottom());
-    IntRect hCorner;
-    if (m_hBar && paddingBox.width() - m_hBar->width() > 0) {
-        hCorner = IntRect(paddingBox.x() + m_hBar->width(),
-                          paddingBox.y() + paddingBox.height() - m_hBar->height(),
-                          paddingBox.width() - m_hBar->width(),
-                          m_hBar->height());
-        if (hCorner.intersects(damageRect))
-            p->fillRect(hCorner, Color::white);
-    }
-    if (m_vBar && paddingBox.height() - m_vBar->height() > 0) {
-        IntRect vCorner(paddingBox.x() + paddingBox.width() - m_vBar->width(),
-                        paddingBox.y() + m_vBar->height(),
-                        m_vBar->width(),
-                        paddingBox.height() - m_vBar->height());
-        if (vCorner != hCorner && vCorner.intersects(damageRect))
-            p->fillRect(vCorner, Color::white);
-    }
-
-    if (m_object->style()->resize() != RESIZE_NONE)  {
-        IntRect absBounds(m_object->xPos() + tx, m_object->yPos() + ty, m_object->width(), m_object->height());
-        IntRect scrollCorner = scrollCornerRect(m_object, absBounds);
-        if (!scrollCorner.intersects(damageRect))
-            return;
-
-        // Paint the resizer control.
-        static Image* resizeCornerImage;
-        if (!resizeCornerImage)
-            resizeCornerImage = Image::loadPlatformResource("textAreaResizeCorner");
-        IntPoint imagePoint(scrollCorner.right() - resizeCornerImage->width(), scrollCorner.bottom() - resizeCornerImage->height());
-        p->drawImage(resizeCornerImage, imagePoint);
-
-        // Draw a frame around the resizer (1px grey line) if there are any scrollbars present.
-        // Clipping will exclude the right and bottom edges of this frame.
-        if (m_hBar || m_vBar) {
-            p->save();
-            scrollCorner.setSize(IntSize(scrollCorner.width() + 1, scrollCorner.height() + 1));
-            p->setStrokeColor(Color(makeRGB(217, 217, 217)));
-            p->setStrokeThickness(1.0f);
-            p->setFillColor(Color::transparent);
-            p->drawRect(scrollCorner);
-            p->restore();
-        }
-    }
 }
 
-bool RenderLayer::isPointInResizeControl(const IntPoint& point)
+void RenderLayer::paintResizeControl(GraphicsContext* c)
 {
-    if (!m_object->hasOverflowClip() || m_object->style()->resize() == RESIZE_NONE)
-        return false;
+    if (resizeControlRect().isEmpty())
+        return;
     
-    int x = 0;
-    int y = 0;
-    convertToLayerCoords(root(), x, y);
-    IntRect absBounds(x, y, m_object->width(), m_object->height());
-    return scrollCornerRect(m_object, absBounds).contains(point);
-}
-    
-bool RenderLayer::hitTestOverflowControls(HitTestResult& result)
-{
-    if (!m_hBar && !m_vBar && (!renderer()->hasOverflowClip() || renderer()->style()->resize() == RESIZE_NONE))
-        return false;
+    if (!m_resizeCornerImage)
+        m_resizeCornerImage = Image::loadResource("textAreaResizeCorner");
 
-    int x = 0;
-    int y = 0;
-    convertToLayerCoords(root(), x, y);
-    IntRect absBounds(x, y, renderer()->width(), renderer()->height());
-    
-    IntRect resizeControlRect;
-    if (renderer()->style()->resize() != RESIZE_NONE) {
-        resizeControlRect = scrollCornerRect(renderer(), absBounds);
-        if (resizeControlRect.contains(result.point()))
-            return true;
-    }
-
-    int resizeControlSize = max(resizeControlRect.height(), 0);
-
-    if (m_vBar) {
-        IntRect vBarRect(absBounds.right() - renderer()->borderRight() - m_vBar->width(), absBounds.y() + renderer()->borderTop(), m_vBar->width(), absBounds.height() - (renderer()->borderTop() + renderer()->borderBottom()) - (m_hBar ? m_hBar->height() : resizeControlSize));
-        if (vBarRect.contains(result.point())) {
-            result.setScrollbar(verticalScrollbarWidget());
-            return true;
-        }
-    }
-
-    resizeControlSize = max(resizeControlRect.width(), 0);
-    if (m_hBar) {
-        IntRect hBarRect(absBounds.x() + renderer()->borderLeft(), absBounds.bottom() - renderer()->borderBottom() - m_hBar->height(), absBounds.width() - (renderer()->borderLeft() + renderer()->borderRight()) - (m_vBar ? m_vBar->width() : resizeControlSize), m_hBar->height());
-        if (hBarRect.contains(result.point())) {
-            result.setScrollbar(horizontalScrollbarWidget());
-            return true;
-        }
-    }
-
-    return false;
+    IntPoint imagePoint(resizeControlRect().right() - m_resizeCornerImage->width(), resizeControlRect().bottom() - m_resizeCornerImage->height());
+    c->drawImage(m_resizeCornerImage, imagePoint);
 }
 
 bool RenderLayer::scroll(ScrollDirection direction, ScrollGranularity granularity, float multiplier)
@@ -1582,17 +1202,18 @@ bool RenderLayer::scroll(ScrollDirection direction, ScrollGranularity granularit
     bool didHorizontalScroll = false;
     bool didVerticalScroll = false;
     
-    if (m_hBar) {
+    if (m_hBar != 0) {
         if (granularity == ScrollByDocument) {
             // Special-case for the ScrollByDocument granularity. A document scroll can only be up 
             // or down and in both cases the horizontal bar goes all the way to the left.
             didHorizontalScroll = m_hBar->scroll(ScrollLeft, ScrollByDocument, multiplier);
-        } else
+        } else {
             didHorizontalScroll = m_hBar->scroll(direction, granularity, multiplier);
+        }
     }
-
-    if (m_vBar)
+    if (m_vBar != 0) {
         didVerticalScroll = m_vBar->scroll(direction, granularity, multiplier);
+    }
 
     return (didHorizontalScroll || didVerticalScroll);
 }
@@ -1600,27 +1221,23 @@ bool RenderLayer::scroll(ScrollDirection direction, ScrollGranularity granularit
 void
 RenderLayer::paint(GraphicsContext* p, const IntRect& damageRect, PaintRestriction paintRestriction, RenderObject *paintingRoot)
 {
-#if ENABLE(HW_COMP)
-    if (!hasCompositingLayer()
-        // in Purple, the document layer is special
-        || isDocumentLayer()
-    )
-#endif
-    {
-        paintLayer(this, p, damageRect, false, paintRestriction, paintingRoot);
-    }
+    paintLayer(this, p, damageRect, false, paintRestriction, paintingRoot);
 }
 
 static void setClip(GraphicsContext* p, const IntRect& paintDirtyRect, const IntRect& clipRect)
 {
+    // Work around bugs in focus ring clipping on Mac.
+    p->setFocusRingClip(clipRect);
     if (paintDirtyRect == clipRect)
         return;
     p->save();
-    p->clip(clipRect);
+    p->addClip(clipRect);
 }
 
 static void restoreClip(GraphicsContext* p, const IntRect& paintDirtyRect, const IntRect& clipRect)
 {
+    // Work around bugs in focus ring clipping on Mac.
+    p->clearFocusRingClip();
     if (paintDirtyRect == clipRect)
         return;
     p->restore();
@@ -1631,136 +1248,55 @@ RenderLayer::paintLayer(RenderLayer* rootLayer, GraphicsContext* p,
                         const IntRect& paintDirtyRect, bool haveTransparency, PaintRestriction paintRestriction,
                         RenderObject *paintingRoot)
 {
-#if ENABLE(HW_COMP)
-    // RenderLayers with a compositing layer are painted via paintIntoLayer() below.
-    if (hasCompositingLayer()
-        // The document layer is special; it gets a LCLayer for hit testing, but doesn't draw that layer.
-        && !isDocumentLayer()
-        )
-        return;
-#endif
-
-    ASSERT(renderer());
-
-    // Avoid painting layers when stylesheets haven't loaded.  This eliminates FOUC.
-    // It's ok not to draw, because later on, when all the stylesheets do load, updateStyleSelector on the Document
-    // will do a full repaint().
-    if (renderer()->document()->didLayoutWithPendingStylesheets() && !renderer()->isRenderView() && !renderer()->isRoot())
-        return;
-    
-    // If this layer is totally invisible then there is nothing to paint.
-    if (!m_object->opacity())
-        return;
-
-    if (isTransparentForDrawing())
-        haveTransparency = true;
-
-#if !ENABLE(HW_COMP)
-    // Apply a transform if we have one.
-    if (m_transform && rootLayer != this) {
-        // If the transform can't be inverted, then don't paint anything.
-        if (!m_transform->isInvertible())
-            return;
-
-        // If we have a transparency layer enclosing us and we are the root of a transform, then we need to establish the transparency
-        // layer from the parent now.
-        if (haveTransparency)
-            parent()->beginTransparencyLayers(p, rootLayer);
-  
-        // Make sure the parent's clip rects have been calculated.
-        parent()->calculateClipRects(rootLayer);
-        IntRect clipRect = parent()->clipRects()->overflowClipRect();
-        clipRect.intersect(paintDirtyRect);
-
-        // Push the parent coordinate space's clip.
-        setClip(p, paintDirtyRect, clipRect);
-
-        // Adjust the transform such that the renderer's upper left corner will paint at (0,0) in user space.
-        // This involves subtracting out the position of the layer in our current coordinate space.
-        int x = 0;
-        int y = 0;
-        convertToLayerCoords(rootLayer, x, y);
-        AffineTransform transform;
-        transform.translate(x, y);
-        transform = *m_transform * transform;
-        
-        // Apply the transform.
-        p->save();
-        p->concatCTM(transform);
-
-        // Now do a paint with the root layer shifted to be us.
-        paintLayer(this, p, transform.inverse().mapRect(paintDirtyRect), haveTransparency, paintRestriction, paintingRoot);
-        
-        p->restore();
-        
-        // Restore the clip.
-        restoreClip(p, paintDirtyRect, clipRect);
-        
-        return;
-    }
-#endif // !ENABLE(HW_COMP)
-
     // Calculate the clip rects we should use.
     IntRect layerBounds, damageRect, clipRectToApply, outlineRect;
-    calculateRects(rootLayer, rootLayer /* FIXME? */, paintDirtyRect, layerBounds, damageRect, clipRectToApply, outlineRect);
+    calculateRects(rootLayer, paintDirtyRect, layerBounds, damageRect, clipRectToApply, outlineRect);
     int x = layerBounds.x();
     int y = layerBounds.y();
     int tx = x - renderer()->xPos();
     int ty = y - renderer()->yPos() + renderer()->borderTopExtra();
                              
     // Ensure our lists are up-to-date.
-#if ENABLE(HW_COMP)
-    if (inCompositingMode()) {
-
-        if (isStackingContext() && (m_zOrderListsDirty || m_overflowListDirty))
-        {
-#ifndef NDEBUG
-            fprintf(stderr, "RenderLayer %p paintLayer has to eagerly update z-order lists\n", this);
-#endif
-            updateLayers();
-        }
-
-    }
-    else {
-        updateZOrderLists();
-        updateOverflowList();
-    }
-#else
     updateZOrderLists();
     updateOverflowList();
-#endif
 
-    bool selectionOnly = paintRestriction == PaintRestrictionSelectionOnly || paintRestriction == PaintRestrictionSelectionOnlyBlackText;
-    bool forceBlackText = paintRestriction == PaintRestrictionSelectionOnlyBlackText;
-    
+    // If this layer is totally invisible, then return as there is nothing to paint
+    if (!m_object->opacity())
+        return;
+        
+    bool selectionOnly = paintRestriction == PaintRestrictionSelectionOnly || paintRestriction == PaintRestrictionSelectionOnlyWhiteText;
+    bool forceWhiteText = paintRestriction == PaintRestrictionSelectionOnlyWhiteText;
+
+    if (isTransparent())
+        haveTransparency = true;
+
     // If this layer's renderer is a child of the paintingRoot, we render unconditionally, which
     // is done by passing a nil paintingRoot down to our renderer (as if no paintingRoot was ever set).
     // Else, our renderer tree may or may not contain the painting root, so we pass that root along
     // so it will be tested against as we decend through the renderers.
     RenderObject *paintingRootForRenderer = 0;
-    if (paintingRoot && !m_object->isDescendantOf(paintingRoot))
+    if (paintingRoot && !m_object->hasAncestor(paintingRoot))
         paintingRootForRenderer = paintingRoot;
-
+    
     // We want to paint our layer, but only if we intersect the damage rect.
-    bool shouldPaint = intersectsDamageRect(layerBounds, damageRect, rootLayer) && m_hasVisibleContent;
+    bool shouldPaint = intersectsDamageRect(layerBounds, damageRect);
     if (shouldPaint && !selectionOnly && !damageRect.isEmpty()) {
         // Begin transparency layers lazily now that we know we have to paint something.
         if (haveTransparency)
-            beginTransparencyLayers(p, rootLayer);
+            beginTransparencyLayers(p, paintDirtyRect);
         
         // Paint our background first, before painting any child layers.
         // Establish the clip used to paint our background.
         setClip(p, paintDirtyRect, damageRect);
 
         // Paint the background.
-        RenderObject::PaintInfo paintInfo(p, damageRect, PaintPhaseBlockBackground, false, paintingRootForRenderer, 0);
-        renderer()->paint(paintInfo, tx, ty);
+        RenderObject::PaintInfo info(p, damageRect, PaintPhaseBlockBackground, false, paintingRootForRenderer, 0);
+        renderer()->paint(info, tx, ty);
 
         // Our scrollbar widgets paint exactly when we tell them to, so that they work properly with
         // z-index.  We paint after we painted the background/border, so that the scrollbars will
         // sit above the background/border.
-        paintOverflowControls(p, tx, ty, damageRect);
-        
+        paintScrollbars(p, damageRect);
         // Restore the clip.
         restoreClip(p, paintDirtyRect, damageRect);
     }
@@ -1774,21 +1310,22 @@ RenderLayer::paintLayer(RenderLayer* rootLayer, GraphicsContext* p,
     if (shouldPaint && !clipRectToApply.isEmpty()) {
         // Begin transparency layers lazily now that we know we have to paint something.
         if (haveTransparency)
-            beginTransparencyLayers(p, rootLayer);
+            beginTransparencyLayers(p, paintDirtyRect);
 
         // Set up the clip used when painting our children.
         setClip(p, paintDirtyRect, clipRectToApply);
-        RenderObject::PaintInfo paintInfo(p, clipRectToApply, 
-                                          selectionOnly ? PaintPhaseSelection : PaintPhaseChildBlockBackgrounds,
-                                          forceBlackText, paintingRootForRenderer, 0);
-        renderer()->paint(paintInfo, tx, ty);
+        RenderObject::PaintInfo info(p, clipRectToApply, 
+                                     selectionOnly ? PaintPhaseSelection : PaintPhaseChildBlockBackgrounds,
+                                     forceWhiteText,
+                                     paintingRootForRenderer, 0);
+        renderer()->paint(info, tx, ty);
         if (!selectionOnly) {
-            paintInfo.phase = PaintPhaseFloat;
-            renderer()->paint(paintInfo, tx, ty);
-            paintInfo.phase = PaintPhaseForeground;
-            renderer()->paint(paintInfo, tx, ty);
-            paintInfo.phase = PaintPhaseChildOutlines;
-            renderer()->paint(paintInfo, tx, ty);
+            info.phase = PaintPhaseFloat;
+            renderer()->paint(info, tx, ty);
+            info.phase = PaintPhaseForeground;
+            renderer()->paint(info, tx, ty);
+            info.phase = PaintPhaseChildOutlines;
+            renderer()->paint(info, tx, ty);
         }
 
         // Now restore our clip.
@@ -1797,9 +1334,9 @@ RenderLayer::paintLayer(RenderLayer* rootLayer, GraphicsContext* p,
     
     if (!outlineRect.isEmpty()) {
         // Paint our own outline
-        RenderObject::PaintInfo paintInfo(p, outlineRect, PaintPhaseSelfOutline, false, paintingRootForRenderer, 0);
+        RenderObject::PaintInfo info(p, outlineRect, PaintPhaseSelfOutline, false, paintingRootForRenderer, 0);
         setClip(p, paintDirtyRect, outlineRect);
-        renderer()->paint(paintInfo, tx, ty);
+        renderer()->paint(info, tx, ty);
         restoreClip(p, paintDirtyRect, outlineRect);
     }
     
@@ -1814,293 +1351,147 @@ RenderLayer::paintLayer(RenderLayer* rootLayer, GraphicsContext* p,
             it[0]->paintLayer(rootLayer, p, paintDirtyRect, haveTransparency, paintRestriction, paintingRoot);
     
     // End our transparency layer
-    if (haveTransparency && m_usedTransparency) {
+    if (isTransparent() && m_usedTransparency) {
         p->endTransparencyLayer();
         p->restore();
         m_usedTransparency = false;
     }
 }
 
-static inline IntRect frameVisibleRect(RenderObject* renderer)
+static inline bool isSubframeCanvas(RenderObject* renderer)
 {
-    FrameView* frameView = renderer->document()->view();
-    if (!frameView)
-        return IntRect();
-
-    return enclosingIntRect(frameView->visibleContentRect());
+    return renderer->isRenderView() && renderer->node()->document()->frame()->tree()->parent();
 }
 
-bool RenderLayer::hitTest(const HitTestRequest& request, HitTestResult& result)
+static inline IntRect frameVisibleRect(RenderObject* renderer)
 {
+    return enclosingIntRect(renderer->node()->document()->frame()->view()->visibleContentRect());
+}
+
+bool
+RenderLayer::hitTest(RenderObject::NodeInfo& info, const IntPoint& point)
+{
+    gScrollBar = 0;
+
     renderer()->document()->updateLayout();
     
     IntRect boundsRect(m_x, m_y, width(), height());
-    boundsRect.intersect(frameVisibleRect(renderer()));
+    if (isSubframeCanvas(renderer()))
+        boundsRect.intersect(frameVisibleRect(renderer()));
 
-    RenderLayer* insideLayer = hitTestLayer(this, request, result, boundsRect, result.point());
+    RenderLayer* insideLayer = hitTestLayer(this, info, point, boundsRect);
 
     // Now determine if the result is inside an anchor; make sure an image map wins if
     // it already set URLElement and only use the innermost.
-    Node* node = result.innerNode();
+    Node* node = info.innerNode();
     while (node) {
-        // for imagemaps, URLElement is the associated area element not the image itself
-        if (node->isLink() && !result.URLElement() && !node->hasTagName(imgTag))
-            result.setURLElement(static_cast<Element*>(node));
-        node = node->eventParentNode();
+        if (node->isLink() && !info.URLElement())
+            info.setURLElement(static_cast<Element*>(node));
+        node = node->parentNode();
     }
 
     // Next set up the correct :hover/:active state along the new chain.
-    updateHoverActiveState(request, result);
+    updateHoverActiveState(info);
     
     // Now return whether we were inside this layer (this will always be true for the root
     // layer).
     return insideLayer;
 }
 
-Node* RenderLayer::enclosingElement() const
+static inline bool shouldApplyImplicitCapture(RenderObject* renderer, bool mouseDown)
 {
-    for (RenderObject* r = renderer(); r; r = r->parent()) {
-        if (Node* e = r->element())
-            return e;
-    }
-    ASSERT_NOT_REACHED();
-    return 0;
+    return mouseDown && renderer->isRoot();
 }
 
-RenderLayer* RenderLayer::hitTestLayer(RenderLayer* rootLayer, const HitTestRequest& request, HitTestResult& result, const IntRect& hitTestRect, const IntPoint& hitTestPoint)
+RenderLayer*
+RenderLayer::hitTestLayer(RenderLayer* rootLayer, RenderObject::NodeInfo& info,
+                          const IntPoint& mousePos, const IntRect& hitTestRect)
 {
-#if !ENABLE(HW_COMP)
-    // Apply a transform if we have one.
-    if (m_transform && rootLayer != this) {
-        // If the transform can't be inverted, then don't hit test this layer at all.
-        if (!m_transform->isInvertible())
-            return 0;
-  
-        // Make sure the parent's clip rects have been calculated.
-        parent()->calculateClipRects(rootLayer);
-        
-        // Go ahead and test the enclosing clip now.
-        IntRect clipRect = parent()->clipRects()->overflowClipRect();
-        if (!clipRect.contains(hitTestPoint))
-            return 0;
-
-        // Adjust the transform such that the renderer's upper left corner is at (0,0) in user space.
-        // This involves subtracting out the position of the layer in our current coordinate space.
-        int x = 0;
-        int y = 0;
-        convertToLayerCoords(rootLayer, x, y);
-        AffineTransform transform;
-        transform.translate(x, y);
-        transform = *m_transform * transform;
-        
-        // Map the hit test point into the transformed space and then do a hit test with the root layer shifted to be us.
-        return hitTestLayer(this, request, result, transform.inverse().mapRect(hitTestRect), transform.inverse().mapPoint(hitTestPoint));
-    }
-#endif
-
     // Calculate the clip rects we should use.
     IntRect layerBounds;
     IntRect bgRect;
     IntRect fgRect;
     IntRect outlineRect;
-    calculateRects(rootLayer, rootLayer /* FIXME */, hitTestRect, layerBounds, bgRect, fgRect, outlineRect);
+    calculateRects(rootLayer, hitTestRect, layerBounds, bgRect, fgRect, outlineRect);
     
     // Ensure our lists are up-to-date.
-#if ENABLE(HW_COMP)
-    if (inCompositingMode()) {
-        ASSERT(!isStackingContext() || !m_zOrderListsDirty);
-        ASSERT(!isStackingContext() || !m_overflowListDirty);
-    }
-    else {
-        updateZOrderLists();
-        updateOverflowList();
-    }
-#else
     updateZOrderLists();
     updateOverflowList();
-#endif
 
     // This variable tracks which layer the mouse ends up being inside.  The minute we find an insideLayer,
     // we are done and can return it.
     RenderLayer* insideLayer = 0;
-
-#if ENABLE(HW_COMP)
-    if (isDocumentLayer() && hasCompositingLayer()) {
-        return hitTestRootLayer(rootLayer, request, result, hitTestRect, result.point());
-    }
-#endif
-
+    
     // Begin by walking our list of positive layers from highest z-index down to the lowest
     // z-index.
     if (m_posZOrderList) {
         for (int i = m_posZOrderList->size() - 1; i >= 0; --i) {
-            RenderLayer* curLayer = m_posZOrderList->at(i);
-#if ENABLE(HW_COMP)
-            if (!curLayer->hasCompositingLayer())
-#endif
-            {
-                insideLayer = curLayer->hitTestLayer(rootLayer, request, result, hitTestRect, hitTestPoint);
-                if (insideLayer)
-                    return insideLayer;
-            }
+            insideLayer = m_posZOrderList->at(i)->hitTestLayer(rootLayer, info, mousePos, hitTestRect);
+            if (insideLayer)
+                return insideLayer;
         }
     }
 
     // Now check our overflow objects.
     if (m_overflowList) {
         for (int i = m_overflowList->size() - 1; i >= 0; --i) {
-            RenderLayer* curLayer = m_overflowList->at(i);
-#if ENABLE(HW_COMP)
-            if (!curLayer->hasCompositingLayer())
-#endif
-            {
-                insideLayer = curLayer->hitTestLayer(rootLayer, request, result, hitTestRect, hitTestPoint);
-                if (insideLayer)
-                    return insideLayer;
-            }
+            insideLayer = m_overflowList->at(i)->hitTestLayer(rootLayer, info, mousePos, hitTestRect);
+            if (insideLayer)
+                return insideLayer;
         }
     }
 
     // Next we want to see if the mouse pos is inside the child RenderObjects of the layer.
-    if (fgRect.contains(hitTestPoint) && 
-        renderer()->hitTest(request, result, hitTestPoint,
+    if (fgRect.contains(mousePos) && 
+        renderer()->hitTest(info, mousePos.x(), mousePos.y(),
                             layerBounds.x() - renderer()->xPos(),
-                            layerBounds.y() - renderer()->yPos() + m_object->borderTopExtra(), 
-                            HitTestDescendants)) {
-        // For positioned generated content, we might still not have a
+                            layerBounds.y() - renderer()->yPos() + m_object->borderTopExtra(), HitTestDescendants)) {
+        // for positioned generated content, we might still not have a
         // node by the time we get to the layer level, since none of
         // the content in the layer has an element. So just walk up
         // the tree.
-        if (!result.innerNode() || !result.innerNonSharedNode()) {
-            Node* e = enclosingElement();
-            if (!result.innerNode())
-                result.setInnerNode(e);
-            if (!result.innerNonSharedNode())
-                result.setInnerNonSharedNode(e);
+        if (!info.innerNode()) {
+            for (RenderObject *r = renderer(); r != NULL; r = r->parent()) { 
+                if (r->element()) {
+                    info.setInnerNode(r->element());
+                    break;
+                }
+            }
         }
 
+        if (!info.innerNonSharedNode()) {
+             for (RenderObject *r = renderer(); r != NULL; r = r->parent()) { 
+                 if (r->element()) {
+                     info.setInnerNonSharedNode(r->element());
+                     break;
+                 }
+             }
+        }
         return this;
     }
         
     // Now check our negative z-index children.
     if (m_negZOrderList) {
         for (int i = m_negZOrderList->size() - 1; i >= 0; --i) {
-            RenderLayer* curLayer = m_negZOrderList->at(i);
-#if ENABLE(HW_COMP)
-            if (!curLayer->hasCompositingLayer())
-#endif
-            {
-                insideLayer = curLayer->hitTestLayer(rootLayer, request, result, hitTestRect, hitTestPoint);
-                if (insideLayer)
-                    return insideLayer;
-            }
+            insideLayer = m_negZOrderList->at(i)->hitTestLayer(rootLayer, info, mousePos, hitTestRect);
+            if (insideLayer)
+                return insideLayer;
         }
     }
 
-    // Next we want to see if the mouse is inside this layer but not any of its children.
-    if (bgRect.contains(hitTestPoint) &&
-        renderer()->hitTest(request, result, hitTestPoint,
+    // Next we want to see if the mouse pos is inside this layer but not any of its children.
+    // If this is the root layer and the mouse is down, we want to do this even if it doesn't
+    // contain the point so mouse move events keep getting delivered when dragging outside the
+    // window.
+    if ((bgRect.contains(mousePos) || shouldApplyImplicitCapture(renderer(), info.active())) &&
+        renderer()->hitTest(info, mousePos.x(), mousePos.y(),
                             layerBounds.x() - renderer()->xPos(),
                             layerBounds.y() - renderer()->yPos() + m_object->borderTopExtra(),
-                            HitTestSelf)) {
-        if (!result.innerNode() || !result.innerNonSharedNode()) {
-            Node* e = enclosingElement();
-            if (!result.innerNode())
-                result.setInnerNode(e);
-            if (!result.innerNonSharedNode())
-                result.setInnerNonSharedNode(e);
-        }
-
+                            HitTestSelf))
         return this;
-    }
 
-    // We didn't hit any layer. If we are the root layer and the mouse is -- or just was -- down, 
-    // return ourselves. We do this so mouse events continue getting delivered after a drag has 
-    // exited the WebView, and so hit testing over a scrollbar hits the content document.
-    if ((request.active || request.mouseUp) && renderer()->isRenderView()) {
-        renderer()->updateHitTestResult(result, hitTestPoint);
-        return this;
-    }
-
+    // No luck.
     return 0;
-}
-
-void RenderLayer::updateClipRectsRelativeToLayer(const RenderLayer* inAncestorLayer, ClipRects& ioClipRects, bool& outHasClip) const
-{
-    outHasClip = false;
-    
-    // A fixed object is essentially the root of its containing block hierarchy, so when
-    // we encounter such an object, we reset our clip rects to the fixedClipRect.
-    if (m_object->style()->position() == FixedPosition) {
-        ioClipRects.posClipRect()      = ioClipRects.fixedClipRect();
-        ioClipRects.overflowClipRect() = ioClipRects.fixedClipRect();
-        ioClipRects.setFixed(true);
-    }
-    else if (m_object->style()->position() == RelativePosition)
-        ioClipRects.posClipRect() = ioClipRects.overflowClipRect();
-    else if (m_object->style()->position() == AbsolutePosition)
-        ioClipRects.overflowClipRect() = ioClipRects.posClipRect();
-    
-    // Update the clip rects that will be passed to child layers.
-    if (m_object->hasOverflowClip() || m_object->hasClip()) {
-        // This layer establishes a clip of some kind.
-        int x = 0;
-        int y = 0;
-        convertToLayerCoords(inAncestorLayer, x, y);
-        RenderView* view = renderer()->view();
-        ASSERT(view);
-        if (view && ioClipRects.fixed() && inAncestorLayer->renderer() == view) {
-            x -= view->frameView()->contentsX();
-            y -= view->frameView()->contentsY();
-        }
-        
-        if (m_object->hasOverflowClip()) {
-            IntRect newOverflowClip = m_object->getOverflowClipRect(x, y);
-            ioClipRects.overflowClipRect().intersect(newOverflowClip);
-            if (m_object->isPositioned() || m_object->isRelPositioned())
-                ioClipRects.posClipRect().intersect(newOverflowClip);
-        }
-        if (m_object->hasClip()) {
-            IntRect newPosClip = m_object->getClipRect(x, y);
-            ioClipRects.posClipRect().intersect(newPosClip);
-            ioClipRects.overflowClipRect().intersect(newPosClip);
-            ioClipRects.fixedClipRect().intersect(newPosClip);
-        }
-        
-        outHasClip = true;
-    }
-}
-
-// the outClipRects param is not refcounted. outIsClipped is set to true if some layer in the ancestor hierarchy, including inAncestorLayer, has clip.
-void RenderLayer::computeClipRectsFromAncestor(const RenderLayer* inAncestorLayer, ClipRects& outClipRects, bool& outIsClipped,
-                                               const RenderLayer** outNearestClippingAncestor /* = 0 */) const
-{
-    ClipRects curClipRects(IntRect(INT_MIN/2, INT_MIN/2, INT_MAX, INT_MAX));
-
-    bool isClipped = false;
-    if (outNearestClippingAncestor)
-        *outNearestClippingAncestor = 0;
-
-    const RenderLayer* curLayer = parent();
-    while (curLayer)
-    {
-        bool hasClip;
-        curLayer->updateClipRectsRelativeToLayer(inAncestorLayer, curClipRects, hasClip);
-        isClipped |= hasClip;
-    
-        if (hasClip && outNearestClippingAncestor && !*outNearestClippingAncestor)
-            *outNearestClippingAncestor = curLayer;
-            
-        if (curLayer == inAncestorLayer)
-            break;
-
-        curLayer = curLayer->parent();
-    }
-
-    ASSERT(curLayer == inAncestorLayer);    // if fails, |this| is not a descendent of inAncestorLayer
-    
-    outIsClipped = isClipped;
-    outClipRects = curClipRects;
 }
 
 void RenderLayer::calculateClipRects(const RenderLayer* rootLayer)
@@ -2108,9 +1499,9 @@ void RenderLayer::calculateClipRects(const RenderLayer* rootLayer)
     if (m_clipRects)
         return; // We have the correct cached value.
 
-    if (rootLayer == this || !parent()) {
-        // The root layer's clip rect is always infinite.
-        m_clipRects = new (m_object->renderArena()) ClipRects(IntRect(INT_MIN/2, INT_MIN/2, INT_MAX, INT_MAX));
+    if (!parent()) {
+        // The root layer's clip rect is always just its dimensions.
+        m_clipRects = new (m_object->renderArena()) ClipRects(IntRect(0,0,width(),height()));
         m_clipRects->ref();
         return;
     }
@@ -2119,39 +1510,64 @@ void RenderLayer::calculateClipRects(const RenderLayer* rootLayer)
     parent()->calculateClipRects(rootLayer);
 
     // Set up our three rects to initially match the parent rects.
-    ClipRects curClipRects(*parent()->clipRects());
-    bool hasClip;
-    updateClipRectsRelativeToLayer(rootLayer, curClipRects, hasClip);
+    IntRect posClipRect(parent()->clipRects()->posClipRect());
+    IntRect overflowClipRect(parent()->clipRects()->overflowClipRect());
+    IntRect fixedClipRect(parent()->clipRects()->fixedClipRect());
 
+    // A fixed object is essentially the root of its containing block hierarchy, so when
+    // we encounter such an object, we reset our clip rects to the fixedClipRect.
+    if (m_object->style()->position() == FixedPosition) {
+        posClipRect = fixedClipRect;
+        overflowClipRect = fixedClipRect;
+    }
+    else if (m_object->style()->position() == RelativePosition)
+        posClipRect = overflowClipRect;
+    else if (m_object->style()->position() == AbsolutePosition)
+        overflowClipRect = posClipRect;
+    
+    // Update the clip rects that will be passed to child layers.
+    if (m_object->hasOverflowClip() || m_object->hasClip()) {
+        // This layer establishes a clip of some kind.
+        int x = 0;
+        int y = 0;
+        convertToLayerCoords(rootLayer, x, y);
+        
+        if (m_object->hasOverflowClip()) {
+            IntRect newOverflowClip = m_object->getOverflowClipRect(x,y);
+            overflowClipRect.intersect(newOverflowClip);
+            if (m_object->isPositioned() || m_object->isRelPositioned())
+                posClipRect.intersect(newOverflowClip);
+        }
+        if (m_object->hasClip()) {
+            IntRect newPosClip = m_object->getClipRect(x,y);
+            posClipRect.intersect(newPosClip);
+            overflowClipRect.intersect(newPosClip);
+            fixedClipRect.intersect(newPosClip);
+        }
+    }
+    
     // If our clip rects match our parent's clip, then we can just share its data structure and
     // ref count.
-    if (curClipRects == *(parent()->clipRects()))
+    if (posClipRect == parent()->clipRects()->posClipRect() &&
+        overflowClipRect == parent()->clipRects()->overflowClipRect() &&
+        fixedClipRect == parent()->clipRects()->fixedClipRect())
         m_clipRects = parent()->clipRects();
     else
-        m_clipRects = new (m_object->renderArena()) ClipRects(curClipRects);
-
+        m_clipRects = new (m_object->renderArena()) ClipRects(overflowClipRect, fixedClipRect, posClipRect);
     m_clipRects->ref();
 }
 
-void RenderLayer::calculateRects(const RenderLayer* rootLayer, const RenderLayer* rootLayerForClipping,
-                                 const IntRect& paintDirtyRect, IntRect& layerBounds,
-                                 IntRect& backgroundRect, IntRect& foregroundRect, IntRect& outlineRect) const
+void RenderLayer::calculateRects(const RenderLayer* rootLayer, const IntRect& paintDirtyRect, IntRect& layerBounds,
+                                 IntRect& backgroundRect, IntRect& foregroundRect, IntRect& outlineRect)
 {
-    if (rootLayer != this && rootLayerForClipping != this && parent()) {
-        parent()->calculateClipRects(rootLayerForClipping);     // rather than rootLayer
-
+    if (parent()) {
+        parent()->calculateClipRects(rootLayer);
         backgroundRect = m_object->style()->position() == FixedPosition ? parent()->clipRects()->fixedClipRect() :
                          (m_object->isPositioned() ? parent()->clipRects()->posClipRect() : 
                                                      parent()->clipRects()->overflowClipRect());
-        RenderView* view = renderer()->view();
-        ASSERT(view);
-        if (view && parent()->clipRects()->fixed() && rootLayer->renderer() == view)
-            backgroundRect.move(view->frameView()->contentsX(), view->frameView()->contentsY());
-
         backgroundRect.intersect(paintDirtyRect);
     } else
         backgroundRect = paintDirtyRect;
-
     foregroundRect = backgroundRect;
     outlineRect = backgroundRect;
     
@@ -2175,58 +1591,31 @@ void RenderLayer::calculateRects(const RenderLayer* rootLayer, const RenderLayer
 
         // If we establish a clip at all, then go ahead and make sure our background
         // rect is intersected with our layer's bounds.
-        if (ShadowData* boxShadow = renderer()->style()->boxShadow()) {
-            IntRect shadowRect = layerBounds;
-            shadowRect.move(boxShadow->x, boxShadow->y);
-            shadowRect.inflate(boxShadow->blur);
-            shadowRect.unite(layerBounds);
-            backgroundRect.intersect(shadowRect);
-        } else
-            backgroundRect.intersect(layerBounds);
+        backgroundRect.intersect(layerBounds);
     }
 }
 
-IntRect RenderLayer::childrenClipRect() const
-{
-    RenderLayer* rootLayer = renderer()->document()->renderer()->layer();
-    IntRect layerBounds, backgroundRect, foregroundRect, outlineRect;
-    calculateRects(rootLayer, rootLayer, rootLayer->boundingBox(rootLayer), layerBounds, backgroundRect, foregroundRect, outlineRect);
-    return foregroundRect;
-}
-
-IntRect RenderLayer::selfClipRect() const
-{
-    RenderLayer* rootLayer = renderer()->document()->renderer()->layer();
-    IntRect layerBounds, backgroundRect, foregroundRect, outlineRect;
-    calculateRects(rootLayer, rootLayer, rootLayer->boundingBox(rootLayer), layerBounds, backgroundRect, foregroundRect, outlineRect);
-    return backgroundRect;
-}
-
-bool RenderLayer::intersectsDamageRect(const IntRect& layerBounds, const IntRect& damageRect, const RenderLayer* rootLayer) const
+bool RenderLayer::intersectsDamageRect(const IntRect& layerBounds, const IntRect& damageRect) const
 {
     // Always examine the canvas and the root.
-    // FIXME: Could eliminate the isRoot() check if we fix background painting so that the RenderView
-    // paints the root's background.
     if (renderer()->isRenderView() || renderer()->isRoot())
         return true;
 
     // If we aren't an inline flow, and our layer bounds do intersect the damage rect, then we 
     // can go ahead and return true.
-    RenderView* view = renderer()->view();
-    ASSERT(view);
-    if (view && !renderer()->isInlineFlow()) {
+    if (!renderer()->isInlineFlow()) {
         IntRect b = layerBounds;
-        b.inflate(view->maximalOutlineSize());
+        b.inflate(renderer()->view()->maximalOutlineSize());
         if (b.intersects(damageRect))
             return true;
     }
         
     // Otherwise we need to compute the bounding box of this single layer and see if it intersects
     // the damage rect.
-    return boundingBox(rootLayer).intersects(damageRect);
+    return absoluteBoundingBox().intersects(damageRect);
 }
 
-IntRect RenderLayer::localBoundingBox() const
+IntRect RenderLayer::absoluteBoundingBox() const
 {
     // There are three special cases we need to consider.
     // (1) Inline Flows.  For inline flows we will create a bounding box that fully encompasses all of the lines occupied by the
@@ -2270,6 +1659,9 @@ IntRect RenderLayer::localBoundingBox() const
         IntRect overflowRect = renderer()->overflowRect(false);
         if (bbox != overflowRect)
             result.unite(overflowRect);
+        IntRect floatRect = renderer()->floatRect();
+        if (bbox != floatRect)
+            result.unite(floatRect);
         
         // We have to adjust the x/y of this result so that it is in the coordinate space of the layer.
         // We also have to add in borderTopExtra here, since borderBox(), in order to play well with methods like
@@ -2278,30 +1670,14 @@ IntRect RenderLayer::localBoundingBox() const
         // really confusing.
         result.move(m_x, m_y + renderer()->borderTopExtra());
     }
-
-    RenderView* view = renderer()->view();
-    ASSERT(view);
-    if (view)
-        result.inflate(view->maximalOutlineSize()); // Used to apply a fudge factor to dirty-rect checks on blocks/tables.
-
-    return result;
-}
-
-IntRect RenderLayer::absoluteBoundingBox() const
-{
-    return boundingBox(root());
-}
-
-IntRect RenderLayer::boundingBox(const RenderLayer* rootLayer) const
-{    
-    IntRect result = localBoundingBox();
-
+    
     // Convert the bounding box to an absolute position.  We can do this easily by looking at the delta
     // between the bounding box's xpos and our layer's xpos and then applying that to the absolute layerBounds
     // passed in.
     int absX = 0, absY = 0;
-    convertToLayerCoords(rootLayer, absX, absY);
+    convertToLayerCoords(root(), absX, absY);
     result.move(absX - m_x, absY - m_y);
+    result.inflate(renderer()->view()->maximalOutlineSize());
     return result;
 }
 
@@ -2337,16 +1713,17 @@ static RenderObject* commonAncestor(RenderObject* obj1, RenderObject* obj2)
     return 0;
 }
 
-void RenderLayer::updateHoverActiveState(const HitTestRequest& request, HitTestResult& result)
+void RenderLayer::updateHoverActiveState(RenderObject::NodeInfo& info)
 {
-    // We don't update :hover/:active state when the result is marked as readonly.
-    if (request.readonly)
+    // We don't update :hover/:active state when the info is marked as readonly.
+    if (info.readonly())
         return;
 
     Document* doc = renderer()->document();
+    if (!doc) return;
 
     Node* activeNode = doc->activeNode();
-    if (activeNode && !request.active) {
+    if (activeNode && !info.active()) {
         // We are clearing the :active chain because the mouse has been released.
         for (RenderObject* curr = activeNode->renderer(); curr; curr = curr->parent()) {
             if (curr->element() && !curr->isText())
@@ -2354,8 +1731,8 @@ void RenderLayer::updateHoverActiveState(const HitTestRequest& request, HitTestR
         }
         doc->setActiveNode(0);
     } else {
-        Node* newActiveNode = result.innerNode();
-        if (!activeNode && newActiveNode && request.active) {
+        Node* newActiveNode = info.innerNode();
+        if (!activeNode && newActiveNode && info.active()) {
             // We are setting the :active chain and freezing it. If future moves happen, they
             // will need to reference this chain.
             for (RenderObject* curr = newActiveNode->renderer(); curr; curr = curr->parent()) {
@@ -2370,12 +1747,12 @@ void RenderLayer::updateHoverActiveState(const HitTestRequest& request, HitTestR
     // If the mouse is down and if this is a mouse move event, we want to restrict changes in 
     // :hover/:active to only apply to elements that are in the :active chain that we froze
     // at the time the mouse went down.
-    bool mustBeInActiveChain = request.active && request.mouseMove;
+    bool mustBeInActiveChain = info.active() && info.mouseMove();
 
     // Check to see if the hovered node has changed.  If not, then we don't need to
     // do anything.  
-    RefPtr<Node> oldHoverNode = doc->hoverNode();
-    Node* newHoverNode = result.innerNode();
+    Node* oldHoverNode = doc->hoverNode();
+    Node* newHoverNode = info.innerNode();
 
     // Update our current hover node.
     doc->setHoverNode(newHoverNode);
@@ -2400,7 +1777,7 @@ void RenderLayer::updateHoverActiveState(const HitTestRequest& request, HitTestR
     // Now set the hover state for our new object up to the root.
     for (RenderObject* curr = newHoverObj; curr; curr = curr->hoverAncestor()) {
         if (curr->element() && !curr->isText() && (!mustBeInActiveChain || curr->element()->inActiveChain())) {
-            curr->element()->setActive(request.active);
+            curr->element()->setActive(info.active());
             curr->element()->setHovered(true);
         }
     }
@@ -2412,33 +1789,13 @@ static inline bool compareZIndex(RenderLayer* first, RenderLayer* second)
     return first->zIndex() < second->zIndex();
 }
 
-void RenderLayer::dirtyZOrderLists(bool inScheduleUpdate /* = true */)
+void RenderLayer::dirtyZOrderLists()
 {
-#if ENABLE(HW_COMP)
-    ASSERT(!m_rebuildingLayerTree);
-#endif
-
     if (m_posZOrderList)
         m_posZOrderList->clear();
     if (m_negZOrderList)
         m_negZOrderList->clear();
     m_zOrderListsDirty = true;
-
-#if ENABLE(HW_COMP)
-    if (inScheduleUpdate && inCompositingMode())
-        renderer()->scheduleLayerUpdate();
-#endif
-}
-
-void RenderLayer::dirtyStackingContextZOrderList(bool inScheduleUpdate /* = true */)
-{
-#if ENABLE(HW_COMP)
-    ASSERT(!m_rebuildingLayerTree);
-#endif
-    
-    RenderLayer* sc = stackingContext();
-    if (sc)
-        sc->dirtyZOrderLists(inScheduleUpdate);
 }
 
 void RenderLayer::dirtyOverflowList()
@@ -2446,30 +1803,19 @@ void RenderLayer::dirtyOverflowList()
     if (m_overflowList)
         m_overflowList->clear();
     m_overflowListDirty = true;
-
-#if ENABLE(HW_COMP)
-    if (inCompositingMode())
-        renderer()->scheduleLayerUpdate();
-#endif
 }
 
 void RenderLayer::updateZOrderLists()
 {
-    //ASSERT(isStackingContext() || (!m_posZOrderList || m_posZOrderList->size() == 0));
-
     if (!isStackingContext() || !m_zOrderListsDirty)
         return;
-
-    ASSERT(!m_posZOrderList || m_posZOrderList->size() == 0);
-    ASSERT(!m_negZOrderList || m_negZOrderList->size() == 0);
-            
+    
     for (RenderLayer* child = firstChild(); child; child = child->nextSibling())
         child->collectLayers(m_posZOrderList, m_negZOrderList);
 
     // Sort the two lists.
     if (m_posZOrderList)
         std::stable_sort(m_posZOrderList->begin(), m_posZOrderList->end(), compareZIndex);
-
     if (m_negZOrderList)
         std::stable_sort(m_negZOrderList->begin(), m_negZOrderList->end(), compareZIndex);
 
@@ -2494,10 +1840,14 @@ void RenderLayer::updateOverflowList()
 
 void RenderLayer::collectLayers(Vector<RenderLayer*>*& posBuffer, Vector<RenderLayer*>*& negBuffer)
 {
-    updateVisibilityStatus();
-        
+    // FIXME: A child render object or layer could override visibility.  Don't remove this
+    // optimization though until RenderObject's nodeAtPoint is patched to understand what to do
+    // when visibility is overridden by a child.
+    if (renderer()->style()->visibility() != VISIBLE)
+        return;
+
     // Overflow layers are just painted by their enclosing layers, so they don't get put in zorder lists.
-    if ((m_hasVisibleContent || (m_hasVisibleDescendant && isStackingContext())) && !isOverflowOnly()) {
+    if (!isOverflowOnly()) {
         // Determine which buffer the child should be in.
         Vector<RenderLayer*>*& buffer = (zIndex() >= 0) ? posBuffer : negBuffer;
 
@@ -2511,7 +1861,7 @@ void RenderLayer::collectLayers(Vector<RenderLayer*>*& posBuffer, Vector<RenderL
 
     // Recur into our children to collect more layers, but only if we don't establish
     // a stacking context.
-    if (m_hasVisibleDescendant && !isStackingContext())
+    if (!isStackingContext())
         for (RenderLayer* child = firstChild(); child; child = child->nextSibling())
             child->collectLayers(posBuffer, negBuffer);
 }
@@ -2523,22 +1873,6 @@ void RenderLayer::repaintIncludingDescendants()
         curr->repaintIncludingDescendants();
 }
 
-void RenderLayer::repaintAbsoluteRectIncludingDescendants(const IntRect& r)
-{
-#if ENABLE(HW_COMP)
-    if (inCompositingMode()) {
-        RenderLayer* compLayer = enclosingCompositingLayer();
-        
-        // convert to layer coords
-        IntRect layerRect(r);
-        int x = 0, y = 0;
-        convertToLayerCoords(root(), x, y);
-        layerRect.move(-x, -y);
-        compLayer->repaintCompositingLayerRect(layerRect, true);
-    }
-#endif
-}
-
 bool RenderLayer::shouldBeOverflowOnly() const
 {
     return renderer()->hasOverflowClip() && 
@@ -2547,20 +1881,17 @@ bool RenderLayer::shouldBeOverflowOnly() const
            !isTransparent();
 }
 
-void RenderLayer::setStyleChangePending(bool inPending)
-{
-    m_styleChangePending = inPending;
-}
-
-void RenderLayer::styleChanged(RenderStyle::Diff inDiff, bool hasOldStyle)
+void RenderLayer::styleChanged()
 {
     bool isOverflowOnly = shouldBeOverflowOnly();
     if (isOverflowOnly != m_isOverflowOnly) {
         m_isOverflowOnly = isOverflowOnly;
         RenderLayer* p = parent();
+        RenderLayer* sc = stackingContext();
         if (p)
             p->dirtyOverflowList();
-        dirtyStackingContextZOrderList();
+        if (sc)
+            sc->dirtyZOrderLists();
     }
 
     if (m_object->style()->overflowX() == OMARQUEE && m_object->style()->marqueeBehavior() != MNONE) {
@@ -2571,21 +1902,6 @@ void RenderLayer::styleChanged(RenderStyle::Diff inDiff, bool hasOldStyle)
     else if (m_marquee) {
         delete m_marquee;
         m_marquee = 0;
-    }
-
-#if ENABLE(HW_COMP)
-    updateCompositingLayer(hasOldStyle, true, inDiff >= RenderStyle::Repaint);
-#endif
-
-    // if something changes that just implies a recomposite
-    // (i.e. just a compositing property changed, like transform),
-    // we need to recompute the dashboard regions.
-    // FIXME: This should be optimized.
-    if (inDiff == RenderStyle::RecompositeLayer) {
-#if ENABLE(TOUCH_EVENTS)
-        if (m_object->document()->touchEventListeners().size() > 0)
-            m_object->document()->setTouchEventListenersDirty(true);
-#endif
     }
 }
 
@@ -2598,127 +1914,11 @@ void RenderLayer::suspendMarquees()
         curr->suspendMarquees();
 }
 
-#if !ENABLE(HW_COMP)
-bool RenderLayer::startAnimation(double beginTime, int index)
-{
-    return false;
-}
-
-bool RenderLayer::startTransition(double beginTime, int property, RenderStyle* toStyle)
-{
-    return false
-}
-
-void RenderLayer::setAnimationStartTime(double t)
-{
-}
-
-void RenderLayer::setTransitionStartTime(int property, double t)
-{
-}
-
-void RenderLayer::animationFinished(const String& name, int index, bool reset)
-{
-}
-
-void RenderLayer::transitionFinished(int property)
-{
-}
-
-#endif
-
-// inPoint is in the coordinate space of our renderer()
-FloatPoint RenderLayer::convertToPage(const FloatPoint& inPoint)
-{
-#if ENABLE(HW_COMP)
-    RenderLayer*    compLayer = enclosingCompositingLayer();
-    if (compLayer) {
-        FloatPoint  compLayerPoint(inPoint);
-
-        // map point into the compositing ancestor, if necessary    
-        if (compLayer != this) {
-            int myX, myY;
-            renderer()->absolutePosition(myX, myY);
-
-            int compLayerX, compLayerY;
-            compLayer->renderer()->absolutePosition(compLayerX, compLayerY);
-            
-            compLayerPoint.move(myX - compLayerX, myY - compLayerY);
-        }
-        
-        return compLayer->convertToPageUsingCompositingLayer(compLayerPoint);
-    }
-#endif
-
-    int myX, myY;
-    m_object->absolutePosition(myX, myY);
-    return FloatPoint((float)myX + inPoint.x(), (float)myY + inPoint.y());
-}
-
-FloatPoint RenderLayer::convertFromPage(const FloatPoint& inPoint)
-{
-#if ENABLE(HW_COMP)
-    RenderLayer*    compLayer = enclosingCompositingLayer();
-    if (compLayer) {
-
-        FloatPoint  compLayerPoint(compLayer->convertFromPageUsingCompositingLayer(inPoint));
-
-        // map point into the compositing ancestor, if necessary    
-        if (compLayer != this) {
-            int myX, myY;
-            renderer()->absolutePosition(myX, myY);
-
-            int compLayerX, compLayerY;
-            compLayer->renderer()->absolutePosition(compLayerX, compLayerY);
-            
-            compLayerPoint.move(compLayerX - myX, compLayerY - myY);
-        }
-
-        return compLayerPoint;
-    }
-#endif
-
-    int myX, myY;
-    m_object->absolutePosition(myX, myY);
-    return FloatPoint(inPoint.x() - (float)myX, inPoint.y() - (float)myY);
-}
-    
-void RenderLayer::convertQuadToPage(FloatQuad& ioQuad)
-{
-#if ENABLE(HW_COMP)
-    RenderLayer*    compLayer = enclosingCompositingLayer();
-    if (compLayer) {
-
-        // map point into the compositing ancestor, if necessary    
-        if (compLayer != this) {
-            int myX, myY;
-            renderer()->absolutePosition(myX, myY);
-
-            int compLayerX, compLayerY;
-            compLayer->renderer()->absolutePosition(compLayerX, compLayerY);
-            
-            ioQuad.move(myX - compLayerX, myY - compLayerY);
-        }
-        
-        compLayer->convertQuadToPageUsingCompositingLayer(ioQuad);
-        return;
-    }
-#endif
-
-    int myX, myY;
-    m_object->absolutePosition(myX, myY);
-    ioQuad.move(myX, myY);
-}
-
-
-#pragma mark -
-
 // --------------------------------------------------------------------------
 // Marquee implementation
 
 Marquee::Marquee(RenderLayer* l)
     : m_layer(l), m_currentLoop(0)
-    , m_totalLoops(0)
     , m_timer(this, &Marquee::timerFired)
     , m_start(0), m_end(0), m_speed(0), m_reset(false)
     , m_suspended(false), m_stopped(false), m_direction(MAUTO)
@@ -2752,7 +1952,7 @@ EMarqueeDirection Marquee::direction() const
     // Now we have the real direction.  Next we check to see if the increment is negative.
     // If so, then we reverse the direction.
     Length increment = m_layer->renderer()->style()->marqueeIncrement();
-    if (increment.isNegative())
+    if (increment.value() < 0)
         result = static_cast<EMarqueeDirection>(-result);
     
     return result;
@@ -2811,20 +2011,16 @@ int Marquee::computePosition(EMarqueeDirection dir, bool stopAtContentEdge)
 
 void Marquee::start()
 {
-    if (m_timer.isActive() || m_layer->renderer()->style()->marqueeIncrement().isZero())
+    if (m_timer.isActive() || m_layer->renderer()->style()->marqueeIncrement().value() == 0)
         return;
-
-    // We may end up propagating a scroll event. It is important that we suspend events until 
-    // the end of the function since they could delete the layer, including the marquee.
-    FrameView* frameView = m_layer->renderer()->document()->view();
-    if (frameView)
-        frameView->pauseScheduledEvents();
-
+    
     if (!m_suspended && !m_stopped) {
         if (isHorizontal())
             m_layer->scrollToOffset(m_start, 0, false, false);
         else
             m_layer->scrollToOffset(0, m_start, false, false);
+        // FIXME: At this point a scroll event fired, which could have deleted this layer,
+        // including the marquee. Need to handle this case.
     }
     else {
         m_suspended = false;
@@ -2832,9 +2028,6 @@ void Marquee::start()
     }
 
     m_timer.startRepeating(speed() * 0.001);
-
-    if (frameView)
-        frameView->resumeScheduledEvents();
 }
 
 void Marquee::suspend()
@@ -2967,4 +2160,4 @@ void Marquee::timerFired(Timer<Marquee>*)
         m_layer->scrollToYOffset(newPos);
 }
 
-} // namespace WebCore
+}

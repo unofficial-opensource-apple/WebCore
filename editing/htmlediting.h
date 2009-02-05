@@ -35,10 +35,10 @@ class Document;
 class Element;
 class Node;
 class Position;
-class Range;
-class Selection;
 class String;
 class VisiblePosition;
+
+const unsigned short NON_BREAKING_SPACE = 0xa0;
 
 Position rangeCompliantEquivalent(const Position&);
 Position rangeCompliantEquivalent(const VisiblePosition&);
@@ -51,7 +51,6 @@ VisiblePosition firstEditablePositionAfterPositionInRoot(const Position&, Node*)
 VisiblePosition lastEditablePositionBeforePositionInRoot(const Position&, Node*);
 int comparePositions(const Position&, const Position&);
 Node* lowestEditableAncestor(Node*);
-bool isContentEditable(const Node*);
 Position nextCandidate(const Position&);
 Position nextVisuallyDistinctCandidate(const Position&);
 Position previousCandidate(const Position&);
@@ -59,19 +58,16 @@ Position previousVisuallyDistinctCandidate(const Position&);
 bool isEditablePosition(const Position&);
 bool isRichlyEditablePosition(const Position&);
 Element* editableRootForPosition(const Position&);
-bool isBlock(const Node*);
+bool isBlock(Node*);
 Node* enclosingBlock(Node*);
 
-String stringWithRebalancedWhitespace(const String&, bool, bool);
+void rebalanceWhitespaceInTextNode(Node*, unsigned start, unsigned length);
 const String& nonBreakingSpaceString();
 
 //------------------------------------------------------------------------------------------
 
 Position positionBeforeNode(const Node*);
 Position positionAfterNode(const Node*);
-
-PassRefPtr<Range> avoidIntersectionWithNode(const Range*, Node*);
-Selection avoidIntersectionWithNode(const Selection&, Node*);
 
 bool isSpecialElement(const Node*);
 bool validBlockTag(const String&);
@@ -94,8 +90,6 @@ PassRefPtr<Element> createTabSpanElement(Document*, const String& tabText);
 bool isNodeRendered(const Node*);
 bool isMailBlockquote(const Node*);
 Node* nearestMailBlockquote(const Node*);
-int caretMinOffset(const Node*);
-int caretMaxOffset(const Node*);
 
 //------------------------------------------------------------------------------------------
 
@@ -107,27 +101,21 @@ Position positionBeforeContainingSpecialElement(const Position&, Node** containi
 bool isLastVisiblePositionInSpecialElement(const Position&);
 Position positionAfterContainingSpecialElement(const Position&, Node** containingSpecialElement=0);
 Position positionOutsideContainingSpecialElement(const Position&, Node** containingSpecialElement=0);
-Node* isLastPositionBeforeTable(const VisiblePosition&);
-Node* isFirstPositionAfterTable(const VisiblePosition&);
 
-Node* enclosingNodeWithTag(const Position&, const QualifiedName&);
-Node* enclosingNodeOfType(const Position&, bool (*nodeIsOfType)(const Node*));
-Node* enclosingTableCell(const Position&);
+Node* enclosingNodeWithTag(Node*, const QualifiedName&);
+Node* enclosingTableCell(Node*);
 Node* enclosingEmptyListItem(const VisiblePosition&);
-Node* enclosingAnchorElement(const Position&);
 bool isListElement(Node*);
 Node* enclosingList(Node*);
 Node* outermostEnclosingList(Node*);
 Node* enclosingListChild(Node*);
 Node* highestAncestor(Node*);
 bool isTableElement(Node*);
-bool isTableCell(const Node*);
-
-bool lineBreakExistsAtPosition(const VisiblePosition&);
-
-Selection selectionForParagraphIteration(const Selection&);
-
-int indexForVisiblePosition(VisiblePosition&);
+bool isFirstVisiblePositionAfterTableElement(const Position&);
+Position positionBeforePrecedingTableElement(const Position&);
+bool isLastVisiblePositionBeforeTableElement(const Position&);
+Position positionAfterFollowingTableElement(const Position&);
+Position positionAvoidingSpecialElementBoundary(const Position&);
 
 }
 

@@ -13,20 +13,16 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface [
-        GenerateConstructor,
-        InterfaceUUID=64165a4c-8889-4725-a149-abd13d5b4b61,
-        ImplementationUUID=a20e9b6a-e3a5-4276-aa43-0097e57df8d8
-    ] HTMLOListElement : HTMLElement {
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLOListElement : HTMLElement {
         attribute boolean compact;
         attribute long start;
-        attribute [ConvertNullToNullString] DOMString type;
+        attribute DOMString type;
     };
 
 }

@@ -19,8 +19,8 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
+    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+    Boston, MA 02111-1307, USA.
 
     This class provides all functionality needed for loading images, style sheets and html
     pages from the web. It has a memory cache for these objects.
@@ -32,17 +32,16 @@
 #include "Cache.h"
 #include "CachedResourceClient.h"
 #include "CachedResourceClientWalker.h"
-#include "TextResourceDecoder.h"
+#include "Decoder.h"
 #include "loader.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
-#if ENABLE(XSLT)
+#ifdef KHTML_XSLT
 
-CachedXSLStyleSheet::CachedXSLStyleSheet(DocLoader* dl, const String &url)
-    : CachedResource(url, XSLStyleSheet)
-    , m_decoder(new TextResourceDecoder("text/xsl"))
+CachedXSLStyleSheet::CachedXSLStyleSheet(DocLoader* dl, const String &url, CachePolicy cachePolicy)
+    : CachedResource(url, XSLStyleSheet, cachePolicy)
 {
     // It's XML we want.
     // FIXME: This should accept more general xml formats */*+xml, image/svg+xml for example.
@@ -51,6 +50,7 @@ CachedXSLStyleSheet::CachedXSLStyleSheet(DocLoader* dl, const String &url)
     // load the file
     cache()->loader()->load(dl, this, false);
     m_loading = true;
+    m_decoder = new Decoder;
 }
 
 void CachedXSLStyleSheet::ref(CachedResourceClient *c)
@@ -58,30 +58,22 @@ void CachedXSLStyleSheet::ref(CachedResourceClient *c)
     CachedResource::ref(c);
     
     if (!m_loading)
-        c->setXSLStyleSheet(m_url, m_sheet);
+        c->setStyleSheet(m_url, m_sheet);
 }
 
-void CachedXSLStyleSheet::setEncoding(const String& chs)
+void CachedXSLStyleSheet::setCharset( const DeprecatedString &chs )
 {
-    m_decoder->setEncoding(chs, TextResourceDecoder::EncodingFromHTTPHeader);
+    if (!chs.isEmpty())
+        m_decoder->setEncodingName(chs.latin1(), Decoder::EncodingFromHTTPHeader);
 }
 
-String CachedXSLStyleSheet::encoding() const
-{
-    return m_decoder->encoding().name();
-}
-
-void CachedXSLStyleSheet::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+void CachedXSLStyleSheet::data(Vector<char>& data, bool allDataReceived)
 {
     if (!allDataReceived)
         return;
 
-    m_data = data;     
-    setEncodedSize(m_data.get() ? m_data->size() : 0);
-    if (m_data.get()) {
-        m_sheet = String(m_decoder->decode(m_data->data(), encodedSize()));
-        m_sheet += m_decoder->flush();
-    }
+    setEncodedSize(data.size());
+    m_sheet = String(m_decoder->decode(data.data(), encodedSize()));
     m_loading = false;
     checkNotify();
 }
@@ -93,14 +85,13 @@ void CachedXSLStyleSheet::checkNotify()
     
     CachedResourceClientWalker w(m_clients);
     while (CachedResourceClient *c = w.next())
-        c->setXSLStyleSheet(m_url, m_sheet);
+        c->setStyleSheet(m_url, m_sheet);
 }
 
 
 void CachedXSLStyleSheet::error()
 {
     m_loading = false;
-    m_errorOccurred = true;
     checkNotify();
 }
 

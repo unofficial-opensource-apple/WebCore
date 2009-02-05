@@ -4,7 +4,6 @@ acronym
 address
 applet
 area
-audio
 b
 base
 basefont
@@ -82,7 +81,6 @@ samp
 script
 select
 small
-source
 span
 strike
 strong
@@ -102,6 +100,5 @@ tt
 u
 ul
 var
-video
 wbr
 xmp

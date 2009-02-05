@@ -28,30 +28,26 @@
 
 namespace WebCore {
 
+class DOMImplementation;
+class FrameView;
 class Token;
+class Attribute;
 
 class HTMLViewSourceDocument : public HTMLDocument
 {
 public:
-    HTMLViewSourceDocument(DOMImplementation*, Frame*, const String& mimeType);
+    HTMLViewSourceDocument(DOMImplementation*, FrameView* = 0);
     
     virtual Tokenizer* createTokenizer();
     
-    void addViewSourceToken(Token*); // Used by the HTML tokenizer.
-    void addViewSourceText(const String&); // Used by the plaintext tokenizer.
+    void addViewSourceToken(Token*);
+    void addViewSourceAttribute(Attribute*);
     
 private:
-    void createContainingTable();
     Element* addSpanWithClassName(const String&);
-    void addLine(const String& className);
-    void addText(const String& text, const String& className);
-    Element* addLink(const String& url, bool isAnchor);
 
 private:
-    String m_type;
-    Element* m_current;
-    Element* m_tbody;
-    Element* m_td;
+    RefPtr<Node> m_current;
 };
 
 }

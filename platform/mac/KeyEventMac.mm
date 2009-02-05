@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,11 +27,8 @@
 #import "PlatformKeyboardEvent.h"
 
 #import "Logging.h"
-#import <wtf/ASCIICType.h>
 
-using namespace WTF;
-
-#import <GraphicsServices/GraphicsServices.h>
+#import "GraphicsServices/GraphicsServices.h"
 #import "WKWindow.h"
 
 
@@ -39,7 +36,7 @@ namespace WebCore {
 
 static String keyIdentifierForKeyEvent(GSEventRef event)
 {
-    CFStringRef s = GSEventCopyCharactersIgnoringModifiers(event);
+    CFStringRef s = GSEventCopyCharactersIgnoringModifiers (event);
     if (CFStringGetLength(s) != 1) {
         WKError("received an unexpected number of characters in key event: %u", CFStringGetLength(s));
         return "Unidentified";
@@ -303,14 +300,10 @@ static String keyIdentifierForKeyEvent(GSEventRef event)
 
         // Turn 0x7F into 0x08, because backspace needs to always be 0x08.
         case 0x7F:
-            return "U+0008";
-        // Standard says that DEL becomes U+007F.
+            return "U+000008";
+        // Standard says that DEL becomes U+00007F.
         case NSDeleteFunctionKey:
-            return "U+007F";
-            
-        // Always use 0x09 for tab instead of AppKit's backtab character.
-        case NSBackTabCharacter:
-            return "U+0009";
+            return "U+00007F";
 
         case NSBeginFunctionKey:
         case NSBreakFunctionKey:
@@ -330,7 +323,7 @@ static String keyIdentifierForKeyEvent(GSEventRef event)
             // FIXME: We should use something other than the vendor-area Unicode values for the above keys.
             // For now, just fall through to the default.
         default:
-            return String::format("U+%04X", toASCIIUpper(c));
+            return String::sprintf("U+%06X", toupper(c));
     }
 }
 
@@ -346,33 +339,6 @@ static bool isKeypadEvent(GSEventRef event)
             return false;
     }
 
-//TODO A.B. TEMPORARILY disabled until GSEventGetKeyCode is added to GraphicsServices
-//#if !PLATFORM(IPHONE)
-//    switch ([event keyCode]) {
-//#else
-//    switch (GSEventGetKeyCode (event)) {
-//#endif
-/*        case 71: // Clear
-        case 81: // =
-        case 75: // /
-        case 67: // *
-        case 78: // -
-        case 69: // +
-        case 76: // Enter
-        case 65: // .
-        case 82: // 0
-        case 83: // 1
-        case 84: // 2
-        case 85: // 3
-        case 86: // 4
-        case 87: // 5
-        case 88: // 6
-        case 89: // 7
-        case 91: // 8
-        case 92: // 9
-            return true;
-     }
-*/     
      return false;
 }
 
@@ -388,68 +354,29 @@ static inline NSString *eventCopyCharactersIgnoringModifiers(GSEventRef event)
     return [(NSString *)GSEventCopyCharactersIgnoringModifiers(event) autorelease]; 
 }
 
-PlatformKeyboardEvent::PlatformKeyboardEvent(GSEventRef event)
-    : m_type(GSEventGetType(event) == kGSEventKeyUp ? PlatformKeyboardEvent::KeyUp : PlatformKeyboardEvent::KeyDown)
-    , m_text(eventCopyCharacters(event))
-    , m_unmodifiedText(eventCopyCharactersIgnoringModifiers(event))
-    , m_keyIdentifier(keyIdentifierForKeyEvent(event))
-    , m_autoRepeat(GSEventIsKeyRepeating(event))
-    , m_windowsVirtualKeyCode(GSEventGetKeyCode(event))
-    , m_isKeypad(isKeypadEvent(event))
-    , m_shiftKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskShift)
-    , m_ctrlKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskControl)
-    , m_altKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskAlternate)
-    , m_metaKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskCommand)
-    , m_gsEvent(event)
+PlatformKeyboardEvent::PlatformKeyboardEvent(GSEventRef event, bool forceAutoRepeat)
+    : m_text(eventCopyCharacters(event)),
+      m_unmodifiedText(eventCopyCharactersIgnoringModifiers(event)),
+      m_keyIdentifier(keyIdentifierForKeyEvent(event)),
+      m_isKeyUp(GSEventGetType(event) == kGSEventKeyUp),
+      m_autoRepeat (forceAutoRepeat || GSEventIsKeyRepeating (event)),
+      m_WindowsKeyCode(GSEventGetKeyCode(event)),
+      m_isKeypad(isKeypadEvent(event)),
+      m_shiftKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskShift),
+      m_ctrlKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskControl),
+      m_altKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskAlternate),
+      m_metaKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskCommand)
 {
-    // Always use 13 for Enter/Return -- we don't want to use AppKit's different character for Enter.
-    if (m_windowsVirtualKeyCode == '\r') {
-        m_text = "\r";
-        m_unmodifiedText = "\r";
-    }
-
-    // The adjustments below are only needed in backward compatibility mode, but we cannot tell what mode we are in from here.
-
     // Turn 0x7F into 8, because backspace needs to always be 8.
     if (m_text == "\x7F")
         m_text = "\x8";
     if (m_unmodifiedText == "\x7F")
         m_unmodifiedText = "\x8";
     // Always use 9 for tab -- we don't want to use AppKit's different character for shift-tab.
-    if (m_windowsVirtualKeyCode == 9) {
+    if (m_WindowsKeyCode == 9) {
         m_text = "\x9";
         m_unmodifiedText = "\x9";
     }
-}
-
-void PlatformKeyboardEvent::disambiguateKeyDownEvent(Type type, bool backwardCompatibilityMode)
-{
-    // Can only change type from KeyDown to RawKeyDown or Char, as we lack information for other conversions.
-    ASSERT(m_type == KeyDown);
-    ASSERT(type == RawKeyDown || type == Char);
-    m_type = type;
-    if (backwardCompatibilityMode)
-        return;
-
-    if (type == RawKeyDown) {
-        m_text = String();
-        m_unmodifiedText = String();
-    } else {
-        m_keyIdentifier = String();
-        m_windowsVirtualKeyCode = 0;
-        if (m_text.length() == 1 && (m_text[0U] >= 0xF700 && m_text[0U] <= 0xF7FF)) {
-            // According to NSEvents.h, OpenStep reserves the range 0xF700-0xF8FF for function keys. However, some actual private use characters
-            // happen to be in this range, e.g. the Apple logo (Option+Shift+K).
-            // 0xF7FF is an arbitrary cut-off.
-            m_text = String();
-            m_unmodifiedText = String();
-        }
-    }
-}
-
-bool PlatformKeyboardEvent::currentCapsLockState()
-{
-    return 0;
 }
 
 }

@@ -1,6 +1,8 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,10 +16,9 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "CSSStyleDeclaration.h"
 
@@ -26,11 +27,14 @@
 #include "CSSPropertyNames.h"
 #include "CSSRule.h"
 #include "DeprecatedValueList.h"
-#include <wtf/ASCIICType.h>
 
-using namespace WTF;
+// Not in any header, so just declare it here for now.
+WebCore::String getPropertyName(unsigned short id);
 
 namespace WebCore {
+
+// Defined in CSSGrammar.y, but not in any header, so just declare it here for now.
+int getPropertyID(const char* str, int len);
 
 static int propertyID(const String& s)
 {
@@ -44,10 +48,15 @@ static int propertyID(const String& s)
         UChar c = s[i];
         if (c == 0 || c >= 0x7F)
             return 0; // illegal character
-        buffer[i] = toASCIILower(c);
+        buffer[i] = c;
     }
 
-    return getPropertyID(buffer, len);
+    int id = getPropertyID(buffer, len);
+#if SVG_SUPPORT
+    if (id == 0)
+        id = SVG::getSVGCSSPropertyID(buffer, len);
+#endif
+    return id;
 }
 
 CSSStyleDeclaration::CSSStyleDeclaration(CSSRule* parent)
@@ -76,7 +85,7 @@ String CSSStyleDeclaration::getPropertyValue(const String &propertyName)
     return getPropertyValue(propID);
 }
 
-String CSSStyleDeclaration::getPropertyPriority(const String& propertyName)
+String CSSStyleDeclaration::getPropertyPriority(const String &propertyName)
 {
     int propID = propertyID(propertyName);
     if (!propID)
@@ -84,7 +93,7 @@ String CSSStyleDeclaration::getPropertyPriority(const String& propertyName)
     return getPropertyPriority(propID) ? "important" : "";
 }
 
-String CSSStyleDeclaration::getPropertyShorthand(const String& propertyName)
+String CSSStyleDeclaration::getPropertyShorthand(const String &propertyName)
 {
     int propID = propertyID(propertyName);
     if (!propID)
@@ -92,10 +101,10 @@ String CSSStyleDeclaration::getPropertyShorthand(const String& propertyName)
     int shorthandID = getPropertyShorthand(propID);
     if (!shorthandID)
         return String();
-    return getPropertyName(static_cast<CSSPropertyID>(shorthandID));
+    return getPropertyName(shorthandID);
 }
 
-bool CSSStyleDeclaration::isPropertyImplicit(const String& propertyName)
+bool CSSStyleDeclaration::isPropertyImplicit(const String &propertyName)
 {
     int propID = propertyID(propertyName);
     if (!propID)
@@ -115,8 +124,7 @@ void CSSStyleDeclaration::setProperty(const String& propertyName, const String& 
 void CSSStyleDeclaration::setProperty(const String& propertyName, const String& value, const String& priority, ExceptionCode& ec)
 {
     int propID = propertyID(propertyName);
-    if (!propID)
-        // FIXME: set exception?
+    if (!propID) // set exception?
         return;
     bool important = priority.find("important", 0, false) != -1;
     setProperty(propID, value, important, ec);
@@ -130,41 +138,37 @@ String CSSStyleDeclaration::removeProperty(const String& propertyName, Exception
     return removeProperty(propID, ec);
 }
 
-bool CSSStyleDeclaration::isPropertyName(const String& propertyName)
+bool CSSStyleDeclaration::isPropertyName(const String &propertyName)
 {
     return propertyID(propertyName);
 }
 
-CSSRule* CSSStyleDeclaration::parentRule() const
+CSSRule *CSSStyleDeclaration::parentRule() const
 {
-    return (parent() && parent()->isRule()) ? static_cast<CSSRule*>(parent()) : 0;
+    return (parent() && parent()->isRule()) ? static_cast<CSSRule *>(parent()) : 0;
 }
 
-void CSSStyleDeclaration::diff(CSSMutableStyleDeclaration* style) const
+void CSSStyleDeclaration::diff(CSSMutableStyleDeclaration *style) const
 {
     if (!style)
         return;
 
-    Vector<int> propertiesToRemove;
-    {
-        CSSMutableStyleDeclaration::const_iterator end = style->end();
-        for (CSSMutableStyleDeclaration::const_iterator it = style->begin(); it != end; ++it) {
-            const CSSProperty& property = *it;
-            RefPtr<CSSValue> value = getPropertyCSSValue(property.id());
-            if (value && (value->cssText() == property.value()->cssText()))
-                propertiesToRemove.append(property.id());
-        }
+    DeprecatedValueList<int> properties;
+    DeprecatedValueListConstIterator<CSSProperty> end;
+    for (DeprecatedValueListConstIterator<CSSProperty> it(style->valuesIterator()); it != end; ++it) {
+        const CSSProperty& property = *it;
+        RefPtr<CSSValue> value = getPropertyCSSValue(property.id());
+        if (value && (value->cssText() == property.value()->cssText()))
+            properties.append(property.id());
     }
-
-    // FIXME: This should use mass removal.
-    for (unsigned i = 0; i < propertiesToRemove.size(); i++)
-        style->removeProperty(propertiesToRemove[i]);
+    
+    for (DeprecatedValueListIterator<int> it(properties.begin()); it != properties.end(); ++it)
+        style->removeProperty(*it);
 }
 
-PassRefPtr<CSSMutableStyleDeclaration> CSSStyleDeclaration::copyPropertiesInSet(const int* set, unsigned length) const
+PassRefPtr<CSSMutableStyleDeclaration> CSSStyleDeclaration::copyPropertiesInSet(const int *set, unsigned length) const
 {
-    Vector<CSSProperty> list;
-    list.reserveCapacity(length);
+    DeprecatedValueList<CSSProperty> list;
     for (unsigned i = 0; i < length; i++) {
         RefPtr<CSSValue> value = getPropertyCSSValue(set[i]);
         if (value)
@@ -173,4 +177,4 @@ PassRefPtr<CSSMutableStyleDeclaration> CSSStyleDeclaration::copyPropertiesInSet(
     return new CSSMutableStyleDeclaration(0, list);
 }
 
-} // namespace WebCore
+}

@@ -17,8 +17,8 @@
 # 
 # You should have received a copy of the GNU Library General Public License
 # aint with this library; see the file COPYING.LIB.  If not, write to
-# the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-# Boston, MA 02110-1301, USA.
+# the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+# Boston, MA 02111-1307, USA.
 # 
 
 package IDLStructure;
@@ -39,7 +39,7 @@ struct( domClass => {
     constants => '@',    # List of 'domConstant'
     functions => '@',    # List of 'domFunction'
     attributes => '@',    # List of 'domAttribute'    
-    extendedAttributes => '$', # Extended attributes
+    extendedAttributes => '%', # Extended attributes
 });
 
 # Used to represent domClass contents (name of method, signature)
@@ -61,7 +61,7 @@ struct( domAttribute => {
 struct( domSignature => {
     name => '$',      # Variable name
     type => '$',      # Variable type
-    extendedAttributes => '$' # Extended attributes
+    extendedAttributes => '%' # Extended attributes
 });
 
 # Used to represent string constants
@@ -99,7 +99,7 @@ $exceptionSelector = 'exception\s*(' . $idlIdNs . '*)\s*([a-zA-Z\s{;]*};)';
 $exceptionSubSelector = '{\s*' . $supportedTypes . '\s*(' . $idlType . '*)\s*;\s*}';
 
 $interfaceSelector = 'interface\s*((?:' . $extendedAttributeSyntax . ' )?)(' . $idlIdNs . '*)\s*(?::(\s*[^{]*))?{([a-zA-Z0-9_=\s(),;:\[\]]*)';
-$interfaceMethodSelector = '\s*((?:' . $extendedAttributeSyntax . ' )?)' . $supportedTypes . '\s*(' . $idlIdNs . '*)\s*\(\s*([a-zA-Z0-9:\s,=\[\]]*)';
+$interfaceMethodSelector = '\s*((?:' . $extendedAttributeSyntax . ' )?)' . $supportedTypes . '\s*(' . $idlIdNs . '*)\s*\(\s*([a-zA-Z0-9:\s,\[\]]*)';
 $interfaceParameterSelector = 'in\s*((?:' . $extendedAttributeSyntax . ' )?)' . $supportedTypes . '\s*(' . $idlIdNs . '*)';
 
 $interfaceAttributeSelector = '\s*(readonly attribute|attribute)\s*(' . $extendedAttributeSyntax . ' )?' . $supportedTypes . '\s*(' . $idlType . '*)';

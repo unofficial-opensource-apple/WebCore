@@ -1,1 +1,1 @@
-#include <JavaScriptCore/FastMalloc.h>
+#import <JavaScriptCore/FastMalloc.h>

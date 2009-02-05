@@ -16,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 #include "config.h"
 #include "ProcessingInstruction.h"
@@ -28,8 +28,6 @@
 #include "Document.h"
 #include "DocLoader.h"
 #include "ExceptionCode.h"
-#include "Frame.h"
-#include "FrameLoader.h"
 #include "XSLStyleSheet.h"
 #include "XMLTokenizer.h" // for parseAttributes()
 
@@ -39,7 +37,7 @@ ProcessingInstruction::ProcessingInstruction(Document* doc)
     : ContainerNode(doc)
     , m_cachedSheet(0)
     , m_loading(false)
-#if ENABLE(XSLT)
+#if KHTML_XSLT
     , m_isXSL(false)
 #endif
 {
@@ -47,11 +45,11 @@ ProcessingInstruction::ProcessingInstruction(Document* doc)
 
 ProcessingInstruction::ProcessingInstruction(Document* doc, const String& target, const String& data)
     : ContainerNode(doc)
-    , m_target(target)
-    , m_data(data)
+    , m_target(target.impl())
+    , m_data(data.impl())
     , m_cachedSheet(0)
     , m_loading(false)
-#if ENABLE(XSLT)
+#if KHTML_XSLT
     , m_isXSL(false)
 #endif
 {
@@ -70,12 +68,12 @@ void ProcessingInstruction::setData(const String& data, ExceptionCode& ec)
         ec = NO_MODIFICATION_ALLOWED_ERR;
         return;
     }
-    m_data = data;
+    m_data = data.impl();
 }
 
 String ProcessingInstruction::nodeName() const
 {
-    return m_target;
+    return m_target.get();
 }
 
 Node::NodeType ProcessingInstruction::nodeType() const
@@ -85,7 +83,7 @@ Node::NodeType ProcessingInstruction::nodeType() const
 
 String ProcessingInstruction::nodeValue() const
 {
-    return m_data;
+    return m_data.get();
 }
 
 void ProcessingInstruction::setNodeValue(const String& nodeValue, ExceptionCode& ec)
@@ -97,7 +95,7 @@ void ProcessingInstruction::setNodeValue(const String& nodeValue, ExceptionCode&
 PassRefPtr<Node> ProcessingInstruction::cloneNode(bool /*deep*/)
 {
     // ### copy m_localHref
-    return new ProcessingInstruction(document(), m_target, m_data);
+    return new ProcessingInstruction(document(), m_target.get(), m_data.get());
 }
 
 // DOM Section 1.1.1
@@ -108,21 +106,21 @@ bool ProcessingInstruction::childTypeAllowed(NodeType)
 
 bool ProcessingInstruction::checkStyleSheet()
 {
-    if (m_target == "xml-stylesheet") {
+    if (String(m_target.get()) == "xml-stylesheet") {
         // see http://www.w3.org/TR/xml-stylesheet/
         // ### support stylesheet included in a fragment of this (or another) document
         // ### make sure this gets called when adding from javascript
         bool attrsOk;
-        const HashMap<String, String> attrs = parseAttributes(m_data, attrsOk);
+        const HashMap<String, String> attrs = parseAttributes(m_data.get(), attrsOk);
         if (!attrsOk)
             return true;
         HashMap<String, String>::const_iterator i = attrs.find("type");
         String type;
         if (i != attrs.end())
             type = i->second;
-
+        
         bool isCSS = type.isEmpty() || type == "text/css";
-#if ENABLE(XSLT)
+#if KHTML_XSLT
         m_isXSL = (type == "text/xml" || type == "text/xsl" || type == "application/xml" ||
                    type == "application/xhtml+xml" || type == "application/rss+xml" || type == "application/atom=xml");
         if (!isCSS && !m_isXSL)
@@ -135,44 +133,40 @@ bool ProcessingInstruction::checkStyleSheet()
 
         if (href.length() > 1) {
             if (href[0] == '#') {
-                m_localHref = href.substring(1);
-#if ENABLE(XSLT)
+                m_localHref = href.substring(1).impl();
+#if KHTML_XSLT
                 // We need to make a synthetic XSLStyleSheet that is embedded.  It needs to be able
                 // to kick off import/include loads that can hang off some parent sheet.
                 if (m_isXSL) {
-                    m_sheet = new XSLStyleSheet(this, m_localHref, true);
+                    m_sheet = new XSLStyleSheet(this, m_localHref.get(), true);
                     m_loading = false;
-                }
+                }                    
                 return !m_isXSL;
 #endif
             }
             else
             {
-                // FIXME: some validation on the URL?
+                // ### some validation on the URL?
+                // ### FIXME charset
                 if (document()->frame()) {
                     m_loading = true;
                     document()->addPendingSheet();
                     if (m_cachedSheet)
                         m_cachedSheet->deref(this);
-#if ENABLE(XSLT)
+#if KHTML_XSLT
                     if (m_isXSL)
                         m_cachedSheet = document()->docLoader()->requestXSLStyleSheet(document()->completeURL(href));
                     else
 #endif
-                    {
-                        String charset = attrs.get("charset");
-                        if (charset.isEmpty())
-                            charset = document()->frame()->loader()->encoding();
-
-                        m_cachedSheet = document()->docLoader()->requestCSSStyleSheet(document()->completeURL(href), charset);
-                    }
+                    m_cachedSheet = document()->docLoader()->requestStyleSheet(document()->completeURL(href), DeprecatedString::null);
                     if (m_cachedSheet)
-                        m_cachedSheet->ref(this);
-#if ENABLE(XSLT)
+                        m_cachedSheet->ref( this );
+#if KHTML_XSLT
                     return !m_isXSL;
 #endif
                 }
             }
+
         }
     }
     
@@ -188,69 +182,50 @@ bool ProcessingInstruction::isLoading() const
     return m_sheet->isLoading();
 }
 
-bool ProcessingInstruction::sheetLoaded()
+void ProcessingInstruction::sheetLoaded()
 {
-    if (!isLoading()) {
-        document()->removePendingSheet();
-        return true;
-    }
-    return false;
+    if (!isLoading())
+        document()->stylesheetLoaded();
 }
 
-void ProcessingInstruction::setCSSStyleSheet(const String& url, const String& charset, const String& sheet)
+void ProcessingInstruction::setStyleSheet(const String &url, const String &sheet)
 {
-#if ENABLE(XSLT)
-    ASSERT(!m_isXSL);
+#if KHTML_XSLT
+    if (m_isXSL)
+        m_sheet = new XSLStyleSheet(this, url);
+    else
 #endif
-    m_sheet = new CSSStyleSheet(this, url, charset);
-    parseStyleSheet(sheet);
-}
-
-#if ENABLE(XSLT)
-void ProcessingInstruction::setXSLStyleSheet(const String& url, const String& sheet)
-{
-    ASSERT(m_isXSL);
-    m_sheet = new XSLStyleSheet(this, url);
-    parseStyleSheet(sheet);
-}
-#endif
-
-void ProcessingInstruction::parseStyleSheet(const String& sheet)
-{
-    m_sheet->parseString(sheet, true);
+        m_sheet = new CSSStyleSheet(this, url);
+    m_sheet->parseString(sheet);
     if (m_cachedSheet)
         m_cachedSheet->deref(this);
     m_cachedSheet = 0;
 
     m_loading = false;
-    m_sheet->checkLoaded();
+
+    // Tell the doc about the sheet.
+    if (!isLoading() && m_sheet)
+        document()->stylesheetLoaded();
 }
 
 String ProcessingInstruction::toString() const
 {
     String result = "<?";
-    result += m_target;
+    result += m_target.get();
     result += " ";
-    result += m_data;
+    result += m_data.get();
     result += "?>";
     return result;
 }
 
-void ProcessingInstruction::setCSSStyleSheet(CSSStyleSheet* sheet)
+void ProcessingInstruction::setStyleSheet(StyleSheet* sheet)
 {
-    ASSERT(!m_cachedSheet);
-    ASSERT(!m_loading);
     m_sheet = sheet;
 }
 
 bool ProcessingInstruction::offsetInCharacters() const
 {
     return true;
-}
-
-int ProcessingInstruction::maxCharacterOffset() const 
-{
-    return static_cast<int>(m_data.length());
 }
 
 } // namespace

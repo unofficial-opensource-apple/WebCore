@@ -57,8 +57,6 @@ namespace WebCore {
 - (WebCoreAXObject*)nextSibling;
 - (WebCoreAXObject*)parentObject;
 
-- (WebCoreAXObject*)observableObject;
-
 - (void)childrenChanged;
 - (void)clearChildren;
 

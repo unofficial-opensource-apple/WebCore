@@ -17,41 +17,34 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSFontFaceRule_h
-#define CSSFontFaceRule_h
+#ifndef CSSFontFaceRule_H
+#define CSSFontFaceRule_H
 
 #include "CSSRule.h"
-#include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
 class CSSMutableStyleDeclaration;
 
-class CSSFontFaceRule : public CSSRule {
+class CSSFontFaceRule : public CSSRule
+{
 public:
     CSSFontFaceRule(StyleBase* parent);
     virtual ~CSSFontFaceRule();
 
-    virtual bool isFontFaceRule() { return true; }
-
     CSSMutableStyleDeclaration* style() const { return m_style.get(); }
 
-    // Inherited from CSSRule
-    virtual unsigned short type() const { return FONT_FACE_RULE; }
-
-    virtual String cssText() const;
-
-    void setDeclaration(PassRefPtr<CSSMutableStyleDeclaration>);
+    virtual bool isFontFaceRule() { return true; }
 
 protected:
     RefPtr<CSSMutableStyleDeclaration> m_style;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSFontFaceRule_h
+#endif

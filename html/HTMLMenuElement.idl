@@ -13,18 +13,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
-
-    interface [
-        GenerateConstructor,
-        InterfaceUUID=fb353af6-4927-4512-ad43-4ad8191b5615,
-        ImplementationUUID=ec26257c-a2a4-43dc-b234-cf644d22b1fb
-    ] HTMLMenuElement : HTMLElement {
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLMenuElement : HTMLElement {
         attribute boolean compact;
     };
-
 }

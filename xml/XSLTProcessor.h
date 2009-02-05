@@ -1,7 +1,7 @@
 /*
  * This file is part of the XSL implementation.
  *
- * Copyright (C) 2004, 2007 Apple, Inc.
+ * Copyright (C) 2004 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,15 +15,15 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef XSLTProcessor_h
-#define XSLTProcessor_h
+#ifndef xslt_processorimpl_h_
+#define xslt_processorimpl_h_
 
-#if ENABLE(XSLT)
+#ifdef KHTML_XSLT
 
 #include "StringHash.h"
 #include "XSLStyleSheet.h"
@@ -33,41 +33,39 @@
 
 namespace WebCore {
 
-class Frame;
+class FrameView;
 class Node;
 class Document;
 class DocumentFragment;
 
-class XSLTProcessor : public RefCounted<XSLTProcessor>
+class XSLTProcessor : public Shared<XSLTProcessor>
 {
 public:
-    void setXSLStylesheet(XSLStyleSheet* styleSheet) { m_stylesheet = styleSheet; }
-    bool transformToString(Node* source, String& resultMIMEType, String& resultString, String& resultEncoding);
-    RefPtr<Document> createDocumentFromSource(const String& source, const String& sourceEncoding, const String& sourceMIMEType, Node* sourceNode, Frame* frame);
+    void setXSLStylesheet(XSLStyleSheet *styleSheet) { m_stylesheet = styleSheet; }
+    bool transformToString(Node *source, DeprecatedString &resultMIMEType, DeprecatedString &resultString, DeprecatedString &resultEncoding);
+    RefPtr<Document> createDocumentFromSource(const DeprecatedString &source, const DeprecatedString &sourceEncoding, const DeprecatedString &sourceMIMEType, Node *sourceNode, FrameView *view = 0);
     
     // DOM methods
-    void importStylesheet(Node* style) { m_stylesheetRootNode = style; }
-    RefPtr<DocumentFragment> transformToFragment(Node* source, Document* ouputDoc);
-    RefPtr<Document> transformToDocument(Node* source);
+    void importStylesheet(Node *style) { m_stylesheetRootNode = style; }
+    RefPtr<DocumentFragment> transformToFragment(Node *source, Document *ouputDoc);
+    RefPtr<Document> transformToDocument(Node *source);
     
-    void setParameter(const String& namespaceURI, const String& localName, const String& value);
-    String getParameter(const String& namespaceURI, const String& localName) const;
-    void removeParameter(const String& namespaceURI, const String& localName);
+    void setParameter(StringImpl *namespaceURI, StringImpl *localName, StringImpl *value);
+    RefPtr<StringImpl> getParameter(StringImpl *namespaceURI, StringImpl *localName) const;
+    void removeParameter(StringImpl *namespaceURI, StringImpl *localName);
     void clearParameters() { m_parameters.clear(); }
 
     void reset() { m_stylesheet = NULL; m_stylesheetRootNode = NULL;  m_parameters.clear(); }
-
-    static void parseErrorFunc(void* userData, xmlError*);
-
+    
 public:
     // Only for libXSLT callbacks
-    XSLStyleSheet* xslStylesheet() const { return m_stylesheet.get(); }
+    XSLStyleSheet *xslStylesheet() const { return m_stylesheet.get(); }
     
-    typedef HashMap<String, String> ParameterMap;
+    typedef HashMap<RefPtr<StringImpl>, RefPtr<StringImpl> > ParameterMap;
 
 private:
     // Convert a libxml doc ptr to a KHTML DOM Document
-    RefPtr<Document> documentFromXMLDocPtr(xmlDocPtr resultDoc, xsltStylesheetPtr sheet, Document* ownerDocument, bool sourceIsDocument);
+    RefPtr<Document> documentFromXMLDocPtr(xmlDocPtr resultDoc, xsltStylesheetPtr sheet, Document *ownerDocument, bool sourceIsDocument);
 
     RefPtr<XSLStyleSheet> m_stylesheet;
     RefPtr<Node> m_stylesheetRootNode;

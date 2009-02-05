@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,27 +18,26 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef ContainerNode_h
-#define ContainerNode_h
+#ifndef DOM_ContainerNodeImpl_h
+#define DOM_ContainerNodeImpl_h
 
 #include "EventTargetNode.h"
 
 namespace WebCore {
-    
-typedef void (*NodeCallback)(Node*);
 
-class ContainerNode : public EventTargetNode {
+class ContainerNode : public EventTargetNode
+{
 public:
-    ContainerNode(Document*);
+    ContainerNode(Document *doc);
     virtual ~ContainerNode();
 
-    Node* firstChild() const { return m_firstChild; }
-    Node* lastChild() const { return m_lastChild; }
+    virtual Node* firstChild() const;
+    virtual Node* lastChild() const;
 
     virtual bool insertBefore(PassRefPtr<Node> newChild, Node* refChild, ExceptionCode&);
     virtual bool replaceChild(PassRefPtr<Node> newChild, Node* oldChild, ExceptionCode&);
@@ -60,37 +61,21 @@ public:
     virtual void insertedIntoTree(bool deep);
     virtual void removedFromTree(bool deep);
 
-    virtual void childrenChanged(bool changedByParser = false);
-
-    virtual bool removeChildren();
-
+    Node* fastFirstChild() const { return m_firstChild; }
+    Node* fastLastChild() const { return m_lastChild; }
+    
     void removeAllChildren();
+    void removeChildren();
+    void cloneChildNodes(Node* clone);
 
-    void cloneChildNodes(ContainerNode* clone);
-
-protected:
-    static void queuePostAttachCallback(NodeCallback, Node*);
-    static void suspendPostAttachCallbacks();
-    static void resumePostAttachCallbacks();
-
-    void setFirstChild(Node* child) { m_firstChild = child; }
-    void setLastChild(Node* child) { m_lastChild = child; }
-    
 private:
-    static void dispatchPostAttachCallbacks();
-
-    virtual Node* virtualFirstChild() const;
-    virtual Node* virtualLastChild() const;
-    
-    static void addChildNodesToDeletionQueue(Node*& head, Node*& tail, ContainerNode*);
+    Node* m_firstChild;
+    Node* m_lastChild;
 
     bool getUpperLeftCorner(int& x, int& y) const;
     bool getLowerRightCorner(int& x, int& y) const;
-
-    Node* m_firstChild;
-    Node* m_lastChild;
 };
 
-} // namespace WebCore
+} //namespace
 
-#endif // ContainerNode_h
+#endif
