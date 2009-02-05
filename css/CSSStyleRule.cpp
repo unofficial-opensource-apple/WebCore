@@ -17,10 +17,9 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "CSSStyleRule.h"
 
@@ -33,6 +32,7 @@ CSSStyleRule::CSSStyleRule(StyleBase* parent)
     : CSSRule(parent)
     , m_selector(0)
 {
+    m_type = STYLE_RULE;
 }
 
 CSSStyleRule::~CSSStyleRule()
@@ -56,25 +56,25 @@ String CSSStyleRule::selectorText() const
     return String();
 }
 
-void CSSStyleRule::setSelectorText(const String& /*selectorText*/, ExceptionCode& /*ec*/)
+void CSSStyleRule::setSelectorText(String /*str*/)
 {
-    // FIXME: Implement!
+    // ###
 }
 
 String CSSStyleRule::cssText() const
 {
     String result = selectorText();
-
+    
     result += " { ";
     result += m_style->cssText();
     result += "}";
-
+    
     return result;
 }
 
-bool CSSStyleRule::parseString(const String& /*string*/, bool /*strict*/)
+bool CSSStyleRule::parseString( const String &/*string*/, bool )
 {
-    // FIXME
+    // ###
     return false;
 }
 
@@ -83,4 +83,4 @@ void CSSStyleRule::setDeclaration(PassRefPtr<CSSMutableStyleDeclaration> style)
     m_style = style;
 }
 
-} // namespace WebCore
+}

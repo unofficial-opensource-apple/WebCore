@@ -44,9 +44,10 @@ namespace WebCore {
     PassRefPtr<DocumentFragment> createFragmentFromMarkup(Document*, const String& markup, const String& baseURL);
     PassRefPtr<DocumentFragment> createFragmentFromNodes(Document*, const Vector<Node*>&);
 
-    String createMarkup(const Range*,
-        Vector<Node*>* = 0, EAnnotateForInterchange = DoNotAnnotateForInterchange, bool convertBlocksToInlines = false);
-    String createMarkup(const Node*, EChildrenOnly = IncludeNode, Vector<Node*>* = 0);
+    DeprecatedString createMarkup(const Range*,
+        Vector<Node*>* = 0, EAnnotateForInterchange = DoNotAnnotateForInterchange);
+    DeprecatedString createMarkup(const Node*, EChildrenOnly = IncludeNode,
+        Vector<Node*>* = 0, EAnnotateForInterchange = DoNotAnnotateForInterchange);
 
 }
 

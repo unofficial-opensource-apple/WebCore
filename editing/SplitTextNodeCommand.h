@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,24 +23,27 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef SplitTextNodeCommand_h
-#define SplitTextNodeCommand_h
+#ifndef __split_text_node_command_h__
+#define __split_text_node_command_h__
 
 #include "EditCommand.h"
 
 namespace WebCore {
+    class Text;
+}
 
-class Text;
+namespace WebCore {
 
-class SplitTextNodeCommand : public EditCommand {
+class SplitTextNodeCommand : public EditCommand
+{
 public:
-    SplitTextNodeCommand(Text*, int offset);
+    SplitTextNodeCommand(Document *, Text *, int);
     virtual ~SplitTextNodeCommand() { }
 
     virtual void doApply();
     virtual void doUnapply();
 
-    Text* node() const { return m_text2.get(); }
+    Text *node() const { return m_text2.get(); }
     int offset() const { return m_offset; }
 
 private:
@@ -51,4 +54,4 @@ private:
 
 } // namespace WebCore
 
-#endif // SplitTextNodeCommand_h
+#endif // __split_text_node_command_h__

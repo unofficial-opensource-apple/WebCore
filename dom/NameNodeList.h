@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,32 +18,40 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
+#ifndef DOM_NameNodeListImpl_h
+#define DOM_NameNodeListImpl_h
 
-#ifndef NameNodeList_h
-#define NameNodeList_h
-
-#include "DynamicNodeList.h"
-#include "AtomicString.h"
+#include "NodeList.h"
+#include "PlatformString.h"
 
 namespace WebCore {
 
-    class String;
+/**
+ * NodeList which lists all Nodes in a Element with a given "name=" tag
+ */
+class NameNodeList : public NodeList
+{
+public:
+    NameNodeList( Node *doc, const String &t );
 
-    // NodeList which lists all Nodes in a Element with a given "name" attribute
-    class NameNodeList : public DynamicNodeList {
-    public:
-        NameNodeList(PassRefPtr<Node> rootNode, const String& name, DynamicNodeList::Caches*);
+    // DOM methods overridden from  parent classes
 
-    private:
-        virtual bool nodeMatches(Node*) const;
+    virtual unsigned length() const;
+    virtual Node *item ( unsigned index ) const;
 
-        AtomicString m_nodeName;
-    };
+    // Other methods (not part of DOM)
+    virtual void rootNodeChildrenChanged() {};
+    virtual void rootNodeAttributeChanged() { NodeList::rootNodeChildrenChanged(); }
 
-} // namespace WebCore
+protected:
+    virtual bool nodeMatches( Node *testNode ) const;
 
-#endif // NameNodeList_h
+    String nodeName;
+};
+
+}; //namespace
+#endif

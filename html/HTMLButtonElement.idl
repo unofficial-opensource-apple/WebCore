@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,26 +13,23 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface [
-        GenerateConstructor,
-        InterfaceUUID=b9715643-5591-442d-ab65-e05309607271,
-        ImplementationUUID=1be13b5f-40df-4550-b70e-8c805e546cad
-    ] HTMLButtonElement : HTMLElement {
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLButtonElement : HTMLElement {
         readonly attribute  HTMLFormElement      form;
-                 attribute  [ConvertNullToNullString] DOMString            accessKey;
+                 attribute  DOMString            accessKey;
                  attribute  boolean              disabled;
-                 attribute  [ConvertNullToNullString] DOMString            name;
+                 attribute  DOMString            name;
                  attribute  long                 tabIndex;
         readonly attribute  DOMString            type;
-                 attribute  [ConvertNullToNullString] DOMString            value;
+                 attribute  DOMString            value;
+                 
+        void    click();
 
-        void click();
     };
 
 }

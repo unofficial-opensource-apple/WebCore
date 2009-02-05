@@ -1,7 +1,9 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -26,8 +28,11 @@
 
 namespace WebCore {
 
-CDATASection::CDATASection(Document* document, const String& text)
-    : Text(document, text)
+CDATASection::CDATASection(Document *impl, const String &_text) : Text(impl,_text)
+{
+}
+
+CDATASection::CDATASection(Document *impl) : Text(impl)
 {
 }
 
@@ -37,7 +42,7 @@ CDATASection::~CDATASection()
 
 String CDATASection::nodeName() const
 {
-    return "#cdata-section";
+  return "#cdata-section";
 }
 
 Node::NodeType CDATASection::nodeType() const
@@ -47,7 +52,8 @@ Node::NodeType CDATASection::nodeType() const
 
 PassRefPtr<Node> CDATASection::cloneNode(bool /*deep*/)
 {
-    return new CDATASection(document(), m_data);
+    ExceptionCode ec = 0;
+    return document()->createCDATASection(str, ec);
 }
 
 // DOM Section 1.1.1
@@ -56,15 +62,15 @@ bool CDATASection::childTypeAllowed(NodeType)
     return false;
 }
 
-PassRefPtr<Text> CDATASection::createNew(PassRefPtr<StringImpl> string)
+Text *CDATASection::createNew(StringImpl *_str)
 {
-    return new CDATASection(document(), string);
+    return new CDATASection(document(), _str);
 }
 
 String CDATASection::toString() const
 {
-    // FIXME: We need to substitute entity references.
-    return "<![CDATA[" + data() + "]]>";
+    // FIXME: substitute entity references as needed!
+    return "<![CDATA[" + nodeValue() + "]]>";
 }
 
 } // namespace WebCore

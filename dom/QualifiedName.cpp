@@ -15,13 +15,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
 
-#ifdef AVOID_STATIC_CONSTRUCTORS
+#if AVOID_STATIC_CONSTRUCTORS
 #define WEBCORE_QUALIFIEDNAME_HIDE_GLOBALS 1
 #else
 #define QNAME_DEFAULT_CONSTRUCTOR
@@ -43,7 +43,7 @@ struct QualifiedNameComponents {
 // Golden ratio - arbitrary start value to avoid mapping all 0's to all 0's
 static const unsigned PHI = 0x9e3779b9U;
     
-static inline unsigned hashComponents(const QualifiedNameComponents& buf)
+inline unsigned hashComponents(const QualifiedNameComponents& buf)
 {
     ASSERT(sizeof(QualifiedNameComponents) % (sizeof(uint16_t) * 2) == 0);
 
@@ -81,10 +81,7 @@ struct QNameHash {
         QualifiedNameComponents c = { name->m_prefix.impl(), name->m_localName.impl(), name->m_namespace.impl() };
         return hashComponents(c);
     }
-
     static bool equal(const QualifiedName::QualifiedNameImpl* a, const QualifiedName::QualifiedNameImpl* b) { return a == b; }
-
-    static const bool safeToCompareToEmptyOrDeleted = false;
 };
 
 typedef HashSet<QualifiedName::QualifiedNameImpl*, QNameHash> QNameSet;
@@ -162,7 +159,7 @@ String QualifiedName::toString() const
 }
 
 // Global init routines
-DEFINE_GLOBAL(QualifiedName, anyName, nullAtom, starAtom, starAtom)
+DEFINE_GLOBAL(QualifiedName, anyName, nullAtom, starAtom, starAtom);
 
 void QualifiedName::init()
 {

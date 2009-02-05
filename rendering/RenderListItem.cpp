@@ -18,11 +18,10 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-
 #include "config.h"
 #include "RenderListItem.h"
 
@@ -30,7 +29,6 @@
 #include "HTMLNames.h"
 #include "HTMLOListElement.h"
 #include "RenderListMarker.h"
-#include "RenderView.h"
 
 using namespace std;
 
@@ -40,28 +38,32 @@ using namespace HTMLNames;
 
 RenderListItem::RenderListItem(Node* node)
     : RenderBlock(node)
+    , m_predefVal(-1)
     , m_marker(0)
-    , m_hasExplicitValue(false)
-    , m_isValueUpToDate(false)
     , m_notInList(false)
+    , m_value(-1)
 {
-    setInline(false);
+    // init RenderObject attributes
+    setInline(false); // our object is not Inline
 }
 
-void RenderListItem::setStyle(RenderStyle* newStyle)
+void RenderListItem::setStyle(RenderStyle* _style)
 {
-    RenderBlock::setStyle(newStyle);
+    RenderBlock::setStyle(_style);
 
     if (style()->listStyleType() != LNONE ||
-        (style()->listStyleImage() && !style()->listStyleImage()->errorOccurred())) {
-        RenderStyle* newStyle = new (renderArena()) RenderStyle;
+        (style()->listStyleImage() && !style()->listStyleImage()->isErrorImage())) {
+        RenderStyle *newStyle = new (renderArena()) RenderStyle();
         newStyle->ref();
         // The marker always inherits from the list item, regardless of where it might end
-        // up (e.g., in some deeply nested line box). See CSS3 spec.
+        // up (e.g., in some deeply nested line box).  See CSS3 spec.
         newStyle->inheritFrom(style()); 
-        if (!m_marker)
-            m_marker = new (renderArena()) RenderListMarker(this);
-        m_marker->setStyle(newStyle);
+        if (!m_marker) {
+            m_marker = new (renderArena()) RenderListMarker(document());
+            m_marker->setStyle(newStyle);
+            m_marker->setListItem(this);
+        } else
+            m_marker->setStyle(newStyle);
         newStyle->deref(renderArena());
     } else if (m_marker) {
         m_marker->destroy();
@@ -80,17 +82,13 @@ void RenderListItem::destroy()
 
 static Node* enclosingList(Node* node)
 {
-    Node* parent = node->parentNode();
-    for (Node* n = parent; n; n = n->parentNode())
+    for (Node* n = node->parentNode(); n; n = n->parentNode())
         if (n->hasTagName(ulTag) || n->hasTagName(olTag))
             return n;
-    // If there's no actual <ul> or <ol> list element, then our parent acts as
-    // our list for purposes of determining what other list items should be
-    // numbered as part of the same list.
-    return parent;
+    return 0;
 }
 
-static RenderListItem* previousListItem(Node* list, const RenderListItem* item)
+static RenderListItem* previousListItem(Node* list, RenderListItem* item)
 {
     for (Node* n = item->node()->traversePreviousNode(); n != list; n = n->traversePreviousNode()) {
         RenderObject* o = n->renderer();
@@ -100,34 +98,31 @@ static RenderListItem* previousListItem(Node* list, const RenderListItem* item)
             if (list == otherList)
                 return static_cast<RenderListItem*>(o);
             // We found ourself inside another list; lets skip the rest of it.
-            // Use traverseNextNode() here because the other list itself may actually
-            // be a list item itself. We need to examine it, so we do this to counteract
-            // the traversePreviousNode() that will be done by the loop.
             if (otherList)
-                n = otherList->traverseNextNode();
+                n = otherList;
         }
     }
     return 0;
 }
 
-inline int RenderListItem::calcValue() const
+void RenderListItem::calcValue()
 {
-    if (m_hasExplicitValue)
-        return m_explicitValue;
-    Node* list = enclosingList(node());
-    // FIXME: This recurses to a possible depth of the length of the list.
-    // That's not good -- we need to change this to an iterative algorithm.
-    if (RenderListItem* previousItem = previousListItem(list, this))
-        return previousItem->value() + 1;
-    if (list && list->hasTagName(olTag))
-        return static_cast<HTMLOListElement*>(list)->start();
-    return 1;
-}
-
-void RenderListItem::updateValueNow() const
-{
-    m_value = calcValue();
-    m_isValueUpToDate = true;
+    if (m_predefVal != -1)
+        m_value = m_predefVal;
+    else {
+        Node* list = enclosingList(node());
+        RenderListItem* item = previousListItem(list, this);
+        if (item) {
+            // FIXME: This recurses to a possible depth of the length of the list.
+            // That's not good -- we need to change this to an iterative algorithm.
+            if (item->value() == -1)
+                item->calcValue();
+            m_value = item->value() + 1;
+        } else if (list && list->hasTagName(olTag))
+            m_value = static_cast<HTMLOListElement*>(list)->start();
+        else
+            m_value = 1;
+    }
 }
 
 bool RenderListItem::isEmpty() const
@@ -135,52 +130,42 @@ bool RenderListItem::isEmpty() const
     return lastChild() == m_marker;
 }
 
-static RenderObject* getParentOfFirstLineBox(RenderBlock* curr, RenderObject* marker)
+static RenderObject* getParentOfFirstLineBox(RenderObject* curr, RenderObject* marker)
 {
     RenderObject* firstChild = curr->firstChild();
     if (!firstChild)
         return 0;
-
+        
     for (RenderObject* currChild = firstChild; currChild; currChild = currChild->nextSibling()) {
         if (currChild == marker)
             continue;
-
-        if (currChild->isInline() && (!currChild->isInlineFlow() || curr->generatesLineBoxesForInlineChild(currChild)))
+            
+        if (currChild->isInline())
             return curr;
-
+        
         if (currChild->isFloating() || currChild->isPositioned())
             continue;
-
+            
         if (currChild->isTable() || !currChild->isRenderBlock())
             break;
-
-        if (curr->isListItem() && currChild->style()->htmlHacks() && currChild->element() &&
+        
+        if (currChild->style()->htmlHacks() && currChild->element() &&
             (currChild->element()->hasTagName(ulTag)|| currChild->element()->hasTagName(olTag)))
             break;
-
-        RenderObject* lineBox = getParentOfFirstLineBox(static_cast<RenderBlock*>(currChild), marker);
+            
+        RenderObject* lineBox = getParentOfFirstLineBox(currChild, marker);
         if (lineBox)
             return lineBox;
     }
-
+    
     return 0;
 }
 
-void RenderListItem::updateValue()
+void RenderListItem::resetValue()
 {
-    if (!m_hasExplicitValue) {
-        m_isValueUpToDate = false;
-        if (m_marker)
-            m_marker->setNeedsLayoutAndPrefWidthsRecalc();
-    }
-}
-
-static RenderObject* firstNonMarkerChild(RenderObject* parent)
-{
-    RenderObject* result = parent->firstChild();
-    while (result && result->isListMarker())
-        result = result->nextSibling();
-    return result;
+    m_value = -1;
+    if (m_marker)
+        m_marker->setNeedsLayoutAndMinMaxRecalc();
 }
 
 void RenderListItem::updateMarkerLocation()
@@ -199,36 +184,32 @@ void RenderListItem::updateMarkerLocation()
             else
                 lineBoxParent = this;
         }
-
-        if (markerPar != lineBoxParent || m_marker->prefWidthsDirty()) {
-            // Removing and adding the marker can trigger repainting in
-            // containers other than ourselves, so we need to disable LayoutState.
-            view()->disableLayoutState();
-            updateFirstLetter();
+        
+        if (markerPar != lineBoxParent || !m_marker->minMaxKnown()) {
             m_marker->remove();
             if (!lineBoxParent)
                 lineBoxParent = this;
-            lineBoxParent->addChild(m_marker, firstNonMarkerChild(lineBoxParent));
-            if (m_marker->prefWidthsDirty())
-                m_marker->calcPrefWidths();
-            view()->enableLayoutState();
+            lineBoxParent->addChild(m_marker, lineBoxParent->firstChild());
+            if (!m_marker->minMaxKnown())
+                m_marker->calcMinMaxWidth();
+            recalcMinMaxWidths();
         }
     }
 }
 
-void RenderListItem::calcPrefWidths()
+void RenderListItem::calcMinMaxWidth()
 {
-    ASSERT(prefWidthsDirty());
-    
+    // Make sure our marker is in the correct location.
     updateMarkerLocation();
-
-    RenderBlock::calcPrefWidths();
+    if (!minMaxKnown())
+        RenderBlock::calcMinMaxWidth();
 }
 
 void RenderListItem::layout()
 {
-    ASSERT(needsLayout()); 
-
+    ASSERT(needsLayout());
+    ASSERT(minMaxKnown());
+    
     updateMarkerLocation();    
     RenderBlock::layout();
 }
@@ -243,94 +224,39 @@ void RenderListItem::positionListMarker()
             yOffset += o->yPos();
             xOffset += o->xPos();
         }
-
-        bool adjustOverflow = false;
-        int markerXPos;
+        
         RootInlineBox* root = m_marker->inlineBoxWrapper()->root();
-
         if (style()->direction() == LTR) {
             int leftLineOffset = leftRelOffset(yOffset, leftOffset(yOffset));
-            markerXPos = leftLineOffset - xOffset - paddingLeft() - borderLeft() + m_marker->marginLeft();
+            int markerXPos = leftLineOffset - xOffset - paddingLeft() - borderLeft() + m_marker->marginLeft();
             m_marker->inlineBoxWrapper()->adjustPosition(markerXPos - markerOldX, 0);
             if (markerXPos < root->leftOverflow()) {
                 root->setHorizontalOverflowPositions(markerXPos, root->rightOverflow());
-                adjustOverflow = true;
+                m_overflowLeft = min(markerXPos, m_overflowLeft);
             }
         } else {
             int rightLineOffset = rightRelOffset(yOffset, rightOffset(yOffset));
-            markerXPos = rightLineOffset - xOffset + paddingRight() + borderRight() + m_marker->marginLeft();
+            int markerXPos = rightLineOffset - xOffset + paddingRight() + borderRight() + m_marker->marginLeft();
             m_marker->inlineBoxWrapper()->adjustPosition(markerXPos - markerOldX, 0);
             if (markerXPos + m_marker->width() > root->rightOverflow()) {
                 root->setHorizontalOverflowPositions(root->leftOverflow(), markerXPos + m_marker->width());
-                adjustOverflow = true;
+                m_overflowWidth = max(markerXPos + m_marker->width(), m_overflowLeft);
             }
-        }
-
-        if (adjustOverflow) {
-            IntRect markerRect(markerXPos + xOffset, yOffset, m_marker->width(), m_marker->height());
-            RenderObject* o = m_marker;
-            do {
-                o = o->parent();
-                if (o->isRenderBlock())
-                    static_cast<RenderBlock*>(o)->addVisualOverflow(markerRect);
-                markerRect.move(-o->xPos(), -o->yPos());
-            } while (o != this);
         }
     }
 }
 
-void RenderListItem::paint(PaintInfo& paintInfo, int tx, int ty)
+void RenderListItem::paint(PaintInfo& i, int _tx, int _ty)
 {
     if (!m_height)
         return;
 
-    RenderBlock::paint(paintInfo, tx, ty);
+    RenderBlock::paint(i, _tx, _ty);
 }
 
-const String& RenderListItem::markerText() const
+DeprecatedString RenderListItem::markerStringValue()
 {
-    if (m_marker)
-        return m_marker->text();
-    static String staticNullString;
-    return staticNullString;
+    return m_marker ? m_marker->text() : "";
 }
 
-void RenderListItem::explicitValueChanged()
-{
-    if (m_marker)
-        m_marker->setNeedsLayoutAndPrefWidthsRecalc();
-    Node* listNode = enclosingList(node());
-    RenderObject* listRenderer = 0;
-    if (listNode)
-        listRenderer = listNode->renderer();
-    for (RenderObject* r = this; r; r = r->nextInPreOrder(listRenderer))
-        if (r->isListItem()) {
-            RenderListItem* item = static_cast<RenderListItem*>(r);
-            if (!item->m_hasExplicitValue) {
-                item->m_isValueUpToDate = false;
-                if (RenderListMarker* marker = item->m_marker)
-                    marker->setNeedsLayoutAndPrefWidthsRecalc();
-            }
-        }
 }
-
-void RenderListItem::setExplicitValue(int value)
-{
-    if (m_hasExplicitValue && m_explicitValue == value)
-        return;
-    m_explicitValue = value;
-    m_value = value;
-    m_hasExplicitValue = true;
-    explicitValueChanged();
-}
-
-void RenderListItem::clearExplicitValue()
-{
-    if (!m_hasExplicitValue)
-        return;
-    m_hasExplicitValue = false;
-    m_isValueUpToDate = false;
-    explicitValueChanged();
-}
-
-} // namespace WebCore

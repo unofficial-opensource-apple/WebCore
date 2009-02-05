@@ -12,7 +12,6 @@ nmstart         [_a-zA-Z]|{nonascii}|{escape}
 nmchar          [_a-zA-Z0-9-]|{nonascii}|{escape}
 string1         \"([\t !#$%&(-~]|\\{nl}|\'|{nonascii}|{escape})*\"
 string2         \'([\t !#$%&(-~]|\\{nl}|\"|{nonascii}|{escape})*\'
-hexcolor        {h}{3}|{h}{6}
 
 ident           -?{nmstart}{nmchar}*
 name            {nmchar}+
@@ -23,7 +22,6 @@ url             ([!#$%&*-~]|{nonascii}|{escape})*
 w               [ \t\r\n\f]*
 nl              \n|\r\n|\r|\f
 range           \?{1,6}|{h}(\?{0,5}|{h}(\?{0,4}|{h}(\?{0,3}|{h}(\?{0,2}|{h}(\??|{h})))))
-nth             (-?[0-9]*n[\+-][0-9]+)|(-?[0-9]*n)
 
 %%
 
@@ -43,11 +41,10 @@ nth             (-?[0-9]*n[\+-][0-9]+)|(-?[0-9]*n)
 <mediaquery>"and"       {yyTok = MEDIA_AND; return yyTok;}
 
 {string}                {yyTok = STRING; return yyTok;}
-{ident}                 {yyTok = IDENT; return yyTok;}
-{nth}                   {yyTok = NTH; return yyTok;}
 
-"#"{hexcolor}           {yyTok = HEX; return yyTok;}
-"#"{ident}              {yyTok = IDSEL; return yyTok;}
+{ident}                 {yyTok = IDENT; return yyTok;}
+
+"#"{name}               {yyTok = HASH; return yyTok;}
 
 "@import"               {BEGIN(mediaquery); yyTok = IMPORT_SYM; return yyTok;}
 "@page"                 {yyTok = PAGE_SYM; return yyTok;}
@@ -55,14 +52,12 @@ nth             (-?[0-9]*n[\+-][0-9]+)|(-?[0-9]*n)
 "@font-face"            {yyTok = FONT_FACE_SYM; return yyTok;}
 "@charset"              {yyTok = CHARSET_SYM; return yyTok;}
 "@namespace"            {yyTok = NAMESPACE_SYM; return yyTok; }
-"@-webkit-rule"         {yyTok = WEBKIT_RULE_SYM; return yyTok; }
-"@-webkit-keyframe-rule" {yyTok = WEBKIT_KEYFRAME_RULE_SYM; return yyTok; }
-"@-webkit-decls"        {yyTok = WEBKIT_DECLS_SYM; return yyTok; }
-"@-webkit-value"        {yyTok = WEBKIT_VALUE_SYM; return yyTok; }
+"@-webkit-rule"    {yyTok = WEBKIT_RULE_SYM; return yyTok; }
+"@-webkit-decls"   {yyTok = WEBKIT_DECLS_SYM; return yyTok; }
+"@-webkit-value"   {yyTok = WEBKIT_VALUE_SYM; return yyTok; }
 "@-webkit-mediaquery"   {BEGIN(mediaquery); yyTok = WEBKIT_MEDIAQUERY_SYM; return yyTok; }
-"@-webkit-keyframes"    {yyTok = WEBKIT_KEYFRAMES_SYM; return yyTok; }
 
-"!"{w}"important"       {yyTok = IMPORTANT_SYM; return yyTok;}
+"!"{w}"important"         {yyTok = IMPORTANT_SYM; return yyTok;}
 
 {num}em                 {yyTok = EMS; return yyTok;}
 {num}__qem              {yyTok = QEMS; return yyTok;} /* quirky ems */
@@ -83,7 +78,7 @@ nth             (-?[0-9]*n[\+-][0-9]+)|(-?[0-9]*n)
 {num}{ident}            {yyTok = DIMEN; return yyTok;}
 {num}%+                 {yyTok = PERCENTAGE; return yyTok;}
 {intnum}                {yyTok = INTEGER; return yyTok;}
-{num}                   {yyTok = FLOATTOKEN; return yyTok;}
+{num}                   {yyTok = FLOAT; return yyTok;}
 
 "not("                  {yyTok = NOTFUNCTION; return yyTok;}
 "url("{w}{string}{w}")" {yyTok = URI; return yyTok;}
@@ -98,3 +93,4 @@ U\+{h}{1,6}-{h}{1,6}    {yyTok = UNICODERANGE; return yyTok;}
 .                       {yyTok = *yytext; return yyTok;}
 
 %%
+

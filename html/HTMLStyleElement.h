@@ -17,20 +17,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-#ifndef HTMLStyleElement_h
-#define HTMLStyleElement_h
+#ifndef HTMLStyleElement_H
+#define HTMLStyleElement_H
 
-#include "CSSStyleSheet.h"
 #include "HTMLElement.h"
-#include "StyleElement.h"
+#include "CSSStyleSheet.h"
 
 namespace WebCore {
 
-class HTMLStyleElement : public HTMLElement, public StyleElement
+class HTMLStyleElement : public HTMLElement
 {
 public:
     HTMLStyleElement(Document*);
@@ -39,35 +38,31 @@ public:
     virtual int tagPriority() const { return 1; }
     virtual bool checkDTD(const Node* newChild) { return newChild->isTextNode(); }
 
+    StyleSheet* sheet() const;
+
     // overload from HTMLElement
     virtual void parseMappedAttribute(MappedAttribute*);
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
-    virtual void childrenChanged(bool changedByParser = false);
+    virtual void childrenChanged();
 
-    void setCreatedByParser(bool createdByParser) { m_createdByParser = createdByParser; }
-    virtual void finishParsingChildren();
-
-    virtual bool isLoading() const;
-    virtual bool sheetLoaded();
+    bool isLoading() const;
+    void sheetLoaded();
 
     bool disabled() const;
     void setDisabled(bool);
 
-    virtual const AtomicString& media() const;
-    void setMedia(const AtomicString&);
+    String media() const;
+    void setMedia(const String&);
 
-    virtual const AtomicString& type() const;
-    void setType(const AtomicString&);
-
-    StyleSheet* sheet();
-
-    virtual void setLoading(bool loading) { m_loading = loading; }
+    String type() const;
+    void setType(const String&);
 
 protected:
-    String m_media;
+    RefPtr<CSSStyleSheet> m_sheet;
     bool m_loading;
-    bool m_createdByParser;
+    String m_type;
+    String m_media;
 };
 
 } //namespace

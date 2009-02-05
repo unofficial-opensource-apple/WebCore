@@ -14,8 +14,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -23,14 +23,24 @@
 
 #include "Frame.h"
 #include "Page.h"
-#include <stdarg.h>
-#include <wtf/Platform.h>
-#include <wtf/StringExtras.h>
 #include <wtf/Vector.h>
+#include <stdarg.h>
 
 using std::swap;
 
 namespace WebCore {
+
+// This belongs in some header file where multiple clients can share it.
+#if WIN32
+int snprintf(char* str, size_t size, const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    int result = vsnprintf_s(str, size, _TRUNCATE, format, args);
+    va_end(args);
+    return result;
+}
+#endif
 
 FrameTree::~FrameTree()
 {
@@ -50,7 +60,6 @@ void FrameTree::setName(const AtomicString& name)
 
 void FrameTree::appendChild(PassRefPtr<Frame> child)
 {
-    ASSERT(child->page() == m_thisFrame->page());
     child->tree()->m_parent = m_thisFrame;
 
     Frame* oldLast = m_lastChild;
@@ -71,7 +80,7 @@ void FrameTree::removeChild(Frame* child)
 {
     child->tree()->m_parent = 0;
     child->setView(0);
-    if (child->ownerElement())
+    if (child->ownerElement() && child->page())
         child->page()->decrementFrameCount();
     child->pageDestroyed();
 
@@ -82,8 +91,7 @@ void FrameTree::removeChild(Frame* child)
     RefPtr<Frame>& newLocationForNext = m_firstChild == child ? m_firstChild : child->tree()->m_previousSibling->tree()->m_nextSibling;
     Frame*& newLocationForPrevious = m_lastChild == child ? m_lastChild : child->tree()->m_nextSibling->tree()->m_previousSibling;
     swap(newLocationForNext, child->tree()->m_nextSibling);
-    // For some inexplicable reason, the following line does not compile without the explicit std:: namepsace
-    std::swap(newLocationForPrevious, child->tree()->m_previousSibling);
+    swap(newLocationForPrevious, child->tree()->m_previousSibling);
 
     child->tree()->m_previousSibling = 0;
     child->tree()->m_nextSibling = 0;
@@ -198,21 +206,15 @@ Frame* FrameTree::find(const AtomicString& name) const
     return 0;
 }
 
-bool FrameTree::isDescendantOf(const Frame* ancestor) const
+bool FrameTree::isDescendantOf(Frame* ancestor) const
 {
-    if (!ancestor)
-        return false;
-
-    if (m_thisFrame->page() != ancestor->page())
-        return false;
-
     for (Frame* frame = m_thisFrame; frame; frame = frame->tree()->parent())
         if (frame == ancestor)
             return true;
     return false;
 }
 
-Frame* FrameTree::traverseNext(const Frame* stayWithin) const
+Frame* FrameTree::traverseNext(Frame* stayWithin) const
 {
     Frame* child = firstChild();
     if (child) {
@@ -282,15 +284,4 @@ Frame* FrameTree::deepLastChild() const
     return result;
 }
 
-Frame* FrameTree::top() const
-{
-    if (Page* page = m_thisFrame->page())
-        return page->mainFrame();
-
-    Frame* frame = m_thisFrame;
-    while (Frame* parent = frame->tree()->parent())
-        frame = parent;
-    return frame;
 }
-
-} // namespace WebCore

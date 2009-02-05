@@ -13,6 +13,7 @@ extern "C" {
 bool _WKWindowHaveDirtyWindows(void);
 void _WKWindowLayoutDirtyWindows(void);
 void _WKWindowDrawDirtyWindows(void);
+void _WKWindowDidDrawDirtyWindows(void);
 
 #ifdef __cplusplus
 }

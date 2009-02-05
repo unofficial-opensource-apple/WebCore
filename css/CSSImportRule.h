@@ -17,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSImportRule_h
-#define CSSImportRule_h
+#ifndef CSSImportRule_H
+#define CSSImportRule_H
 
 #include "CSSRule.h"
 #include "CachedResourceClient.h"
@@ -33,27 +33,23 @@ namespace WebCore {
 class CachedCSSStyleSheet;
 class MediaList;
 
-class CSSImportRule : public CSSRule, public CachedResourceClient {
+class CSSImportRule : public CSSRule, public CachedResourceClient
+{
 public:
     CSSImportRule(StyleBase* parent, const String& href, MediaList*);
     virtual ~CSSImportRule();
-
-    virtual bool isImportRule() { return true; }
 
     String href() const { return m_strHref; }
     MediaList* media() const { return m_lstMedia.get(); }
     CSSStyleSheet* styleSheet() const { return m_styleSheet.get(); }
 
-    // Inherited from CSSRule
-    virtual unsigned short type() const { return IMPORT_RULE; }
-
+    virtual bool isImportRule() { return true; }
     virtual String cssText() const;
-
-    // Not part of the CSSOM
+  
     bool isLoading() const;
 
     // from CachedResourceClient
-    virtual void setCSSStyleSheet(const String& url, const String& charset, const String& sheet);
+    virtual void setStyleSheet(const String& url, const String& sheet);
 
     virtual void insertedIntoParent();
 
@@ -65,6 +61,6 @@ protected:
     bool m_loading;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSImportRule_h
+#endif

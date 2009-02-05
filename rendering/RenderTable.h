@@ -20,12 +20,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef RenderTable_h
-#define RenderTable_h
+#ifndef RenderTable_H
+#define RenderTable_H
 
 #include "RenderBlock.h"
 #include <wtf/Vector.h>
@@ -64,16 +64,14 @@ public:
 
     virtual const char* renderName() const { return "RenderTable"; }
 
-    virtual bool isTable() const { return true; }
-
     virtual void setStyle(RenderStyle*);
 
-    virtual bool avoidsFloats() const { return true; }
+    virtual bool isTable() const { return true; }
 
-    int getColumnPos(int col) const { return m_columnPos[col]; }
+    int getColumnPos(int col) const { return columnPos[col]; }
 
-    int hBorderSpacing() const { return m_hSpacing; }
-    int vBorderSpacing() const { return m_vSpacing; }
+    int hBorderSpacing() const { return hspacing; }
+    int vBorderSpacing() const { return vspacing; }
     
     bool collapseBorders() const { return style()->borderCollapse(); }
     int borderLeft() const { return m_borderLeft; }
@@ -81,9 +79,12 @@ public:
     int borderTop() const;
     int borderBottom() const;
     
-    Rules getRules() const { return static_cast<Rules>(m_rules); }
+    Rules getRules() const { return static_cast<Rules>(rules); }
 
     const Color& bgColor() const { return style()->backgroundColor(); }
+
+    unsigned cellPadding() const { return padding; }
+    void setCellPadding(unsigned p) { padding = p; }
 
     int outerBorderTop() const;
     int outerBorderBottom() const;
@@ -95,11 +96,12 @@ public:
     void recalcHorizontalBorders();
 
     // overrides
+    virtual int overflowHeight(bool includeInterior = true) const { return height(); }
     virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0);
     virtual void paint(PaintInfo&, int tx, int ty);
-    virtual void paintBoxDecorations(PaintInfo&, int tx, int ty);
+    virtual void paintBoxDecorations(PaintInfo&, int _tx, int _ty);
     virtual void layout();
-    virtual void calcPrefWidths();
+    virtual void calcMinMaxWidth();
 
     virtual RenderBlock* firstLineBlock() const;
     virtual void updateFirstLetter();
@@ -108,38 +110,35 @@ public:
 
     virtual void calcWidth();
 
+#ifndef NDEBUG
+    virtual void dump(TextStream *stream, DeprecatedString ind = "") const;
+#endif
     struct ColumnStruct {
         enum {
             WidthUndefined = 0xffff
         };
-
-        ColumnStruct()
-            : span(1)
-            , width(WidthUndefined)
-        {
+        ColumnStruct() {
+            span = 1;
+            width = WidthUndefined;
         }
-
         unsigned short span;
         unsigned width; // the calculated position of the column
     };
 
-    Vector<ColumnStruct>& columns() { return m_columns; }
-    Vector<int>& columnPositions() { return m_columnPos; }
-    RenderTableSection* header() const { return m_head; }
-    RenderTableSection* footer() const { return m_foot; }
-    RenderTableSection* firstBody() const { return m_firstBody; }
+    Vector<int> columnPos;
+    Vector<ColumnStruct> columns;
 
     void splitColumn(int pos, int firstSpan);
     void appendColumn(int span);
-    int numEffCols() const { return m_columns.size(); }
-    int spanOfEffCol(int effCol) const { return m_columns[effCol].span; }
+    int numEffCols() const { return columns.size(); }
+    int spanOfEffCol(int effCol) const { return columns[effCol].span; }
     
     int colToEffCol(int col) const
     {
         int i = 0;
         int effCol = numEffCols();
         for (int c = 0; c < col && i < effCol; ++i)
-            c += m_columns[i].span;
+            c += columns[i].span;
         return i;
     }
     
@@ -147,28 +146,20 @@ public:
     {
         int c = 0;
         for (int i = 0; i < effCol; i++)
-            c += m_columns[i].span;
+            c += columns[i].span;
         return c;
     }
 
-    int bordersPaddingAndSpacing() const
-    {
-        return borderLeft() + borderRight() +
+    int bordersPaddingAndSpacing() const {
+        return borderLeft() + borderRight() + 
                (collapseBorders() ? 0 : (paddingLeft() + paddingRight() + (numEffCols() + 1) * hBorderSpacing()));
     }
 
-    RenderTableCol* colElement(int col, bool* startEdge = 0, bool* endEdge = 0) const;
+    RenderTableCol* colElement(int col) const;
 
-    bool needsSectionRecalc() const { return m_needsSectionRecalc; }
-    void setNeedsSectionRecalc()
-    {
-        if (documentBeingDestroyed())
-            return;
-        m_needsSectionRecalc = true;
-        setNeedsLayout(true);
-    }
+    void setNeedSectionRecalc() { needSectionRecalc = true; }
 
-    virtual RenderObject* removeChildNode(RenderObject*, bool fullRemove = true);
+    virtual RenderObject* removeChildNode(RenderObject*);
 
     RenderTableSection* sectionAbove(const RenderTableSection*, bool skipEmptySections = false) const;
     RenderTableSection* sectionBelow(const RenderTableSection*, bool skipEmptySections = false) const;
@@ -178,49 +169,42 @@ public:
     RenderTableCell* cellBefore(const RenderTableCell*) const;
     RenderTableCell* cellAfter(const RenderTableCell*) const;
  
-    const CollapsedBorderValue* currentBorderStyle() const { return m_currentBorder; }
+    CollapsedBorderValue* currentBorderStyle() { return m_currentBorder; }
     
-    bool hasSections() const { return m_head || m_foot || m_firstBody; }
+    bool hasSections() const { return head || foot || firstBody; }
 
     virtual IntRect getOverflowClipRect(int tx, int ty);
 
-    void recalcSectionsIfNeeded() const
-    {
-        if (m_needsSectionRecalc)
-            recalcSections();
-    }
-
-#ifndef NDEBUG
-    virtual void dump(TextStream*, DeprecatedString ind = "") const;
-#endif
+    void recalcSectionsIfNeeded();
 
 private:
-    void recalcSections() const;
+    void recalcSections();
 
-    mutable Vector<int> m_columnPos;
-    mutable Vector<ColumnStruct> m_columns;
+    friend class AutoTableLayout;
+    friend class FixedTableLayout;
 
-    mutable RenderBlock* m_caption;
-    mutable RenderTableSection* m_head;
-    mutable RenderTableSection* m_foot;
-    mutable RenderTableSection* m_firstBody;
+    RenderBlock* tCaption;
+    RenderTableSection* head;
+    RenderTableSection* foot;
+    RenderTableSection* firstBody;
 
-    TableLayout* m_tableLayout;
+    TableLayout* tableLayout;
 
-    const CollapsedBorderValue* m_currentBorder;
+    CollapsedBorderValue* m_currentBorder;
     
-    unsigned m_frame : 4; // Frame
-    unsigned m_rules : 4; // Rules
+    unsigned frame : 4; // Frame
+    unsigned rules : 4; // Rules
 
-    mutable bool m_hasColElements : 1;
-    mutable bool m_needsSectionRecalc : 1;
+    bool has_col_elems : 1;
+    unsigned padding : 22;
+    bool needSectionRecalc : 1;
     
-    short m_hSpacing;
-    short m_vSpacing;
-    int m_borderLeft;
+    short hspacing;
+    short vspacing;
     int m_borderRight;
+    int m_borderLeft;
 };
 
-} // namespace WebCore
+}
 
-#endif // RenderTable_h
+#endif

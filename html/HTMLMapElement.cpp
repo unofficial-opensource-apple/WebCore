@@ -1,7 +1,9 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 #include "config.h"
 #include "HTMLMapElement.h"
@@ -25,8 +27,6 @@
 #include "HTMLAreaElement.h"
 #include "HTMLCollection.h"
 #include "HTMLNames.h"
-#include "IntSize.h"
-#include "HitTestResult.h"
 
 using namespace std;
 
@@ -46,30 +46,18 @@ HTMLMapElement::~HTMLMapElement()
 
 bool HTMLMapElement::checkDTD(const Node* newChild)
 {
-    return inEitherTagList(newChild) || newChild->hasTagName(areaTag) // HTML 4 DTD
-        || newChild->hasTagName(scriptTag); // extensions
+    // FIXME: This seems really odd, allowing only blocks inside map elements.
+    return newChild->hasTagName(areaTag) || newChild->hasTagName(scriptTag) || inBlockTagList(newChild);
 }
 
-bool HTMLMapElement::mapMouseEvent(int x, int y, const IntSize& size, HitTestResult& result)
+bool HTMLMapElement::mapMouseEvent(int x, int y, const IntSize& size, RenderObject::NodeInfo& info)
 {
-    HTMLAreaElement* defaultArea = 0;
     Node *node = this;
-    while ((node = node->traverseNextNode(this))) {
-        if (node->hasTagName(areaTag)) {
-            HTMLAreaElement* areaElt = static_cast<HTMLAreaElement*>(node);
-            if (areaElt->isDefault()) {
-                if (!defaultArea)
-                    defaultArea = areaElt;
-            } else if (areaElt->mapMouseEvent(x, y, size, result))
+    while ((node = node->traverseNextNode(this)))
+        if (node->hasTagName(areaTag))
+            if (static_cast<HTMLAreaElement*>(node)->mapMouseEvent(x, y, size, info))
                 return true;
-        }
-    }
-    
-    if (defaultArea) {
-        result.setInnerNode(defaultArea);
-        result.setURLElement(defaultArea);
-    }
-    return defaultArea;
+    return false;
 }
 
 void HTMLMapElement::parseMappedAttribute(MappedAttribute* attr)
@@ -84,10 +72,12 @@ void HTMLMapElement::parseMappedAttribute(MappedAttribute* attr)
                 return;
         }
         doc->removeImageMap(this);
-        String mapName = attr->value();
-        if (mapName[0] == '#')
-            mapName = mapName.substring(1);
-        m_name = doc->htmlMode() == Document::XHtml ? mapName : mapName.lower();
+        m_name = attr->value();
+        if (m_name[0] == '#') {
+            String mapName(m_name.domString().copy());
+            mapName.remove(0, 1);
+            m_name = mapName;
+        }
         doc->addImageMap(this);
     } else
         HTMLElement::parseMappedAttribute(attr);

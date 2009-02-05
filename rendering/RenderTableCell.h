@@ -1,10 +1,12 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,12 +20,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef RenderTableCell_h
-#define RenderTableCell_h
+#ifndef RenderTableCell_H
+#define RenderTableCell_H
 
 #include "RenderTableSection.h"
 
@@ -33,99 +35,92 @@ class RenderTableCell : public RenderBlock {
 public:
     RenderTableCell(Node*);
 
-    virtual const char* renderName() const { return isAnonymous() ? "RenderTableCell (anonymous)" : "RenderTableCell"; }
-
-    virtual bool isTableCell() const { return true; }
-
     virtual void destroy();
+
+    virtual const char* renderName() const { return "RenderTableCell"; }
+    virtual bool isTableCell() const { return true; }
 
     // FIXME: need to implement cellIndex
     int cellIndex() const { return 0; }
     void setCellIndex(int) { }
 
-    int colSpan() const { return m_columnSpan; }
-    void setColSpan(int c) { m_columnSpan = c; }
+    int colSpan() const { return cSpan; }
+    void setColSpan(int c) { cSpan = c; }
 
-    int rowSpan() const { return m_rowSpan; }
-    void setRowSpan(int r) { m_rowSpan = r; }
+    int rowSpan() const { return rSpan; }
+    void setRowSpan(int r) { rSpan = r; }
 
-    int col() const { return m_column; }
-    void setCol(int col) { m_column = col; }
-    int row() const { return m_row; }
-    void setRow(int row) { m_row = row; }
+    int col() const { return _col; }
+    void setCol(int col) { _col = col; }
+    int row() const { return _row; }
+    void setRow(int r) { _row = r; }
 
-    RenderTableSection* section() const { return static_cast<RenderTableSection*>(parent()->parent()); }
-    RenderTable* table() const { return static_cast<RenderTable*>(parent()->parent()->parent()); }
-
-    Length styleOrColWidth() const;
+    Length styleOrColWidth();
 
     virtual bool requiresLayer();
 
-    virtual void calcPrefWidths();
+    virtual void calcMinMaxWidth();
     virtual void calcWidth();
     virtual void setWidth(int);
     virtual void setStyle(RenderStyle*);
-
-    virtual bool expandsToEncloseOverhangingFloats() const { return true; }
 
     int borderLeft() const;
     int borderRight() const;
     int borderTop() const;
     int borderBottom() const;
 
-    int borderHalfLeft(bool outer) const;
-    int borderHalfRight(bool outer) const;
-    int borderHalfTop(bool outer) const;
-    int borderHalfBottom(bool outer) const;
-
     CollapsedBorderValue collapsedLeftBorder(bool rtl) const;
     CollapsedBorderValue collapsedRightBorder(bool rtl) const;
     CollapsedBorderValue collapsedTopBorder() const;
     CollapsedBorderValue collapsedBottomBorder() const;
-
-    typedef Vector<CollapsedBorderValue, 100> CollapsedBorderStyles;
-    void collectBorderStyles(CollapsedBorderStyles&) const;
-    static void sortBorderStyles(CollapsedBorderStyles&);
+    virtual void collectBorders(DeprecatedValueList<CollapsedBorderValue>&);
 
     virtual void updateFromElement();
 
     virtual void layout();
+    
+    void setCellTopExtra(int p) { _topExtra = p; }
+    void setCellBottomExtra(int p) { _bottomExtra = p; }
 
-    virtual void paint(PaintInfo&, int tx, int ty);
-    virtual void paintBoxDecorations(PaintInfo&, int tx, int ty);
-    void paintCollapsedBorder(GraphicsContext*, int x, int y, int w, int h);
-    void paintBackgroundsBehindCell(PaintInfo&, int tx, int ty, RenderObject* backgroundObject);
+    virtual void paint(PaintInfo& i, int tx, int ty);
 
-    // Lie about position to outside observers.
-    virtual int yPos() const { return m_y + m_topExtra; }
+    void paintCollapsedBorder(GraphicsContext* p, int x, int y, int w, int h);
+    
+    // lie about position to outside observers
+    virtual int yPos() const { return m_y + _topExtra; }
 
-    virtual IntRect absoluteClippedOverflowRect();
-    virtual void computeAbsoluteRepaintRect(IntRect&, bool fixed = false);
-    virtual bool absolutePosition(int& x, int& y, bool fixed = false) const;
+    virtual void computeAbsoluteRepaintRect(IntRect&, bool f=false);
+    virtual bool absolutePosition(int& xPos, int& yPos, bool f = false);
 
-    virtual short baselinePosition(bool firstLine = false, bool isRootLineBox = false) const;
+    virtual short baselinePosition(bool = false) const;
 
-    void setCellTopExtra(int p) { m_topExtra = p; }
-    void setCellBottomExtra(int p) { m_bottomExtra = p; }
+    virtual int borderTopExtra() const { return _topExtra; }
+    virtual int borderBottomExtra() const { return _bottomExtra; }
 
-    virtual int borderTopExtra() const { return m_topExtra; }
-    virtual int borderBottomExtra() const { return m_bottomExtra; }
+    RenderTable* table() const { return static_cast<RenderTable*>(parent()->parent()->parent()); }
+    RenderTableSection* section() const { return static_cast<RenderTableSection*>(parent()->parent()); }
 
-#ifndef NDEBUG
-    virtual void dump(TextStream*, DeprecatedString ind = "") const;
+#if !NDEBUG
+    virtual void dump(TextStream *stream, DeprecatedString ind = "") const;
 #endif
 
+    void paintBackgroundsBehindCell(PaintInfo&, int tx, int ty, RenderObject* backgroundObject);
+
 protected:
-    int m_row;
-    int m_column;
-    int m_rowSpan;
-    int m_columnSpan;
-    int m_topExtra : 31;
-    int m_bottomExtra : 31;
+    virtual void paintBoxDecorations(PaintInfo&, int tx, int ty);
+
+    int _row;
+    int _col;
+    int rSpan;
+    int cSpan;
+    int _topExtra : 31;
+    bool nWrap : 1;
+    int _bottomExtra : 31;
     bool m_widthChanged : 1;
+    
     int m_percentageHeight;
 };
 
-} // namespace WebCore
+}
 
-#endif // RenderTableCell_h
+#endif

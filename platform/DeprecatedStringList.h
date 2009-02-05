@@ -29,8 +29,12 @@
 #include "DeprecatedString.h"
 #include "DeprecatedValueList.h"
 
+#ifdef __APPLE__
 #ifdef __OBJC__
 @class NSArray;
+#else
+class NSArray;
+#endif
 #endif
 
 namespace WebCore {
@@ -44,7 +48,7 @@ public:
     
     DeprecatedString pop_front();
     
-#ifdef __OBJC__
+#ifdef __APPLE__
     NSArray *getNSArray() const;
 #endif
 };

@@ -16,12 +16,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSStyleDeclaration_h
-#define CSSStyleDeclaration_h
+#ifndef CSSStyleDeclaration_H
+#define CSSStyleDeclaration_H
 
 #include "StyleBase.h"
 #include <wtf/PassRefPtr.h>
@@ -81,10 +81,6 @@ private:
     CSSStyleDeclaration& operator=(const CSSStyleDeclaration&);
 };
 
-// Defined in CSSGrammar.y, but not in any header.
-// We have poor control over CSSGrammar.h generation, so just define it here for others to use.
-int getPropertyID(const char* str, int len);
+} // namespace
 
-} // namespace WebCore
-
-#endif // CSSStyleDeclaration_h
+#endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,26 +23,21 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef RenderHTMLCanvas_h
-#define RenderHTMLCanvas_h
+#ifndef RenderHTMLCanvas_H
+#define RenderHTMLCanvas_H
 
 #include "RenderReplaced.h"
 
 namespace WebCore {
 
-    class HTMLCanvasElement;
-
     class RenderHTMLCanvas : public RenderReplaced {
     public:
-        RenderHTMLCanvas(HTMLCanvasElement*);
-
-        virtual const char* renderName() const { return "RenderHTMLCanvas"; }
-
-        virtual void paintReplaced(PaintInfo& paintInfo, int tx, int ty);
-
-        void canvasSizeChanged();
+        RenderHTMLCanvas(Node*);
+        virtual const char* renderName() const;
+        virtual void paint(PaintInfo&, int tx, int ty);
+        virtual void layout();
     };
 
-} // namespace WebCore
+} //namespace
 
-#endif // RenderHTMLCanvas_h
+#endif

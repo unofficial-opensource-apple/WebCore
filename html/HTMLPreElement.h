@@ -16,19 +16,20 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLPreElement_h
-#define HTMLPreElement_h
+#ifndef HTMLPreElement_H
+#define HTMLPreElement_H
 
 #include "HTMLElement.h"
 
 namespace WebCore {
 
-class HTMLPreElement : public HTMLElement {
+class HTMLPreElement : public HTMLElement
+{
 public:
     HTMLPreElement(const QualifiedName&, Document*);
 
@@ -40,11 +41,10 @@ public:
 
     int width() const;
     void setWidth(int w);
-
+    
     bool wrap() const;
     void setWrap(bool b);
 };
 
-} // namespace WebCore
-
-#endif // HTMLPreElement_h
+}; //namespace
+#endif

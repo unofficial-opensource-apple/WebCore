@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,48 +13,49 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module ranges {
 
-    // Introduced in DOM Level 2:
     interface [GenerateConstructor] Range {
 
-        readonly attribute Node startContainer
-            getter raises(DOMException);
-        readonly attribute long startOffset
-            getter raises(DOMException);
-        readonly attribute Node endContainer
-            getter raises(DOMException);
-        readonly attribute long endOffset
-            getter raises(DOMException);
-        readonly attribute boolean collapsed
-            getter raises(DOMException);
-        readonly attribute Node commonAncestorContainer
-            getter raises(DOMException);
+        // DOM Level 2
 
-        [OldStyleObjC] void setStart(in Node refNode, 
-                                     in long offset)
-            raises(RangeException, DOMException);
-        [OldStyleObjC] void setEnd(in Node refNode, 
-                                   in long offset)
-            raises(RangeException, DOMException);
+        readonly attribute Node startContainer
+            getter raises (DOMException);
+        readonly attribute long startOffset
+            getter raises (DOMException);
+        readonly attribute Node endContainer
+            getter raises (DOMException);
+        readonly attribute long endOffset
+            getter raises (DOMException);
+        readonly attribute boolean collapsed
+            getter raises (DOMException);
+        readonly attribute Node commonAncestorContainer
+            getter raises (DOMException);
+
+        void setStart(in Node refNode, 
+                      in long offset)
+            raises(RangeException, dom::DOMException);
+        void setEnd(in Node refNode, 
+                    in long offset)
+            raises(RangeException, dom::DOMException);
         void setStartBefore(in Node refNode)
-            raises(RangeException, DOMException);
+            raises(RangeException, dom::DOMException);
         void setStartAfter(in Node refNode)
-            raises(RangeException, DOMException);
+            raises(RangeException, dom::DOMException);
         void setEndBefore(in Node refNode)
-            raises(RangeException, DOMException);
+            raises(RangeException, dom::DOMException);
         void setEndAfter(in Node refNode)
-            raises(RangeException, DOMException);
+            raises(RangeException, dom::DOMException);
         void collapse(in boolean toStart)
             raises(DOMException);
         void selectNode(in Node refNode)
-            raises(RangeException, DOMException);
+            raises(RangeException, dom::DOMException);
         void selectNodeContents(in Node refNode)
-            raises(RangeException, DOMException);
+            raises(RangeException, dom::DOMException);
 
         // CompareHow
         const unsigned short START_TO_START = 0;
@@ -63,58 +63,38 @@ module ranges {
         const unsigned short END_TO_END     = 2;
         const unsigned short END_TO_START   = 3;
 
-        [OldStyleObjC] short compareBoundaryPoints(in CompareHow how,
-                                                   in Range sourceRange)
-            raises(DOMException);
-
+        short compareBoundaryPoints(in CompareHow how,
+                                    in Range sourceRange)
+            raises(dom::DOMException);
+        short comparePoint(in Node refNode, 
+                           in long offset)
+            raises(RangeException, dom::DOMException);
+        boolean isPointInRange(in Node refNode, 
+                               in long offset)
+            raises(RangeException, dom::DOMException);
         void deleteContents()
-            raises(DOMException);
+            raises(dom::DOMException);
         DocumentFragment extractContents()
-            raises(DOMException);
+            raises(dom::DOMException);
         DocumentFragment cloneContents()
-            raises(DOMException);
+            raises(dom::DOMException);
         void insertNode(in Node newNode)
-            raises(DOMException, RangeException);
+            raises(dom::DOMException, RangeException);
         void surroundContents(in Node newParent)
-            raises(DOMException, RangeException);
+            raises(dom::DOMException, RangeException);
         Range cloneRange()
-            raises(DOMException);
+            raises(dom::DOMException);
         DOMString toString()
-            raises(DOMException);
+            raises(dom::DOMException);
 
         void detach()
-            raises(DOMException);
+            raises(dom::DOMException);
 
         // extensions
 
         DocumentFragment createContextualFragment(in DOMString html)
-            raises(DOMException);
+            raises(dom::DOMException);
 
-        // WebKit extensions
-
-        boolean intersectsNode(in Node refNode)
-            raises(RangeException, DOMException);
-
-        short compareNode(in Node refNode)
-            raises(RangeException, DOMException);
-
-        // CompareResults
-        const unsigned short NODE_BEFORE           = 0;
-        const unsigned short NODE_AFTER            = 1;
-        const unsigned short NODE_BEFORE_AND_AFTER = 2;
-        const unsigned short NODE_INSIDE           = 3;
-
-        short comparePoint(in Node refNode, 
-                           in long offset)
-            raises(RangeException, DOMException);
-
-        boolean isPointInRange(in Node refNode, 
-                               in long offset)
-            raises(RangeException, DOMException);
-
-#if !defined(LANGUAGE_JAVASCRIPT)
-        readonly attribute DOMString text;
-#endif
     };
 
 }

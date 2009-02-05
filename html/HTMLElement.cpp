@@ -1,7 +1,9 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -26,7 +28,6 @@
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "DocumentFragment.h"
-#include "Event.h"
 #include "EventListener.h"
 #include "EventNames.h"
 #include "ExceptionCode.h"
@@ -34,16 +35,13 @@
 #include "HTMLBRElement.h"
 #include "HTMLDocument.h"
 #include "HTMLElementFactory.h"
-#include "HTMLFormElement.h"
 #include "HTMLNames.h"
 #include "HTMLTokenizer.h"
-#include "RenderWordBreak.h"
-#include "Settings.h"
-#include "Text.h"
 #include "TextIterator.h"
-#include "XMLTokenizer.h"
 #include "markup.h"
 
+
+#include "FrameMac.h"
 
 #include "kjs_dom.h"
 #include "kjs_proxy.h"
@@ -56,9 +54,6 @@ namespace WebCore {
 
 using namespace EventNames;
 using namespace HTMLNames;
-
-using std::min;
-using std::max;
 
 HTMLElement::HTMLElement(const QualifiedName& tagName, Document *doc)
     : StyledElement(tagName, doc)
@@ -74,14 +69,12 @@ String HTMLElement::nodeName() const
     // FIXME: Would be nice to have an atomicstring lookup based off uppercase chars that does not have to copy
     // the string on a hit in the hash.
     if (document()->isHTMLDocument())
-        return tagQName().localName().domString().upper();
+        return m_tagName.localName().impl()->upper();
     return Element::nodeName();
 }
     
 HTMLTagStatus HTMLElement::endTagRequirement() const
 {
-    if (hasLocalName(wbrTag))
-        return TagStatusForbidden;
     if (hasLocalName(dtTag) || hasLocalName(ddTag))
         return TagStatusOptional;
 
@@ -91,8 +84,6 @@ HTMLTagStatus HTMLElement::endTagRequirement() const
 
 int HTMLElement::tagPriority() const
 {
-    if (hasLocalName(wbrTag))
-        return 0;
     if (hasLocalName(addressTag) || hasLocalName(ddTag) || hasLocalName(dtTag) || hasLocalName(noscriptTag))
         return 3;
     if (hasLocalName(centerTag) || hasLocalName(nobrTag))
@@ -106,12 +97,15 @@ int HTMLElement::tagPriority() const
 
 PassRefPtr<Node> HTMLElement::cloneNode(bool deep)
 {
-    RefPtr<HTMLElement> clone = HTMLElementFactory::createHTMLElement(tagQName().localName(), document(), 0, false);
+    RefPtr<HTMLElement> clone = HTMLElementFactory::createHTMLElement(m_tagName.localName(), document(), 0, false);
     if (!clone)
         return 0;
 
     if (namedAttrMap)
         *clone->attributes() = *namedAttrMap;
+
+    if (m_inlineStyleDecl)
+        *clone->getInlineStyleDecl() = *m_inlineStyleDecl;
 
     clone->copyNonAttributeProperties(this);
 
@@ -129,7 +123,7 @@ bool HTMLElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry
         return false;
     }
     if (attrName == dirAttr) {
-        result = hasLocalName(bdoTag) ? eBDO : eUniversal;
+        result = hasTagName(bdoTag) ? eBDO : eUniversal;
         return false;
     }
 
@@ -152,13 +146,12 @@ void HTMLElement::parseMappedAttribute(MappedAttribute *attr)
     } else if (attr->name() == tabindexAttr) {
         indexstring = getAttribute(tabindexAttr);
         if (indexstring.length())
-            // Clamp tabindex to the range of 'short' to match Firefox's behavior.
-            setTabIndex(max(static_cast<int>(std::numeric_limits<short>::min()), min(indexstring.toInt(), static_cast<int>(std::numeric_limits<short>::max()))));
+            setTabIndex(indexstring.toInt());
     } else if (attr->name() == langAttr) {
         // FIXME: Implement
     } else if (attr->name() == dirAttr) {
         addCSSProperty(attr, CSS_PROP_DIRECTION, attr->value());
-        addCSSProperty(attr, CSS_PROP_UNICODE_BIDI, hasLocalName(bdoTag) ? CSS_VAL_BIDI_OVERRIDE : CSS_VAL_EMBED);
+        addCSSProperty(attr, CSS_PROP_UNICODE_BIDI, hasTagName(bdoTag) ? CSS_VAL_BIDI_OVERRIDE : CSS_VAL_EMBED);
     }
 // standard events
     if (attr->value() != "return false" && !attr->value().startsWith("return false;")) {
@@ -224,30 +217,6 @@ void HTMLElement::parseMappedAttribute(MappedAttribute *attr)
         setHTMLEventListener(submitEvent, attr);
     } else if (attr->name() == onerrorAttr) {
         setHTMLEventListener(errorEvent, attr);
-    } else if (attr->name() == onwebkitanimationstartAttr) {
-        setHTMLEventListener(webkitAnimationStartEvent, attr);
-    } else if (attr->name() == onwebkitanimationiterationAttr) {
-        setHTMLEventListener(webkitAnimationIterationEvent, attr);
-    } else if (attr->name() == onwebkitanimationendAttr) {
-        setHTMLEventListener(webkitAnimationEndEvent, attr);
-    } else if (attr->name() == onwebkittransitionendAttr) {
-        setHTMLEventListener(webkitTransitionEndEvent, attr);
-#if ENABLE(TOUCH_EVENTS)
-    } else if (attr->name() == ontouchstartAttr) {
-        setHTMLEventListener(touchstartEvent, attr);
-    } else if (attr->name() == ontouchmoveAttr) {
-        setHTMLEventListener(touchmoveEvent, attr);
-    } else if (attr->name() == ontouchendAttr) {
-        setHTMLEventListener(touchendEvent, attr);
-    } else if (attr->name() == ontouchcancelAttr) {
-        setHTMLEventListener(touchcancelEvent, attr);
-    } else if (attr->name() == ongesturestartAttr) {
-        setHTMLEventListener(gesturestartEvent, attr);
-    } else if (attr->name() == ongesturechangeAttr) {
-        setHTMLEventListener(gesturechangeEvent, attr);
-    } else if (attr->name() == ongestureendAttr) {
-        setHTMLEventListener(gestureendEvent, attr);
-#endif
     }
     }
 }
@@ -260,6 +229,26 @@ String HTMLElement::innerHTML() const
 String HTMLElement::outerHTML() const
 {
     return createMarkup(this);
+}
+
+String HTMLElement::innerText() const
+{
+    if (!renderer())
+        return textContent(true);
+    
+    // We need to update layout, since plainText uses line boxes in the render tree.
+    document()->updateLayoutIgnorePendingStylesheets();
+    return plainText(rangeOfContents(const_cast<HTMLElement *>(this)).get());
+}
+
+String HTMLElement::outerText() const
+{
+    // Getting outerText is the same as getting innerText, only
+    // setting is different. You would think this should get the plain
+    // text for the outer range, but this is wrong, <br> for instance
+    // would return different values for inner and outer text by such
+    // a rule, but it doesn't in WinIE, and we want to match that.
+    return innerText();
 }
 
 PassRefPtr<DocumentFragment> HTMLElement::createContextualFragment(const String &html)
@@ -300,72 +289,22 @@ PassRefPtr<DocumentFragment> HTMLElement::createContextualFragment(const String 
             for (RefPtr<Node> child = firstChild; child; child = nextChild) {
                 nextChild = child->nextSibling();
                 node->removeChild(child.get(), ignoredExceptionCode);
-                ASSERT(!ignoredExceptionCode);
+                assert(!ignoredExceptionCode);
                 fragment->insertBefore(child, node.get(), ignoredExceptionCode);
-                ASSERT(!ignoredExceptionCode);
+                assert(!ignoredExceptionCode);
             }
             fragment->removeChild(node.get(), ignoredExceptionCode);
-            ASSERT(!ignoredExceptionCode);
+            assert(!ignoredExceptionCode);
         } else if (node->hasTagName(headTag)) {
             fragment->removeChild(node.get(), ignoredExceptionCode);
-            ASSERT(!ignoredExceptionCode);
+            assert(!ignoredExceptionCode);
         }
     }
 
     return fragment.release();
 }
 
-static inline bool hasOneChild(ContainerNode* node)
-{
-    Node* firstChild = node->firstChild();
-    return firstChild && !firstChild->nextSibling();
-}
-
-static inline bool hasOneTextChild(ContainerNode* node)
-{
-    return hasOneChild(node) && node->firstChild()->isTextNode();
-}
-
-static void replaceChildrenWithFragment(HTMLElement* element, PassRefPtr<DocumentFragment> fragment, ExceptionCode& ec)
-{
-    if (!fragment->firstChild()) {
-        element->removeChildren();
-        return;
-    }
-
-    if (hasOneTextChild(element) && hasOneTextChild(fragment.get())) {
-        static_cast<Text*>(element->firstChild())->setData(static_cast<Text*>(fragment->firstChild())->string(), ec);
-        return;
-    }
-
-    if (hasOneChild(element)) {
-        element->replaceChild(fragment, element->firstChild(), ec);
-        return;
-    }
-
-    element->removeChildren();
-    element->appendChild(fragment, ec);
-}
-
-static void replaceChildrenWithText(HTMLElement* element, const String& text, ExceptionCode& ec)
-{
-    if (hasOneTextChild(element)) {
-        static_cast<Text*>(element->firstChild())->setData(text, ec);
-        return;
-    }
-
-    RefPtr<Text> textNode = new Text(element->document(), text);
-
-    if (hasOneChild(element)) {
-        element->replaceChild(textNode.release(), element->firstChild(), ec);
-        return;
-    }
-
-    element->removeChildren();
-    element->appendChild(textNode.release(), ec);
-}
-
-void HTMLElement::setInnerHTML(const String& html, ExceptionCode& ec)
+void HTMLElement::setInnerHTML(const String &html, ExceptionCode& ec)
 {
     RefPtr<DocumentFragment> fragment = createContextualFragment(html);
     if (!fragment) {
@@ -373,19 +312,20 @@ void HTMLElement::setInnerHTML(const String& html, ExceptionCode& ec)
         return;
     }
 
-    replaceChildrenWithFragment(this, fragment.release(), ec);
-
-#if 0
-// PLATFORM(IPHONE): replaceChildrenWithFragment() should do the same thing
     // Amazon.com sets innerHTML with the same text every second, causing the entire page to redraw.
     if (fragment->childNodeCount() == 1 && childNodeCount() == 1 && 
         fragment->firstChild()->nodeType() == TEXT_NODE && firstChild()->nodeType() == TEXT_NODE &&
         fragment->firstChild()->nodeValue() == firstChild()->nodeValue())
         return;
-#endif
+
+    // FIXME: Add special case for when we had one text child and we just want to set its text?
+    // FIXME: Add special case for cases where we can use replaceChild?
+
+    removeChildren();
+    appendChild(fragment.release(), ec);
 }
 
-void HTMLElement::setOuterHTML(const String& html, ExceptionCode& ec)
+void HTMLElement::setOuterHTML(const String &html, ExceptionCode& ec)
 {
     Node* p = parent();
     if (!p || !p->isHTMLElement()) {
@@ -400,8 +340,8 @@ void HTMLElement::setOuterHTML(const String& html, ExceptionCode& ec)
         return;
     }
 
+    // FIXME: Add special case for when we had one text child and we just want to set its text?
     // FIXME: Why doesn't this have code to merge neighboring text nodes the way setOuterText does?
-
     parent->replaceChild(fragment.release(), this, ec);
 }
 
@@ -421,13 +361,15 @@ void HTMLElement::setInnerText(const String& text, ExceptionCode& ec)
     }
 
     // FIXME: This doesn't take whitespace collapsing into account at all.
+    // FIXME: Add special case for when we had one text child and we just want to set its text?
+    // FIXME: Add special case for cases where we can use replaceChild?
+
+    removeChildren();
 
     if (!text.contains('\n') && !text.contains('\r')) {
-        if (text.isEmpty()) {
-            removeChildren();
+        if (text.isEmpty())
             return;
-        }
-        replaceChildrenWithText(this, text, ec);
+        appendChild(new Text(document(), text), ec);
         return;
     }
 
@@ -437,19 +379,19 @@ void HTMLElement::setInnerText(const String& text, ExceptionCode& ec)
     RenderObject* r = renderer();
     if (r && r->style()->preserveNewline()) {
         if (!text.contains('\r')) {
-            replaceChildrenWithText(this, text, ec);
+            appendChild(new Text(document(), text), ec);
             return;
         }
-        String textWithConsistentLineBreaks = text;
+        // FIXME: Stick with String once it has a replace that can do this.
+        DeprecatedString textWithConsistentLineBreaks = text.deprecatedString();
         textWithConsistentLineBreaks.replace("\r\n", "\n");
         textWithConsistentLineBreaks.replace('\r', '\n');
-        replaceChildrenWithText(this, textWithConsistentLineBreaks, ec);
+        appendChild(new Text(document(), textWithConsistentLineBreaks), ec);
         return;
     }
 
     // Add text nodes and <br> elements.
     ec = 0;
-    RefPtr<DocumentFragment> fragment = new DocumentFragment(document());
     int lineStart = 0;
     UChar prev = 0;
     int length = text.length();
@@ -457,12 +399,12 @@ void HTMLElement::setInnerText(const String& text, ExceptionCode& ec)
         UChar c = text[i];
         if (c == '\n' || c == '\r') {
             if (i > lineStart) {
-                fragment->appendChild(new Text(document(), text.substring(lineStart, i - lineStart)), ec);
+                appendChild(new Text(document(), text.substring(lineStart, i - lineStart)), ec);
                 if (ec)
                     return;
             }
             if (!(c == '\n' && i != 0 && prev == '\r')) {
-                fragment->appendChild(new HTMLBRElement(document()), ec);
+                appendChild(new HTMLBRElement(document()), ec);
                 if (ec)
                     return;
             }
@@ -471,8 +413,7 @@ void HTMLElement::setInnerText(const String& text, ExceptionCode& ec)
         prev = c;
     }
     if (length > lineStart)
-        fragment->appendChild(new Text(document(), text.substring(lineStart, length - lineStart)), ec);
-    replaceChildrenWithFragment(this, fragment.release(), ec);
+        appendChild(new Text(document(), text.substring(lineStart, length - lineStart)), ec);
 }
 
 void HTMLElement::setOuterText(const String &text, ExceptionCode& ec)
@@ -588,23 +529,6 @@ bool HTMLElement::isContentEditable() const
     return renderer()->style()->userModify() == READ_WRITE || renderer()->style()->userModify() == READ_WRITE_PLAINTEXT_ONLY;
 }
 
-bool HTMLElement::isContentRichlyEditable() const
-{
-    if (document()->frame() && document()->frame()->isContentEditable())
-        return true;
-
-    document()->updateRendering();
-
-    if (!renderer()) {
-        if (parentNode())
-            return parentNode()->isContentEditable();
-        else
-            return false;
-    }
-    
-    return renderer()->style()->userModify() == READ_WRITE;
-}
-
 String HTMLElement::contentEditable() const 
 {
     document()->updateRendering();
@@ -622,6 +546,7 @@ String HTMLElement::contentEditable() const
         default:
             return "inherit";
     }
+    return "inherit";
 }
 
 void HTMLElement::setContentEditable(MappedAttribute* attr) 
@@ -660,9 +585,18 @@ void HTMLElement::setContentEditable(const String &enabled)
         setAttribute(contenteditableAttr, enabled.isEmpty() ? "true" : enabled);
 }
 
-void HTMLElement::click()
+void HTMLElement::click(bool sendMouseEvents, bool showPressedLook)
 {
-    dispatchSimulatedClick(0, false, false);
+    // send mousedown and mouseup before the click, if requested
+    if (sendMouseEvents)
+        dispatchSimulatedMouseEvent(mousedownEvent);
+    setActive(true, showPressedLook);
+    if (sendMouseEvents)
+        dispatchSimulatedMouseEvent(mouseupEvent);
+    setActive(false);
+
+    // always send click
+    dispatchSimulatedMouseEvent(clickEvent);
 }
 
 // accessKeyAction is used by the accessibility support code
@@ -675,7 +609,7 @@ void HTMLElement::click()
 void HTMLElement::accessKeyAction(bool sendToAnyElement)
 {
     if (sendToAnyElement)
-        dispatchSimulatedClick(0, true);
+        click(true);
 }
 
 String HTMLElement::toString() const
@@ -701,7 +635,7 @@ String HTMLElement::id() const
     return getAttribute(idAttr);
 }
 
-void HTMLElement::setId(const String& value)
+void HTMLElement::setId(const String &value)
 {
     setAttribute(idAttr, value);
 }
@@ -711,7 +645,7 @@ String HTMLElement::title() const
     return getAttribute(titleAttr);
 }
 
-void HTMLElement::setTitle(const String& value)
+void HTMLElement::setTitle(const String &value)
 {
     setAttribute(titleAttr, value);
 }
@@ -721,7 +655,7 @@ String HTMLElement::lang() const
     return getAttribute(langAttr);
 }
 
-void HTMLElement::setLang(const String& value)
+void HTMLElement::setLang(const String &value)
 {
     setAttribute(langAttr, value);
 }
@@ -783,10 +717,8 @@ bool HTMLElement::isRecognizedTagName(const QualifiedName& tagName)
 {
     static HashSet<AtomicStringImpl*> tagList;
     if (tagList.isEmpty()) {
-        size_t tagCount = 0;
-        WebCore::QualifiedName** tags = HTMLNames::getHTMLTags(&tagCount);
-        for (size_t i = 0; i < tagCount; i++)
-            tagList.add(tags[i]->localName().impl());
+        #define ADD_TAG(name) tagList.add(name##Tag.localName().impl());
+        DOM_HTMLNAMES_FOR_EACH_TAG(ADD_TAG)
     }
     return tagList.contains(tagName.localName().impl());
 }
@@ -842,8 +774,6 @@ HashSet<AtomicStringImpl*>* inlineTagList()
         tagList.add(delTag.localName().impl());
         tagList.add(nobrTag.localName().impl());
         tagList.add(wbrTag.localName().impl());
-        tagList.add(audioTag.localName().impl());
-        tagList.add(videoTag.localName().impl());
     }
     return &tagList;
 }
@@ -937,7 +867,7 @@ bool HTMLElement::inBlockTagList(const Node* newChild)
 
 bool HTMLElement::checkDTD(const Node* newChild)
 {
-    if (hasLocalName(addressTag) && newChild->hasTagName(pTag))
+    if (hasTagName(addressTag) && newChild->hasTagName(pTag))
         return true;
     return inEitherTagList(newChild);
 }
@@ -946,36 +876,6 @@ void HTMLElement::setHTMLEventListener(const AtomicString& eventType, Attribute*
 {
     Element::setHTMLEventListener(eventType,
         document()->createHTMLEventListener(attr->localName().domString(), attr->value(), this));
-}
-    
-bool HTMLElement::rendererIsNeeded(RenderStyle *style)
-{
-    if (hasLocalName(noscriptTag)) {
-        Settings* settings = document()->settings();
-        if (settings && settings->isJavaScriptEnabled())
-            return false;
-    }
-    return (document()->documentElement() == this) || (style->display() != NONE);
-}
-    
-RenderObject* HTMLElement::createRenderer(RenderArena* arena, RenderStyle* style)
-{
-    if (hasLocalName(wbrTag))
-        return new (arena) RenderWordBreak(this);
-    return RenderObject::createObject(this, style);
-}
-
-HTMLFormElement* HTMLElement::findFormAncestor() const
-{
-    for (Node* ancestor = parentNode(); ancestor; ancestor = ancestor->parentNode())
-        if (ancestor->hasTagName(formTag))
-            return static_cast<HTMLFormElement*>(ancestor);
-    return 0;
-}
-
-HTMLFormElement* HTMLElement::virtualForm() const
-{
-    return findFormAncestor();
 }
 
 
@@ -995,11 +895,4 @@ bool HTMLElement::willRespondToMouseClickEvents()
 }
 
 
-} // namespace WebCore
-
-#ifndef NDEBUG
-void dumpInnerHTML(WebCore::HTMLElement* element)
-{
-    printf("%s\n", element->innerHTML().ascii().data());
 }
-#endif

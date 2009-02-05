@@ -18,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -30,28 +30,23 @@
 
 namespace WebCore {
 
-class HTMLGenericFormElement;
+    class HTMLGenericFormElement;
 
-class RenderFieldset : public RenderBlock {
-public:
-    RenderFieldset(HTMLGenericFormElement*);
+    class RenderFieldset : public RenderBlock {
+    public:
+        RenderFieldset(HTMLGenericFormElement*);
 
-    virtual const char* renderName() const { return "RenderFieldSet"; }
+        virtual const char* renderName() const { return "RenderFieldSet"; }
 
-    virtual RenderObject* layoutLegend(bool relayoutChildren);
+        virtual RenderObject* layoutLegend(bool relayoutChildren);
 
-    virtual void setStyle(RenderStyle*);
-
-    virtual void calcPrefWidths();
-    virtual bool avoidsFloats() const { return true; }
-    virtual bool expandsToEncloseOverhangingFloats() const { return style()->height().isAuto(); }
-    virtual bool stretchesToMinIntrinsicWidth() const { return true; }
-
-private:
-    virtual void paintBoxDecorations(PaintInfo&, int tx, int ty);
-    void paintBorderMinusLegend(GraphicsContext*, int tx, int ty, int w, int h, const RenderStyle*, int lx, int lw, int lb);
-    RenderObject* findLegend() const;
-};
+        virtual void setStyle(RenderStyle*);
+        
+    private:
+        virtual void paintBoxDecorations(PaintInfo&, int tx, int ty);
+        void paintBorderMinusLegend(GraphicsContext*, int tx, int ty, int w, int h, const RenderStyle*, int lx, int lw);
+        RenderObject* findLegend();
+    };
 
 } // namespace WebCore
 

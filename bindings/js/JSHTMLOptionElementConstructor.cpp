@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,8 +13,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -25,15 +25,15 @@
 #include "JSHTMLOptionElement.h"
 #include "Text.h"
 
-namespace WebCore {
-
 using namespace KJS;
 
+namespace WebCore {
+
 JSHTMLOptionElementConstructor::JSHTMLOptionElementConstructor(ExecState* exec, Document* d)
-    : KJS::DOMObject(exec->lexicalGlobalObject()->objectPrototype())
-    , m_doc(d)
+    : m_doc(d)
 {
-    putDirect(exec->propertyNames().length, jsNumber(4), ReadOnly|DontDelete|DontEnum);
+    setPrototype(exec->lexicalInterpreter()->builtinObjectPrototype());
+    put(exec, lengthPropertyName, jsNumber(4), ReadOnly|DontDelete|DontEnum);
 }
 
 bool JSHTMLOptionElementConstructor::implementsConstruct() const
@@ -65,4 +65,4 @@ JSObject* JSHTMLOptionElementConstructor::construct(ExecState* exec, const List&
     return static_cast<JSObject*>(toJS(exec, opt));
 }
 
-} // namespace WebCore
+}

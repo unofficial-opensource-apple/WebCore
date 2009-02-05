@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,11 +28,10 @@
 #ifndef ClipboardMac_h
 #define ClipboardMac_h
 
+#include "Image.h"
 #include "IntPoint.h"
 #include "Clipboard.h"
-#include "ClipboardAccessPolicy.h"
 #include "CachedResourceClient.h"
-#include <wtf/RetainPtr.h>
 
 #ifdef __OBJC__
 @class NSImage;
@@ -40,45 +39,72 @@
 #else
 class NSImage;
 class NSPasteboard;
-typedef unsigned NSDragOperation;
+typedef unsigned int NSDragOperation;
 #endif
 
 namespace WebCore {
 
-class Frame;
+class DeprecatedStringList;
+class FrameMac;
 
 class ClipboardMac : public Clipboard, public CachedResourceClient {
 public:
-    ClipboardMac(bool forDragging, NSPasteboard *, ClipboardAccessPolicy, Frame* = 0);
+    // security mechanisms
+    typedef enum {
+        Numb, ImageWritable, Writable, TypesReadable, Readable
+    } AccessPolicy;
+
+    ClipboardMac(bool forDragging, NSPasteboard *pasteboard, AccessPolicy policy, FrameMac *frame = 0);
     virtual ~ClipboardMac();
+
+    bool isForDragging() const;
     
-    void clearData(const String& type);
+    String dropEffect() const;
+    void setDropEffect(const String &s);
+    String effectAllowed() const;
+    void setEffectAllowed(const String &s);
+    
+    void clearData(const String &type);
     void clearAllData();
-    String getData(const String& type, bool& success) const;
-    bool setData(const String& type, const String& data);
-    
-    virtual bool hasData();
-    
+    String getData(const String &type, bool &success) const;
+    bool setData(const String &type, const String &data);
+        
     // extensions beyond IE's API
-    virtual HashSet<String> types() const;
+    virtual DeprecatedStringList types() const;
 
-    void setDragImage(CachedImage*, const IntPoint&);
-    void setDragImageElement(Node *, const IntPoint&);
-    
-    virtual DragImageRef createDragImage(IntPoint& dragLoc) const;
-    virtual void declareAndWriteDragImage(Element*, const KURL&, const String& title, Frame*);
-    virtual void writeRange(Range*, Frame* frame);
-    virtual void writeURL(const KURL&, const String&, Frame* frame);
-    
+    IntPoint dragLocation() const;    // same point as client passed us
+    CachedImage* dragImage() const;
+    void setDragImage(CachedImage*, const IntPoint &);
+    Node *dragImageElement();
+    void setDragImageElement(Node *, const IntPoint &);
+
+#if __APPLE__
     // Methods for getting info in Cocoa's type system
-    NSImage *dragNSImage(NSPoint&) const; // loc converted from dragLoc, based on whole image size
-    NSPasteboard *pasteboard() { return m_pasteboard.get(); }
-private:
-    void setDragImage(CachedImage*, Node*, const IntPoint&);
+    NSImage *dragNSImage(NSPoint *loc);    // loc converted from dragLoc, based on whole image size
+    bool sourceOperation(NSDragOperation *op) const;
+    bool destinationOperation(NSDragOperation *op) const;
+    void setSourceOperation(NSDragOperation op);
+    void setDestinationOperation(NSDragOperation op);
+#endif
 
-    RetainPtr<NSPasteboard> m_pasteboard;
+    void setAccessPolicy(AccessPolicy policy);
+    AccessPolicy accessPolicy() const;
+    void setDragHasStarted() { m_dragStarted = true; }
+    
+private:
+    void setDragImage(CachedImage* cachedImage, Node *, const IntPoint &loc);
+
+    NSPasteboard *m_pasteboard;
+    bool m_forDragging;
+    String m_dropEffect;
+    String m_effectAllowed;
+    IntPoint m_dragLoc;
+    CachedImage* m_dragImage;
+    RefPtr<Node> m_dragImageElement;
+    AccessPolicy m_policy;
     int m_changeCount;
-    Frame* m_frame; // used on the source side to generate dragging images
+    bool m_dragStarted;
+    FrameMac *m_frame;   // used on the source side to generate dragging images
 };
 
 }

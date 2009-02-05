@@ -2,7 +2,7 @@
  *  WebCoreTelephoneParser.h
  *  WebCore
  *
- *  Copyright (C) 2007, 2008, Apple Inc.  All rights reserved.
+ *  Copyright (C) 2007, Apple Inc.  All rights reserved.
  *
  */
 
@@ -21,6 +21,13 @@ extern "C" {
  out endPos: index of last character in phone number, -1 if not found.
  */
 void WebCoreFindTelephoneNumber(const UniChar string[], unsigned len, int *startPos, int *endPos);
+
+/*
+ method: WebCoreSetTelephoneNumberParsingEnabled(bool)
+ description: Enables/Disables telephone number parsing subsequently created HTML documents.
+ in enabled: turn feature on or off 
+ */    
+void WebCoreSetTelephoneNumberParsingEnabled(bool enabled);
 
 #ifdef __cplusplus
 }

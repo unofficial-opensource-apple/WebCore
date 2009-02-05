@@ -28,28 +28,13 @@
 
 #include "IntPoint.h"
 
-#import <GraphicsServices/GSEvent.h>
+#import "GraphicsServices/GSEvent.h"
 
-#if PLATFORM(MAC)
+#ifdef __APPLE__
 #endif
 
-#if PLATFORM(WIN)
-typedef struct HWND__* HWND;
-typedef unsigned WPARAM;
-typedef long LPARAM;
-#endif
-
-#if PLATFORM(GTK)
-typedef struct _GdkEventScroll GdkEventScroll;
-#endif
-
-#if PLATFORM(QT)
-class QWheelEvent;
-#endif
-
-#if PLATFORM(WX)
-class wxMouseEvent;
-class wxPoint;
+#if PLATFORM(GDK)
+typedef union _GdkEvent GdkEvent;
 #endif
 
 namespace WebCore {
@@ -58,10 +43,8 @@ namespace WebCore {
     public:
         const IntPoint& pos() const { return m_position; }
         const IntPoint& globalPos() const { return m_globalPosition; }
-
-        float deltaX() const { return m_deltaX; }
-        float deltaY() const { return m_deltaY; }
-
+        int delta() const { return m_delta; }
+        bool isHorizontal() const { return m_isHorizontal; }
         bool isAccepted() const { return m_isAccepted; }
         bool shiftKey() const { return m_shiftKey; }
         bool ctrlKey() const { return m_ctrlKey; }
@@ -75,40 +58,25 @@ namespace WebCore {
 
         void accept() { m_isAccepted = true; }
         void ignore() { m_isAccepted = false; }
-        
-        bool isContinuous() const { return m_isContinuous; }
-        float continuousDeltaX() const { return m_continuousDeltaX; }
-        float continuousDeltaY() const { return m_continuousDeltaY; }
 
-#if PLATFORM(MAC)
+#ifdef __APPLE__
         PlatformWheelEvent(GSEventRef);
 #endif
-#if PLATFORM(WIN)
-        PlatformWheelEvent(HWND, WPARAM, LPARAM, bool isHorizontal);
-#endif
-#if PLATFORM(GTK)
-        PlatformWheelEvent(GdkEventScroll*);
-#endif
-#if PLATFORM(QT)
-        PlatformWheelEvent(QWheelEvent*);
-#endif
-#if PLATFORM(WX)
-        PlatformWheelEvent(const wxMouseEvent&, const wxPoint&);
+
+#if PLATFORM(GDK)
+        PlatformWheelEvent(GdkEvent*);
 #endif
 
     private:
         IntPoint m_position;
         IntPoint m_globalPosition;
-        float m_deltaX;
-        float m_deltaY;
+        int m_delta;
+        bool m_isHorizontal;
         bool m_isAccepted;
         bool m_shiftKey;
         bool m_ctrlKey;
         bool m_altKey;
         bool m_metaKey;
-        bool m_isContinuous;
-        float m_continuousDeltaX;
-        float m_continuousDeltaY;
     };
 
 } // namespace WebCore

@@ -17,21 +17,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef CDATASection_h
-#define CDATASection_h
+#ifndef DOM_CDATASectionImpl_h
+#define DOM_CDATASectionImpl_h
 
 #include "Text.h"
 
 namespace WebCore {
 
-class CDATASection : public Text {
+class CDATASection : public Text
+{
+// ### should these have id==ID_TEXT
 public:
-    CDATASection(Document*, const String&);
+    CDATASection(Document *impl, const String &_text);
+    CDATASection(Document *impl);
     virtual ~CDATASection();
 
     virtual String nodeName() const;
@@ -41,9 +44,9 @@ public:
     virtual String toString() const;
 
 protected:
-    virtual PassRefPtr<Text> createNew(PassRefPtr<StringImpl>);
+    virtual Text* createNew(StringImpl*);
 };
 
 } // namespace WebCore
 
-#endif // CDATASection_h
+#endif // DOM_CDATASectionImpl_h

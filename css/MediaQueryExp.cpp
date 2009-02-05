@@ -28,7 +28,7 @@
 #include "config.h"
 #include "MediaQueryExp.h"
 
-#include "CSSParser.h"
+#include "cssparser.h"
 #include "CSSPrimitiveValue.h"
 #include "CSSValueList.h"
 

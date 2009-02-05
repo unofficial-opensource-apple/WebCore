@@ -1,10 +1,11 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- *           (C) 2007 David Smith (catfish.man@gmail.com)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,15 +19,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "NamedMappedAttrMap.h"
 
 #include "Document.h"
-#include "Element.h"
 
 namespace WebCore {
 
@@ -38,7 +37,7 @@ NamedMappedAttrMap::NamedMappedAttrMap(Element *e)
 
 void NamedMappedAttrMap::clearAttributes()
 {
-    m_classNames.clear();
+    m_classList.clear();
     m_mappedAttributeCount = 0;
     NamedAttrMap::clearAttributes();
 }
@@ -52,9 +51,8 @@ int NamedMappedAttrMap::declCount() const
 {
     int result = 0;
     for (unsigned i = 0; i < length(); i++) {
-        Attribute* attr = attributeItem(i);
-        if (attr->isMappedAttribute() &&
-            static_cast<MappedAttribute*>(attr)->decl())
+        MappedAttribute* attr = attributeItem(i);
+        if (attr->decl())
             result++;
     }
     return result;
@@ -68,9 +66,8 @@ bool NamedMappedAttrMap::mapsEquivalent(const NamedMappedAttrMap* otherMap) cons
     
     // The values for each decl must match.
     for (unsigned i = 0; i < length(); i++) {
-        Attribute* attr = attributeItem(i);
-        if (attr->isMappedAttribute() &&
-            static_cast<MappedAttribute*>(attr)->decl()) {
+        MappedAttribute* attr = attributeItem(i);
+        if (attr->decl()) {
             Attribute* otherAttr = otherMap->getAttributeItem(attr->name());
             if (!otherAttr || (attr->value() != otherAttr->value()))
                 return false;
@@ -79,15 +76,48 @@ bool NamedMappedAttrMap::mapsEquivalent(const NamedMappedAttrMap* otherMap) cons
     return true;
 }
 
-void NamedMappedAttrMap::parseClassAttribute(const String& classStr) 
-{ 
-    if (!element->hasClass()) { 
-        m_classNames.clear(); 
-        return;
-    }
-
-    m_classNames.parseClassAttribute(classStr, element->document()->inCompatMode()); 
+inline static bool isClassWhitespace(UChar c)
+{
+    return c == ' ' || c == '\r' || c == '\n' || c == '\t';
 }
 
+void NamedMappedAttrMap::parseClassAttribute(const String& classStr)
+{
+    m_classList.clear();
+    if (!element->hasClass())
+        return;
+    
+    String classAttr = element->document()->inCompatMode() ? 
+        (classStr.impl()->isLower() ? classStr : String(classStr.impl()->lower())) :
+        classStr;
+    
+    AtomicStringList* curr = 0;
+    
+    const UChar* str = classAttr.characters();
+    int length = classAttr.length();
+    int sPos = 0;
+
+    while (true) {
+        while (sPos < length && isClassWhitespace(str[sPos]))
+            ++sPos;
+        if (sPos >= length)
+            break;
+        int ePos = sPos + 1;
+        while (ePos < length && !isClassWhitespace(str[ePos]))
+            ++ePos;
+        if (curr) {
+            curr->setNext(new AtomicStringList(AtomicString(str + sPos, ePos - sPos)));
+            curr = curr->next();
+        } else {
+            if (sPos == 0 && ePos == length) {
+                m_classList.setString(AtomicString(classAttr));
+                break;
+            }
+            m_classList.setString(AtomicString(str + sPos, ePos - sPos));
+            curr = &m_classList;
+        }
+        sPos = ePos + 1;
+    }
+}
 
 }

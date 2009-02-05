@@ -29,6 +29,15 @@ extern "C" {
 
 #import <GraphicsServices/GSFont.h>
 
+// These types are only available in the ARM version of CoreGraphics.
+// FIXME: Remove this if/when Tahoe picks up the new CoreGraphics headers.
+#if !defined(__arm__)
+typedef int CGFontSmoothingStyle;
+#define kCGFontSmoothingStyleMedium (2 << 4)
+typedef int CGFontAntialiasingStyle;
+#define kCGFontAntialiasingStyleUnfiltered (0 << 6)
+#endif /* !defined(__arm__) */
+
 extern void WebCoreDrawTextAtPoint(const UniChar*, unsigned length, CGPoint, GSFontRef, CGColorRef);
 extern float WebCoreTextFloatWidth(const UniChar*, unsigned length, CGFontRef);
 extern void WebCoreSetShouldUseFontSmoothing(bool);

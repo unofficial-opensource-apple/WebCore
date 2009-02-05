@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -17,74 +19,52 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
 #include "HTMLFormElement.h"
 
-#include "Base64.h"
-#include "CSSHelper.h"
-#include "CString.h"
-#include "Event.h"
 #include "EventNames.h"
-#include "FormData.h"
 #include "FormDataList.h"
 #include "Frame.h"
-#include "FrameLoader.h"
 #include "HTMLDocument.h"
 #include "HTMLFormCollection.h"
 #include "HTMLImageElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
-#include "MIMETypeRegistry.h"
-#include "RenderTextControl.h"
-
-#if PLATFORM(QT)
-#include <QtCore/QFileInfo>
-#endif
-
-#if PLATFORM(WX)
-#include <wx/defs.h>
-#include <wx/filename.h>
-#endif
-
-#if PLATFORM(WIN_OS)
-#include <shlwapi.h>
-#endif
+#include "csshelper.h"
+#include "RenderLineEdit.h"
 
 namespace WebCore {
 
 using namespace EventNames;
 using namespace HTMLNames;
 
-HTMLFormElement::HTMLFormElement(Document* doc)
+HTMLFormElement::HTMLFormElement(Document *doc)
     : HTMLElement(formTag, doc)
-    , m_elementAliases(0)
-    , collectionInfo(0)
-    , m_enctype("application/x-www-form-urlencoded")
-    , m_post(false)
-    , m_multipart(false)
-    , m_autocomplete(true)
-    , m_insubmit(false)
-    , m_doingsubmit(false)
-    , m_inreset(false)
-    , m_malformed(false)
 {
+    collectionInfo = 0;
+    m_post = false;
+    m_multipart = false;
+    m_autocomplete = true;
+    m_insubmit = false;
+    m_doingsubmit = false;
+    m_inreset = false;
+    m_enctype = "application/x-www-form-urlencoded";
+    m_boundary = "----------0xKhTmLbOuNdArY";
+    m_malformed = false;
+    m_preserveAcrossRemove = false;
 }
 
 HTMLFormElement::~HTMLFormElement()
 {
-    if (!m_autocomplete)
-        document()->unregisterForCacheCallbacks(this);
-
-    delete m_elementAliases;
     delete collectionInfo;
     
     for (unsigned i = 0; i < formElements.size(); ++i)
-        formElements[i]->formDestroyed();
+        formElements[i]->m_form = 0;
     for (unsigned i = 0; i < imgElements.size(); ++i)
         imgElements[i]->m_form = 0;
 }
@@ -100,6 +80,11 @@ bool HTMLFormElement::formWouldHaveSecureSubmission(const String &url)
 void HTMLFormElement::attach()
 {
     HTMLElement::attach();
+
+    // note we don't deal with calling secureFormRemoved() on detach, because the timing
+    // was such that it cleared our state too early
+    if (formWouldHaveSecureSubmission(m_url))
+        document()->secureFormAdded();
 }
 
 void HTMLFormElement::insertedIntoDocument()
@@ -122,16 +107,6 @@ void HTMLFormElement::removedFromDocument()
     HTMLElement::removedFromDocument();
 }
 
-void HTMLFormElement::handleLocalEvents(Event* event, bool useCapture)
-{
-    EventTargetNode* targetNode = event->target()->toNode();
-    if (!useCapture && targetNode && targetNode != this && (event->type() == submitEvent || event->type() == resetEvent)) {
-        event->stopPropagation();
-        return;
-    }
-    HTMLElement::handleLocalEvents(event, useCapture);
-}
-
 unsigned HTMLFormElement::length() const
 {
     int len = 0;
@@ -147,7 +122,7 @@ Node* HTMLFormElement::item(unsigned index)
     return elements()->item(index);
 }
 
-void HTMLFormElement::submitClick(Event* event)
+void HTMLFormElement::submitClick()
 {
     bool submitFound = false;
     for (unsigned i = 0; i < formElements.size(); ++i) {
@@ -155,41 +130,46 @@ void HTMLFormElement::submitClick(Event* event)
             HTMLInputElement *element = static_cast<HTMLInputElement *>(formElements[i]);
             if (element->isSuccessfulSubmitButton() && element->renderer()) {
                 submitFound = true;
-                element->dispatchSimulatedClick(event);
+                element->click(false);
                 break;
             }
         }
     }
     if (!submitFound) // submit the form without a submit or image input
-        prepareSubmit(event);
+        prepareSubmit();
 }
 
-static DeprecatedCString encodeCString(const CString& cstr)
+static DeprecatedCString encodeCString(const DeprecatedCString& e)
 {
-    DeprecatedCString e = cstr.deprecatedCString();
-
     // http://www.w3.org/TR/html4/interact/forms.html#h-17.13.4.1
-    // same safe characters as Netscape for compatibility
+    // safe characters like NS handles them for compatibility
     static const char *safe = "-._*";
     int elen = e.length();
-    DeprecatedCString encoded((elen + e.contains('\n')) * 3 + 1);
+    DeprecatedCString encoded(( elen+e.contains( '\n' ) )*3+1);
     int enclen = 0;
 
-    for (int pos = 0; pos < elen; pos++) {
+    for(int pos = 0; pos < elen; pos++) {
         unsigned char c = e[pos];
 
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || strchr(safe, c))
+        if ( (( c >= 'A') && ( c <= 'Z')) ||
+             (( c >= 'a') && ( c <= 'z')) ||
+             (( c >= '0') && ( c <= '9')) ||
+             (strchr(safe, c))
+            )
             encoded[enclen++] = c;
-        else if (c == ' ')
+        else if ( c == ' ' )
             encoded[enclen++] = '+';
-        else if (c == '\n' || (c == '\r' && e[pos + 1] != '\n')) {
+        else if ( c == '\n' || ( c == '\r' && e[pos+1] != '\n' ) )
+        {
             encoded[enclen++] = '%';
             encoded[enclen++] = '0';
             encoded[enclen++] = 'D';
             encoded[enclen++] = '%';
             encoded[enclen++] = '0';
             encoded[enclen++] = 'A';
-        } else if (c != '\r') {
+        }
+        else if ( c != '\r' )
+        {
             encoded[enclen++] = '%';
             unsigned int h = c / 16;
             h += (h > 9) ? ('A' - 10) : '0';
@@ -206,116 +186,75 @@ static DeprecatedCString encodeCString(const CString& cstr)
     return encoded;
 }
 
-static int randomNumber()
+bool HTMLFormElement::formData(FormData &form_data) const
 {
-    static bool randomSeeded = false;
+    DeprecatedCString enc_string = ""; // used for non-multipart data
 
-#if PLATFORM(DARWIN)
-    if (!randomSeeded) {
-        srandomdev();
-        randomSeeded = true;
-    }
-    return random();
-#else
-    if (!randomSeeded) {
-        srand(static_cast<unsigned>(time(0)));
-        randomSeeded = true;
-    }
-    return rand();
-#endif
-}
-
-// Warning: this helper doesn't currently have a reliable cross-platform behavior in certain edge cases
-// (see basename(3) specification for examples).
-// Consider this if it ever needs to become a general purpose method.
-static String pathGetFilename(String path)
-{
-#if PLATFORM(QT)
-    return QFileInfo(path).fileName();
-#elif PLATFORM(WX)
-    return wxFileName(path).GetFullName();
-#elif PLATFORM(WIN_OS)
-    return String(PathFindFileName(path.charactersWithNullTermination()));
-#else
-    return path.substring(path.reverseFind('/') + 1);
-#endif
-}
-
-TextEncoding HTMLFormElement::dataEncoding() const
-{
-    if (isMailtoForm())
-        return UTF8Encoding();
-
-    TextEncoding encoding;
-    String str = m_acceptcharset;
+    DeprecatedString str = m_acceptcharset.deprecatedString();
     str.replace(',', ' ');
-    Vector<String> charsets = str.split(' ');
-    Vector<String>::const_iterator end = charsets.end();
-    for (Vector<String>::const_iterator it = charsets.begin(); it != end; ++it)
-        if ((encoding = TextEncoding(*it)).isValid())
-            return encoding;
-    if (Frame* frame = document()->frame())
-        return frame->loader()->encoding();
-    return Latin1Encoding();
-}
+    DeprecatedStringList charsets = DeprecatedStringList::split(' ', str);
+    TextEncoding encoding(InvalidEncoding);
+    Frame *frame = document()->frame();
+    for (DeprecatedStringList::Iterator it = charsets.begin(); it != charsets.end(); ++it) {
+        if ((encoding = TextEncoding((*it).latin1())).isValid())
+            break;
+    }
 
-PassRefPtr<FormData> HTMLFormElement::formData(const char* boundary) const
-{
-    DeprecatedCString enc_string = "";
-    TextEncoding encoding = dataEncoding();
+    if (!encoding.isValid()) {
+        if (frame)
+            encoding = TextEncoding(frame->encoding().latin1());
+        else
+            encoding = TextEncoding(Latin1Encoding);
+    }
 
-    RefPtr<FormData> result = new FormData;
-    
     for (unsigned i = 0; i < formElements.size(); ++i) {
         HTMLGenericFormElement* current = formElements[i];
         FormDataList lst(encoding);
 
         if (!current->disabled() && current->appendFormData(lst, m_multipart)) {
-            size_t ln = lst.list().size();
-            for (size_t j = 0; j < ln; ++j) {
-                const FormDataListItem& item = lst.list()[j];
+            for (DeprecatedValueListConstIterator<FormDataListItem> it = lst.begin(); it != lst.end(); ++it) {
                 if (!m_multipart) {
                     // handle ISINDEX / <input name=isindex> special
                     // but only if its the first entry
-                    if (enc_string.isEmpty() && item.m_data == "isindex") {
-                        enc_string += encodeCString(lst.list()[j + 1].m_data);
-                        ++j;
-                    } else {
-                        if (!enc_string.isEmpty())
+                    if ( enc_string.isEmpty() && (*it).m_data == "isindex" ) {
+                        ++it;
+                        enc_string += encodeCString( (*it).m_data );
+                    }
+                    else {
+                        if(!enc_string.isEmpty())
                             enc_string += '&';
 
-                        enc_string += encodeCString(item.m_data);
+                        enc_string += encodeCString((*it).m_data);
                         enc_string += "=";
-                        enc_string += encodeCString(lst.list()[j + 1].m_data);
-                        ++j;
+                        ++it;
+                        enc_string += encodeCString((*it).m_data);
                     }
                 }
                 else
                 {
                     DeprecatedCString hstr("--");
-                    hstr += boundary;
+                    hstr += m_boundary.deprecatedString().latin1();
                     hstr += "\r\n";
                     hstr += "Content-Disposition: form-data; name=\"";
-                    hstr += item.m_data.data();
+                    hstr += (*it).m_data.data();
                     hstr += "\"";
 
                     // if the current type is FILE, then we also need to
                     // include the filename
                     if (current->hasLocalName(inputTag) &&
                         static_cast<HTMLInputElement*>(current)->inputType() == HTMLInputElement::FILE) {
-                        String path = static_cast<HTMLInputElement*>(current)->value();
-                        String filename = pathGetFilename(path);
+                        DeprecatedString path = static_cast<HTMLInputElement*>(current)->value().deprecatedString();
 
                         // FIXME: This won't work if the filename includes a " mark,
                         // or control characters like CR or LF. This also does strange
                         // things if the filename includes characters you can't encode
                         // in the website's character set.
                         hstr += "; filename=\"";
-                        hstr += encoding.encode(reinterpret_cast<const UChar*>(filename.characters()), filename.length(), true).data();
+                        hstr += encoding.fromUnicode(path.mid(path.findRev('/') + 1), true);
                         hstr += "\"";
 
                         if (!static_cast<HTMLInputElement*>(current)->value().isEmpty()) {
-                            DeprecatedString mimeType = MIMETypeRegistry::getMIMETypeForPath(path).deprecatedString();
+                            DeprecatedString mimeType = frame ? frame->mimeTypeForFileName(path).deprecatedString() : DeprecatedString();
                             if (!mimeType.isEmpty()) {
                                 hstr += "\r\nContent-Type: ";
                                 hstr += mimeType.ascii();
@@ -324,31 +263,28 @@ PassRefPtr<FormData> HTMLFormElement::formData(const char* boundary) const
                     }
 
                     hstr += "\r\n\r\n";
+                    ++it;
 
                     // append body
-                    result->appendData(hstr.data(), hstr.length());
-                    const FormDataListItem& item = lst.list()[j + 1];
-                    if (size_t dataSize = item.m_data.length())
-                        result->appendData(item.m_data.data(), dataSize);
+                    form_data.appendData(hstr.data(), hstr.length());
+                    const FormDataListItem &item = *it;
+                    size_t dataSize = item.m_data.size();
+                    if (dataSize != 0)
+                        form_data.appendData(item.m_data, dataSize - 1);
                     else if (!item.m_path.isEmpty())
-                        result->appendFile(item.m_path);
-                    result->appendData("\r\n", 2);
-
-                    ++j;
+                        form_data.appendFile(item.m_path);
+                    form_data.appendData("\r\n", 2);
                 }
             }
         }
     }
 
 
-    if (m_multipart) {
-        enc_string = "--";
-        enc_string += boundary;
-        enc_string += "--\r\n";
-    }
+    if (m_multipart)
+        enc_string = ("--" + m_boundary.deprecatedString() + "--\r\n").ascii();
 
-    result->appendData(enc_string.data(), enc_string.length());
-    return result;
+    form_data.appendData(enc_string.data(), enc_string.length());
+    return true;
 }
 
 void HTMLFormElement::parseEnctype(const String& type)
@@ -365,14 +301,14 @@ void HTMLFormElement::parseEnctype(const String& type)
     }
 }
 
-bool HTMLFormElement::isMailtoForm() const
+void HTMLFormElement::setBoundary( const String& bound )
 {
-    return m_url.startsWith("mailto:", false);
+    m_boundary = bound;
 }
 
-bool HTMLFormElement::prepareSubmit(Event* event)
+bool HTMLFormElement::prepareSubmit()
 {
-    Frame* frame = document()->frame();
+    Frame *frame = document()->frame();
     if (m_insubmit || !frame)
         return m_insubmit;
 
@@ -385,74 +321,19 @@ bool HTMLFormElement::prepareSubmit(Event* event)
     m_insubmit = false;
 
     if (m_doingsubmit)
-        submit(event, true);
+        submit(true);
 
     return m_doingsubmit;
 }
 
-void HTMLFormElement::submit()
-{
-    submit(0, false);
-}
-
-// Returns a 0-terminated C string in the vector.
-static void getUniqueBoundaryString(Vector<char>& boundary)
-{
-    // The RFC 2046 spec says the AlphaNumeric characters plus the following characters
-    // are legal for boundaries:  '()+_,-./:=?
-    // However the following characters, though legal, cause some sites to fail:
-    // (),./:=
-    // http://bugs.webkit.org/show_bug.cgi?id=13352
-    static const char AlphaNumericEncMap[64] =
-    {
-      0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
-      0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50,
-      0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
-      0x59, 0x5A, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
-      0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E,
-      0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76,
-      0x77, 0x78, 0x79, 0x7A, 0x30, 0x31, 0x32, 0x33,
-      0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x2B, 0x41
-      // FIXME <rdar://problem/5252577> gmail does not accept legal characters in the form boundary
-      // As stated above, some legal characters cause, sites to fail. Specifically
-      // the / character which was the last character in the above array. I have
-      // replaced the last character with another character already in the array
-      // (notice the first and last values are both 0x41, A). Instead of picking
-      // another unique legal character for boundary strings that, because it has
-      // never been tested, may or may not break other sites, I simply
-      // replaced / with A.  This means A is twice as likely to occur in our boundary
-      // strings than any other character but I think this is fine for the time being.
-      // The FIXME here is about restoring the / character once the aforementioned
-      // radar has been resolved.
-    };
-
-    // Start with an informative prefix.
-    const char boundaryPrefix[] = "----WebKitFormBoundary";
-    boundary.append(boundaryPrefix, strlen(boundaryPrefix));
-
-    // Append 16 random 7bit ascii AlphaNumeric characters.
-    Vector<char> randomBytes;
-
-    for (int i = 0; i < 4; ++i) {
-        int randomness = randomNumber();
-        randomBytes.append(AlphaNumericEncMap[(randomness >> 24) & 0x3F]);
-        randomBytes.append(AlphaNumericEncMap[(randomness >> 16) & 0x3F]);
-        randomBytes.append(AlphaNumericEncMap[(randomness >> 8) & 0x3F]);
-        randomBytes.append(AlphaNumericEncMap[randomness & 0x3F]);
-    }
-
-    boundary.append(randomBytes);
-    boundary.append(0); // Add a 0 at the end so we can use this as a C-style string.
-}
-
-void HTMLFormElement::submit(Event* event, bool activateSubmitButton)
+void HTMLFormElement::submit( bool activateSubmitButton )
 {
     FrameView *view = document()->view();
     Frame *frame = document()->frame();
     if (!view || !frame)
         return;
 
-    if (m_insubmit) {
+    if ( m_insubmit ) {
         m_doingsubmit = true;
         return;
     }
@@ -462,17 +343,20 @@ void HTMLFormElement::submit(Event* event, bool activateSubmitButton)
     HTMLGenericFormElement* firstSuccessfulSubmitButton = 0;
     bool needButtonActivation = activateSubmitButton; // do we need to activate a submit button?
     
-    frame->loader()->clearRecordedFormValues();
+    frame->clearRecordedFormValues();
     for (unsigned i = 0; i < formElements.size(); ++i) {
         HTMLGenericFormElement* current = formElements[i];
+        // Our app needs to get form values for password fields for doing password autocomplete,
+        // so we are more lenient in pushing values, and let the app decide what to save when.
         if (current->hasLocalName(inputTag)) {
-            HTMLInputElement* input = static_cast<HTMLInputElement*>(current);
+            HTMLInputElement *input = static_cast<HTMLInputElement*>(current);
             if (input->isTextField()) {
-                frame->loader()->recordFormValue(input->name(), input->value(), this);
-                if (input->isSearchField())
-                    input->addSearchResult();
+                frame->recordFormValue(input->name().deprecatedString(), input->value().deprecatedString(), this);
+                if (input->renderer() && input->inputType() == HTMLInputElement::SEARCH)
+                    static_cast<RenderLineEdit*>(input->renderer())->addSearchResult();
             }
         }
+
         if (needButtonActivation) {
             if (current->isActivatedSubmit())
                 needButtonActivation = false;
@@ -483,35 +367,16 @@ void HTMLFormElement::submit(Event* event, bool activateSubmitButton)
 
     if (needButtonActivation && firstSuccessfulSubmitButton)
         firstSuccessfulSubmitButton->setActivatedSubmit(true);
-    
-    if (!m_url)
-        m_url = document()->url();
 
-    if (m_post) {
-        if (m_multipart && isMailtoForm()) {
-            setEnctype("application/x-www-form-urlencoded");
-            m_multipart = false;
-        }
-
-        if (!m_multipart) {
-            RefPtr<FormData> data = formData(0);
-            if (isMailtoForm()) {
-                String body = data->flattenToString();
-                if (equalIgnoringCase(enctype(), "text/plain")) {
-                    // Convention seems to be to decode, and s/&/\r\n/. Also, spaces are encoded as %20.
-                    body = KURL::decode_string(body.replace('&', "\r\n").replace('+', ' ').deprecatedString() + "\r\n");
-                }
-                data = new FormData((String("body=") + encodeCString(body.utf8())).replace('+', "%20").latin1());
-            }
-            frame->loader()->submitForm("POST", m_url, data, m_target, enctype(), String(), event);
-        } else {
-            Vector<char> boundary;
-            getUniqueBoundaryString(boundary);
-            frame->loader()->submitForm("POST", m_url, formData(boundary.data()), m_target, enctype(), boundary.data(), event);
-        }
-    } else {
+    if (!m_post)
         m_multipart = false;
-        frame->loader()->submitForm("GET", m_url, formData(0), m_target, String(), String(), event);
+    
+    FormData form_data;
+    if (formData(form_data)) {
+        if(m_post)
+            frame->submitForm("post", m_url, form_data, m_target, enctype(), boundary());
+        else
+            frame->submitForm("get", m_url, form_data, m_target);
     }
 
     if (needButtonActivation && firstSuccessfulSubmitButton)
@@ -543,8 +408,17 @@ void HTMLFormElement::reset()
 
 void HTMLFormElement::parseMappedAttribute(MappedAttribute *attr)
 {
-    if (attr->name() == actionAttr)
+    if (attr->name() == actionAttr) {
+        bool oldURLWasSecure = formWouldHaveSecureSubmission(m_url);
         m_url = parseURL(attr->value());
+        bool newURLIsSecure = formWouldHaveSecureSubmission(m_url);
+
+        if (m_attached && (oldURLWasSecure != newURLIsSecure))
+            if (newURLIsSecure)
+                document()->secureFormAdded();
+            else
+                document()->secureFormRemoved();
+    }
     else if (attr->name() == targetAttr)
         m_target = attr->value();
     else if (attr->name() == methodAttr) {
@@ -560,13 +434,9 @@ void HTMLFormElement::parseMappedAttribute(MappedAttribute *attr)
         m_acceptcharset = attr->value();
     else if (attr->name() == acceptAttr) {
         // ignore this one for the moment...
-    } else if (attr->name() == autocompleteAttr) {
+    } else if (attr->name() == autocompleteAttr)
         m_autocomplete = !equalIgnoringCase(attr->value(), "off");
-        if (!m_autocomplete)
-            document()->registerForCacheCallbacks(this);    
-        else
-            document()->unregisterForCacheCallbacks(this);
-    } else if (attr->name() == onsubmitAttr)
+    else if (attr->name() == onsubmitAttr)
         setHTMLEventListener(submitEvent, attr);
     else if (attr->name() == onresetAttr)
         setHTMLEventListener(resetEvent, attr);
@@ -614,14 +484,24 @@ unsigned HTMLFormElement::formElementIndex(HTMLGenericFormElement *e)
 
 void HTMLFormElement::registerFormElement(HTMLGenericFormElement* e)
 {
-    document()->checkedRadioButtons().removeButton(e);
-    m_checkedRadioButtons.addButton(e);
+    Document* doc = document();
+    if (e->isRadioButton() && !e->name().isEmpty()) {
+        HTMLGenericFormElement* currentCheckedRadio = doc->checkedRadioButtonForGroup(e->name().impl(), 0);
+        if (currentCheckedRadio == e)
+            doc->removeRadioButtonGroup(e->name().impl(), 0);
+        if (e->isChecked())
+            doc->radioButtonChecked(static_cast<HTMLInputElement*>(e), this);
+    }
     formElements.insert(formElementIndex(e), e);
 }
 
 void HTMLFormElement::removeFormElement(HTMLGenericFormElement* e)
 {
-    m_checkedRadioButtons.removeButton(e);
+    if (!e->name().isEmpty()) {
+        HTMLGenericFormElement* currentCheckedRadio = document()->checkedRadioButtonForGroup(e->name().impl(), this);
+        if (currentCheckedRadio == e)
+            document()->removeRadioButtonGroup(e->name().impl(), this);
+    }
     removeFromVector(formElements, e);
 }
 
@@ -699,120 +579,5 @@ void HTMLFormElement::setTarget(const String &value)
 {
     setAttribute(targetAttr, value);
 }
-
-PassRefPtr<HTMLGenericFormElement> HTMLFormElement::elementForAlias(const AtomicString& alias)
-{
-    if (alias.isEmpty() || !m_elementAliases)
-        return 0;
-    return m_elementAliases->get(alias.impl());
-}
-
-void HTMLFormElement::addElementAlias(HTMLGenericFormElement* element, const AtomicString& alias)
-{
-    if (alias.isEmpty())
-        return;
-    if (!m_elementAliases)
-        m_elementAliases = new AliasMap;
-    m_elementAliases->set(alias.impl(), element);
-}
-
-void HTMLFormElement::getNamedElements(const AtomicString& name, Vector<RefPtr<Node> >& namedItems)
-{
-    elements()->namedItems(name, namedItems);
-
-    // see if we have seen something with this name before
-    RefPtr<HTMLGenericFormElement> aliasElem;
-    if (aliasElem = elementForAlias(name)) {
-        bool found = false;
-        for (unsigned n = 0; n < namedItems.size(); n++) {
-            if (namedItems[n] == aliasElem.get()) {
-                found = true;
-                break;
-            }
-        }
-        if (!found)
-            // we have seen it before but it is gone now. still, we need to return it.
-            namedItems.append(aliasElem.get());
-    }
-    // name has been accessed, remember it
-    if (namedItems.size() && aliasElem != namedItems.first())
-        addElementAlias(static_cast<HTMLGenericFormElement*>(namedItems.first().get()), name);        
-}
-
-void HTMLFormElement::didRestoreFromCache()
-{
-    ASSERT(!m_autocomplete);
     
-    for (unsigned i = 0; i < formElements.size(); ++i)
-        formElements[i]->reset();
-}
-
-void HTMLFormElement::willMoveToNewOwnerDocument()
-{
-    if (!m_autocomplete)
-        document()->unregisterForCacheCallbacks(this);
-}
-
-void HTMLFormElement::didMoveToNewOwnerDocument()
-{
-    if(m_autocomplete)
-        document()->registerForCacheCallbacks(this);
-}
-
-void HTMLFormElement::CheckedRadioButtons::addButton(HTMLGenericFormElement* element)
-{
-    // We only want to add radio buttons.
-    if (!element->isRadioButton())
-        return;
-
-    // Without a name, there is no group.
-    if (element->name().isEmpty())
-        return;
-
-    HTMLInputElement* inputElement = static_cast<HTMLInputElement*>(element);
-
-    // We only track checked buttons.
-    if (!inputElement->checked())
-        return;
-
-    if (!m_nameToCheckedRadioButtonMap)
-        m_nameToCheckedRadioButtonMap.set(new NameToInputMap);
-
-    pair<NameToInputMap::iterator, bool> result = m_nameToCheckedRadioButtonMap->add(element->name().impl(), inputElement);
-    if (result.second)
-        return;
-    
-    HTMLInputElement* oldCheckedButton = result.first->second;
-    if (oldCheckedButton == inputElement)
-        return;
-
-    result.first->second = inputElement;
-    oldCheckedButton->setChecked(false);
-}
-
-HTMLInputElement* HTMLFormElement::CheckedRadioButtons::checkedButtonForGroup(const AtomicString& name) const
-{
-    if (!m_nameToCheckedRadioButtonMap)
-        return 0;
-    
-    return m_nameToCheckedRadioButtonMap->get(name.impl());
-}
-
-void HTMLFormElement::CheckedRadioButtons::removeButton(HTMLGenericFormElement* element)
-{
-    if (element->name().isEmpty() || !m_nameToCheckedRadioButtonMap)
-        return;
-    
-    NameToInputMap::iterator it = m_nameToCheckedRadioButtonMap->find(element->name().impl());
-    if (it == m_nameToCheckedRadioButtonMap->end() || it->second != element)
-        return;
-    
-    ASSERT(element->isRadioButton());
-    ASSERT(element->isChecked());
-    
-    m_nameToCheckedRadioButtonMap->remove(it);
-    if (m_nameToCheckedRadioButtonMap->isEmpty())
-        m_nameToCheckedRadioButtonMap.clear();
-}
-
 } // namespace

@@ -35,10 +35,7 @@
 - (BOOL)makeFirstResponder:(NSResponder *)aResponder;
 - (WKWindowRef)_windowRef;
 - (void)setFrame:(NSRect)frameRect display:(BOOL)flag;
-- (void)sendGSEvent:(id)aGSEventRef;
-- (void)sendGSEvent:(id)aGSEventRef contentChange:(WKContentChange *)aContentChange;
+- (void)sendEvent:(GSEventRef)event;
+- (void)sendEvent:(GSEventRef)anEvent contentChange:(WKContentChange *)aContentChange;
 
-// DDK: Added to play nice with ToT WebKit code
-- (BOOL)_needsToResetDragMargins;
-- (void)_setNeedsToResetDragMargins:(BOOL)flag;
 @end

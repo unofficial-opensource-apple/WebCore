@@ -17,13 +17,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLImageLoader_h
-#define HTMLImageLoader_h
+#ifndef HTMLImageLoader_H
+#define HTMLImageLoader_H
 
 #include "CachedResourceClient.h"
 
@@ -38,26 +38,19 @@ public:
 
     virtual void updateFromElement();
 
-    virtual void dispatchLoadEvent();
+    void dispatchLoadEvent();
 
     Element* element() const { return m_element; }
     bool imageComplete() const { return m_imageComplete; }
-
     CachedImage* image() const { return m_image; }
-    void setImage(CachedImage*);
 
     void setLoadManually(bool loadManually) { m_loadManually = loadManually; }
 
     // CachedResourceClient API
     virtual void notifyFinished(CachedResource*);
 
-    virtual bool memoryLimitReached();
-    
-    bool haveFiredLoadEvent() const { return m_firedLoad; }
 protected:
     void setLoadingImage(CachedImage*);
-    
-    void setHaveFiredLoadEvent(bool firedLoad) { m_firedLoad = firedLoad; }
 
 private:
     Element* m_element;

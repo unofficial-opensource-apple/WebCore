@@ -29,72 +29,54 @@
 #include <GraphicsServices/GSEvent.h>
 
 #include "IntPoint.h"
-#include <wtf/Platform.h>
 
-#if PLATFORM(MAC)
+#if __APPLE__
 #ifdef __OBJC__
 @class NSEvent;
-@class NSScreen;
-@class NSWindow;
 #else
 class NSEvent;
-class NSScreen;
-class NSWindow;
 #endif
 #endif
 
-#if PLATFORM(WIN)
+#if WIN32
 typedef struct HWND__* HWND;
-typedef unsigned UINT;
 typedef unsigned WPARAM;
 typedef long LPARAM;
 #endif
 
-#if PLATFORM(GTK)
-typedef struct _GdkEventButton GdkEventButton;
-typedef struct _GdkEventMotion GdkEventMotion;
-#endif
-
-#if PLATFORM(QT)
-class QInputEvent;
-#endif
-
-#if PLATFORM(WX)
-class wxMouseEvent;
+#if PLATFORM(GDK)
+typedef union _GdkEvent GdkEvent;
 #endif
 
 namespace WebCore {
-    
-    // These button numbers match the ones used in the DOM API, 0 through 2, except for NoButton which isn't specified.
-    enum MouseButton { NoButton = -1, LeftButton, MiddleButton, RightButton };
-    enum MouseEventType { MouseEventMoved, MouseEventPressed, MouseEventReleased, MouseEventScroll };
-    
+
+    // These button numbers match the one used in the DOM API.
+    enum MouseButton { LeftButton, MiddleButton, RightButton };
+
     class PlatformMouseEvent {
     public:
+        static const struct CurrentEventTag {} currentEvent;
+    
         PlatformMouseEvent()
-            : m_button(NoButton)
-            , m_eventType(MouseEventMoved)
+            : m_button(LeftButton)
             , m_clickCount(0)
             , m_shiftKey(false)
             , m_ctrlKey(false)
             , m_altKey(false)
             , m_metaKey(false)
-            , m_timestamp(0)
-            , m_modifierFlags(0)
         {
         }
 
-        PlatformMouseEvent(const IntPoint& pos, const IntPoint& globalPos, MouseButton button, MouseEventType eventType,
-                           int clickCount, bool shift, bool ctrl, bool alt, bool meta, double timestamp)
+        PlatformMouseEvent(const CurrentEventTag&);
+
+        PlatformMouseEvent(const IntPoint& pos, const IntPoint& globalPos, MouseButton button,
+                           int clickCount, bool shift, bool ctrl, bool alt, bool meta)
             : m_position(pos), m_globalPosition(globalPos), m_button(button)
-            , m_eventType(eventType)
             , m_clickCount(clickCount)
             , m_shiftKey(shift)
             , m_ctrlKey(ctrl)
             , m_altKey(alt)
             , m_metaKey(meta)
-            , m_timestamp(timestamp)
-            , m_modifierFlags(0)
         {
         }
 
@@ -104,63 +86,32 @@ namespace WebCore {
         int globalX() const { return m_globalPosition.x(); }
         int globalY() const { return m_globalPosition.y(); }
         MouseButton button() const { return m_button; }
-        MouseEventType eventType() const { return m_eventType; }
         int clickCount() const { return m_clickCount; }
         bool shiftKey() const { return m_shiftKey; }
         bool ctrlKey() const { return m_ctrlKey; }
         bool altKey() const { return m_altKey; }
         bool metaKey() const { return m_metaKey; }
-        unsigned modifierFlags() const { return m_modifierFlags; }
-        
-        //time in seconds
-        double timestamp() const { return m_timestamp; }
 
-#if PLATFORM(MAC)
+#if __APPLE__
         PlatformMouseEvent(GSEventRef);
-        int eventNumber() const { return m_eventNumber; }
 #endif
-#if PLATFORM(WIN)
-        PlatformMouseEvent(HWND, UINT, WPARAM, LPARAM, bool activatedWebView = false);
-        void setClickCount(int count) { m_clickCount = count; }
-        bool activatedWebView() const { return m_activatedWebView; }
+#if WIN32
+        PlatformMouseEvent(HWND, WPARAM, LPARAM, int clickCount);
 #endif
-#if PLATFORM(GTK) 
-        PlatformMouseEvent(GdkEventButton*);
-        PlatformMouseEvent(GdkEventMotion*);
+#if PLATFORM(GDK) 
+        PlatformMouseEvent(GdkEvent*);
 #endif
-#if PLATFORM(QT)
-        PlatformMouseEvent(QInputEvent*, int clickCount);
-#endif
-
-#if PLATFORM(WX)
-        PlatformMouseEvent(const wxMouseEvent&, const wxPoint& globalPoint);
-#endif
-
 
     private:
         IntPoint m_position;
         IntPoint m_globalPosition;
         MouseButton m_button;
-        MouseEventType m_eventType;
         int m_clickCount;
         bool m_shiftKey;
         bool m_ctrlKey;
         bool m_altKey;
         bool m_metaKey;
-        double m_timestamp; // unit: seconds
-        unsigned m_modifierFlags;
-#if PLATFORM(MAC)
-        int m_eventNumber;
-#endif
-#if PLATFORM(WIN)
-        bool m_activatedWebView;
-#endif
     };
-
-#if PLATFORM(MAC)
-    IntPoint pointForEvent(GSEventRef event);
-    IntPoint globalPointForEvent(GSEventRef event);
-#endif
 
 } // namespace WebCore
 

@@ -15,8 +15,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -26,8 +26,8 @@
 #include "Document.h"
 #include "GraphicsContext.h"
 #include "HTMLInputElement.h"
+#include "RenderText.h"
 #include "HTMLNames.h"
-#include "RenderTextFragment.h"
 
 #include "RenderTheme.h"
 
@@ -46,7 +46,7 @@ void RenderButton::addChild(RenderObject* newChild, RenderObject* beforeChild)
 {
     if (!m_inner) {
         // Create an anonymous block.
-        ASSERT(!firstChild());
+        assert(!m_first);
         m_inner = createAnonymousBlock();
         m_inner->style()->setBoxFlex(1.0f);
         RenderFlexibleBox::addChild(m_inner);
@@ -60,7 +60,8 @@ void RenderButton::removeChild(RenderObject* oldChild)
     if (oldChild == m_inner || !m_inner) {
         RenderFlexibleBox::removeChild(oldChild);
         m_inner = 0;
-    } else
+    }
+    else
         m_inner->removeChild(oldChild);
 }
 
@@ -69,7 +70,7 @@ void RenderButton::setStyle(RenderStyle* style)
     RenderBlock::setStyle(style);
     if (m_buttonText)
         m_buttonText->setStyle(style);
-    if (m_inner) // RenderBlock handled updating the anonymous block's style.
+    if (m_inner)
         m_inner->style()->setBoxFlex(1.0f);
     setReplaced(isInline());
 }
@@ -79,17 +80,10 @@ void RenderButton::updateFromElement()
     // If we're an input element, we may need to change our button text.
     if (element()->hasTagName(inputTag)) {
         HTMLInputElement* input = static_cast<HTMLInputElement*>(element());
+        
         String value = input->valueWithDefault();
         setText(value);
     }
-}
-
-bool RenderButton::canHaveChildren() const
-{
-    // Input elements can't have children, but button elements can.  We'll
-    // write the code assuming any other button types that might emerge in the future
-    // can also have children.
-    return !element()->hasTagName(inputTag);
 }
 
 void RenderButton::setText(const String& str)
@@ -103,25 +97,19 @@ void RenderButton::setText(const String& str)
         if (m_buttonText)
             m_buttonText->setText(str.impl());
         else {
-            m_buttonText = new (renderArena()) RenderTextFragment(document(), str.impl());
+            m_buttonText = new (renderArena()) RenderText(document(), str.impl());
             m_buttonText->setStyle(style());
             addChild(m_buttonText);
         }
     }
 }
 
-void RenderButton::updateBeforeAfterContent(RenderStyle::PseudoId type)
+void RenderButton::updatePseudoChild(RenderStyle::PseudoId type)
 {
     if (m_inner)
-        m_inner->updateBeforeAfterContentForContainer(type, this);
+        m_inner->updatePseudoChildForObject(type, this);
     else
-        updateBeforeAfterContentForContainer(type, this);
-}
-
-IntRect RenderButton::controlClipRect(int tx, int ty) const
-{
-    // Clip to the padding box to at least give content the extra padding space.
-    return IntRect(tx + borderLeft(), ty + borderTop(), m_width - borderLeft() - borderRight(), m_height - borderTop() - borderBottom());
+        updatePseudoChildForObject(type, this);
 }
 
 void RenderButton::layout()
@@ -138,4 +126,24 @@ void RenderButton::layout()
     style()->setBorderBottomRightRadius(radius);
 }
 
-} // namespace WebCore
+void RenderButton::paintObject(PaintInfo& i, int _tx, int _ty)
+{
+    // Push a clip.
+    if (m_inner && i.phase == PaintPhaseForeground) {
+        IntRect clipRect(_tx + borderLeft(), _ty + borderTop(),
+            width() - borderLeft() - borderRight(), height() - borderBottom() - borderTop());
+        if (clipRect.width() == 0 || clipRect.height() == 0)
+            return;
+        i.p->save();
+        i.p->addClip(clipRect);
+    }
+    
+    // Paint the children.
+    RenderBlock::paintObject(i, _tx, _ty);
+    
+    // Pop the clip.
+    if (m_inner && i.phase == PaintPhaseForeground)
+        i.p->restore();
+}
+
+}

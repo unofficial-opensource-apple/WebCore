@@ -17,18 +17,18 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLAppletElement_h
-#define HTMLAppletElement_h
+#ifndef HTMLAppletElement_H
+#define HTMLAppletElement_H
 
 #include "HTMLPlugInElement.h"
 
-#if USE(JAVASCRIPTCORE_BINDINGS)
-#include <bindings/runtime.h>
+#if PLATFORM(MAC)
+#include <JavaScriptCore/runtime.h>
 #else
 namespace KJS { namespace Bindings { class Instance; } }
 #endif
@@ -50,10 +50,10 @@ public:
     
     virtual bool rendererIsNeeded(RenderStyle*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual void finishParsingChildren();
+    virtual void closeRenderer();
     virtual void detach();
     
-#if USE(JAVASCRIPTCORE_BINDINGS)
+#if PLATFORM(MAC)
     virtual KJS::Bindings::Instance* getInstance() const;
 #endif
 
@@ -78,6 +78,7 @@ public:
     String vspace() const;
     void setVspace(const String&);
 
+    virtual bool allParamsAvailable();
     void setupApplet() const;
 
     virtual void insertedIntoDocument();
@@ -85,6 +86,7 @@ public:
 
 private:
     String oldIdAttr;
+    bool m_allParamsAvailable;
 };
 
 }

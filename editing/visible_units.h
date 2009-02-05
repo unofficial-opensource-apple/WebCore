@@ -26,7 +26,6 @@
 #ifndef visible_units_h
 #define visible_units_h
 
-#include "Document.h"
 #include "TextAffinity.h"
 
 namespace WebCore {
@@ -57,9 +56,8 @@ bool isStartOfLine(const VisiblePosition &);
 bool isEndOfLine(const VisiblePosition &);
 
 // paragraphs (perhaps a misnomer, can be divided by line break elements)
-VisiblePosition startOfParagraph(const VisiblePosition&);
-VisiblePosition endOfParagraph(const VisiblePosition&);
-VisiblePosition startOfNextParagraph(const VisiblePosition&);
+VisiblePosition startOfParagraph(const VisiblePosition &);
+VisiblePosition endOfParagraph(const VisiblePosition &);
 VisiblePosition previousParagraphPosition(const VisiblePosition &, int x);
 VisiblePosition nextParagraphPosition(const VisiblePosition &, int x);
 bool inSameParagraph(const VisiblePosition &, const VisiblePosition &);
@@ -74,8 +72,6 @@ bool isStartOfBlock(const VisiblePosition &);
 bool isEndOfBlock(const VisiblePosition &);
 
 // document
-VisiblePosition startOfDocument(const Node*);
-VisiblePosition endOfDocument(const Node*);
 VisiblePosition startOfDocument(const VisiblePosition &);
 VisiblePosition endOfDocument(const VisiblePosition &);
 bool inSameDocument(const VisiblePosition &, const VisiblePosition &);
@@ -83,8 +79,11 @@ bool isStartOfDocument(const VisiblePosition &);
 bool isEndOfDocument(const VisiblePosition &);
 
 // editable content
-VisiblePosition startOfEditableContent(const VisiblePosition&);
-VisiblePosition endOfEditableContent(const VisiblePosition&);
+VisiblePosition startOfEditableContent(const VisiblePosition &);
+VisiblePosition endOfEditableContent(const VisiblePosition &);
+bool inSameEditableContent(const VisiblePosition &, const VisiblePosition &);
+bool isStartOfEditableContent(const VisiblePosition &);
+bool isEndOfEditableContent(const VisiblePosition &);
 
 } // namespace WebCore
 

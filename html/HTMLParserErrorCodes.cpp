@@ -16,8 +16,8 @@
  * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+                                        * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+                                        * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
@@ -27,7 +27,7 @@
 #include "HTMLParserErrorCodes.h"
 
 namespace WebCore {
-
+    
 const char* htmlParserErrorMessageTemplate(HTMLParserErrorCode errorCode)
 {
     static const char* const errors[] = { 
@@ -51,7 +51,7 @@ const char* htmlParserErrorMessageTemplate(HTMLParserErrorCode errorCode)
         "<form> cannot act as a container inside %tag1 without disrupting the table.  The children of the <form> will be placed inside the %tag1 instead.",
         "XML self-closing tag syntax used on <script>.  The tag will be closed by WebKit, but not all browsers do this.  Change to <script></script> instead for best cross-browser compatibility."
     };
-     
+    
     if (errorCode >= MisplacedTablePartError && errorCode <= IncorrectXMLCloseScriptWarning)
         return errors[errorCode];
     return 0;
@@ -87,5 +87,7 @@ MessageLevel viewportErrorMessageLevel(ViewportErrorCode anErrorCode)
         
     return TipMessageLevel;
 }
+
+
 
 }

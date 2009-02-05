@@ -30,11 +30,10 @@ namespace WebCore {
 
     class KURL;
     class String;
-    class Document;
 
-    String cookies(const Document* document, const KURL&);
-    void setCookies(Document* document, const KURL&, const KURL& policyBaseURL, const String&);
-    bool cookiesEnabled(const Document* document);
+    String cookies(const KURL&);
+    void setCookies(const KURL&, const KURL& policyBaseURL, const String&);
+    bool cookiesEnabled();
 
 }
 

@@ -1,1 +1,1 @@
-#include <JavaScriptCore/AlwaysInline.h>
+#import <JavaScriptCore/AlwaysInline.h>

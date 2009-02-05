@@ -1,10 +1,11 @@
-/*
+/* This file is part of the KDE project
+
    Copyright (C) 1997 Martin Jones (mjones@kde.org)
              (C) 1998 Waldo Bastian (bastian@kde.org)
              (C) 1998, 1999 Torben Weis (weis@kde.org)
              (C) 1999 Lars Knoll (knoll@kde.org)
              (C) 1999 Antti Koivisto (koivisto@kde.org)
-   Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+   Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -18,178 +19,231 @@
 
    You should have received a copy of the GNU Library General Public License
    along with this library; see the file COPYING.LIB.  If not, write to
-   the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301, USA.
+   the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+   Boston, MA 02111-1307, USA.
 */
 
-#ifndef FrameView_h
-#define FrameView_h
+#ifndef FrameView_H
+#define FrameView_H
 
 #include "ScrollView.h"
 #include "IntSize.h"
-#include <wtf/Forward.h>
-#include <wtf/OwnPtr.h>
+#include "PlatformString.h"
 
 namespace WebCore {
 
-class Color;
+class AtomicString;
+class CSSProperty;
+class CSSStyleSelector;
+class Clipboard;
+class DeprecatedStringList;
+class Document;
+class Element;
 class Event;
 class EventTargetNode;
 class Frame;
 class FrameViewPrivate;
+class GraphicsContext;
+class HTMLAnchorElement;
+class HTMLDocument;
+class HTMLElement;
+class HTMLFormElement;
+class HTMLFrameSetElement;
+class HTMLGenericFormElement;
+class HTMLTitleElement;
+class InlineBox;
 class IntRect;
+class PlatformKeyboardEvent;
+class FrameMac;
 class PlatformMouseEvent;
+class MouseEventWithHitTestResults;
 class Node;
-class RenderLayer;
+class RenderBox;
+class RenderView;
+class RenderLineEdit;
 class RenderObject;
+class RenderPart;
 class RenderPartObject;
+class RenderStyle;
+class RenderWidget;
+class PlatformWheelEvent;
 class String;
 
 template <typename T> class Timer;
 
+void applyRule(CSSProperty*);
+
 class FrameView : public ScrollView {
+    friend class CSSStyleSelector;
+    friend class Document;
+    friend class Frame;
+    friend class HTMLAnchorElement;
+    friend class HTMLDocument;
+    friend class HTMLFormElement;
+    friend class HTMLGenericFormElement;
+    friend class HTMLTitleElement;
+    friend class FrameMac;
+    friend class RenderBox;
+    friend class RenderView;
+    friend class RenderLineEdit;
+    friend class RenderObject;
+    friend class RenderPart;
+    friend class RenderPartObject;
+    friend class RenderWidget;
+    friend void applyRule(CSSProperty *prop);
+
 public:
     FrameView(Frame*);
-
-    // On the Mac, FrameViews always get their size from the underlying NSView,
-    // so passing in a size is nonsensical.
-#if !PLATFORM(MAC)
-    FrameView(Frame*, const IntSize& initialSize);
-#endif
-
     virtual ~FrameView();
 
     Frame* frame() const { return m_frame.get(); }
-    void clearFrame();
+
+    int frameWidth() const { return m_size.width(); }
+
+    /**
+     * Gets/Sets the margin width/height
+     *
+     * A return value of -1 means the default value will be used.
+     */
+    int marginWidth() const { return m_margins.width(); }
+    int marginHeight() { return  m_margins.height(); }
+    void setMarginWidth(int);
+    void setMarginHeight(int);
+
+    virtual void setVScrollBarMode(ScrollBarMode);
+    virtual void setHScrollBarMode(ScrollBarMode);
+    virtual void setScrollBarsMode(ScrollBarMode);
+    
+    void print();
+
+    void layout(bool allowSubtree = true);
+
+    Node* layoutRoot() const;
+    int layoutCount() const;
+
+    bool needsFullRepaint() const;
+    
+    void addRepaintInfo(RenderObject*, const IntRect&);
+
+    void resetScrollBars();
+
+    void clear();
+
+public:
+    void clearPart();
+
+    void handleMousePressEvent(const PlatformMouseEvent&);
+    void handleMouseDoubleClickEvent(const PlatformMouseEvent&);
+    void handleMouseMoveEvent(const PlatformMouseEvent&);
+    void handleMouseReleaseEvent(const PlatformMouseEvent&);
+    void handleWheelEvent(PlatformWheelEvent&);
+
+    bool mousePressed();
+
+    void doAutoScroll();
+
+    bool updateDragAndDrop(const PlatformMouseEvent&, Clipboard*);
+    void cancelDragAndDrop(const PlatformMouseEvent&, Clipboard*);
+    bool performDragAndDrop(const PlatformMouseEvent&, Clipboard*);
+
+    void layoutTimerFired(Timer<FrameView>*);
+    void hoverTimerFired(Timer<FrameView>*);
+
+    void repaintRectangle(const IntRect& r, bool immediate);
+
+    bool isTransparent() const;
+    void setTransparent(bool isTransparent);
+    
+    void scheduleRelayout();
+    void scheduleRelayoutOfSubtree(Node*);
+    void unscheduleRelayout();
+    bool haveDelayedLayoutScheduled();
+    bool layoutPending() const;
+
+    void scheduleHoverStateUpdate();
+
+    void adjustViewSize();
+    void initScrollBars();
+    
+    void setHasBorder(bool);
+    bool hasBorder() const;
+    
+    void setResizingFrameSet(HTMLFrameSetElement *);
+
+#if __APPLE__
+    void updateDashboardRegions();
+#endif
+    void invalidateClick();
+
+    virtual void scrollPointRecursively(int x, int y);
+    virtual void setContentsPos(int x, int y);
+
+    void scheduleEvent(PassRefPtr<Event>, PassRefPtr<EventTargetNode>, bool tempEvent);
 
     void ref() { ++m_refCount; }
     void deref() { if (!--m_refCount) delete this; }
     bool hasOneRef() { return m_refCount == 1; }
-
-    int marginWidth() const { return m_margins.width(); } // -1 means default
-    int marginHeight() const { return m_margins.height(); } // -1 means default
-    void setMarginWidth(int);
-    void setMarginHeight(int);
-
-    virtual void setVScrollbarMode(ScrollbarMode);
-    virtual void setHScrollbarMode(ScrollbarMode);
-    virtual void setScrollbarsMode(ScrollbarMode);
-
-    void layout(bool allowSubtree = true);
-    bool didFirstLayout() const;
-    void layoutTimerFired(Timer<FrameView>*);
-    void scheduleRelayout();
-    void scheduleRelayoutOfSubtree(RenderObject*);
-    void unscheduleRelayout();
-    bool layoutPending() const;
-
-    RenderObject* layoutRoot(bool onlyDuringLayout = false) const;
-    int layoutCount() const;
-
-    // These two helper functions just pass through to the RenderView.
-    bool needsLayout() const;
-    void setNeedsLayout();
-
-    bool needsFullRepaint() const;
-    void repaintRectangle(const IntRect&, bool immediate);
-    void addRepaintInfo(RenderObject*, const IntRect&);
-    bool checkDeferRepaint(const IntRect& rect);
-    void didPaint();
-    void doDeferredRepaints();
-    void deferredRepaintTimerFired(Timer<FrameView>*);
-    void resetDeferredRepaintDelay();
-    IntSize offsetInWindow() const;
-    void setFrameGeometry(const IntRect &rect);
-
-#if ENABLE(HW_COMP)
-    void scheduleLayerUpdate();
-    void unscheduleLayerUpdate();
-    bool layerUpdatePending() const;
-    void layerUpdateTimerFired(Timer<FrameView>*);
-    void updateLayers();
-
-    bool hasCompositingLayers() const;
-    void setHasCompositingLayers(bool inHasCompLayers = true);
-
-    virtual void updateContents(const IntRect& r, bool now = false, bool updateCompositingLayers = true);
-    virtual void update();
-#endif
-
-    void resetScrollbars();
-
-    void clear();
-
-    bool isTransparent() const;
-    void setTransparent(bool isTransparent);
-
-    Color baseBackgroundColor() const;
-    void setBaseBackgroundColor(Color);
-
-    void adjustViewSize();
-    void initScrollbars();
     
-    virtual IntRect windowClipRect() const;
-    IntRect windowClipRect(bool clipToContents) const;
-    IntRect windowClipRectForLayer(const RenderLayer*, bool clipToLayerContents) const;
-
-    virtual void scrollRectIntoViewRecursively(const IntRect&);
-    virtual void setContentsPos(int x, int y);
-
-    String mediaType() const;
-    void setMediaType(const String&);
-
-    void setUseSlowRepaints();
-
-    void addSlowRepaintObject();
-    void removeSlowRepaintObject();
-
-#if ENABLE(DASHBOARD_SUPPORT)
-    void updateDashboardRegions();
-#endif
-    void updateControlTints();
-
-    void restoreScrollbar();
-
-    void scheduleEvent(PassRefPtr<Event>, PassRefPtr<EventTargetNode>, bool tempEvent);
-    void pauseScheduledEvents();
-    void resumeScheduledEvents();
-    void postLayoutTimerFired(Timer<FrameView>*);
-
-    bool wasScrolledByUser() const;
-    void setWasScrolledByUser(bool);
-
-    void addWidgetToUpdate(RenderPartObject*);
-    void removeWidgetToUpdate(RenderPartObject*);
-
-    // FIXME: This method should be used by all platforms, but currently depends on ScrollView::children,
-    // which not all methods have. Once FrameView and ScrollView are merged, this #if should be removed.
-#if PLATFORM(WIN) || PLATFORM(GTK) || PLATFORM(QT)
-    void layoutIfNeededRecursive();
-#endif
-
 private:
-    void init();
+    void cleared();
+    void scrollBarMoved();
 
-    virtual bool isFrameView() const;
+    void resetCursor();
+
+    /**
+     * Get/set the CSS Media Type.
+     *
+     * Media type is set to "screen" for on-screen rendering and "print"
+     * during printing. Other media types lack the proper support in the
+     * renderer and are not activated. The DOM tree and the parser itself,
+     * however, properly handle other media types. To make them actually work
+     * you only need to enable the media type in the view and if necessary
+     * add the media type dependent changes to the renderer.
+     */
+    void setMediaType(const String&);
+    String mediaType() const;
 
     bool scrollTo(const IntRect&);
 
-    bool useSlowRepaints() const;
+    void focusNextPrevNode(bool next);
 
-    void applyOverflowToViewport(RenderObject*, ScrollbarMode& hMode, ScrollbarMode& vMode);
+    void useSlowRepaints();
+
+    void setIgnoreWheelEvents(bool e);
+
+    void init();
+
+    Node *nodeUnderMouse() const;
+
+    void restoreScrollBar();
+
+    DeprecatedStringList formCompletionItems(const String& name) const;
+    void addFormCompletionItem(const String& name, const String& value);
+
+    MouseEventWithHitTestResults prepareMouseEvent(bool readonly, bool active, bool mouseMove, const PlatformMouseEvent&);
+
+    bool dispatchMouseEvent(const AtomicString& eventType, Node* target,
+        bool cancelable, int clickCount, const PlatformMouseEvent&, bool setUnder);
+    bool dispatchDragEvent(const AtomicString& eventType, Node* target,
+        const PlatformMouseEvent&, Clipboard*);
+
+    void applyOverflowToViewport(RenderObject* o, ScrollBarMode& hMode, ScrollBarMode& vMode);
+
+    virtual bool isFrameView() const;
+
+    void updateBorder();
 
     void updateOverflowStatus(bool horizontalOverflow, bool verticalOverflow);
-
     void dispatchScheduledEvents();
-    void performPostLayoutTasks();
-
+    
     float minimumZoomFontSize();
     CGSize visibleSize();
-
+        
     unsigned m_refCount;
+    
     IntSize m_size;
     IntSize m_margins;
-    OwnPtr<HashSet<RenderPartObject*> > m_widgetUpdateSet;
+    
     RefPtr<Frame> m_frame;
     FrameViewPrivate* d;
 };
@@ -197,3 +251,4 @@ private:
 }
 
 #endif
+

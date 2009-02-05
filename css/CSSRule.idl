@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,19 +13,14 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module css {
 
     // Introduced in DOM Level 2:
-    interface [
-        GenerateConstructor,
-        ObjCCustomInternalImpl,
-        InterfaceUUID=548139b4-31ab-4978-b1d5-cfcfdfbaea0e,
-        ImplementationUUID=0268e673-2489-4743-9a3a-197dae4b4d9c
-    ] CSSRule {
+    interface [LegacyParent=KJS::DOMCSSRule, GenerateConstructor] CSSRule {
 
         // RuleType
         const unsigned short UNKNOWN_RULE = 0;
@@ -36,17 +30,5 @@ module css {
         const unsigned short MEDIA_RULE = 4;
         const unsigned short FONT_FACE_RULE = 5;
         const unsigned short PAGE_RULE = 6;
-        const unsigned short WEBKIT_KEYFRAMES_RULE = 7;
-        const unsigned short WEBKIT_KEYFRAME_RULE = 8;
-
-        readonly attribute unsigned short   type;
-
-                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString        cssText
-                     setter raises (DOMException);
-
-        readonly attribute CSSStyleSheet    parentStyleSheet;
-        readonly attribute CSSRule          parentRule;
-
     };
-
 }

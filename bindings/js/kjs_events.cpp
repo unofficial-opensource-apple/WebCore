@@ -1,6 +1,7 @@
 /*
+ *  This file is part of the KDE libraries
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All Rights Reserved.
+ *  Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -14,43 +15,47 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include "config.h"
 #include "kjs_events.h"
 
-#include "CString.h"
 #include "Chrome.h"
 #include "Clipboard.h"
 #include "ClipboardEvent.h"
-#include "DOMWindow.h"
 #include "Document.h"
 #include "Event.h"
 #include "EventNames.h"
 #include "Frame.h"
-#include "FrameLoader.h"
 #include "HTMLImageElement.h"
 #include "HTMLNames.h"
 #include "JSEvent.h"
-#include "JSEventTargetNode.h"
-#include "KURL.h"
+#include "JSKeyboardEvent.h"
+#include "JSMouseEvent.h"
+#include "JSMutationEvent.h"
+#include "JSOverflowEvent.h"
+#include "JSWheelEvent.h"
+#include "KeyboardEvent.h"
+#include "MouseEvent.h"
+#include "MutationEvent.h"
+#include "OverflowEvent.h"
 #include "Page.h"
+#include "UIEvent.h"
+#include "WheelEvent.h"
 #include "kjs_proxy.h"
 #include "kjs_window.h"
-#include <kjs/array_object.h>
-#include <kjs/function_object.h>
 
 #include "kjs_events.lut.h"
 
-namespace WebCore {
-
-using namespace KJS;
+using namespace WebCore;
 using namespace EventNames;
 using namespace HTMLNames;
 
-JSAbstractEventListener::JSAbstractEventListener(bool html)
-    : m_html(html)
+namespace KJS {
+
+JSAbstractEventListener::JSAbstractEventListener(bool _html)
+    : html(_html)
 {
 }
 
@@ -61,47 +66,47 @@ void JSAbstractEventListener::handleEvent(Event* ele, bool isWindowEvent)
         return;
 #endif
 
-    Event* event = ele;
+    Event *event = ele;
 
     JSObject* listener = listenerObj();
     if (!listener)
         return;
 
-    KJS::Window* window = windowObj();
-    // Null check as clearWindowObj() can clear this and we still get called back by
-    // xmlhttprequest objects. See http://bugs.webkit.org/show_bug.cgi?id=13275
-    if (!window)
-        return;
-    Frame *frame = window->impl()->frame();
+    Window* window = windowObj();
+    Frame *frame = window->frame();
     if (!frame)
         return;
-    if (!frame->scriptProxy()->isEnabled())
+    KJSProxy* proxy = frame->jScript();
+    if (!proxy)
         return;
 
     JSLock lock;
-
-    JSGlobalObject* globalObject = frame->scriptProxy()->globalObject();
-    ExecState* exec = globalObject->globalExec();
-
+  
+    ScriptInterpreter* interpreter = proxy->interpreter();
+    ExecState* exec = interpreter->globalExec();
+  
     JSValue* handleEventFuncValue = listener->get(exec, "handleEvent");
     JSObject* handleEventFunc = 0;
-    if (handleEventFuncValue->isObject()) {
+    if (handleEventFuncValue->isObject()) {      
         handleEventFunc = static_cast<JSObject*>(handleEventFuncValue);
         if (!handleEventFunc->implementsCall())
             handleEventFunc = 0;
     }
-
+  
     if (handleEventFunc || listener->implementsCall()) {
         ref();
-
+      
         List args;
         args.append(toJS(exec, event));
-
+      
+        // Set the event we're handling in the Window object
         window->setCurrentEvent(event);
-
+        // ... and in the interpreter
+        interpreter->setCurrentEvent(event);
+      
         JSValue* retval;
         if (handleEventFunc) {
-            globalObject->startTimeoutCheck();
+            interpreter->startTimeoutCheck();
             retval = handleEventFunc->call(exec, listener, args);
         } else {
             JSObject* thisObj;
@@ -109,27 +114,28 @@ void JSAbstractEventListener::handleEvent(Event* ele, bool isWindowEvent)
                 thisObj = window;
             else
                 thisObj = static_cast<JSObject*>(toJS(exec, event->currentTarget()));
-            globalObject->startTimeoutCheck();
+            interpreter->startTimeoutCheck();
             retval = listener->call(exec, thisObj, args);
         }
-        globalObject->stopTimeoutCheck();
+        interpreter->stopTimeoutCheck();
 
         window->setCurrentEvent(0);
+        interpreter->setCurrentEvent(0);
 
         if (exec->hadException()) {
             JSObject* exception = exec->exception()->toObject(exec);
-            String message = exception->get(exec, exec->propertyNames().message)->toString(exec);
+            String message = exception->get(exec, messagePropertyName)->toString(exec);
             int lineNumber = exception->get(exec, "line")->toInt32(exec);
             String sourceURL = exception->get(exec, "sourceURL")->toString(exec);
             if (Interpreter::shouldPrintExceptions())
-                printf("(event handler):%s\n", message.utf8().data());
+                printf("(event handler):%s\n", message.deprecatedString().utf8().data());
             if (Page* page = frame->page())
                 page->chrome()->addMessageToConsole(JSMessageSource, ErrorMessageLevel, message, lineNumber, sourceURL);
             exec->clearException();
         } else {
             if (!retval->isUndefinedOrNull() && event->storesResultAsString())
                 event->storeResult(retval->toString(exec));
-            if (m_html) {
+            if (html) {
                 bool retvalbool;
                 if (retval->getBoolean(retvalbool) && !retvalbool)
                     event->preventDefault();
@@ -143,51 +149,51 @@ void JSAbstractEventListener::handleEvent(Event* ele, bool isWindowEvent)
 
 bool JSAbstractEventListener::isHTMLEventListener() const
 {
-    return m_html;
+    return html;
 }
 
 // -------------------------------------------------------------------------
 
-JSUnprotectedEventListener::JSUnprotectedEventListener(JSObject* listener, KJS::Window* win, bool html)
-    : JSAbstractEventListener(html)
-    , m_listener(listener)
-    , m_win(win)
+JSUnprotectedEventListener::JSUnprotectedEventListener(JSObject* _listener, Window* _win, bool _html)
+  : JSAbstractEventListener(_html)
+  , listener(_listener)
+  , win(_win)
 {
-    if (m_listener) {
-        KJS::Window::UnprotectedListenersMap& listeners = html
-            ? m_win->jsUnprotectedHTMLEventListeners() : m_win->jsUnprotectedEventListeners();
-        listeners.set(m_listener, this);
+    if (_listener) {
+        Window::UnprotectedListenersMap& listeners = _html
+            ? _win->jsUnprotectedHTMLEventListeners : _win->jsUnprotectedEventListeners;
+        listeners.set(_listener, this);
     }
 }
 
 JSUnprotectedEventListener::~JSUnprotectedEventListener()
 {
-    if (m_listener && m_win) {
-        KJS::Window::UnprotectedListenersMap& listeners = isHTMLEventListener()
-            ? m_win->jsUnprotectedHTMLEventListeners() : m_win->jsUnprotectedEventListeners();
-        listeners.remove(m_listener);
+    if (listener && win) {
+        Window::UnprotectedListenersMap& listeners = isHTMLEventListener()
+            ? win->jsUnprotectedHTMLEventListeners : win->jsUnprotectedEventListeners;
+        listeners.remove(listener);
     }
 }
 
 JSObject* JSUnprotectedEventListener::listenerObj() const
-{
-    return m_listener;
+{ 
+    return listener; 
 }
 
-KJS::Window* JSUnprotectedEventListener::windowObj() const
+Window* JSUnprotectedEventListener::windowObj() const
 {
-    return m_win;
+    return win;
 }
 
 void JSUnprotectedEventListener::clearWindowObj()
 {
-    m_win = 0;
+    win = 0;
 }
 
 void JSUnprotectedEventListener::mark()
 {
-    if (m_listener && !m_listener->marked())
-        m_listener->mark();
+    if (listener && !listener->marked())
+        listener->mark();
 }
 
 #ifndef NDEBUG
@@ -210,27 +216,27 @@ static EventListenerCounter eventListenerCounter;
 
 // -------------------------------------------------------------------------
 
-JSEventListener::JSEventListener(JSObject* listener, KJS::Window* win, bool html)
-    : JSAbstractEventListener(html)
-    , m_listener(listener)
-    , m_win(win)
+JSEventListener::JSEventListener(JSObject* _listener, Window* _win, bool _html)
+    : JSAbstractEventListener(_html)
+    , listener(_listener)
+    , win(_win)
 {
-    if (m_listener) {
-        KJS::Window::ListenersMap& listeners = html
-            ? m_win->jsHTMLEventListeners() : m_win->jsEventListeners();
-        listeners.set(m_listener, this);
+    if (_listener) {
+        Window::ListenersMap& listeners = _html
+            ? _win->jsHTMLEventListeners : _win->jsEventListeners;
+        listeners.set(_listener, this);
     }
 #ifndef NDEBUG
     ++eventListenerCounter.count;
-#endif
+#endif            
 }
 
 JSEventListener::~JSEventListener()
 {
-    if (m_listener && m_win) {
-        KJS::Window::ListenersMap& listeners = isHTMLEventListener()
-            ? m_win->jsHTMLEventListeners() : m_win->jsEventListeners();
-        listeners.remove(m_listener);
+    if (listener && win) {
+        Window::ListenersMap& listeners = isHTMLEventListener()
+            ? win->jsHTMLEventListeners : win->jsEventListeners;
+        listeners.remove(listener);
     }
 #ifndef NDEBUG
     --eventListenerCounter.count;
@@ -238,29 +244,29 @@ JSEventListener::~JSEventListener()
 }
 
 JSObject* JSEventListener::listenerObj() const
-{
-    return m_listener;
+{ 
+    return listener; 
 }
 
-KJS::Window* JSEventListener::windowObj() const
+Window* JSEventListener::windowObj() const
 {
-    return m_win;
+    return win;
 }
 
 void JSEventListener::clearWindowObj()
 {
-    m_win = 0;
+    win = 0;
 }
 
 // -------------------------------------------------------------------------
 
-JSLazyEventListener::JSLazyEventListener(const String& functionName, const String& code, KJS::Window* win, Node* node, int lineNumber)
-    : JSEventListener(0, win, true)
-    , m_functionName(functionName)
-    , m_code(code)
-    , m_parsed(false)
-    , m_lineNumber(lineNumber)
-    , m_originalNode(node)
+JSLazyEventListener::JSLazyEventListener(const String& functionName, const String& code, Window* win, Node* node, int lineno)
+  : JSEventListener(0, win, true)
+  , m_functionName(functionName)
+  , code(code)
+  , parsed(false)
+  , lineNumber(lineno)
+  , originalNode(node)
 {
     // We don't retain the original node because we assume it
     // will stay alive as long as this handler object is around
@@ -272,7 +278,7 @@ JSLazyEventListener::JSLazyEventListener(const String& functionName, const Strin
 JSObject* JSLazyEventListener::listenerObj() const
 {
     parseCode();
-    return m_listener;
+    return listener;
 }
 
 JSValue* JSLazyEventListener::eventParameterName() const
@@ -283,136 +289,309 @@ JSValue* JSLazyEventListener::eventParameterName() const
 
 void JSLazyEventListener::parseCode() const
 {
-    if (m_parsed)
+    if (parsed)
         return;
-    m_parsed = true;
+    parsed = true;
 
-    Frame* frame = windowObj()->impl()->frame();
-    if (frame && frame->scriptProxy()->isEnabled()) {
-        ExecState* exec = frame->scriptProxy()->globalObject()->globalExec();
+    Frame *frame = windowObj()->frame();
+    KJSProxy *proxy = 0;
+    if (frame)
+        proxy = frame->jScript();
+
+    if (proxy) {
+        ScriptInterpreter* interpreter = proxy->interpreter();
+        ExecState* exec = interpreter->globalExec();
 
         JSLock lock;
-        JSObject* constr = frame->scriptProxy()->globalObject()->functionConstructor();
+        JSObject* constr = interpreter->builtinFunction();
         List args;
 
-        UString sourceURL(frame->loader()->url().string());
+        UString sourceURL(frame->url().url());
         args.append(eventParameterName());
-        args.append(jsString(m_code));
-        m_listener = constr->construct(exec, args, m_functionName, sourceURL, m_lineNumber); // FIXME: is globalExec ok ?
-
-        FunctionImp* listenerAsFunction = static_cast<FunctionImp*>(m_listener.get());
+        args.append(jsString(code));
+        listener = constr->construct(exec, args, m_functionName, sourceURL, lineNumber); // ### is globalExec ok ?
 
         if (exec->hadException()) {
             exec->clearException();
 
             // failed to parse, so let's just make this listener a no-op
-            m_listener = 0;
-        } else if (m_originalNode) {
+            listener = 0;
+        } else if (originalNode) {
             // Add the event's home element to the scope
             // (and the document, and the form - see JSHTMLElement::eventHandlerScope)
-            ScopeChain scope = listenerAsFunction->scope();
+            ScopeChain scope = listener->scope();
 
-            JSValue* thisObj = toJS(exec, m_originalNode);
+            JSValue* thisObj = toJS(exec, originalNode);
             if (thisObj->isObject()) {
-                static_cast<JSEventTargetNode*>(thisObj)->pushEventHandlerScope(exec, scope);
-                listenerAsFunction->setScope(scope);
+                static_cast<DOMEventTargetNode*>(thisObj)->pushEventHandlerScope(exec, scope);
+                listener->setScope(scope);
             }
         }
     }
 
     // no more need to keep the unparsed code around
     m_functionName = String();
-    m_code = String();
+    code = String();
 
-    if (m_listener) {
-        KJS::Window::ListenersMap& listeners = isHTMLEventListener()
-            ? windowObj()->jsHTMLEventListeners() : windowObj()->jsEventListeners();
-        listeners.set(m_listener, const_cast<JSLazyEventListener*>(this));
+    if (listener) {
+        Window::ListenersMap& listeners = isHTMLEventListener()
+            ? windowObj()->jsHTMLEventListeners : windowObj()->jsEventListeners;
+        listeners.set(listener, const_cast<JSLazyEventListener*>(this));
     }
 }
 
 JSValue* getNodeEventListener(EventTargetNode* n, const AtomicString& eventType)
 {
-    if (JSAbstractEventListener* listener = static_cast<JSAbstractEventListener*>(n->getHTMLEventListener(eventType))) {
+    if (JSAbstractEventListener* listener = static_cast<JSAbstractEventListener*>(n->getHTMLEventListener(eventType)))
         if (JSValue* obj = listener->listenerObj())
             return obj;
-    }
     return jsNull();
 }
 
 // -------------------------------------------------------------------------
 
-const ClassInfo JSClipboard::info = { "Clipboard", 0, &JSClipboardTable };
-
-/* Source for JSClipboardTable. Use "make hashtables" to regenerate.
-@begin JSClipboardTable 3
-  dropEffect    WebCore::JSClipboard::DropEffect                           DontDelete
-  effectAllowed WebCore::JSClipboard::EffectAllowed                        DontDelete
-  types         WebCore::JSClipboard::Types                                DontDelete|ReadOnly
+const ClassInfo DOMEvent::info = { "Event", 0, &DOMEventTable, 0 };
+/*
+@begin DOMEventTable 12
+  type          DOMEvent::Type          DontDelete|ReadOnly
+  target        DOMEvent::Target        DontDelete|ReadOnly
+  currentTarget DOMEvent::CurrentTarget DontDelete|ReadOnly
+  srcElement    DOMEvent::SrcElement    DontDelete|ReadOnly
+  eventPhase    DOMEvent::EventPhase    DontDelete|ReadOnly
+  bubbles       DOMEvent::Bubbles       DontDelete|ReadOnly
+  cancelable    DOMEvent::Cancelable    DontDelete|ReadOnly
+  timeStamp     DOMEvent::TimeStamp     DontDelete|ReadOnly
+  returnValue   DOMEvent::ReturnValue   DontDelete
+  cancelBubble  DOMEvent::CancelBubble  DontDelete
+  dataTransfer  DOMEvent::DataTransfer  DontDelete|ReadOnly
+  clipboardData  DOMEvent::ClipboardData  DontDelete|ReadOnly
 @end
-@begin JSClipboardPrototypeTable 4
-  clearData     WebCore::jsClipboardPrototypeFunctionClearData    DontDelete|Function 0
-  getData       WebCore::jsClipboardPrototypeFunctionGetData      DontDelete|Function 1
-  setData       WebCore::jsClipboardPrototypeFunctionSetData      DontDelete|Function 2
-  setDragImage  WebCore::jsClipboardPrototypeFunctionSetDragImage DontDelete|Function 3
+@begin DOMEventProtoTable 3
+  stopPropagation       DOMEvent::StopPropagation       DontDelete|Function 0
+  preventDefault        DOMEvent::PreventDefault        DontDelete|Function 0
+  initEvent             DOMEvent::InitEvent             DontDelete|Function 3
 @end
 */
+KJS_IMPLEMENT_PROTOFUNC(DOMEventProtoFunc)
+KJS_IMPLEMENT_PROTOTYPE("DOMEvent", DOMEventProto, DOMEventProtoFunc)
 
-KJS_DEFINE_PROTOTYPE(JSClipboardPrototype)
-KJS_IMPLEMENT_PROTOTYPE("Clipboard", JSClipboardPrototype)
-
-JSClipboard::JSClipboard(JSObject* prototype, Clipboard* clipboard)
-    : DOMObject(prototype)
-    , m_impl(clipboard)
+DOMEvent::DOMEvent(ExecState *exec, Event *e)
+  : m_impl(e), clipboard(0) 
 {
+    setPrototype(DOMEventProto::self(exec));
 }
 
-JSClipboard::~JSClipboard()
+DOMEvent::~DOMEvent()
 {
     ScriptInterpreter::forgetDOMObject(m_impl.get());
 }
 
-bool JSClipboard::getOwnPropertySlot(ExecState* exec, const Identifier& propertyName, PropertySlot& slot)
+// pass marks through to JS objects we hold during garbage collection
+void DOMEvent::mark()
 {
-    return getStaticValueSlot<JSClipboard, DOMObject>(exec, &JSClipboardTable, this, propertyName, slot);
+    DOMObject::mark();
+    if (clipboard && !clipboard->marked())
+        clipboard->mark();
 }
 
-JSValue* JSClipboard::getValueProperty(ExecState* exec, int token) const
+bool DOMEvent::getOwnPropertySlot(ExecState *exec, const Identifier& propertyName, PropertySlot& slot)
 {
-    Clipboard* clipboard = impl();
+    return getStaticValueSlot<DOMEvent, DOMObject>(exec, &DOMEventTable, this, propertyName, slot);
+}
+
+JSValue *DOMEvent::getValueProperty(ExecState *exec, int token) const
+{
+  Event &event = *m_impl;
+  switch (token) {
+  case Type:
+    return jsString(event.type());
+  case Target:
+  case SrcElement: /*MSIE extension - "the object that fired the event"*/
+    return toJS(exec, event.target());
+  case CurrentTarget:
+    return toJS(exec, event.currentTarget());
+  case EventPhase:
+    return jsNumber(event.eventPhase());
+  case Bubbles:
+    return jsBoolean(event.bubbles());
+  case CancelBubble:
+    return jsBoolean(event.getCancelBubble());
+  case ReturnValue:
+    return jsBoolean(!event.defaultPrevented());
+  case Cancelable:
+    return jsBoolean(event.cancelable());
+  case TimeStamp:
+    return jsNumber(event.timeStamp());
+  case ClipboardData:
+  {
+    if (event.isClipboardEvent()) {
+      ClipboardEvent *impl = static_cast<ClipboardEvent *>(&event);
+      if (!clipboard)
+        clipboard = new Clipboard(exec, impl->clipboard());
+      return clipboard;
+    } else
+      return jsUndefined();
+  }
+  case DataTransfer:
+  {
+    if (event.isDragEvent()) {
+      MouseEvent *impl = static_cast<MouseEvent *>(&event);
+      if (!clipboard)
+        clipboard = new Clipboard(exec, impl->clipboard());
+      return clipboard;
+    } else
+      return jsUndefined();
+  }
+  default:
+    return 0;
+  }
+}
+
+void DOMEvent::put(ExecState *exec, const Identifier &propertyName,
+                      JSValue *value, int attr)
+{
+    lookupPut<DOMEvent, DOMObject>(exec, propertyName, value, attr, &DOMEventTable, this);
+}
+
+void DOMEvent::putValueProperty(ExecState *exec, int token, JSValue *value, int)
+{
+  Event &event = *m_impl;
+  switch (token) {
+  case ReturnValue:
+    event.setDefaultPrevented(!value->toBoolean(exec));
+    break;
+  case CancelBubble:
+    event.setCancelBubble(value->toBoolean(exec));
+    break;
+  default:
+    break;
+  }
+}
+
+JSValue *DOMEventProtoFunc::callAsFunction(ExecState *exec, JSObject * thisObj, const List &args)
+{
+  if (!thisObj->inherits(&DOMEvent::info))
+    return throwError(exec, TypeError);
+  Event &event = *static_cast<DOMEvent *>( thisObj )->impl();
+  switch (id) {
+    case DOMEvent::StopPropagation:
+      event.stopPropagation();
+      return jsUndefined();
+    case DOMEvent::PreventDefault:
+      event.preventDefault();
+      return jsUndefined();
+    case DOMEvent::InitEvent:
+      event.initEvent(AtomicString(args[0]->toString(exec)), args[1]->toBoolean(exec), args[2]->toBoolean(exec));
+      return jsUndefined();
+  };
+  return jsUndefined();
+}
+
+JSValue *toJS(ExecState *exec, Event *e)
+{
+  if (!e)
+    return jsNull();
+  ScriptInterpreter* interp = static_cast<ScriptInterpreter *>(exec->dynamicInterpreter());
+
+  JSLock lock;
+
+  DOMObject *ret = interp->getDOMObject(e);
+  if (!ret) {
+    if (e->isKeyboardEvent())
+      ret = new JSKeyboardEvent(exec, static_cast<KeyboardEvent *>(e));
+    else if (e->isMouseEvent())
+      ret = new JSMouseEvent(exec, static_cast<MouseEvent *>(e));
+    else if (e->isWheelEvent())
+      ret = new JSWheelEvent(exec, static_cast<WheelEvent *>(e));
+    else if (e->isUIEvent())
+      ret = new JSUIEvent(exec, static_cast<UIEvent *>(e));
+    else if (e->isMutationEvent())
+      ret = new JSMutationEvent(exec, static_cast<MutationEvent *>(e));
+    else if (e->isOverflowEvent())
+      ret = new JSOverflowEvent(exec, static_cast<OverflowEvent*>(e));
+    else
+      ret = new JSEvent(exec, e);
+
+    interp->putDOMObject(e, ret);
+  }
+
+  return ret;
+}
+
+Event *toEvent(JSValue *val)
+{
+    if (!val || !val->isObject(&DOMEvent::info))
+        return 0;
+    return static_cast<DOMEvent *>(val)->impl();
+}
+
+// -------------------------------------------------------------------------
+
+const ClassInfo Clipboard::info = { "Clipboard", 0, &ClipboardTable, 0 };
+
+/* Source for ClipboardTable. Use "make hashtables" to regenerate.
+@begin ClipboardTable 3
+  dropEffect    Clipboard::DropEffect   DontDelete
+  effectAllowed Clipboard::EffectAllowed        DontDelete
+  types         Clipboard::Types        DontDelete|ReadOnly
+@end
+@begin ClipboardProtoTable 4
+  clearData     Clipboard::ClearData    DontDelete|Function 0
+  getData       Clipboard::GetData      DontDelete|Function 1
+  setData       Clipboard::SetData      DontDelete|Function 2
+  setDragImage  Clipboard::SetDragImage DontDelete|Function 3
+@end
+*/
+
+KJS_DEFINE_PROTOTYPE(ClipboardProto)
+KJS_IMPLEMENT_PROTOFUNC(ClipboardProtoFunc)
+KJS_IMPLEMENT_PROTOTYPE("Clipboard", ClipboardProto, ClipboardProtoFunc)
+
+Clipboard::Clipboard(ExecState *exec, WebCore::Clipboard *cb)
+  : clipboard(cb)
+{
+    setPrototype(ClipboardProto::self(exec));
+}
+
+bool Clipboard::getOwnPropertySlot(ExecState *exec, const Identifier& propertyName, PropertySlot& slot)
+{
+    return getStaticValueSlot<Clipboard, DOMObject>(exec, &ClipboardTable, this, propertyName, slot);
+}
+
+JSValue *Clipboard::getValueProperty(ExecState *exec, int token) const
+{
     switch (token) {
         case DropEffect:
-            ASSERT(clipboard->isForDragging() || clipboard->dropEffect().isNull());
+            assert(clipboard->isForDragging() || clipboard->dropEffect().isNull());
             return jsStringOrUndefined(clipboard->dropEffect());
         case EffectAllowed:
-            ASSERT(clipboard->isForDragging() || clipboard->effectAllowed().isNull());
+            assert(clipboard->isForDragging() || clipboard->effectAllowed().isNull());
             return jsStringOrUndefined(clipboard->effectAllowed());
         case Types:
         {
-            HashSet<String> types = clipboard->types();
-            if (types.isEmpty())
-                return jsNull();
+            DeprecatedStringList qTypes = clipboard->types();
+            if (qTypes.isEmpty())
+                return jsNull(); 
             else {
                 List list;
-                HashSet<String>::const_iterator end = types.end();
-                for (HashSet<String>::const_iterator it = types.begin(); it != end; ++it)
+                for (DeprecatedStringList::Iterator it = qTypes.begin(); it != qTypes.end(); ++it) {
                     list.append(jsString(UString(*it)));
-                return exec->lexicalGlobalObject()->arrayConstructor()->construct(exec, list);
+                }
+                return exec->lexicalInterpreter()->builtinArray()->construct(exec, list);
             }
         }
         default:
-            return 0;
+            return NULL;
     }
 }
 
-void JSClipboard::put(ExecState* exec, const Identifier& propertyName, JSValue* value, int attr)
+void Clipboard::put(ExecState *exec, const Identifier &propertyName, JSValue *value, int attr)
 {
-    lookupPut<JSClipboard, DOMObject>(exec, propertyName, value, attr, &JSClipboardTable, this );
+    lookupPut<Clipboard,DOMObject>(exec, propertyName, value, attr, &ClipboardTable, this );
 }
 
-void JSClipboard::putValueProperty(ExecState* exec, int token, JSValue* value, int /*attr*/)
+void Clipboard::putValueProperty(ExecState *exec, int token, JSValue *value, int /*attr*/)
 {
-    Clipboard* clipboard = impl();
     switch (token) {
         case DropEffect:
             // can never set this when not for dragging, thus getting always returns NULL string
@@ -427,93 +606,68 @@ void JSClipboard::putValueProperty(ExecState* exec, int token, JSValue* value, i
     }
 }
 
-JSValue* jsClipboardPrototypeFunctionClearData(ExecState* exec, JSObject* thisObj, const List& args)
+JSValue *ClipboardProtoFunc::callAsFunction(ExecState *exec, JSObject *thisObj, const List &args)
 {
-    if (!thisObj->inherits(&JSClipboard::info))
+    if (!thisObj->inherits(&Clipboard::info))
         return throwError(exec, TypeError);
 
-    Clipboard* clipboard = static_cast<JSClipboard*>(thisObj)->impl();
+    Clipboard *cb = static_cast<Clipboard *>(thisObj);
+    switch (id) {
+        case Clipboard::ClearData:
+            if (args.size() == 0) {
+                cb->clipboard->clearAllData();
+                return jsUndefined();
+            } else if (args.size() == 1) {
+                cb->clipboard->clearData(args[0]->toString(exec));
+                return jsUndefined();
+            } else
+                return throwError(exec, SyntaxError, "clearData: Invalid number of arguments");
+        case Clipboard::GetData:
+        {
+            if (args.size() == 1) {
+                bool success;
+                String result = cb->clipboard->getData(args[0]->toString(exec), success);
+                if (success)
+                    return jsString(result);
+                else
+                    return jsUndefined();
+            } else
+                return throwError(exec, SyntaxError, "getData: Invalid number of arguments");
+        }
+        case Clipboard::SetData:
+            if (args.size() == 2)
+                return jsBoolean(cb->clipboard->setData(args[0]->toString(exec), args[1]->toString(exec)));
+            else
+                return throwError(exec, SyntaxError, "setData: Invalid number of arguments");
+        case Clipboard::SetDragImage:
+        {
+            if (!cb->clipboard->isForDragging())
+                return jsUndefined();
 
-    if (args.size() == 0) {
-        clipboard->clearAllData();
-        return jsUndefined();
-    } else if (args.size() == 1) {
-        clipboard->clearData(args[0]->toString(exec));
-        return jsUndefined();
-    } else
-        return throwError(exec, SyntaxError, "clearData: Invalid number of arguments");
-}
+            if (args.size() != 3)
+                return throwError(exec, SyntaxError, "setDragImage: Invalid number of arguments");
 
-JSValue* jsClipboardPrototypeFunctionGetData(ExecState* exec, JSObject* thisObj, const List& args)
-{
-    if (!thisObj->inherits(&JSClipboard::info))
-        return throwError(exec, TypeError);
+            int x = (int)args[1]->toNumber(exec);
+            int y = (int)args[2]->toNumber(exec);
 
-    Clipboard* clipboard = static_cast<JSClipboard*>(thisObj)->impl();
+            // See if they passed us a node
+            Node *node = toNode(args[0]);
+            if (!node)
+                return throwError(exec, TypeError);
+            
+            if (!node->isElementNode())
+                return throwError(exec, SyntaxError, "setDragImageFromElement: Invalid first argument");
 
-    if (args.size() == 1) {
-        bool success;
-        String result = clipboard->getData(args[0]->toString(exec), success);
-        if (success)
-            return jsString(result);
-        return jsUndefined();
-    } else
-        return throwError(exec, SyntaxError, "getData: Invalid number of arguments");
-}
-
-JSValue* jsClipboardPrototypeFunctionSetData(ExecState* exec, JSObject* thisObj, const List& args)
-{
-    if (!thisObj->inherits(&JSClipboard::info))
-        return throwError(exec, TypeError);
-
-    Clipboard* clipboard = static_cast<JSClipboard*>(thisObj)->impl();
-
-    if (args.size() == 2)
-        return jsBoolean(clipboard->setData(args[0]->toString(exec), args[1]->toString(exec)));
-    return throwError(exec, SyntaxError, "setData: Invalid number of arguments");
-}
-
-JSValue* jsClipboardPrototypeFunctionSetDragImage(ExecState* exec, JSObject* thisObj, const List& args)
-{
-    if (!thisObj->inherits(&JSClipboard::info))
-        return throwError(exec, TypeError);
-
-    Clipboard* clipboard = static_cast<JSClipboard*>(thisObj)->impl();
-
-    if (!clipboard->isForDragging())
-        return jsUndefined();
-
-    if (args.size() != 3)
-        return throwError(exec, SyntaxError, "setDragImage: Invalid number of arguments");
-
-    int x = args[1]->toInt32(exec);
-    int y = args[2]->toInt32(exec);
-
-    // See if they passed us a node
-    Node* node = toNode(args[0]);
-    if (!node)
-        return throwError(exec, TypeError);
-
-    if (!node->isElementNode())
-        return throwError(exec, SyntaxError, "setDragImageFromElement: Invalid first argument");
-
-    if (static_cast<Element*>(node)->hasLocalName(imgTag) &&
-        !node->inDocument())
-        clipboard->setDragImage(static_cast<HTMLImageElement*>(node)->cachedImage(), IntPoint(x, y));
-    else
-        clipboard->setDragImageElement(node, IntPoint(x, y));
-
+            if (static_cast<Element*>(node)->hasLocalName(imgTag) && 
+                !node->inDocument())
+                cb->clipboard->setDragImage(static_cast<HTMLImageElement*>(node)->cachedImage(), IntPoint(x, y));
+            else
+                cb->clipboard->setDragImageElement(node, IntPoint(x, y));                    
+                
+            return jsUndefined();
+        }
+    }
     return jsUndefined();
 }
 
-JSValue* toJS(ExecState* exec, Clipboard* obj)
-{
-    return cacheDOMObject<Clipboard, JSClipboard, JSClipboardPrototype>(exec, obj);
 }
-
-Clipboard* toClipboard(JSValue* val)
-{
-    return val->isObject(&JSClipboard::info) ? static_cast<JSClipboard*>(val)->impl() : 0;
-}
-
-} // namespace WebCore

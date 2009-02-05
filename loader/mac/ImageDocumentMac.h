@@ -30,7 +30,7 @@ namespace WebCore {
     class CachedImage;
     class Document;
 
-    void finishImageLoad(Document*, CachedImage*);
+    void finishImageLoad(Document*, CachedImage*, const void* imageData, size_t imageDataSize);
 
 }
 

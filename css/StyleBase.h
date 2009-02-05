@@ -2,8 +2,7 @@
  * This file is part of the CSS implementation for KDE.
  *
  * Copyright (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 1999 Waldo Bastian (bastian@kde.org)
- * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmial.com)
+ *               1999 Waldo Bastian (bastian@kde.org)
  * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -18,14 +17,14 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef StyleBase_h
-#define StyleBase_h
+#ifndef StyleBase_H
+#define StyleBase_H
 
-#include <wtf/RefCounted.h>
+#include "Shared.h"
 
 namespace WebCore {
 
@@ -33,7 +32,7 @@ namespace WebCore {
     class StyleSheet;
 
     // a style class which has a parent (almost all have)
-    class StyleBase : public RefCounted<StyleBase> {
+    class StyleBase : public Shared<StyleBase> {
     public:
         StyleBase(StyleBase* parent)
             : m_parent(parent)
@@ -55,11 +54,9 @@ namespace WebCore {
         virtual bool isRuleList() { return false; }
         virtual bool isRule() { return false; }
         virtual bool isStyleRule() { return false; }
-        virtual bool isCharsetRule() { return false; }
+        virtual bool isCharetRule() { return false; }
         virtual bool isImportRule() { return false; }
         virtual bool isMediaRule() { return false; }
-        virtual bool isKeyframesRule() { return false; }
-        virtual bool isKeyframeRule() { return false; }
         virtual bool isFontFaceRule() { return false; }
         virtual bool isPageRule() { return false; }
         virtual bool isUnknownRule() { return false; }
@@ -68,10 +65,6 @@ namespace WebCore {
         virtual bool isPrimitiveValue() const { return false; }
         virtual bool isValueList() { return false; }
         virtual bool isValueCustom() { return false; }
-#if ENABLE(SVG)
-        virtual bool isSVGColor() const { return false; }
-        virtual bool isSVGPaint() const { return false; }
-#endif
 
         virtual bool parseString(const String&, bool /*strict*/ = false) { return false; }
         virtual void checkLoaded();

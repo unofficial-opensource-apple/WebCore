@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,21 +13,20 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module css {
 
-    // Introduced in DOM Level 2:
-    interface [
-        GenerateConstructor,
-        InterfaceUUID=365d0f26-3a6e-457c-a34c-174d98f79798,
-        ImplementationUUID=8bfdc968-9a1b-4e4f-8d36-732d49b48eaa
-    ] Counter {
+    interface Counter {
+
+        // DOM Level 2
+
         readonly attribute DOMString identifier;
         readonly attribute DOMString listStyle;
         readonly attribute DOMString separator;
+
     };
 
 }

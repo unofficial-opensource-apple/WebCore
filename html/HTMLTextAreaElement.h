@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,25 +18,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLTextAreaElement_h
-#define HTMLTextAreaElement_h
+#ifndef HTML_HTMLTextAreaElementImpl_H
+#define HTML_HTMLTextAreaElementImpl_H
 
 #include "HTMLGenericFormElement.h"
 
 namespace WebCore {
 
-class Selection;
-
-class HTMLTextAreaElement : public HTMLFormControlElementWithState {
+class HTMLTextAreaElement : public HTMLGenericFormElement {
 public:
     enum WrapMethod { ta_NoWrap, ta_Virtual, ta_Physical };
 
     HTMLTextAreaElement(Document*, HTMLFormElement* = 0);
+    ~HTMLTextAreaElement();
 
     virtual bool checkDTD(const Node* newChild) { return newChild->isTextNode(); }
 
@@ -47,7 +48,7 @@ public:
 
     virtual const AtomicString& type() const;
 
-    virtual bool saveState(String& value) const;
+    virtual String stateValue() const;
     virtual void restoreState(const String&);
 
     bool readOnly() const { return isReadOnlyControl(); }
@@ -61,15 +62,16 @@ public:
     void select();
     void setSelectionRange(int, int);
 
-    virtual void childrenChanged(bool changedByParser = false);
+    virtual void childrenChanged();
     virtual void parseMappedAttribute(MappedAttribute*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     virtual bool appendFormData(FormDataList&, bool);
     virtual void reset();
     virtual void defaultEventHandler(Event*);
     virtual bool isMouseFocusable() const;
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
-    virtual void updateFocusAppearance(bool restorePreviousSelection);
+    virtual bool isKeyboardFocusable() const;
+    virtual void focus();
+    virtual void updateFocusAppearance();
 
     String value() const;
     void setValue(const String&);
@@ -87,11 +89,9 @@ public:
     void setRows(int);
     
     void cacheSelection(int s, int e) { cachedSelStart = s; cachedSelEnd = e; };
-    Selection selection() const;
 
     virtual bool willRespondToMouseClickEvents();
 
-    virtual bool shouldUseInputMethod() const;
 private:
     void updateValue() const;
 

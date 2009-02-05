@@ -23,23 +23,23 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ApplyStyleCommand_h
-#define ApplyStyleCommand_h
+#ifndef apply_style_command_h__
+#define apply_style_command_h__
 
 #include "CompositeEditCommand.h"
 
 namespace WebCore {
 
 class HTMLElement;
-class StyleChange;
 
-class ApplyStyleCommand : public CompositeEditCommand {
+class ApplyStyleCommand : public CompositeEditCommand
+{
 public:
     enum EPropertyLevel { PropertyDefault, ForceBlockProperties };
 
     ApplyStyleCommand(Document*, CSSStyleDeclaration*, EditAction = EditActionChangeAttributes, EPropertyLevel = PropertyDefault);
     ApplyStyleCommand(Document*, CSSStyleDeclaration*, const Position& start, const Position& end, EditAction = EditActionChangeAttributes, EPropertyLevel = PropertyDefault);
-    ApplyStyleCommand(Element*, bool = false, EditAction = EditActionChangeAttributes);
+    ApplyStyleCommand(Document*, Element*, bool = false, EditAction = EditActionChangeAttributes);
 
     virtual void doApply();
     virtual EditAction editingAction() const;
@@ -49,7 +49,7 @@ public:
 private:
     // style-removal helpers
     bool isHTMLStyleNode(CSSMutableStyleDeclaration*, HTMLElement*);
-    void removeHTMLStyleNode(HTMLElement*);
+    void removeHTMLStyleNode(HTMLElement *);
     void removeHTMLFontStyle(CSSMutableStyleDeclaration*, HTMLElement*);
     void removeCSSStyle(CSSMutableStyleDeclaration*, HTMLElement*);
     void removeBlockStyle(CSSMutableStyleDeclaration*, const Position& start, const Position& end);
@@ -66,7 +66,7 @@ private:
     void applyBlockStyle(CSSMutableStyleDeclaration*);
     void applyRelativeFontStyleChange(CSSMutableStyleDeclaration*);
     void applyInlineStyle(CSSMutableStyleDeclaration*);
-    void addBlockStyle(const StyleChange&, HTMLElement*);
+    void addBlockStyleIfNeeded(CSSMutableStyleDeclaration*, Node*);
     void addInlineStyleIfNeeded(CSSMutableStyleDeclaration*, Node* start, Node* end);
     bool splitTextAtStartIfNeeded(const Position& start, const Position& end);
     bool splitTextAtEndIfNeeded(const Position& start, const Position& end);
@@ -74,7 +74,7 @@ private:
     bool splitTextElementAtEndIfNeeded(const Position& start, const Position& end);
     bool mergeStartWithPreviousIfIdentical(const Position& start, const Position& end);
     bool mergeEndWithNextIfIdentical(const Position& start, const Position& end);
-    void cleanupUnstyledAppleStyleSpans(Node* dummySpanAncestor);
+    void cleanUpEmptyStyleSpans(const Position& start, const Position& end);
 
     void surroundNodeRangeWithElement(Node* start, Node* end, Element* element);
     float computedFontSize(const Node*);

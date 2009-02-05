@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
  
-#ifndef BeforeTextInsertedEvent_h
-#define BeforeTextInsertedEvent_h
+#ifndef BEFORETEXTINSERTEDEVENTIMPL_H
+#define BEFORETEXTINSERTEDEVENTIMPL_H
 
 #include "Event.h"
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,42 +26,23 @@
 #include "config.h"
 #include "DeprecatedString.h"
 
-#include "CString.h"
-#include "FloatConversion.h"
 #include "Logging.h"
-#include "PlatformString.h"
 #include "RegularExpression.h"
 #include "TextEncoding.h"
 #include <kjs/dtoa.h>
 #include <kjs/identifier.h>
-#include <stdarg.h>
 #include <stdio.h>
-#include <wtf/Platform.h>
-#include <wtf/StringExtras.h>
-
-#if PLATFORM(WIN_OS)
+#include <stdarg.h>
+#ifdef WIN32
 #include <windows.h>
-#endif
-
-#if PLATFORM(QT)
-#include <QString>
 #endif
 
 using namespace std;
 using namespace KJS;
-using namespace WTF;
 
 namespace WebCore {
 
-COMPILE_ASSERT(sizeof(DeprecatedChar) == 2, deprecated_char_is_2_bytes)
-
 #define CHECK_FOR_HANDLE_LEAKS 0
-
-#if PLATFORM(SYMBIAN)
-#undef CHECK_FOR_HANDLE_LEAKS
-// symbian:fixme need page aligned allocations as Symbian platform does not have support for valloc
-#define CHECK_FOR_HANDLE_LEAKS 1
-#endif
 
 #define ALLOC_QCHAR_GOOD_SIZE(X) (X)
 #define ALLOC_CHAR_GOOD_SIZE(X) (X)
@@ -74,7 +55,6 @@ COMPILE_ASSERT(sizeof(DeprecatedChar) == 2, deprecated_char_is_2_bytes)
 #define WEBCORE_REALLOCATE_CHARACTERS(P, N) (DeprecatedChar *)fastRealloc(P, sizeof(DeprecatedChar)*(N))
 #define DELETE_QCHAR(P) fastFree(P)
 
-#ifndef CHECK_FOR_HANDLE_LEAKS
 struct HandleNode;
 struct HandlePageNode;
 
@@ -89,18 +69,16 @@ static inline void initializeHandleNodes()
     if (freeNodeAllocationPages == 0)
         freeNodeAllocationPages = allocatePageNode();
 }
-#endif
 
 static inline DeprecatedStringData **allocateHandle()
 {
-#ifdef CHECK_FOR_HANDLE_LEAKS
+#if CHECK_FOR_HANDLE_LEAKS
     return static_cast<DeprecatedStringData **>(fastMalloc(sizeof(DeprecatedStringData *)));
-#else
+#endif
 
     initializeHandleNodes();
     
     return reinterpret_cast<DeprecatedStringData **>(allocateNode(freeNodeAllocationPages));
-#endif
 }
 
 static void freeHandle(DeprecatedStringData **);
@@ -136,6 +114,7 @@ static inline int ucstrcmp( const DeprecatedString &as, const DeprecatedString &
     return a->unicode() - b->unicode();
 }
 
+
 static bool equal(const DeprecatedChar *a, const char *b, int l)
 {
     ASSERT(l >= 0);
@@ -153,7 +132,7 @@ static bool equalCaseInsensitive(const char *a, const char *b, int l)
 {
     ASSERT(l >= 0);
     while (l--) {
-        if (toASCIILower(*a) != toASCIILower(*b))
+        if (tolower(*a) != tolower(*b))
             return false;
         a++; b++;
     }
@@ -164,7 +143,7 @@ static bool equalCaseInsensitive(const DeprecatedChar *a, const char *b, int l)
 {
     ASSERT(l >= 0);
     while (l--) {
-        if (toASCIILower(a->unicode()) != static_cast<unsigned char>(toASCIILower(*b)))
+        if (tolower(a->unicode()) != tolower(*b))
             return false;
         a++; b++;
     }
@@ -175,7 +154,7 @@ static bool equalCaseInsensitive(const DeprecatedChar *a, const DeprecatedChar *
 {
     ASSERT(l >= 0);
     while (l--) {
-        if (toASCIILower(a->unicode()) != toASCIILower(b->unicode()))
+        if (tolower(a->unicode()) != tolower(b->unicode()))
             return false;
         a++; b++;
     }
@@ -184,22 +163,20 @@ static bool equalCaseInsensitive(const DeprecatedChar *a, const DeprecatedChar *
 
 static inline bool equalCaseInsensitive(char c1, char c2)
 {
-    return toASCIILower(c1) == toASCIILower(c2);
+    return tolower(c1) == tolower(c2);
 }
 
 static inline bool equalCaseInsensitive(DeprecatedChar c1, char c2)
 {
-    return toASCIILower(c1.unicode()) == static_cast<unsigned char>(toASCIILower(c2));
+    return tolower(c1.unicode()) == tolower(static_cast<unsigned char>(c2));
 }
 
-static bool isCharacterAllowedInBase(DeprecatedChar c, int base)
+static bool ok_in_base(DeprecatedChar c, int base)
 {
-    ::UChar uc = c.unicode();
-    if (uc > 0x7F)
-        return false;
-    if (isASCIIDigit(uc))
+    int uc = c.unicode();
+    if (isdigit(uc))
         return uc - '0' < base;
-    if (isASCIIAlpha(uc)) {
+    if (isalpha(uc)) {
         if (base > 36)
             base = 36;
         return (uc >= 'a' && uc < 'a' + base - 10)
@@ -322,25 +299,17 @@ void DeprecatedStringData::initialize(const char *a, unsigned l)
     }
 }
 
-DeprecatedStringData* DeprecatedStringData::createAndAdopt(DeprecatedStringData &o)
+DeprecatedStringData::DeprecatedStringData(DeprecatedStringData &o)
+    : refCount(1)
+    , _length(o._length)
+    , _unicode(o._unicode)
+    , _ascii(o._ascii)
+    , _maxUnicode(o._maxUnicode)
+    , _isUnicodeValid(o._isUnicodeValid)
+    , _isHeapAllocated(0)
+    , _maxAscii(o._maxAscii)
+    , _isAsciiValid(o._isAsciiValid)
 {
-    DeprecatedStringData* data = new DeprecatedStringData();
-    data->adopt(o);
-    return data;
-}
-
-void DeprecatedStringData::adopt(DeprecatedStringData& o)
-{
-    ASSERT(refCount == 1);
-    _length = o._length;
-    _unicode = o._unicode;
-    _ascii = o._ascii;
-    _maxUnicode = o._maxUnicode;
-    _isUnicodeValid = o._isUnicodeValid;
-    _isHeapAllocated = 0;
-    _maxAscii = o._maxAscii;
-    _isAsciiValid = o._isAsciiValid;
-
     // Handle the case where either the Unicode or 8-bit pointer was
     // pointing to the internal buffer. We need to point at the
     // internal buffer in the new object, and copy the characters.
@@ -490,9 +459,6 @@ char *DeprecatedStringData::makeAscii()
         unsigned i = _length;
         char* cp = _ascii;
         while (i--)
-            // FIXME: this converts non-Latin1 characters to '\0', which may be not what we want in some cases.
-            // In particular, toDouble() may fail to report errors, believing that the string ends earlier
-            // than it actually does.
             *cp++ = (*str++).latin1();
         *cp = 0;
         
@@ -594,7 +560,7 @@ inline void DeprecatedString::detachIfInternal()
 {
     DeprecatedStringData *oldData = *dataHandle;
     if (oldData->refCount > 1 && oldData == &internalData) {
-        DeprecatedStringData *newData = DeprecatedStringData::createAndAdopt(*oldData);
+        DeprecatedStringData *newData = new DeprecatedStringData(*oldData);
         newData->_isHeapAllocated = 1;
         newData->refCount = oldData->refCount;
         oldData->refCount = 1;
@@ -680,7 +646,7 @@ DeprecatedString::DeprecatedString(DeprecatedChar qc)
 
 DeprecatedString::DeprecatedString(const DeprecatedChar *unicode, unsigned length)
 {
-    if (!unicode || !length) {
+    if (!unicode && !length) {
         internalData.deref();
         dataHandle = makeSharedNullHandle();
         dataHandle[0]->ref();
@@ -848,6 +814,13 @@ bool DeprecatedString::startsWith(const char *prefix) const
     }
 }
 
+#ifdef WIN32
+inline int strncasecmp(const char *first, const char *second, size_t maxLength)
+{
+    return _strnicmp(first, second, maxLength);
+}
+#endif
+
 bool DeprecatedString::startsWith(const char *prefix, bool caseSensitive) const
 {
     if (caseSensitive) {
@@ -973,8 +946,8 @@ int DeprecatedString::find(const DeprecatedString &str, int index, bool caseSens
         }
     } else {
         for ( i = 0; i < lstr; i++ ) {
-            hthis += toASCIILower(uthis[i].unicode());
-            hstr += toASCIILower(ustr[i].unicode());
+            hthis += tolower(uthis[i].unicode());
+            hstr += tolower(ustr[i].unicode());
         }
         i = 0;
         while ( true ) {
@@ -982,8 +955,8 @@ int DeprecatedString::find(const DeprecatedString &str, int index, bool caseSens
                 return index + i;
             if ( i == delta )
                 return -1;
-            hthis += toASCIILower(uthis[i + lstr].unicode());
-            hthis -= toASCIILower(uthis[i].unicode());
+            hthis += tolower(uthis[i + lstr].unicode());
+            hthis -= tolower(uthis[i].unicode());
             i++;
         }
     }
@@ -1021,9 +994,9 @@ int DeprecatedString::find(const char *chs, int index, bool caseSensitive) const
                 }
             } while (--n);
         } else {
-            unsigned char lc = toASCIILower(*chs);
+            int lc = tolower(*chs);
             do {
-                if (toASCIILower(*++ptr) == lc && equalCaseInsensitive(ptr + 1, chsPlusOne, chsLengthMinusOne)) {
+                if (tolower(*++ptr) == lc && equalCaseInsensitive(ptr + 1, chsPlusOne, chsLengthMinusOne)) {
                     return data->_length - chsLength - n + 1;
                 }
             } while (--n);
@@ -1040,9 +1013,9 @@ int DeprecatedString::find(const char *chs, int index, bool caseSensitive) const
                 }
             } while (--n);
         } else {
-            unsigned char lc = toASCIILower(*chs);
+            int lc = tolower((unsigned char)*chs);
             do {
-                if (toASCIILower((++ptr)->unicode()) == lc && equalCaseInsensitive(ptr + 1, chsPlusOne, chsLengthMinusOne)) {
+                if (tolower((++ptr)->unicode()) == lc && equalCaseInsensitive(ptr + 1, chsPlusOne, chsLengthMinusOne)) {
                     return data->_length - chsLength - n + 1;
                 }
             } while (--n);
@@ -1162,9 +1135,9 @@ int DeprecatedString::contains(DeprecatedChar c, bool cs) const
             while (n--)
                 count += *cPtr++ == ac;
         } else {                                        // case insensitive
-            unsigned char lc = toASCIILower(ac);
+            int lc = tolower(ac);
             while (n--) {
-                count += toASCIILower(*cPtr++) == lc;
+                count += tolower(*cPtr++) == lc;
             }
         }
     } else {
@@ -1175,9 +1148,9 @@ int DeprecatedString::contains(DeprecatedChar c, bool cs) const
             while ( n-- )
                 count += *uc++ == c;
         } else {                                        // case insensitive
-            ::UChar lc = toASCIILower(c.unicode());
+            int lc = tolower(c.unicode());
             while (n--) {
-                count += toASCIILower(uc->unicode()) == lc;
+                count += tolower(uc->unicode()) == lc;
                 uc++;
             }
         }
@@ -1216,9 +1189,9 @@ int DeprecatedString::contains(const char *str, bool caseSensitive) const
                 p++;
             } while (--n);
         } else {
-            char lc = toASCIILower(c);
+            int lc = tolower(c);
             do {
-                count += toASCIILower(*p) == lc && equalCaseInsensitive(p + 1, str + 1, len - 1);
+                count += tolower(*p) == lc && equalCaseInsensitive(p + 1, str + 1, len - 1);
                 p++;
             } while (--n);
         }
@@ -1231,9 +1204,9 @@ int DeprecatedString::contains(const char *str, bool caseSensitive) const
                 p++;
             } while (--n);
         } else {
-            unsigned char lc = toASCIILower(c);
+            int lc = tolower(c);
             do {
-                count += toASCIILower(p->unicode()) == lc && equalCaseInsensitive(p + 1, str + 1, len - 1);
+                count += tolower(p->unicode()) == lc && equalCaseInsensitive(p + 1, str + 1, len - 1);
                 p++;
             } while (--n);
         }
@@ -1377,93 +1350,102 @@ unsigned short DeprecatedString::toUShort(bool *ok, int base) const
     return sv;
 }
 
-template <typename IntegralType> static inline
-IntegralType toIntegralType(const DeprecatedString& string, bool *ok, int base)
-{
-    static const IntegralType integralMax = std::numeric_limits<IntegralType>::max();
-    static const bool isSigned = std::numeric_limits<IntegralType>::is_signed;
-    const DeprecatedChar* p = string.unicode();
-    const IntegralType maxMultiplier = integralMax / base;
-
-    int length = string.length();
-    IntegralType value = 0;
-    bool isOk = false;
-    bool isNegative = false;
-
-    if (!p)
-        goto bye;
-
-    // skip leading whitespace
-    while (length && p->isSpace()) {
-        length--;
-        p++;
-    }
-
-    if (isSigned && length && *p == '-') {
-        length--;
-        p++;
-        isNegative = true;
-    } else if (length && *p == '+') {
-        length--;
-        p++;
-    }
-
-    if (!length || !isCharacterAllowedInBase(*p, base))
-        goto bye;
-
-    while (length && isCharacterAllowedInBase(*p, base)) {
-        length--;
-        IntegralType digitValue;
-        ::UChar c = p->unicode();
-        if (isASCIIDigit(c))
-            digitValue = c - '0';
-        else if (c >= 'a')
-            digitValue = c - 'a' + 10;
-        else
-            digitValue = c - 'A' + 10;
-
-        if (value > maxMultiplier || (value == maxMultiplier && digitValue > (integralMax % base) + isNegative))
-            goto bye;
-
-        value = base * value + digitValue;
-        p++;
-    }
-
-    if (isNegative)
-        value = -value;
-
-    // skip trailing space
-    while (length && p->isSpace()) {
-        length--;
-        p++;
-    }
-
-    if (!length)
-        isOk = true;
-bye:
-    if (ok)
-        *ok = isOk;
-    return isOk ? value : 0;
-}
-
 int DeprecatedString::toInt(bool *ok, int base) const
 {
-    return toIntegralType<int>(*this, ok, base);
-}
+    const DeprecatedChar *p = unicode();
+    int val=0;
+    int l = dataHandle[0]->_length;
+    const int max_mult = INT_MAX / base;
+    bool is_ok = false;
+    int neg = 0;
+    if ( !p )
+        goto bye;
+    while ( l && p->isSpace() )                 // skip leading space
+        l--,p++;
+    if ( l && *p == '-' ) {
+        l--;
+        p++;
+        neg = 1;
+    } else if ( *p == '+' ) {
+        l--;
+        p++;
+    }
 
-int64_t DeprecatedString::toInt64(bool *ok, int base) const
-{
-    return toIntegralType<int64_t>(*this, ok, base);
+    // NOTE: toUInt() code is similar
+    if ( !l || !ok_in_base(*p,base) )
+        goto bye;
+    while ( l && ok_in_base(*p,base) ) {
+        l--;
+        int dv;
+        int c = p->unicode();
+        if ( isdigit(c) ) {
+            dv = c - '0';
+        } else {
+            if ( c >= 'a' )
+                dv = c - 'a' + 10;
+            else
+                dv = c - 'A' + 10;
+        }
+        if ( val > max_mult || (val == max_mult && dv > (INT_MAX % base)+neg) )
+            goto bye;
+        val = base*val + dv;
+        p++;
+    }
+    if ( neg )
+        val = -val;
+    while ( l && p->isSpace() )                 // skip trailing space
+        l--,p++;
+    if ( !l )
+        is_ok = true;
+bye:
+    if ( ok )
+        *ok = is_ok;
+    return is_ok ? val : 0;
 }
 
 unsigned DeprecatedString::toUInt(bool *ok, int base) const
 {
-    return toIntegralType<unsigned>(*this, ok, base);
-}
+    const DeprecatedChar *p = unicode();
+    unsigned val=0;
+    int l = dataHandle[0]->_length;
+    const unsigned max_mult = UINT_MAX / base;
+    bool is_ok = false;
+    if ( !p )
+        goto bye;
+    while ( l && p->isSpace() )                 // skip leading space
+        l--,p++;
+    if ( *p == '+' )
+        l--,p++;
 
-uint64_t DeprecatedString::toUInt64(bool *ok, int base) const
-{
-    return toIntegralType<uint64_t>(*this, ok, base);
+    // NOTE: toInt() code is similar
+    if ( !l || !ok_in_base(*p,base) )
+        goto bye;
+    while ( l && ok_in_base(*p,base) ) {
+        l--;
+        unsigned dv;
+        int c = p->unicode();
+        if ( isdigit(c) ) {
+            dv = c - '0';
+        } else {
+            if ( c >= 'a' )
+                dv = c - 'a' + 10;
+            else
+                dv = c - 'A' + 10;
+        }
+        if ( val > max_mult || (val == max_mult && dv > (UINT_MAX % base)) )
+            goto bye;
+        val = base*val + dv;
+        p++;
+    }
+
+    while ( l && p->isSpace() )                 // skip trailing space
+        l--,p++;
+    if ( !l )
+        is_ok = true;
+bye:
+    if ( ok )
+        *ok = is_ok;
+    return is_ok ? val : 0;
 }
 
 double DeprecatedString::toDouble(bool *ok) const
@@ -1479,12 +1461,6 @@ double DeprecatedString::toDouble(bool *ok) const
     if (ok)
         *ok = end == 0 || *end == '\0';
     return val;
-}
-
-float DeprecatedString::toFloat(bool* ok) const
-{
-    // FIXME: this will return ok even when the string does not fit into a float
-    return narrowPrecisionToFloat(toDouble(ok));
 }
 
 DeprecatedString DeprecatedString::left(unsigned len) const
@@ -1752,53 +1728,47 @@ DeprecatedString &DeprecatedString::setLatin1(const char *str, int len)
 
 DeprecatedString &DeprecatedString::setNum(short n)
 {
-    return format("%d", n);
+    return sprintf("%d", n);
 }
 
 DeprecatedString &DeprecatedString::setNum(unsigned short n)
 {
-    return format("%u", n);
+    return sprintf("%u", n);
 }
 
 DeprecatedString &DeprecatedString::setNum(int n)
 {
-    return format("%d", n);
+    return sprintf("%d", n);
 }
 
 DeprecatedString &DeprecatedString::setNum(unsigned n)
 {
-    return format("%u", n);
+    return sprintf("%u", n);
 }
 
 DeprecatedString &DeprecatedString::setNum(long n)
 {
-    return format("%ld", n);
+    return sprintf("%ld", n);
 }
 
 DeprecatedString &DeprecatedString::setNum(unsigned long n)
 {
-    return format("%lu", n);
+    return sprintf("%lu", n);
 }
 
 DeprecatedString &DeprecatedString::setNum(double n)
 {
-    return format("%.6lg", n);
+    return sprintf("%.6lg", n);
 }
 
-DeprecatedString &DeprecatedString::format(const char *format, ...)
+DeprecatedString &DeprecatedString::sprintf(const char *format, ...)
 {
-    // FIXME: this needs the same windows compat fixes as String::format
-
     va_list args;
     va_start(args, format);
     
     // Do the format once to get the length.
-#if COMPILER(MSVC) 
-    int result = _vscprintf(format, args);
-#else
     char ch;
     int result = vsnprintf(&ch, 1, format, args);
-#endif
     
     // Handle the empty string case to simplify the code below.
     if (result <= 0) { // POSIX returns 0 in error; Windows returns a negative number.
@@ -1826,7 +1796,6 @@ DeprecatedString &DeprecatedString::format(const char *format, ...)
     // Now do the formatting again, guaranteed to fit.
     vsprintf(const_cast<char*>(ascii()), format, args);
 
-    va_end(args);
     return *this;
 }
 
@@ -1914,12 +1883,11 @@ DeprecatedString &DeprecatedString::insert(unsigned index, const DeprecatedStrin
     else {
         unsigned insertLength = qs.dataHandle[0]->_length;
         unsigned originalLength = dataHandle[0]->_length;
-
-        forceUnicode();
+        DeprecatedChar *targetChars;
         
         // Ensure that we have enough space.
         setLength (originalLength + insertLength);
-        DeprecatedChar *targetChars = const_cast<DeprecatedChar *>(unicode());
+        targetChars = forceUnicode();
         
         // Move tail to make space for inserted characters.
         memmove (targetChars+(index+insertLength), targetChars+index, (originalLength-index)*sizeof(DeprecatedChar));
@@ -1989,12 +1957,11 @@ DeprecatedString &DeprecatedString::insert(unsigned index, DeprecatedChar qc)
     }
     else {
         unsigned originalLength = dataHandle[0]->_length;
+        DeprecatedChar *targetChars;
         
-        forceUnicode();
-
         // Ensure that we have enough space.
         setLength (originalLength + 1);
-        DeprecatedChar *targetChars = const_cast<DeprecatedChar *>(unicode());
+        targetChars = forceUnicode();
         
         // Move tail to make space for inserted character.
         memmove (targetChars+(index+1), targetChars+index, (originalLength-index)*sizeof(DeprecatedChar));
@@ -2243,12 +2210,13 @@ void DeprecatedString::setLength(unsigned newLen)
         // bytes contain garbage.
         dataHandle[0]->_ascii[newLen] = 0;
     }
-
-    if (dataHandle[0]->_isUnicodeValid){
+    else if (dataHandle[0]->_isUnicodeValid){
         if (newLen > dataHandle[0]->_maxUnicode) {
             dataHandle[0]->increaseUnicodeSize(newLen);
         }
     }
+    else
+        FATAL("invalid character cache");
 
     dataHandle[0]->_length = newLen;
 }
@@ -2258,6 +2226,11 @@ void DeprecatedString::truncate(unsigned newLen)
 {
     if ( newLen < dataHandle[0]->_length )
         setLength( newLen );
+}
+
+void DeprecatedString::resize(unsigned newLen)
+{
+    setLength(newLen);
 }
 
 void DeprecatedString::fill(DeprecatedChar qc, int len)
@@ -2459,8 +2432,6 @@ struct HandleNode {
     } type;
 };
 
-#ifndef CHECK_FOR_HANDLE_LEAKS
-
 static const size_t pageSize = 4096;
 static const uintptr_t pageMask = ~(pageSize - 1);
 static const size_t nodeBlockSize = pageSize / sizeof(HandleNode);
@@ -2471,11 +2442,8 @@ static HandleNode *initializeHandleNodeBlock(HandlePageNode *pageNode)
     HandleNode* block;
     HandleNode* aNode;
 
-#if PLATFORM(WIN_OS)
+#ifdef WIN32
     block = (HandleNode*)VirtualAlloc(0, pageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-#elif PLATFORM(SYMBIAN)
-    // symbian::fixme needs to do page aligned allocation as valloc is not supported.
-    block = NULL;
 #else
     block = (HandleNode*)valloc(pageSize);
 #endif
@@ -2541,14 +2509,12 @@ static HandleNode *allocateNode(HandlePageNode *pageNode)
     return allocated;
 }
 
-#endif
-
 void freeHandle(DeprecatedStringData **_free)
 {
-#ifdef CHECK_FOR_HANDLE_LEAKS
+#if CHECK_FOR_HANDLE_LEAKS
     fastFree(_free);
     return;
-#else
+#endif
 
     HandleNode *free = (HandleNode *)_free;
     HandleNode *base = (HandleNode *)((uintptr_t)free & pageMask);
@@ -2581,22 +2547,21 @@ void freeHandle(DeprecatedStringData **_free)
             freeNodeAllocationPages->next = pageNode;
         freeNodeAllocationPages = pageNode;
     }
-#endif
 }
 
 DeprecatedString DeprecatedString::fromUtf8(const char *chs)
 {
-    return UTF8Encoding().decode(chs, strlen(chs)).deprecatedString();
+    return TextEncoding(UTF8Encoding).toUnicode(chs, strlen(chs));
 }
 
 DeprecatedString DeprecatedString::fromUtf8(const char *chs, int len)
 {
-    return UTF8Encoding().decode(chs, len).deprecatedString();
+    return TextEncoding(UTF8Encoding).toUnicode(chs, len);
 }
 
 DeprecatedCString DeprecatedString::utf8(int& length) const
 {
-    DeprecatedCString result = UTF8Encoding().encode((::UChar*)unicode(), this->length()).deprecatedCString();
+    DeprecatedCString result = TextEncoding(UTF8Encoding).fromUnicode(*this);
     length = result.length();
     return result;
 }
@@ -2626,21 +2591,6 @@ DeprecatedString::DeprecatedString(const UString& str)
         internalData.initialize(reinterpret_cast<const DeprecatedChar*>(str.data()), str.size());
     }
 }
-
-#if PLATFORM(QT)
-DeprecatedString::DeprecatedString(const QString& str)
-{
-    if (str.isNull()) {
-        internalData.deref();
-        dataHandle = makeSharedNullHandle();
-        dataHandle[0]->ref();
-    } else {
-        dataHandle = allocateHandle();
-        *dataHandle = &internalData;
-        internalData.initialize(reinterpret_cast<const DeprecatedChar*>(str.data()), str.length());
-    }
-}
-#endif
 
 DeprecatedString::operator Identifier() const
 {

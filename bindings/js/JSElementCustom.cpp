@@ -33,9 +33,9 @@
 #include "Attr.h"
 #include "Document.h"
 #include "Element.h"
-#include "CSSHelper.h"
 #include "ExceptionCode.h"
-#include "HTMLFrameElementBase.h"
+#include "HTMLFrameElement.h"
+#include "HTMLIFrameElement.h"
 #include "HTMLNames.h"
 #include "PlatformString.h"
 #include "kjs_binding.h"
@@ -47,8 +47,13 @@ using namespace HTMLNames;
 
 static inline bool allowSettingSrcToJavascriptURL(KJS::ExecState* exec, Element* element, String name, String value)
 {
-    if ((element->hasTagName(iframeTag) || element->hasTagName(frameTag)) && equalIgnoringCase(name, "src") && parseURL(value).startsWith("javascript:", false)) {
-        HTMLFrameElementBase* frame = static_cast<HTMLFrameElementBase*>(element);
+    if (element->hasTagName(iframeTag) && equalIgnoringCase(name, "src") && value.startsWith("javascript:", false)) {
+        HTMLIFrameElement* frame = static_cast<HTMLIFrameElement*>(element);
+        if (!checkNodeSecurity(exec, frame->contentDocument()))
+            return false;
+    }
+    if (element->hasTagName(frameTag) && equalIgnoringCase(name, "src") && value.startsWith("javascript:", false)) {
+        HTMLFrameElement* frame = static_cast<HTMLFrameElement*>(element);
         if (!checkNodeSecurity(exec, frame->contentDocument()))
             return false;
     }
@@ -61,7 +66,7 @@ KJS::JSValue* JSElement::setAttribute(KJS::ExecState* exec, const KJS::List& arg
     String name = args[0]->toString(exec);
     String value = args[1]->toString(exec);
 
-    Element* imp = impl();
+    Element* imp = static_cast<Element*>(impl());
     if (!allowSettingSrcToJavascriptURL(exec, imp, name, value))
         return KJS::jsUndefined();
 
@@ -80,7 +85,7 @@ KJS::JSValue* JSElement::setAttributeNode(KJS::ExecState* exec, const KJS::List&
         return KJS::jsUndefined();
     }
 
-    Element* imp = impl();
+    Element* imp = static_cast<Element*>(impl());
     if (!allowSettingSrcToJavascriptURL(exec, imp, newAttr->name(), newAttr->value()))
         return KJS::jsUndefined();
 
@@ -96,7 +101,7 @@ KJS::JSValue* JSElement::setAttributeNS(KJS::ExecState* exec, const KJS::List& a
     String qualifiedName = args[1]->toString(exec);
     String value = args[2]->toString(exec);
 
-    Element* imp = impl();
+    Element* imp = static_cast<Element*>(impl());
     if (!allowSettingSrcToJavascriptURL(exec, imp, qualifiedName, value))
         return KJS::jsUndefined();
 
@@ -115,7 +120,7 @@ KJS::JSValue* JSElement::setAttributeNodeNS(KJS::ExecState* exec, const KJS::Lis
         return KJS::jsUndefined();
     }
 
-    Element* imp = impl();
+    Element* imp = static_cast<Element*>(impl());
     if (!allowSettingSrcToJavascriptURL(exec, imp, newAttr->name(), newAttr->value()))
         return KJS::jsUndefined();
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2007 Apple Inc.  All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,6 @@
 #include "BreakBlockquoteCommand.h"
 #include "DeleteSelectionCommand.h"
 #include "Document.h"
-#include "Editor.h"
 #include "Element.h"
 #include "Frame.h"
 #include "InsertLineBreakCommand.h"
@@ -51,30 +50,8 @@ TypingCommand::TypingCommand(Document *document, ETypingCommand commandType, con
       m_applyEditing(false), 
       m_selectInsertedText(selectInsertedText),
       m_smartDelete(false),
-      m_granularity(granularity),
-      m_openedByBackwardDelete(false)
+      m_granularity(granularity)
 {
-}
-
-void TypingCommand::deleteSelection(Document* document, bool smartDelete)
-{
-    ASSERT(document);
-    
-    Frame* frame = document->frame();
-    ASSERT(frame);
-    
-    if (!frame->selectionController()->isRange())
-        return;
-    
-    EditCommand* lastEditCommand = frame->editor()->lastEditCommand();
-    if (isOpenForMoreTypingCommand(lastEditCommand)) {
-        static_cast<TypingCommand*>(lastEditCommand)->deleteSelection(smartDelete);
-        return;
-    }
-    
-    RefPtr<TypingCommand> typingCommand = new TypingCommand(document, DeleteSelection, "", false);
-    typingCommand->setSmartDelete(smartDelete);
-    typingCommand->apply();
 }
 
 void TypingCommand::deleteKeyPressed(Document *document, bool smartDelete, TextGranularity granularity)
@@ -84,61 +61,49 @@ void TypingCommand::deleteKeyPressed(Document *document, bool smartDelete, TextG
     Frame *frame = document->frame();
     ASSERT(frame);
     
-    EditCommand* lastEditCommand = frame->editor()->lastEditCommand();
+    EditCommandPtr lastEditCommand = frame->lastEditCommand();
     if (isOpenForMoreTypingCommand(lastEditCommand)) {
-        static_cast<TypingCommand*>(lastEditCommand)->deleteKeyPressed(granularity);
+        static_cast<TypingCommand *>(lastEditCommand.get())->deleteKeyPressed(granularity);
         return;
     }
     
-    RefPtr<TypingCommand> typingCommand = new TypingCommand(document, DeleteKey, "", false, granularity);
+    TypingCommand *typingCommand = new TypingCommand(document, DeleteKey, "", false, granularity);
     typingCommand->setSmartDelete(smartDelete);
-    typingCommand->apply();
+    EditCommandPtr cmd(typingCommand);
+    cmd.apply();
 }
 
 void TypingCommand::forwardDeleteKeyPressed(Document *document, bool smartDelete, TextGranularity granularity)
 {
-    // FIXME: Forward delete in TextEdit appears to open and close a new typing command.
     ASSERT(document);
     
     Frame *frame = document->frame();
     ASSERT(frame);
     
-    EditCommand* lastEditCommand = frame->editor()->lastEditCommand();
+    EditCommandPtr lastEditCommand = frame->lastEditCommand();
     if (isOpenForMoreTypingCommand(lastEditCommand)) {
-        static_cast<TypingCommand*>(lastEditCommand)->forwardDeleteKeyPressed(granularity);
+        static_cast<TypingCommand *>(lastEditCommand.get())->forwardDeleteKeyPressed(granularity);
         return;
     }
 
-    RefPtr<TypingCommand> typingCommand = new TypingCommand(document, ForwardDeleteKey, "", false, granularity);
+    TypingCommand *typingCommand = new TypingCommand(document, ForwardDeleteKey, "", false, granularity);
     typingCommand->setSmartDelete(smartDelete);
-    typingCommand->apply();
+    EditCommandPtr cmd(typingCommand);
+    cmd.apply();
 }
 
-void TypingCommand::insertText(Document* document, const String& text, bool selectInsertedText, bool insertedTextIsComposition)
+void TypingCommand::insertText(Document *document, const String &text, bool selectInsertedText)
 {
     ASSERT(document);
     
-    Frame* frame = document->frame();
+    Frame *frame = document->frame();
     ASSERT(frame);
-
-    insertText(document, text, frame->selectionController()->selection(), selectInsertedText, insertedTextIsComposition);
-}
-
-void TypingCommand::insertText(Document* document, const String& text, const Selection& selectionForInsertion, bool selectInsertedText, bool insertedTextIsComposition)
-{
-    ASSERT(document);
-    
-    RefPtr<Frame> frame = document->frame();
-    ASSERT(frame);
-    
-    Selection currentSelection = frame->selectionController()->selection();
-    bool changeSelection = currentSelection != selectionForInsertion;
     
     String newText = text;
-    Node* startNode = selectionForInsertion.start().node();
+    Node* startNode = frame->selection().start().node();
     
-    if (startNode && startNode->rootEditableElement() && !insertedTextIsComposition) {        
-        // Send BeforeTextInsertedEvent. The event handler will update text if necessary.
+    if (startNode && startNode->rootEditableElement()) {        
+        // Send khtmlBeforeTextInsertedEvent.  The event handler will update text if necessary.
         ExceptionCode ec = 0;
         RefPtr<BeforeTextInsertedEvent> evt = new BeforeTextInsertedEvent(text);
         startNode->rootEditableElement()->dispatchEvent(evt, ec, true);
@@ -148,34 +113,14 @@ void TypingCommand::insertText(Document* document, const String& text, const Sel
     if (newText.isEmpty())
         return;
     
-    // Set the starting and ending selection appropriately if we are using a selection
-    // that is different from the current selection.  In the future, we should change EditCommand
-    // to deal with custom selections in a general way that can be used by all of the commands.
-    RefPtr<EditCommand> lastEditCommand = frame->editor()->lastEditCommand();
-    if (isOpenForMoreTypingCommand(lastEditCommand.get())) {
-        TypingCommand* lastTypingCommand = static_cast<TypingCommand*>(lastEditCommand.get());
-        if (changeSelection) {
-            lastTypingCommand->setStartingSelection(selectionForInsertion);
-            lastTypingCommand->setEndingSelection(selectionForInsertion);
-        }
-        lastTypingCommand->insertText(newText, selectInsertedText);
-        if (changeSelection) {
-            lastTypingCommand->setEndingSelection(currentSelection);
-            frame->selectionController()->setSelection(currentSelection);
-        }
+    EditCommandPtr lastEditCommand = frame->lastEditCommand();
+    if (isOpenForMoreTypingCommand(lastEditCommand)) {
+        static_cast<TypingCommand *>(lastEditCommand.get())->insertText(newText, selectInsertedText);
         return;
     }
 
-    RefPtr<TypingCommand> cmd = new TypingCommand(document, InsertText, newText, selectInsertedText);
-    if (changeSelection)  {
-        cmd->setStartingSelection(selectionForInsertion);
-        cmd->setEndingSelection(selectionForInsertion);
-    }
-    applyCommand(cmd);
-    if (changeSelection) {
-        cmd->setEndingSelection(currentSelection);
-        frame->selectionController()->setSelection(currentSelection);
-    }
+    EditCommandPtr cmd(new TypingCommand(document, InsertText, newText, selectInsertedText));
+    cmd.apply();
 }
 
 void TypingCommand::insertLineBreak(Document *document)
@@ -185,13 +130,14 @@ void TypingCommand::insertLineBreak(Document *document)
     Frame *frame = document->frame();
     ASSERT(frame);
     
-    EditCommand* lastEditCommand = frame->editor()->lastEditCommand();
+    EditCommandPtr lastEditCommand = frame->lastEditCommand();
     if (isOpenForMoreTypingCommand(lastEditCommand)) {
-        static_cast<TypingCommand*>(lastEditCommand)->insertLineBreak();
+        static_cast<TypingCommand *>(lastEditCommand.get())->insertLineBreak();
         return;
     }
 
-    applyCommand(new TypingCommand(document, InsertLineBreak));
+    EditCommandPtr cmd(new TypingCommand(document, InsertLineBreak));
+    cmd.apply();
 }
 
 void TypingCommand::insertParagraphSeparatorInQuotedContent(Document *document)
@@ -201,13 +147,14 @@ void TypingCommand::insertParagraphSeparatorInQuotedContent(Document *document)
     Frame *frame = document->frame();
     ASSERT(frame);
     
-    EditCommand* lastEditCommand = frame->editor()->lastEditCommand();
+    EditCommandPtr lastEditCommand = frame->lastEditCommand();
     if (isOpenForMoreTypingCommand(lastEditCommand)) {
-        static_cast<TypingCommand*>(lastEditCommand)->insertParagraphSeparatorInQuotedContent();
+        static_cast<TypingCommand *>(lastEditCommand.get())->insertParagraphSeparatorInQuotedContent();
         return;
     }
 
-    applyCommand(new TypingCommand(document, InsertParagraphSeparatorInQuotedContent));
+    EditCommandPtr cmd(new TypingCommand(document, InsertParagraphSeparatorInQuotedContent));
+    cmd.apply();
 }
 
 void TypingCommand::insertParagraphSeparator(Document *document)
@@ -217,39 +164,34 @@ void TypingCommand::insertParagraphSeparator(Document *document)
     Frame *frame = document->frame();
     ASSERT(frame);
     
-    EditCommand* lastEditCommand = frame->editor()->lastEditCommand();
+    EditCommandPtr lastEditCommand = frame->lastEditCommand();
     if (isOpenForMoreTypingCommand(lastEditCommand)) {
-        static_cast<TypingCommand*>(lastEditCommand)->insertParagraphSeparator();
+        static_cast<TypingCommand *>(lastEditCommand.get())->insertParagraphSeparator();
         return;
     }
 
-    applyCommand(new TypingCommand(document, InsertParagraphSeparator));
+    EditCommandPtr cmd(new TypingCommand(document, InsertParagraphSeparator));
+    cmd.apply();
 }
 
-bool TypingCommand::isOpenForMoreTypingCommand(const EditCommand* cmd)
+bool TypingCommand::isOpenForMoreTypingCommand(const EditCommandPtr &cmd)
 {
-    return cmd && cmd->isTypingCommand() && static_cast<const TypingCommand*>(cmd)->isOpenForMoreTyping();
+    return cmd.isTypingCommand() &&
+        static_cast<const TypingCommand *>(cmd.get())->openForMoreTyping();
 }
 
-void TypingCommand::closeTyping(EditCommand* cmd)
+void TypingCommand::closeTyping(const EditCommandPtr &cmd)
 {
     if (isOpenForMoreTypingCommand(cmd))
-        static_cast<TypingCommand*>(cmd)->closeTyping();
+        static_cast<TypingCommand *>(cmd.get())->closeTyping();
 }
 
 void TypingCommand::doApply()
 {
     if (endingSelection().isNone())
         return;
-        
-    if (m_commandType == DeleteKey)
-        if (m_commands.isEmpty())
-            m_openedByBackwardDelete = true;
 
     switch (m_commandType) {
-        case DeleteSelection:
-            deleteSelection(m_smartDelete);
-            return;
         case DeleteKey:
             deleteKeyPressed(m_granularity);
             return;
@@ -289,8 +231,10 @@ void TypingCommand::typingAddedToOpenCommand()
     // The frame will get told in the same way as all other commands.
     // But since this command stays open and is used for additional typing, 
     // we need to tell the frame here as other commands are added.
-    if (m_applyEditing)
-        document()->frame()->editor()->appliedEditing(this);
+    if (m_applyEditing) {
+        EditCommandPtr cmd(this);
+        document()->frame()->appliedEditing(cmd);
+    }
     m_applyEditing = true;
 }
 
@@ -321,54 +265,63 @@ void TypingCommand::insertText(const String &text, bool selectInsertedText)
 
 void TypingCommand::insertTextRunWithoutNewlines(const String &text, bool selectInsertedText)
 {
-    RefPtr<InsertTextCommand> command;
-    if (!document()->frame()->typingStyle() && !m_commands.isEmpty()) {
-        EditCommand* lastCommand = m_commands.last().get();
-        if (lastCommand->isInsertTextCommand())
-            command = static_cast<InsertTextCommand*>(lastCommand);
+    // FIXME: Improve typing style.
+    // See this bug: <rdar://problem/3769899> Implementation of typing style needs improvement
+    if (document()->frame()->typingStyle() || m_cmds.count() == 0) {
+        InsertTextCommand *impl = new InsertTextCommand(document());
+        EditCommandPtr cmd(impl);
+        applyCommandToComposite(cmd);
+        impl->input(text, selectInsertedText);
+    } else {
+        EditCommandPtr lastCommand = m_cmds.last();
+        if (lastCommand.isInsertTextCommand()) {
+            InsertTextCommand *impl = static_cast<InsertTextCommand *>(lastCommand.get());
+            impl->input(text, selectInsertedText);
+        } else {
+            InsertTextCommand *impl = new InsertTextCommand(document());
+            EditCommandPtr cmd(impl);
+            applyCommandToComposite(cmd);
+            impl->input(text, selectInsertedText);
+        }
     }
-    if (!command) {
-        command = new InsertTextCommand(document());
-        applyCommandToComposite(command);
-    }
-    command->input(text, selectInsertedText);
     typingAddedToOpenCommand();
 }
 
 void TypingCommand::insertLineBreak()
 {
-    applyCommandToComposite(new InsertLineBreakCommand(document()));
+    EditCommandPtr cmd(new InsertLineBreakCommand(document()));
+    applyCommandToComposite(cmd);
     typingAddedToOpenCommand();
 }
 
 void TypingCommand::insertParagraphSeparator()
 {
-    applyCommandToComposite(new InsertParagraphSeparatorCommand(document()));
+    EditCommandPtr cmd(new InsertParagraphSeparatorCommand(document()));
+    applyCommandToComposite(cmd);
     typingAddedToOpenCommand();
 }
 
 void TypingCommand::insertParagraphSeparatorInQuotedContent()
 {
-    applyCommandToComposite(new BreakBlockquoteCommand(document()));
+    EditCommandPtr cmd(new BreakBlockquoteCommand(document()));
+    applyCommandToComposite(cmd);
     typingAddedToOpenCommand();
 }
 
 void TypingCommand::deleteKeyPressed(TextGranularity granularity)
 {
     Selection selectionToDelete;
-    Selection selectionAfterUndo;
     
     switch (endingSelection().state()) {
         case Selection::RANGE:
             selectionToDelete = endingSelection();
-            selectionAfterUndo = selectionToDelete;
             break;
         case Selection::CARET: {
-            m_smartDelete = false;
-
-            SelectionController selectionController;
-            selectionController.setSelection(endingSelection());
-            selectionController.modify(SelectionController::EXTEND, SelectionController::BACKWARD, granularity);
+            // Handle delete at beginning-of-block case.
+            // Do nothing in the case that the caret is at the start of a
+            // root editable element or at the start of a document.
+            SelectionController sc = SelectionController(endingSelection().start(), endingSelection().end(), SEL_DEFAULT_AFFINITY);
+            sc.modify(SelectionController::EXTEND, SelectionController::BACKWARD, granularity);
             
             // When the caret is at the start of the editable area in an empty list item, break out of the list item.
             if (endingSelection().visibleStart().previous(true).isNull()) {
@@ -378,29 +331,22 @@ void TypingCommand::deleteKeyPressed(TextGranularity granularity)
                 }
             }
             
-            VisiblePosition visibleStart(endingSelection().visibleStart());
-            // If the caret is at the start of a paragraph after a table, move content into the last table cell.
-            if (isStartOfParagraph(visibleStart) && isFirstPositionAfterTable(visibleStart.previous(true))) {
-                // Unless the caret is just before a table.  We don't want to move a table into the last table cell.
-                if (isLastPositionBeforeTable(visibleStart))
-                    return;
-                // Extend the selection backward into the last cell, then deletion will handle the move.
-                selectionController.modify(SelectionController::EXTEND, SelectionController::BACKWARD, granularity);
-            // If the caret is just after a table, select the table and don't delete anything.
-            } else if (Node* table = isFirstPositionAfterTable(visibleStart)) {
-                setEndingSelection(Selection(Position(table, 0), endingSelection().start(), DOWNSTREAM));
+            // When the caret is a) just after a table, or b) at the beginning of the paragraph after a table, select the table.
+            Position upstreamStart = endingSelection().start().upstream();
+            VisiblePosition visibleStart = endingSelection().visibleStart();
+            if (isStartOfParagraph(visibleStart))
+                upstreamStart = visibleStart.previous(true).deepEquivalent().upstream();
+            if (upstreamStart.node() && upstreamStart.node()->renderer() && upstreamStart.node()->renderer()->isTable() && upstreamStart.offset() == maxDeepOffset(upstreamStart.node())) {
+                setEndingSelection(Selection(Position(upstreamStart.node(), 0), endingSelection().start(), DOWNSTREAM));
                 typingAddedToOpenCommand();
                 return;
             }
 
-            selectionToDelete = selectionController.selection();
-            if (!startingSelection().isRange() || selectionToDelete.base() != startingSelection().start())
-                selectionAfterUndo = selectionToDelete;
-            else
-                // It's a little tricky to compute what the starting selection would have been in the original document.
-                // We can't let the Selection class's validation kick in or it'll adjust for us based on
-                // the current state of the document and we'll get the wrong result.
-                selectionAfterUndo.setWithoutValidation(startingSelection().end(), selectionToDelete.extent());
+            selectionToDelete = sc.selection();
+            
+            // setStartingSelection so that undo selects what was deleted
+            if (selectionToDelete.isCaretOrRange() && granularity != CharacterGranularity)
+                setStartingSelection(selectionToDelete);
             break;
         }
         case Selection::NONE:
@@ -408,20 +354,13 @@ void TypingCommand::deleteKeyPressed(TextGranularity granularity)
             break;
     }
     
-    if (selectionToDelete.isCaretOrRange() && document()->frame()->shouldDeleteSelection(selectionToDelete)) {
-        // Make undo select everything that has been deleted, unless an undo will undo more than just this deletion.
-        // FIXME: This behaves like TextEdit except for the case where you open with text insertion and then delete
-        // more text than you insert.  In that case all of the text that was around originally should be selected.
-        if (m_openedByBackwardDelete)
-            setStartingSelection(selectionAfterUndo);
-        CompositeEditCommand::deleteSelection(selectionToDelete, m_smartDelete);
+    if (selectionToDelete.isCaretOrRange() && document()->frame()->shouldDeleteSelection(SelectionController(selectionToDelete))) {
+        deleteSelection(selectionToDelete, m_smartDelete);
         setSmartDelete(false);
         typingAddedToOpenCommand();
     }
-    // Workaround for this bug:
-    // <rdar://problem/4653755> UIKit text widgets should use WebKit editing API to manipulate text
     else {
-        setEndingSelection(document()->frame()->selectionController()->selection());
+        setEndingSelection(document()->frame()->selection().selection());
         closeTyping(this);
     }
 }
@@ -429,22 +368,17 @@ void TypingCommand::deleteKeyPressed(TextGranularity granularity)
 void TypingCommand::forwardDeleteKeyPressed(TextGranularity granularity)
 {
     Selection selectionToDelete;
-    Selection selectionAfterUndo;
-
+    
     switch (endingSelection().state()) {
         case Selection::RANGE:
             selectionToDelete = endingSelection();
-            selectionAfterUndo = selectionToDelete;
             break;
         case Selection::CARET: {
-            m_smartDelete = false;
-
             // Handle delete at beginning-of-block case.
             // Do nothing in the case that the caret is at the start of a
             // root editable element or at the start of a document.
-            SelectionController selectionController;
-            selectionController.setSelection(endingSelection());
-            selectionController.modify(SelectionController::EXTEND, SelectionController::FORWARD, granularity);
+            SelectionController sc = SelectionController(endingSelection().start(), endingSelection().end(), SEL_DEFAULT_AFFINITY);
+            sc.modify(SelectionController::EXTEND, SelectionController::FORWARD, granularity);
             Position downstreamEnd = endingSelection().end().downstream();
             VisiblePosition visibleEnd = endingSelection().visibleEnd();
             if (visibleEnd == endOfParagraph(visibleEnd))
@@ -455,31 +389,11 @@ void TypingCommand::forwardDeleteKeyPressed(TextGranularity granularity)
                 typingAddedToOpenCommand();
                 return;
             }
+            selectionToDelete = sc.selection();
 
-            // deleting to end of paragraph when at end of paragraph needs to merge the next paragraph (if any)
-            if (granularity == ParagraphBoundary && selectionController.selection().isCaret() && isEndOfParagraph(selectionController.selection().visibleEnd()))
-                selectionController.modify(SelectionController::EXTEND, SelectionController::FORWARD, CharacterGranularity);
-
-            selectionToDelete = selectionController.selection();
-            if (!startingSelection().isRange() || selectionToDelete.base() != startingSelection().start())
-                selectionAfterUndo = selectionToDelete;
-            else {
-                // It's a little tricky to compute what the starting selection would have been in the original document.
-                // We can't let the Selection class's validation kick in or it'll adjust for us based on
-                // the current state of the document and we'll get the wrong result.
-                Position extent = startingSelection().end();
-                if (extent.node() != selectionToDelete.end().node())
-                    extent = selectionToDelete.extent();
-                else {
-                    int extraCharacters;
-                    if (selectionToDelete.start().node() == selectionToDelete.end().node())
-                        extraCharacters = selectionToDelete.end().offset() - selectionToDelete.start().offset();
-                    else
-                        extraCharacters = selectionToDelete.end().offset();
-                    extent = Position(extent.node(), extent.offset() + extraCharacters);
-                }
-                selectionAfterUndo.setWithoutValidation(startingSelection().start(), extent);
-            }
+            // setStartingSelection so that undo selects what was deleted
+            if (selectionToDelete.isCaretOrRange() && granularity != CharacterGranularity)
+                setStartingSelection(selectionToDelete);
             break;
         }
         case Selection::NONE:
@@ -487,31 +401,20 @@ void TypingCommand::forwardDeleteKeyPressed(TextGranularity granularity)
             break;
     }
     
-    if (selectionToDelete.isCaretOrRange() && document()->frame()->shouldDeleteSelection(selectionToDelete)) {
-        // make undo select what was deleted
-        setStartingSelection(selectionAfterUndo);
-        CompositeEditCommand::deleteSelection(selectionToDelete, m_smartDelete);
+    if (selectionToDelete.isCaretOrRange() && document()->frame()->shouldDeleteSelection(SelectionController(selectionToDelete))) {
+        deleteSelection(selectionToDelete, m_smartDelete);
         setSmartDelete(false);
         typingAddedToOpenCommand();
     }
-    // Workaround for this bug:
-    // <rdar://problem/4653755> UIKit text widgets should use WebKit editing API to manipulate text
     else {
-        setEndingSelection(document()->frame()->selectionController()->selection());
+        setEndingSelection(document()->frame()->selection().selection());
         closeTyping(this);
     }
-}
-
-void TypingCommand::deleteSelection(bool smartDelete)
-{
-    CompositeEditCommand::deleteSelection(smartDelete);
-    typingAddedToOpenCommand();
 }
 
 bool TypingCommand::preservesTypingStyle() const
 {
     switch (m_commandType) {
-        case DeleteSelection:
         case DeleteKey:
         case ForwardDeleteKey:
         case InsertParagraphSeparator:

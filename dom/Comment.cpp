@@ -17,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -42,6 +42,11 @@ Comment::~Comment()
 {
 }
 
+const AtomicString& Comment::localName() const
+{
+    return commentAtom;
+}
+
 String Comment::nodeName() const
 {
     return commentAtom.domString();
@@ -54,7 +59,7 @@ Node::NodeType Comment::nodeType() const
 
 PassRefPtr<Node> Comment::cloneNode(bool /*deep*/)
 {
-    return document()->createComment(m_data);
+    return document()->createComment(str);
 }
 
 // DOM Section 1.1.1
@@ -67,6 +72,11 @@ String Comment::toString() const
 {
     // FIXME: We need to substitute entity references here.
     return "<!--" + nodeValue() + "-->";
+}
+
+bool Comment::offsetInCharacters() const
+{
+    return true;
 }
 
 } // namespace WebCore

@@ -17,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 #include "config.h"
@@ -54,14 +54,14 @@ void HTMLBaseFontElement::setFace(const String &value)
     setAttribute(faceAttr, value);
 }
 
-int HTMLBaseFontElement::size() const
+String HTMLBaseFontElement::size() const
 {
-    return getAttribute(sizeAttr).toInt();
+    return getAttribute(sizeAttr);
 }
 
-void HTMLBaseFontElement::setSize(int value)
+void HTMLBaseFontElement::setSize(const String &value)
 {
-    setAttribute(sizeAttr, String::number(value));
+    setAttribute(sizeAttr, value);
 }
 
 }

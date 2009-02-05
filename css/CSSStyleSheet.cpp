@@ -1,6 +1,8 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,16 +16,15 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "CSSStyleSheet.h"
 
 #include "CSSImportRule.h"
 #include "CSSNamespace.h"
-#include "CSSParser.h"
+#include "cssparser.h"
 #include "CSSRuleList.h"
 #include "Document.h"
 #include "ExceptionCode.h"
@@ -31,30 +32,27 @@
 
 namespace WebCore {
 
-CSSStyleSheet::CSSStyleSheet(CSSStyleSheet* parentSheet, const String& href, const String& charset)
+CSSStyleSheet::CSSStyleSheet(CSSStyleSheet* parentSheet, String href)
     : StyleSheet(parentSheet, href)
     , m_doc(parentSheet ? parentSheet->doc() : 0)
+    , m_implicit(false)
     , m_namespaces(0)
-    , m_charset(charset)
-    , m_loadCompleted(false)
 {
 }
 
-CSSStyleSheet::CSSStyleSheet(Node *parentNode, const String& href, const String& charset)
+CSSStyleSheet::CSSStyleSheet(Node *parentNode, String href, bool _implicit)
     : StyleSheet(parentNode, href)
     , m_doc(parentNode->document())
+    , m_implicit(_implicit) 
     , m_namespaces(0)
-    , m_charset(charset)
-    , m_loadCompleted(false)
 {
 }
 
-CSSStyleSheet::CSSStyleSheet(CSSRule *ownerRule, const String& href, const String& charset)
+CSSStyleSheet::CSSStyleSheet(CSSRule *ownerRule, String href)
     : StyleSheet(ownerRule, href)
     , m_doc(0)
+    , m_implicit(false)
     , m_namespaces(0)
-    , m_charset(charset)
-    , m_loadCompleted(false)
 {
 }
 
@@ -93,23 +91,16 @@ unsigned CSSStyleSheet::insertRule(const String& rule, unsigned index, Exception
     return index;
 }
 
-int CSSStyleSheet::addRule(const String& selector, const String& style, int index, ExceptionCode& ec)
+unsigned CSSStyleSheet::addRule(const String &selector, const String &style, int index, ExceptionCode& ec)
 {
-    insertRule(selector + " { " + style + " }", index, ec);
-
-    // As per Microsoft documentation, always return -1.
-    return -1;
+    if (index == -1)
+        index = length();
+    return insertRule(selector + " { " + style + " }", index, ec);
 }
 
-int CSSStyleSheet::addRule(const String& selector, const String& style, ExceptionCode& ec)
+CSSRuleList *CSSStyleSheet::cssRules()
 {
-    return addRule(selector, style, length(), ec);
-}
-
-
-CSSRuleList* CSSStyleSheet::cssRules(bool omitCharsetRules)
-{
-    return new CSSRuleList(this, omitCharsetRules);
+    return new CSSRuleList(this);
 }
 
 void CSSStyleSheet::deleteRule(unsigned index, ExceptionCode& ec)
@@ -176,7 +167,8 @@ void CSSStyleSheet::checkLoaded()
         return;
     if (parent())
         parent()->checkLoaded();
-    m_loadCompleted = m_parentNode ? m_parentNode->sheetLoaded() : true;
+    if (m_parentNode)
+        m_parentNode->sheetLoaded();
 }
 
 DocLoader *CSSStyleSheet::docLoader()
@@ -190,17 +182,12 @@ DocLoader *CSSStyleSheet::docLoader()
 
 void CSSStyleSheet::styleSheetChanged()
 {
-    StyleBase* root = this;
-    while (StyleBase* parent = root->parent())
-        root = parent;
-    Document* documentToUpdate = (root && root->isCSSStyleSheet()) ? static_cast<CSSStyleSheet*>(root)->doc() : 0;
-    
     /* FIXME: We don't need to do everything updateStyleSelector does,
      * basically we just need to recreate the document's selector with the
      * already existing style sheets.
      */
-    if (documentToUpdate)
-        documentToUpdate->updateStyleSelector();
+    if (m_doc)
+        m_doc->updateStyleSelector();
 }
 
 }

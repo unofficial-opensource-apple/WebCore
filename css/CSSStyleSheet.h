@@ -1,6 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,12 +16,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSStyleSheet_h
-#define CSSStyleSheet_h
+#ifndef CSSStyleSheet_H
+#define CSSStyleSheet_H
 
 #include "StyleSheet.h"
 
@@ -34,11 +36,12 @@ class Document;
 
 typedef int ExceptionCode;
 
-class CSSStyleSheet : public StyleSheet {
+class CSSStyleSheet : public StyleSheet
+{
 public:
-    CSSStyleSheet(Node* parentNode, const String& href = String(), const String& charset = String());
-    CSSStyleSheet(CSSStyleSheet* parentSheet, const String& href = String(), const String& charset = String());
-    CSSStyleSheet(CSSRule* ownerRule, const String& href = String(), const String& charset = String());
+    CSSStyleSheet(Node* parentNode, String href = String(), bool _implicit = false);
+    CSSStyleSheet(CSSStyleSheet* parentSheet, String href = String());
+    CSSStyleSheet(CSSRule* ownerRule, String href = String());
     
     ~CSSStyleSheet();
     
@@ -47,16 +50,12 @@ public:
     virtual String type() const { return "text/css"; }
 
     CSSRule* ownerRule() const;
-    CSSRuleList* cssRules(bool omitCharsetRules = false);
+    CSSRuleList* cssRules();
     unsigned insertRule(const String& rule, unsigned index, ExceptionCode&);
     void deleteRule(unsigned index, ExceptionCode&);
-
-    // IE Extensions
-    CSSRuleList* rules() { return cssRules(true); }
-    int addRule(const String& selector, const String& style, int index, ExceptionCode&);
-    int addRule(const String& selector, const String& style, ExceptionCode&);
+    unsigned addRule(const String& selector, const String& style, int index, ExceptionCode&);
     void removeRule(unsigned index, ExceptionCode& ec) { deleteRule(index, ec); }
-
+    
     void addNamespace(CSSParser*, const AtomicString& prefix, const AtomicString& uri);
     const AtomicString& determineNamespace(const AtomicString& prefix);
     
@@ -69,15 +68,12 @@ public:
     virtual void checkLoaded();
     DocLoader* docLoader();
     Document* doc() { return m_doc; }
-    const String& charset() const { return m_charset; }
-
-    bool loadCompleted() const { return m_loadCompleted; }
+    bool implicit() { return m_implicit; }
 
 protected:
     Document* m_doc;
+    bool m_implicit;
     CSSNamespace* m_namespaces;
-    String m_charset;
-    bool m_loadCompleted;
 };
 
 } // namespace

@@ -23,17 +23,14 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef CanvasPattern_h
-#define CanvasPattern_h
+#ifndef HTMLImagePattern_h
+#define HTMLImagePattern_h
 
 #include "CachedResourceClient.h"
-#include <wtf/RefCounted.h>
+#include "Shared.h"
 
-#if PLATFORM(CG)
-#include <wtf/RetainPtr.h>
+#if __APPLE__
 #include <CoreGraphics/CoreGraphics.h>
-#elif PLATFORM(CAIRO)
-#include <cairo.h>
 #endif
 
 namespace WebCore {
@@ -43,36 +40,28 @@ namespace WebCore {
 
     typedef int ExceptionCode;
 
-    class CanvasPattern : public RefCounted<CanvasPattern>, CachedResourceClient {
+    class CanvasPattern : public Shared<CanvasPattern>, CachedResourceClient {
     public:
         static void parseRepetitionType(const String&, bool& repeatX, bool& repeatY, ExceptionCode&);
 
-#if PLATFORM(CG)
+#if __APPLE__
         CanvasPattern(CGImageRef, bool repeatX, bool repeatY);
-#elif PLATFORM(CAIRO)
-        CanvasPattern(cairo_surface_t*, bool repeatX, bool repeatY);
 #endif
         CanvasPattern(CachedImage*, bool repeatX, bool repeatY);
         ~CanvasPattern();
 
-#if PLATFORM(CG)
-        CGImageRef platformImage() const { return m_platformImage.get(); }
-#elif PLATFORM(CAIRO)
-        cairo_surface_t* platformImage() const { return m_platformImage; }
+#if __APPLE__
+        CGImageRef platformImage() const { return m_platformImage; }
 #endif
         CachedImage* cachedImage() const { return m_cachedImage; }
 
-#if PLATFORM(CG)
+#if __APPLE__
         CGPatternRef createPattern(const CGAffineTransform&);
-#elif PLATFORM(CAIRO)
-        cairo_pattern_t* createPattern(const cairo_matrix_t&);
 #endif
 
     private:
-#if PLATFORM(CG)
-        const RetainPtr<CGImageRef> m_platformImage;
-#elif PLATFORM(CAIRO)
-        cairo_surface_t* const m_platformImage;
+#if __APPLE__
+        const CGImageRef m_platformImage;
 #endif
         CachedImage* const m_cachedImage;
         const bool m_repeatX;

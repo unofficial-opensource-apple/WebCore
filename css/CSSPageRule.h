@@ -17,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSPageRule_h
-#define CSSPageRule_h
+#ifndef CSSPageRule_H
+#define CSSPageRule_H
 
 #include "CSSRule.h"
 #include <wtf/RefPtr.h>
@@ -31,29 +31,23 @@ namespace WebCore {
 
 class CSSMutableStyleDeclaration;
 
-typedef int ExceptionCode;
-
-class CSSPageRule : public CSSRule {
+class CSSPageRule : public CSSRule
+{
 public:
     CSSPageRule(StyleBase* parent);
     virtual ~CSSPageRule();
 
+    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
+
     virtual bool isPageRule() { return true; }
 
     String selectorText() const;
-    void setSelectorText(const String&, ExceptionCode&);
-
-    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
-
-    // Inherited from CSSRule
-    virtual unsigned short type() const { return PAGE_RULE; }
-
-    virtual String cssText() const;
+    void setSelectorText(const String&);
 
 protected:
     RefPtr<CSSMutableStyleDeclaration> m_style;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSPageRule_h
+#endif

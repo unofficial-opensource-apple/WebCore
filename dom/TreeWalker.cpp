@@ -19,8 +19,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -58,79 +58,93 @@ void TreeWalker::setCurrentNode(Node* node)
 
 Node* TreeWalker::parentNode()
 {
-    for (Node* node = currentNode()->parentNode(); node && (node == root() || node->isDescendantOf(root())); node = node->parentNode()) {
+    Node* result = 0;
+    for (Node* node = currentNode()->parentNode(); node && node != root(); node = node->parentNode()) {
         if (acceptNode(node) == NodeFilter::FILTER_ACCEPT) {
             setCurrentNode(node);
-            return node;
+            result = node;
+            break;
         }
     }
-    return 0;
+    return result;
 }
 
 Node* TreeWalker::firstChild()
 {
-    for (Node* node = currentNode()->firstChild(); node && (node == root() || node->isDescendantOf(root())); node = node->nextSibling()) {
+    Node* result = 0;
+    for (Node* node = currentNode()->firstChild(); node; node = node->nextSibling()) {
         if (acceptNode(node) == NodeFilter::FILTER_ACCEPT) {
             setCurrentNode(node);
-            return node;
+            result = node;
+            break;
         }
     }
-    return 0;
+    return result;
 }
 
 Node* TreeWalker::lastChild()
 {
-    for (Node* node = currentNode()->lastChild(); node && (node == root() || node->isDescendantOf(root())); node = node->previousSibling()) {
+    Node* result = 0;
+    for (Node* node = currentNode()->lastChild(); node; node = node->previousSibling()) {
         if (acceptNode(node) == NodeFilter::FILTER_ACCEPT) {
             setCurrentNode(node);
-            return node;
+            result = node;
+            break;
         }
     }
-    return 0;
+    return result;
 }
 
 Node* TreeWalker::previousSibling()
 {
-    for (Node* node = currentNode()->previousSibling(); node && (node == root() || node->isDescendantOf(root())); node = node->previousSibling()) {
+    Node* result = 0;
+    for (Node* node = currentNode()->previousSibling(); node; node = node->previousSibling()) {
         if (acceptNode(node) == NodeFilter::FILTER_ACCEPT) {
             setCurrentNode(node);
-            return node;
+            result = node;
+            break;
         }
     }
-    return 0;
+    return result;
 }
 
 Node* TreeWalker::nextSibling()
 {
-    for (Node* node = currentNode()->nextSibling(); node && (node == root() || node->isDescendantOf(root())); node = node->nextSibling()) {
+    Node* result = 0;
+    for (Node* node = currentNode()->nextSibling(); node; node = node->nextSibling()) {
         if (acceptNode(node) == NodeFilter::FILTER_ACCEPT) {
             setCurrentNode(node);
-            return node;
+            result = node;
+            break;
         }
     }
-    return 0;
+    return result;
 }
 
 Node* TreeWalker::previousNode()
 {
-    for (Node* node = currentNode()->traversePreviousNode(); node && (node == root() || node->isDescendantOf(root())); node = node->traversePreviousNode()) {
+    Node* result = 0;
+    for (Node* node = currentNode()->traversePreviousNode(root()); node; node = node->traversePreviousNode(root())) {
         if (acceptNode(node) == NodeFilter::FILTER_ACCEPT && !ancestorRejected(node)) {
             setCurrentNode(node);
-            return node;
+            result = node;
+            break;
         }
     }
-    return 0;
+    return result;
 }
 
 Node* TreeWalker::nextNode()
 {
-    for (Node* node = currentNode()->traverseNextNode(); node && (node == root() || node->isDescendantOf(root())); node = node->traverseNextNode()) {
+    Node* result = 0;
+    for (Node* node = currentNode()->traverseNextNode(root()); node; node = node->traverseNextNode(root())) {
         if (acceptNode(node) == NodeFilter::FILTER_ACCEPT && !ancestorRejected(node)) {
             setCurrentNode(node);
-            return node;
+            result = node;
+            break;
         }
     }
-    return 0;
+    return result;
 }
 
 bool TreeWalker::ancestorRejected(const Node* node) const

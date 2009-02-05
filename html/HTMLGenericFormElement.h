@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,20 +18,22 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLGenericFormElement_h
-#define HTMLGenericFormElement_h
+#ifndef HTML_HTMLGenericFormElementImpl_h
+#define HTML_HTMLGenericFormElementImpl_h
 
+#include "Document.h"
 #include "HTMLElement.h"
 
 namespace WebCore {
 
 class FormDataList;
 class HTMLFormElement;
+class RenderFormElement;
 
 typedef enum
 {
@@ -38,10 +42,13 @@ typedef enum
     HTMLTextEntryAssistanceOff
 }   HTMLTextEntryAssistance;
 
-// FIXME: Rename this class to HTMLFormControlElement.
-class HTMLGenericFormElement : public HTMLElement {
+class HTMLGenericFormElement : public HTMLElement
+{
+    friend class HTMLFormElement;
+    friend class RenderFormElement;
+
 public:
-    HTMLGenericFormElement(const QualifiedName& tagName, Document*, HTMLFormElement*);
+    HTMLGenericFormElement(const QualifiedName& tagName, Document*, HTMLFormElement* = 0);
     virtual ~HTMLGenericFormElement();
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
@@ -58,20 +65,22 @@ public:
     virtual void attach();
     virtual void insertedIntoTree(bool deep);
     virtual void removedFromTree(bool deep);
+    virtual void closeRenderer();
 
     virtual void reset() {}
 
     bool valueMatchesRenderer() const { return m_valueMatchesRenderer; }
     void setValueMatchesRenderer(bool b = true) const { m_valueMatchesRenderer = b; }
 
+    void onSelect();
     void onChange();
 
     bool disabled() const;
     void setDisabled(bool);
 
-    virtual bool supportsFocus() const;
+    virtual bool supportsFocus() const { return isFocusable() || (!disabled() && document() && !document()->haveStylesheetsLoaded()); }
     virtual bool isFocusable() const;
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
+    virtual bool isKeyboardFocusable() const;
     virtual bool isMouseFocusable() const;
     virtual bool isEnumeratable() const { return false; }
 
@@ -91,10 +100,14 @@ public:
      */
     virtual bool appendFormData(FormDataList&, bool) { return false; }
 
+    virtual String stateValue() const;
+    virtual void restoreState(const String& value);
+
     virtual bool isSuccessfulSubmitButton() const { return false; }
     virtual bool isActivatedSubmit() const { return false; }
     virtual void setActivatedSubmit(bool flag) { }
 
+    int tabIndex() const;
     void setTabIndex(int);
     
     virtual void dispatchFocusEvent();
@@ -103,37 +116,17 @@ public:
     virtual HTMLTextEntryAssistance autocorrect();
     virtual HTMLTextEntryAssistance autocapitalize();
 
-    void formDestroyed() { m_form = 0; }
-
 protected:
-    void removeFromForm();
+    HTMLFormElement* getForm() const;
 
 private:
-    virtual HTMLFormElement* virtualForm() const;
-
     HTMLFormElement* m_form;
     bool m_disabled;
     bool m_readOnly;
     mutable bool m_valueMatchesRenderer;
     HTMLTextEntryAssistance m_autocorrect;
     HTMLTextEntryAssistance m_autocapitalize;
-};
 
-class HTMLFormControlElementWithState : public HTMLGenericFormElement {
-public:
-    HTMLFormControlElementWithState(const QualifiedName& tagName, Document*, HTMLFormElement*);
-    virtual ~HTMLFormControlElementWithState();
-
-    virtual void finishParsingChildren();
-
-    virtual bool saveState(String& value) const = 0;
-
-protected:
-    virtual void willMoveToNewOwnerDocument();
-    virtual void didMoveToNewOwnerDocument();
-
-private:
-    virtual void restoreState(const String& value) = 0;
 };
 
 } //namespace

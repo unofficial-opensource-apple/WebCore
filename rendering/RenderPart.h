@@ -17,33 +17,33 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderPart_h
-#define RenderPart_h
+#ifndef RenderPart_H
+#define RenderPart_H
 
 #include "RenderWidget.h"
 
 namespace WebCore {
 
 class Frame;
-class HTMLFrameOwnerElement;
+class HTMLElement;
 
 class RenderPart : public RenderWidget {
 public:
-    RenderPart(HTMLFrameOwnerElement*);
+    RenderPart(HTMLElement*);
     virtual ~RenderPart();
     
     virtual const char* renderName() const { return "RenderPart"; }
 
-    virtual void setWidget(Widget*);
+    void setWidget(Widget*);
 
     // FIXME: This should not be necessary.
     // Remove this once WebKit knows to properly schedule layouts using WebCore when objects resize.
-    virtual void updateWidgetPosition();
+    void updateWidgetPosition();
 
     bool hasFallbackContent() const { return m_hasFallbackContent; }
 
@@ -56,6 +56,7 @@ private:
     virtual void deleteWidget();
 
     Frame* m_frame;
+    bool m_disconnectOwnerElementWhenDestroyed;
 };
 
 }

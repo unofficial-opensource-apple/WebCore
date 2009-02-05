@@ -18,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -34,26 +34,18 @@ namespace WebCore {
     class WheelEvent : public MouseRelatedEvent {
     public:
         WheelEvent();
-        WheelEvent(float wheelDeltaX, float wheelDeltaY, AbstractView*,
+        WheelEvent(bool horizontal, int wheelDelta, AbstractView*,
                    int screenX, int screenY, int pageX, int pageY,
                    bool ctrlKey, bool altKey, bool shiftKey, bool metaKey);
-
-        void initWheelEvent(int wheelDeltaX, int wheelDeltaY, AbstractView*,
-                            int screenX, int screenY, int pageX, int pageY,
-                            bool ctrlKey, bool altKey, bool shiftKey, bool metaKey);
-
-        int wheelDelta() const { if (m_wheelDeltaY == 0) return m_wheelDeltaX; return m_wheelDeltaY; }
-        int wheelDeltaX() const { return m_wheelDeltaX; }
-        int wheelDeltaY() const { return m_wheelDeltaY; }
-
-        // Needed for Objective-C legacy support
-        bool isHorizontal() const { return m_wheelDeltaX; }
+        
+        bool isHorizontal() const { return m_horizontal; }
+        int wheelDelta() const { return m_wheelDelta; }
 
     private:
         virtual bool isWheelEvent() const;
 
-        int m_wheelDeltaX;
-        int m_wheelDeltaY;
+        bool m_horizontal;
+        int m_wheelDelta;
     };
 
 } // namespace WebCore

@@ -17,10 +17,9 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "CSSRuleList.h"
 
@@ -33,13 +32,13 @@ CSSRuleList::CSSRuleList()
 {
 }
 
-CSSRuleList::CSSRuleList(StyleList* list, bool omitCharsetRules)
+CSSRuleList::CSSRuleList(StyleList* lst)
 {
-    if (list) {
-        unsigned len = list->length();
+    if (lst) {
+        unsigned len = lst->length();
         for (unsigned i = 0; i < len; ++i) {
-            StyleBase* style = list->item(i);
-            if (style->isRule() && !(omitCharsetRules && style->isCharsetRule()))
+            StyleBase* style = lst->item(i);
+            if (style->isRule())
                 append(static_cast<CSSRule*>(style));
         }
     }
@@ -57,7 +56,8 @@ void CSSRuleList::deleteRule(unsigned index)
     CSSRule* rule = m_lstCSSRules.take(index);
     if (rule)
         rule->deref();
-    // FIXME: Throw INDEX_SIZE_ERR exception here if !rule
+    else
+        ; // ### Throw INDEX_SIZE_ERR exception here (TODO)
 }
 
 void CSSRuleList::append(CSSRule* rule)
@@ -72,8 +72,8 @@ unsigned CSSRuleList::insertRule(CSSRule* rule, unsigned index)
         return index;
     }
 
-    // FIXME: Should throw INDEX_SIZE_ERR exception instead!
+    // ### Should throw INDEX_SIZE_ERR exception instead! (TODO)
     return 0;
 }
 
-} // namespace WebCore
+}

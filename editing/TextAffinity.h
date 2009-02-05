@@ -26,9 +26,6 @@
 #ifndef TextAffinity_h
 #define TextAffinity_h
 
-#include <wtf/Platform.h>
-
-
 namespace WebCore {
 
 // These match the AppKit values for these concepts.
@@ -37,17 +34,6 @@ namespace WebCore {
 // NSSelectionAffinityDownstream = 1
 typedef enum { UPSTREAM = 0, DOWNSTREAM = 1 } EAffinity;
 
-#ifdef __OBJC__
-inline NSSelectionAffinity kit(EAffinity affinity)
-{
-    return static_cast<NSSelectionAffinity>(affinity);
 }
 
-inline EAffinity core(NSSelectionAffinity affinity)
-{
-    return static_cast<EAffinity>(affinity);
-}
 #endif
-} // namespace WebCore
-
-#endif // TextAffinity_h

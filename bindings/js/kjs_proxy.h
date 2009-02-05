@@ -15,73 +15,50 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef kjs_proxy_h
-#define kjs_proxy_h
+#ifndef KJS_PROXY_H
+#define KJS_PROXY_H
 
-#include "JSDOMWindow.h"
-#include <kjs/protect.h>
 #include <wtf/RefPtr.h>
 
 namespace KJS {
-    class JSGlobalObject;
     class JSValue;
+    class ScriptInterpreter;
 }
 
 namespace WebCore {
 
+class DeprecatedString;
 class Event;
 class EventListener;
 class Frame;
 class Node;
 class String;
 
-// FIXME: Rename this class to JSController and the Frame function to javaScript().
-
 class KJSProxy {
 public:
     KJSProxy(Frame*);
     ~KJSProxy();
-
-    bool haveGlobalObject() const { return m_globalObject; }
-    JSDOMWindow* globalObject()
-    {
-        initScriptIfNeeded();
-        return m_globalObject;
-    }
-
-    KJS::JSValue* evaluate(const String& filename, int baseLine, const String& code);
+    KJS::JSValue* evaluate(const String& filename, int baseLine, const String& code, Node*);
     void clear();
     EventListener* createHTMLEventHandler(const String& functionName, const String& code, Node*);
-#if ENABLE(SVG)
+#if SVG_SUPPORT
     EventListener* createSVGEventHandler(const String& functionName, const String& code, Node*);
 #endif
     void finishedWithEvent(Event*);
+    KJS::ScriptInterpreter *interpreter();
     void setEventHandlerLineno(int lineno) { m_handlerLineno = lineno; }
 
-    void clearDocumentWrapper();
+    void initScriptIfNeeded();
 
-    void setProcessingTimerCallback(bool b) { m_processingTimerCallback = b; }
-    bool processingUserGesture() const;
-
-    bool isEnabled();
+    bool haveInterpreter() const { return m_script; }
 
 private:
-    void initScriptIfNeeded()
-    {
-        if (!m_globalObject)
-            initScript();
-    }
-    void initScript();
-
-    KJS::ProtectedPtr<JSDOMWindow> m_globalObject;
-    Frame* m_frame;
+    RefPtr<KJS::ScriptInterpreter> m_script;
+    Frame *m_frame;
     int m_handlerLineno;
-    
-    bool m_processingTimerCallback;
-    bool m_processingInlineCode;
 };
 
 }

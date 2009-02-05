@@ -18,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -37,9 +37,9 @@ MutationEvent::MutationEvent(const AtomicString& type, bool canBubble, bool canc
                              const String& attrName, unsigned short attrChange)
     : Event(type, canBubble, cancelable)
     , m_relatedNode(relatedNode)
-    , m_prevValue(prevValue)
-    , m_newValue(newValue)
-    , m_attrName(attrName)
+    , m_prevValue(prevValue.impl())
+    , m_newValue(newValue.impl())
+    , m_attrName(attrName.impl())
     , m_attrChange(attrChange)
 {
 }
@@ -54,9 +54,9 @@ void MutationEvent::initMutationEvent(const AtomicString& type, bool canBubble, 
     initEvent(type, canBubble, cancelable);
 
     m_relatedNode = relatedNode;
-    m_prevValue = prevValue;
-    m_newValue = newValue;
-    m_attrName = attrName;
+    m_prevValue = prevValue.impl();
+    m_newValue = newValue.impl();
+    m_attrName = attrName.impl();
     m_attrChange = attrChange;
 }
 

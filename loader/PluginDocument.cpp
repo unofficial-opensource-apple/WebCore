@@ -23,21 +23,16 @@
  */
 
 #include "config.h"
+
 #include "PluginDocument.h"
 
-#include "DocumentLoader.h"
-#include "Element.h"
 #include "Frame.h"
-#include "FrameLoader.h"
-#include "FrameLoaderClient.h"
-#include "HTMLEmbedElement.h"
+#include "Element.h"
 #include "HTMLNames.h"
-#include "MainResourceLoader.h"
-#include "Page.h"
 #include "RenderWidget.h"
 #include "SegmentedString.h"
-#include "Settings.h"
 #include "Text.h"
+#include "HTMLEmbedElement.h"
 #include "XMLTokenizer.h"
 
 namespace WebCore {
@@ -80,8 +75,7 @@ void PluginTokenizer::createDocumentStructure()
     RefPtr<Element> body = m_doc->createElementNS(xhtmlNamespaceURI, "body", ec);
     body->setAttribute(marginwidthAttr, "0");
     body->setAttribute(marginheightAttr, "0");
-    body->setAttribute(bgcolorAttr, "rgb(38,38,38)");
-
+       
     rootElement->appendChild(body, ec);
         
     RefPtr<Element> embedElement = m_doc->createElementNS(xhtmlNamespaceURI, "embed", ec);
@@ -91,8 +85,8 @@ void PluginTokenizer::createDocumentStructure()
     m_embedElement->setAttribute(heightAttr, "100%");
     
     m_embedElement->setAttribute(nameAttr, "plugin");
-    m_embedElement->setSrc(m_doc->url());
-    m_embedElement->setType(m_doc->frame()->loader()->responseMIMEType());
+    m_embedElement->setSrc(m_doc->URL());
+    m_embedElement->setType(m_doc->frame()->resourceRequest().m_responseMIMEType);
     
     body->appendChild(embedElement, ec);    
 }
@@ -101,21 +95,8 @@ bool PluginTokenizer::writeRawData(const char* data, int len)
 {
     if (!m_embedElement) {
         createDocumentStructure();
-
-        if (Frame* frame = m_doc->frame()) {
-            Settings* settings = frame->settings();
-            if (settings && settings->arePluginsEnabled()) {
-                m_doc->updateLayout();
-            
-                if (RenderWidget* renderer = static_cast<RenderWidget*>(m_embedElement->renderer())) {
-                    frame->loader()->client()->redirectDataToPlugin(renderer->widget());
-                    frame->loader()->activeDocumentLoader()->mainResourceLoader()->setShouldBufferData(false);
-                }
-            
-                finish();
-            }
-        }
-        
+        m_doc->frame()->redirectDataToPlugin(static_cast<RenderWidget*>(m_embedElement->renderer())->widget());
+        finish();
         return false;
     }
     
@@ -141,8 +122,8 @@ bool PluginTokenizer::isWaitingForScripts() const
     return false;
 }
     
-PluginDocument::PluginDocument(DOMImplementation* implementation, Frame* frame)
-    : HTMLDocument(implementation, frame)
+PluginDocument::PluginDocument(DOMImplementation* _implementation, FrameView* v)
+    : HTMLDocument(_implementation, v)
 {
     setParseMode(Compat);
 }

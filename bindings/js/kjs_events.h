@@ -15,118 +15,128 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef kjs_events_h
-#define kjs_events_h
+#ifndef KJS_EVENTS_H
+#define KJS_EVENTS_H
 
 #include "EventListener.h"
 #include "PlatformString.h"
 #include "kjs_dom.h"
 #include "kjs_html.h"
-#include <kjs/protect.h>
-
-namespace KJS {
-    class Window;
-}
 
 namespace WebCore {
-
     class Clipboard;
     class Event;
+    class KeyboardEvent;
+    class MouseEvent;
+    class MutationEvent;
+    class UIEvent;
+}
 
-    class JSAbstractEventListener : public EventListener {
+namespace KJS {
+
+    class Window;
+    class Clipboard;
+    
+    class JSAbstractEventListener : public WebCore::EventListener {
     public:
-        JSAbstractEventListener(bool html = false);
-
-        virtual void handleEvent(Event*, bool isWindowEvent);
+        JSAbstractEventListener(bool HTML = false);
+        virtual void handleEvent(WebCore::Event*, bool isWindowEvent);
         virtual bool isHTMLEventListener() const;
-        virtual KJS::JSObject* listenerObj() const = 0;
-        virtual KJS::Window* windowObj() const = 0;
-
+        virtual JSObject* listenerObj() const = 0;
+        virtual Window* windowObj() const = 0;
     private:
-        bool m_html;
+        bool html;
     };
 
     class JSUnprotectedEventListener : public JSAbstractEventListener {
     public:
-        JSUnprotectedEventListener(KJS::JSObject* listener, KJS::Window*, bool html = false);
+        JSUnprotectedEventListener(JSObject* listener, Window*, bool HTML = false);
         virtual ~JSUnprotectedEventListener();
-
-        virtual KJS::JSObject* listenerObj() const;
-        virtual KJS::Window* windowObj() const;
+        virtual JSObject* listenerObj() const;
+        virtual Window* windowObj() const;
         void clearWindowObj();
-        void mark();
+        virtual void mark();
     private:
-        KJS::JSObject* m_listener;
-        KJS::Window* m_win;
+        JSObject* listener;
+        Window* win;
     };
 
     class JSEventListener : public JSAbstractEventListener {
     public:
-        JSEventListener(KJS::JSObject* listener, KJS::Window*, bool html = false);
+        JSEventListener(JSObject* listener, Window*, bool HTML = false);
         virtual ~JSEventListener();
-
-        virtual KJS::JSObject* listenerObj() const;
-        virtual KJS::Window* windowObj() const;
+        virtual JSObject* listenerObj() const;
+        virtual Window* windowObj() const;
         void clearWindowObj();
-
     protected:
-        mutable KJS::ProtectedPtr<KJS::JSObject> m_listener;
-
+        mutable ProtectedPtr<JSObject> listener;
     private:
-        KJS::ProtectedPtr<KJS::Window> m_win;
+        ProtectedPtr<Window> win;
     };
 
     class JSLazyEventListener : public JSEventListener {
     public:
-        JSLazyEventListener(const String& functionName, const String& code, KJS::Window*, Node*, int lineNumber = 0);
-        virtual KJS::JSObject* listenerObj() const;
-
+        JSLazyEventListener(const WebCore::String& functionName, const WebCore::String& code, Window*, WebCore::Node*, int lineno = 0);
+        virtual JSObject* listenerObj() const;
     private:
-        virtual KJS::JSValue* eventParameterName() const;
+        virtual JSValue* eventParameterName() const;
         void parseCode() const;
 
-        mutable String m_functionName;
-        mutable String m_code;
-        mutable bool m_parsed;
-        int m_lineNumber;
-        Node* m_originalNode;
+        mutable WebCore::String m_functionName;
+        mutable WebCore::String code;
+        mutable bool parsed;
+        int lineNumber;
+        WebCore::Node* originalNode;
     };
 
-    KJS::JSValue* getNodeEventListener(Node*, const AtomicString& eventType);
+    JSValue* getNodeEventListener(WebCore::Node* n, const WebCore::AtomicString& eventType);
 
-    class JSClipboard : public KJS::DOMObject {
+    class DOMEvent : public DOMObject {
     public:
-        JSClipboard(KJS::JSObject* prototype, Clipboard*);
-        virtual ~JSClipboard();
-
-        virtual bool getOwnPropertySlot(KJS::ExecState*, const KJS::Identifier&, KJS::PropertySlot&);
-        KJS::JSValue* getValueProperty(KJS::ExecState*, int token) const;
-        virtual void put(KJS::ExecState*, const KJS::Identifier&, KJS::JSValue*, int attr = KJS::None);
-        void putValueProperty(KJS::ExecState*, int token, KJS::JSValue*, int attr);
-
-        virtual const KJS::ClassInfo* classInfo() const { return &info; }
-        static const KJS::ClassInfo info;
-
-        enum { ClearData, GetData, SetData, Types, SetDragImage, DropEffect, EffectAllowed };
-
-        Clipboard* impl() const { return m_impl.get(); }
-
-    private:
-        RefPtr<Clipboard> m_impl;
+        DOMEvent(ExecState*, WebCore::Event*);
+        virtual ~DOMEvent();
+        virtual bool getOwnPropertySlot(ExecState*, const Identifier&, PropertySlot&);
+        JSValue* getValueProperty(ExecState*, int token) const;
+        virtual void put(ExecState*, const Identifier&, JSValue*, int attr = None);
+        void putValueProperty(ExecState*, int token, JSValue*, int);
+        virtual const ClassInfo* classInfo() const { return &info; }
+        static const ClassInfo info;
+        enum { Type, Target, CurrentTarget, EventPhase, Bubbles,
+               Cancelable, TimeStamp, StopPropagation, PreventDefault, InitEvent,
+               // MS IE equivalents
+               SrcElement, ReturnValue, CancelBubble, ClipboardData, DataTransfer };
+        WebCore::Event *impl() const { return m_impl.get(); }
+        virtual void mark();
+    protected:
+        RefPtr<WebCore::Event> m_impl;
+        mutable Clipboard* clipboard;
     };
 
-    KJS::JSValue* toJS(KJS::ExecState*, Clipboard*);
-    Clipboard* toClipboard(KJS::JSValue*);
+    JSValue* toJS(ExecState*, WebCore::Event*);
 
-    // Functions
-    KJS::JSValue* jsClipboardPrototypeFunctionClearData(KJS::ExecState*, KJS::JSObject*, const KJS::List&);
-    KJS::JSValue* jsClipboardPrototypeFunctionGetData(KJS::ExecState*, KJS::JSObject*, const KJS::List&);
-    KJS::JSValue* jsClipboardPrototypeFunctionSetData(KJS::ExecState*, KJS::JSObject*, const KJS::List&);
-    KJS::JSValue* jsClipboardPrototypeFunctionSetDragImage(KJS::ExecState*, KJS::JSObject*, const KJS::List&);
+    WebCore::Event* toEvent(JSValue*); // returns 0 if value is not a DOMEvent object
 
-} // namespace WebCore
+    KJS_DEFINE_PROTOTYPE(DOMEventProto)
 
-#endif // kjs_events_h
+    class Clipboard : public DOMObject {
+    friend class ClipboardProtoFunc;
+    public:
+        Clipboard(ExecState*, WebCore::Clipboard *ds);
+        virtual bool getOwnPropertySlot(ExecState*, const Identifier&, PropertySlot&);
+        JSValue* getValueProperty(ExecState*, int token) const;
+        virtual void put(ExecState*, const Identifier&, JSValue*, int attr = None);
+        void putValueProperty(ExecState*, int token, JSValue*, int attr);
+        virtual bool toBoolean(ExecState*) const { return true; }
+        virtual const ClassInfo* classInfo() const { return &info; }
+        static const ClassInfo info;
+        enum { ClearData, GetData, SetData, Types, SetDragImage, DropEffect, EffectAllowed };
+    private:
+        RefPtr<WebCore::Clipboard> clipboard;
+    };
+
+} // namespace
+
+#endif

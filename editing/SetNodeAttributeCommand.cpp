@@ -31,9 +31,9 @@
 
 namespace WebCore {
 
-SetNodeAttributeCommand::SetNodeAttributeCommand(Element* element, 
+SetNodeAttributeCommand::SetNodeAttributeCommand(Document *document, Element *element, 
                                                  const QualifiedName& attribute, const String &value)
-    : EditCommand(element->document()), m_element(element), m_attribute(attribute), m_value(value)
+    : EditCommand(document), m_element(element), m_attribute(attribute), m_value(value)
 {
     ASSERT(m_element);
     ASSERT(!m_value.isNull());

@@ -8,7 +8,6 @@ alink
 alt
 archive
 autocomplete
-autoplay
 autosave
 axis
 background
@@ -39,7 +38,6 @@ compact
 composite
 content
 contenteditable
-controls
 coords
 data
 datetime
@@ -49,7 +47,6 @@ dir
 direction
 disabled
 enctype
-end
 face
 for
 frame
@@ -73,11 +70,6 @@ leftmargin
 link
 longdesc
 loop
-playcount
-loopend
-loopstart
-lowsrc
-manifest
 marginheight
 marginwidth
 max
@@ -134,18 +126,7 @@ onselect
 onselectstart
 onsubmit
 onunload
-onwebkitanimationstart
-onwebkitanimationiteration
-onwebkitanimationend
-onwebkittransitionend
 onorientationchange
-ontouchstart
-ontouchmove
-ontouchend
-ontouchcancel
-ongesturestart
-ongesturechange
-ongestureend
 pagex
 pagey
 placeholder
@@ -153,7 +134,6 @@ plain
 pluginpage
 pluginspage
 pluginurl
-poster
 precision
 profile
 prompt

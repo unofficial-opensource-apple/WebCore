@@ -17,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-#ifndef HTMLTitleElement_h
-#define HTMLTitleElement_h
+#ifndef HTMLTitleElement_H
+#define HTMLTitleElement_H
 
 #include "HTMLElement.h"
 
@@ -38,7 +38,7 @@ public:
 
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
-    virtual void childrenChanged(bool changedByParser = false);
+    virtual void childrenChanged();
 
     String text() const;
     void setText(const String&);

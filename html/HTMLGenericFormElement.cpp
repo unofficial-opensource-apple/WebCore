@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -17,26 +19,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
 #include "HTMLGenericFormElement.h"
 
-#include "Document.h"
-#include "EventHandler.h"
 #include "Event.h"
 #include "EventNames.h"
 #include "Frame.h"
 #include "HTMLFormElement.h"
-#include "HTMLInputElement.h"
-#include "HTMLNames.h"
-#include "HTMLParser.h"
-#include "HTMLTokenizer.h"
 #include "RenderTheme.h"
-#include "Tokenizer.h"
+#include "RenderWidget.h"
+#include "HTMLNames.h"
 
 namespace WebCore {
 
@@ -53,7 +50,7 @@ HTMLGenericFormElement::HTMLGenericFormElement(const QualifiedName& tagName, Doc
     , m_autocapitalize(HTMLTextEntryAssistanceUnspecified)
 {
     if (!m_form)
-        m_form = findFormAncestor();
+        m_form = getForm();
     if (m_form)
         m_form->registerFormElement(this);
 }
@@ -94,15 +91,25 @@ void HTMLGenericFormElement::parseMappedAttribute(MappedAttribute *attr)
 
 void HTMLGenericFormElement::attach()
 {
-    ASSERT(!attached());
+    assert(!attached());
 
     HTMLElement::attach();
 
     // The call to updateFromElement() needs to go after the call through
     // to the base class's attach() because that can sometimes do a close
     // on the renderer.
-    if (renderer())
+    if (renderer()) {
         renderer()->updateFromElement();
+    
+        // Delayed attachment in order to prevent FOUC can result in an object being
+        // programmatically focused before it has a render object.  If we have been focused
+        // (i.e., if we are the focusNode) then go ahead and focus our corresponding native widget.
+        // (Attach/detach can also happen as a result of display type changes, e.g., making a widget
+        // block instead of inline, and focus should be restored in that case as well.)
+        if (document()->focusNode() == this && renderer()->isWidget() && 
+            static_cast<RenderWidget*>(renderer())->widget())
+            static_cast<RenderWidget*>(renderer())->widget()->setFocus();
+    }
 }
 
 void HTMLGenericFormElement::insertedIntoTree(bool deep)
@@ -112,11 +119,12 @@ void HTMLGenericFormElement::insertedIntoTree(bool deep)
         // JavaScript and inserted inside a form.  In the case of the parser
         // setting a form, we will already have a non-null value for m_form, 
         // and so we don't need to do anything.
-        m_form = findFormAncestor();
+        m_form = getForm();
         if (m_form)
             m_form->registerFormElement(this);
         else
-            document()->checkedRadioButtons().addButton(this);
+            if (isRadioButton() && !name().isEmpty() && isChecked())
+                document()->radioButtonChecked((HTMLInputElement*)this, m_form);
     }
 
     HTMLElement::insertedIntoTree(deep);
@@ -134,17 +142,19 @@ void HTMLGenericFormElement::removedFromTree(bool deep)
 {
     // If the form and element are both in the same tree, preserve the connection to the form.
     // Otherwise, null out our form and remove ourselves from the form's list of elements.
-    HTMLParser* parser = 0;
-    if (Tokenizer* tokenizer = document()->tokenizer())
-        if (tokenizer->isHTMLTokenizer())
-            parser = static_cast<HTMLTokenizer*>(tokenizer)->htmlParser();
-    
-    if (m_form && !(parser && parser->isHandlingResidualStyleAcrossBlocks()) && findRoot(this) != findRoot(m_form)) {
+    if (m_form && !m_form->preserveAcrossRemove() && findRoot(this) != findRoot(m_form)) {
         m_form->removeFormElement(this);
         m_form = 0;
     }
-
     HTMLElement::removedFromTree(deep);
+}
+
+HTMLFormElement* HTMLGenericFormElement::getForm() const
+{
+    for (Node* p = parentNode(); p; p = p->parentNode())
+        if (p->hasTagName(formTag))
+            return static_cast<HTMLFormElement*>(p);
+    return 0;
 }
 
 const AtomicString& HTMLGenericFormElement::name() const
@@ -158,9 +168,16 @@ void HTMLGenericFormElement::setName(const AtomicString &value)
     setAttribute(nameAttr, value);
 }
 
+void HTMLGenericFormElement::onSelect()
+{
+    // ### make this work with new form events architecture
+    dispatchHTMLEvent(selectEvent,true,false);
+}
+
 void HTMLGenericFormElement::onChange()
 {
-    dispatchHTMLEvent(changeEvent, true, false);
+    // ### make this work with new form events architecture
+    dispatchHTMLEvent(changeEvent,true,false);
 }
 
 bool HTMLGenericFormElement::disabled() const
@@ -178,11 +195,12 @@ void HTMLGenericFormElement::setReadOnly(bool b)
     setAttribute(readonlyAttr, b ? "" : 0);
 }
 
-void HTMLGenericFormElement::recalcStyle(StyleChange change)
+void HTMLGenericFormElement::recalcStyle( StyleChange ch )
 {
-    HTMLElement::recalcStyle(change);
+    //bool changed = changed();
+    HTMLElement::recalcStyle( ch );
 
-    if (renderer())
+    if (renderer() /*&& changed*/)
         renderer()->updateFromElement();
 }
 
@@ -195,68 +213,51 @@ bool HTMLGenericFormElement::isFocusable() const
     return true;
 }
 
-bool HTMLGenericFormElement::isKeyboardFocusable(KeyboardEvent* event) const
+bool HTMLGenericFormElement::isKeyboardFocusable() const
 {
-    if (isFocusable())
+    if (isFocusable()) {
+        if (renderer()->isWidget()) {
+            return static_cast<RenderWidget*>(renderer())->widget() &&
+                (static_cast<RenderWidget*>(renderer())->widget()->focusPolicy() & Widget::TabFocus);
+        }
         if (document()->frame())
-            return document()->frame()->eventHandler()->tabsToAllControls(event);
+            return document()->frame()->tabsToAllControls();
+    }
     return false;
 }
 
 bool HTMLGenericFormElement::isMouseFocusable() const
 {
+    if (isFocusable()) {
+        if (renderer()->isWidget()) {
+            return static_cast<RenderWidget*>(renderer())->widget() &&
+                (static_cast<RenderWidget*>(renderer())->widget()->focusPolicy() & Widget::ClickFocus);
+        } 
+        // For <input type=image> and <button>, we will assume no mouse focusability.  This is
+        // consistent with OS X behavior for buttons.
+        return false;
+    }
     return false;
 }
 
-void HTMLGenericFormElement::setTabIndex(int value)
+String HTMLGenericFormElement::stateValue() const
 {
-    setAttribute(tabindexAttr, String::number(value));
-}
-    
-bool HTMLGenericFormElement::supportsFocus() const
-{
-    return isFocusable() || (!disabled() && !document()->haveStylesheetsLoaded());
+    // Should only reach here if object is inserted into the "form element with
+    // state" set. If so, the derived class is responsible for implementing this function.
+    ASSERT_NOT_REACHED();
+    return String();
 }
 
-HTMLFormElement* HTMLGenericFormElement::virtualForm() const
+void HTMLGenericFormElement::restoreState(const String&)
 {
-    return m_form;
+    // Should only reach here if object of this type was once inserted into the
+    // "form element with state" set. If so, the derived class is responsible for
+    // implementing this function.
+    ASSERT_NOT_REACHED();
 }
 
-void HTMLGenericFormElement::removeFromForm()
+void HTMLGenericFormElement::closeRenderer()
 {
-    if (!m_form)
-        return;
-    m_form->removeFormElement(this);
-    m_form = 0;
-}
-
-HTMLFormControlElementWithState::HTMLFormControlElementWithState(const QualifiedName& tagName, Document* doc, HTMLFormElement* f)
-    : HTMLGenericFormElement(tagName, doc, f)
-{
-    doc->registerFormElementWithState(this);
-}
-
-HTMLFormControlElementWithState::~HTMLFormControlElementWithState()
-{
-    document()->unregisterFormElementWithState(this);
-}
-
-void HTMLFormControlElementWithState::willMoveToNewOwnerDocument()
-{
-    document()->unregisterFormElementWithState(this);
-    HTMLGenericFormElement::willMoveToNewOwnerDocument();
-}
-
-void HTMLFormControlElementWithState::didMoveToNewOwnerDocument()
-{
-    document()->registerFormElementWithState(this);
-    HTMLGenericFormElement::didMoveToNewOwnerDocument();
-}
-
-void HTMLFormControlElementWithState::finishParsingChildren()
-{
-    HTMLGenericFormElement::finishParsingChildren();
     Document* doc = document();
     if (doc->hasStateForNewFormElements()) {
         String state;
@@ -265,19 +266,27 @@ void HTMLFormControlElementWithState::finishParsingChildren()
     }
 }
 
+int HTMLGenericFormElement::tabIndex() const
+{
+    return getAttribute(tabindexAttr).toInt();
+}
+
+void HTMLGenericFormElement::setTabIndex(int value)
+{
+    setAttribute(tabindexAttr, String::number(value));
+}
+
 
 void HTMLGenericFormElement::dispatchFocusEvent()
 {
-    if (document()->frame())
-        document()->frame()->formElementDidFocus(this);
+    document()->frame()->formElementDidFocus(this);
     
     HTMLElement::dispatchFocusEvent();
 }
 
 void HTMLGenericFormElement::dispatchBlurEvent()
 {
-    if (document()->frame())
-        document()->frame()->formElementDidBlur(this);
+    document()->frame()->formElementDidBlur(this);
     
     HTMLElement::dispatchBlurEvent();
 }
@@ -293,4 +302,4 @@ HTMLTextEntryAssistance HTMLGenericFormElement::autocapitalize()
 }
 
 
-} // namespace Webcore
+} // namespace

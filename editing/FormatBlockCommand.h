@@ -30,9 +30,10 @@
 
 namespace WebCore {
 
-class FormatBlockCommand : public CompositeEditCommand {
+class FormatBlockCommand : public CompositeEditCommand
+{
 public:
-    FormatBlockCommand(Document*, const String& tagName);
+    FormatBlockCommand(Document*, const String&);
     virtual void doApply();
     virtual EditAction editingAction() const { return EditActionFormatBlock; }
 private:
@@ -42,4 +43,4 @@ private:
 
 } // namespace WebCore
 
-#endif // FormatBlockCommand_h
+#endif // InsertListCommand_h

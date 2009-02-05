@@ -15,13 +15,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderThemeWin_h
-#define RenderThemeWin_h
+#ifndef RenderThemeWin_H
+#define RenderThemeWin_H
 
 #include "RenderTheme.h"
 
@@ -34,11 +34,10 @@ typedef HINSTANCE HMODULE;
 namespace WebCore {
 
 struct ThemeData {
-    ThemeData() :m_part(0), m_state(0), m_classicState(0) {}
+    ThemeData() :m_part(0), m_state(0) {}
 
     unsigned m_part;
     unsigned m_state;
-    unsigned m_classicState;
 };
 
 class RenderThemeWin : public RenderTheme {
@@ -54,36 +53,32 @@ public:
     virtual Color platformActiveSelectionForegroundColor() const;
     virtual Color platformInactiveSelectionForegroundColor() const;
 
-    // System fonts.
-    virtual void systemFont(int propId, FontDescription&) const;
-
     virtual bool paintCheckbox(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
     { return paintButton(o, i, r); }
     virtual void setCheckboxSize(RenderStyle*) const;
 
     virtual bool paintRadio(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
     { return paintButton(o, i, r); }
-    virtual void setRadioSize(RenderStyle* style) const
-    { return setCheckboxSize(style); }
+    virtual void setRadioSize(RenderStyle*) const;
 
+    virtual void adjustButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
     virtual bool paintButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
 
+    virtual void adjustTextFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
     virtual bool paintTextField(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
 
-    virtual bool paintTextArea(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
-    { return paintTextField(o, i, r); }
+    virtual void adjustTextAreaStyle(CSSStyleSelector*, RenderStyle*, WebCore::Element*) const;
+    virtual bool paintTextArea(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
 
-    void adjustMenuListStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const;
     virtual bool paintMenuList(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
-
-    virtual bool paintMenuListButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+    virtual void adjustMenuListStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual RenderPopupMenu* createPopupMenu(RenderArena*, Document*, RenderMenuList*);
 
 private:
     void addIntrinsicMargins(RenderStyle*) const;
     void close();
 
     unsigned determineState(RenderObject*);
-    unsigned determineClassicState(RenderObject*);
     bool supportsFocus(EAppearance);
 
     ThemeData getThemeData(RenderObject*);
@@ -91,7 +86,6 @@ private:
     HMODULE m_themeDLL;
     mutable HANDLE m_buttonTheme;
     mutable HANDLE m_textFieldTheme;
-    mutable HANDLE m_menuListTheme;
 };
 
 };

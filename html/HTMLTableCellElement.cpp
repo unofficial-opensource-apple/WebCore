@@ -20,8 +20,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 #include "config.h"
 #include "HTMLTableCellElement.h"
@@ -32,13 +32,7 @@
 #include "HTMLTableElement.h"
 #include "RenderTableCell.h"
 
-using std::max;
-using std::min;
-
 namespace WebCore {
-
-// Clamp rowspan at 8k to match Firefox.
-static const int maxRowspan = 8190;
 
 using namespace HTMLNames;
 
@@ -88,12 +82,12 @@ void HTMLTableCellElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == rowspanAttr) {
         rSpan = !attr->isNull() ? attr->value().toInt() : 1;
-        rSpan = max(1, min(rSpan, maxRowspan));
+        if (rSpan < 1) rSpan = 1;
         if (renderer() && renderer()->isTableCell())
             static_cast<RenderTableCell*>(renderer())->updateFromElement();
     } else if (attr->name() == colspanAttr) {
         cSpan = !attr->isNull() ? attr->value().toInt() : 1;
-        cSpan = max(1, cSpan);
+        if (cSpan < 1) cSpan = 1;
         if (renderer() && renderer()->isTableCell())
             static_cast<RenderTableCell*>(renderer())->updateFromElement();
     } else if (attr->name() == nowrapAttr) {
@@ -116,14 +110,18 @@ void HTMLTableCellElement::parseMappedAttribute(MappedAttribute *attr)
 }
 
 // used by table cells to share style decls created by the enclosing table.
-void HTMLTableCellElement::additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>& results)
+CSSMutableStyleDeclaration* HTMLTableCellElement::additionalAttributeStyleDecl()
 {
     Node* p = parentNode();
     while (p && !p->hasTagName(tableTag))
         p = p->parentNode();
-    if (!p)
-        return;
-    static_cast<HTMLTableElement*>(p)->addSharedCellDecls(results);
+
+    if (p) {
+        HTMLTableElement* table = static_cast<HTMLTableElement*>(p);
+        return table->getSharedCellDecl();
+    }
+
+    return 0;
 }
 
 bool HTMLTableCellElement::isURLAttribute(Attribute *attr) const

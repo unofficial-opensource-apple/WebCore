@@ -14,35 +14,31 @@
 
    You should have received a copy of the GNU Library General Public License
    along with this library; see the file COPYING.LIB.  If not, write to
-   the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301, USA.
+   the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+   Boston, MA 02111-1307, USA.
 */
 
 #ifndef MouseEventWithHitTestResults_h
 #define MouseEventWithHitTestResults_h
 
-#include "HitTestResult.h"
+#include "Element.h"
 #include "PlatformMouseEvent.h"
 
 namespace WebCore {
 
-class PlatformScrollbar;
-
-// FIXME: Why doesn't this class just cache a HitTestResult instead of copying all of HitTestResult's fields over?
 class MouseEventWithHitTestResults {
 public:
-    MouseEventWithHitTestResults(const PlatformMouseEvent&, const HitTestResult&);
+    MouseEventWithHitTestResults(const PlatformMouseEvent&, PassRefPtr<Node>, bool isOverLink);
 
     const PlatformMouseEvent& event() const { return m_event; }
-    const HitTestResult& hitTestResult() const { return m_hitTestResult; }
     Node* targetNode() const;
-    const IntPoint localPoint() const;
-    PlatformScrollbar* scrollbar() const;
-    bool isOverLink() const;
+    bool isOverLink() const { return m_isOverLink; }
 
 private:
     PlatformMouseEvent m_event;
-    HitTestResult m_hitTestResult;
+    RefPtr<Node> m_targetNode;
+    RefPtr<Element> m_targetElement;
+    bool m_isOverLink;
 };
 
 }

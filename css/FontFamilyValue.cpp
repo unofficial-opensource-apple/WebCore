@@ -1,6 +1,8 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 #include "config.h"
 #include "FontFamilyValue.h"
@@ -25,40 +27,20 @@
 
 namespace WebCore {
 
-static bool isValidCSSIdentifier(const String& string)
-{
-    unsigned length = string.length();
-    if (!length)
-        return false;
-
-    const UChar* characters = string.characters();
-    UChar c = characters[0];
-    if (!(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0x80))
-        return false;
-
-    for (unsigned i = 1; i < length; ++i) {
-        c = characters[i];
-        if (!(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c >= 0x80))
-            return false;
-    }
-
-    return true;
-}
-
 // Quotes the string if it needs quoting.
-// We use single quotes because serialization code uses double quotes, and it's nice to
-// avoid having to turn all the quote marks into &quot; as we would have to.
-static String quoteStringIfNeeded(const String& string)
+// We use single quotes for now beause markup.cpp uses double quotes.
+static String quoteStringIfNeeded(const String &string)
 {
-    if (isValidCSSIdentifier(string))
+    // For now, just do this for strings that start with "#" to fix Korean font names that start with "#".
+    // Post-Tiger, we should isLegalIdentifier instead after working out all the ancillary issues.
+    if (string[0] != '#')
         return string;
 
-    // FIXME: Also need to transform control characters (00-1F) into \ sequences.
-    // FIXME: This is inefficient -- should use a Vector<UChar> instead.
-    String quotedString = string;
-    quotedString.replace('\\', "\\\\");
-    quotedString.replace('\'', "\\'");
-    return "'" + quotedString + "'";
+    // FIXME: Also need to transform control characters into \ sequences.
+    String s = string;
+    s.replace('\\', "\\\\");
+    s.replace('\'', "\\'");
+    return "'" + s + "'";
 }
 
 FontFamilyValue::FontFamilyValue(const DeprecatedString& string)

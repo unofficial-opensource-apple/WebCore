@@ -2,7 +2,7 @@
  *  WKContentObservation.h
  *  WebCore
  *
- *  Copyright (C) 2007, 2008, Apple Inc.  All rights reserved.
+ *  Copyright (C) 2007, Apple Inc.  All rights reserved.
  *
  */
 

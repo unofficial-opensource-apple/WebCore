@@ -15,22 +15,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
 
-#ifdef AVOID_STATIC_CONSTRUCTORS
+#if AVOID_STATIC_CONSTRUCTORS
 #define CSS_MEDIAQUERY_NAMES_HIDE_GLOBALS 1
 #endif
 
 #include "MediaFeatureNames.h"
 #include "StaticConstructors.h"
 
-namespace WebCore {
-namespace MediaFeatureNames {
+namespace WebCore { namespace MediaFeatureNames {
 
 #define DEFINE_MEDIAFEATURE_GLOBAL(name, str) \
     DEFINE_GLOBAL(AtomicString, name##MediaFeature, str)
@@ -51,5 +50,4 @@ void init()
     }
 }
 
-} // namespace MediaFeatureNames
-} // namespace WebCore
+} }

@@ -16,53 +16,104 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef bidi_h
-#define bidi_h
+#ifndef BIDI_H
+#define BIDI_H
 
-#include "BidiResolver.h"
+#include <unicode/uchar.h>
 
 namespace WebCore {
 
-class BidiIterator;
-class RenderArena;
-class RenderBlock;
-class RenderObject;
-class InlineBox;
+    class RenderArena;
+    class RenderBlock;
+    class RenderObject;
+    class InlineBox;
 
-struct BidiRun : BidiCharacterRun {
-    BidiRun(int start, int stop, RenderObject* o, BidiContext* context, WTF::Unicode::Direction dir)
-        : BidiCharacterRun(start, stop, context, dir)
-        , obj(o)
-        , box(0)
-        , compact(false)
-    {
-    }
+    struct BidiStatus {
+        BidiStatus() : eor(U_OTHER_NEUTRAL), lastStrong(U_OTHER_NEUTRAL), last(U_OTHER_NEUTRAL) {}
+        
+        UCharDirection eor;
+        UCharDirection lastStrong;
+        UCharDirection last;
+    };
+        
+    class BidiContext {
+    public:
+        BidiContext(unsigned char level, UCharDirection embedding, BidiContext* parent = 0, bool override = false);
+        ~BidiContext();
 
-    void destroy(RenderArena*);
+        void ref() const;
+        void deref() const;
 
-    // Overloaded new operator.
-    void* operator new(size_t, RenderArena*) throw();
+        UCharDirection dir() const { return static_cast<UCharDirection>(m_dir); }
+        UCharDirection basicDir() const { return static_cast<UCharDirection>(m_basicDir); }
 
-    // Overridden to prevent the normal delete from being called.
-    void operator delete(void*, size_t);
+        unsigned char level;
+        bool override : 1;
+        unsigned m_dir : 5; // UCharDirection
+        unsigned m_basicDir : 5; // UCharDirection
 
-    BidiRun* next() { return static_cast<BidiRun*>(m_next); }
+        BidiContext* parent;
+
+        // refcounting....
+        mutable int count;
+    };
+
+    struct BidiRun {
+        BidiRun(int start_, int stop_, RenderObject* o, BidiContext* context, UCharDirection dir)
+            :  start(start_), stop(stop_), obj(o), box(0), override(context->override), nextRun(0)
+        {
+            if (dir == U_OTHER_NEUTRAL) 
+                dir = context->dir();
+
+            level = context->level;
+
+            // add level of run (cases I1 & I2)
+            if (level % 2) {
+                if(dir == U_LEFT_TO_RIGHT || dir == U_ARABIC_NUMBER || dir == U_EUROPEAN_NUMBER)
+                    level++;
+            } else {
+                if (dir == U_RIGHT_TO_LEFT)
+                    level++;
+                else if (dir == U_ARABIC_NUMBER || dir == U_EUROPEAN_NUMBER)
+                    level += 2;
+            }
+        }
+
+        void destroy(RenderArena*);
+
+        // Overloaded new operator.
+        void* operator new(size_t, RenderArena*) throw();
+
+        // Overridden to prevent the normal delete from being called.
+        void operator delete(void*, size_t);
 
 private:
-    // The normal operator new is disallowed.
-    void* operator new(size_t) throw();
+        // The normal operator new is disallowed.
+        void* operator new(size_t) throw();
 
 public:
-    RenderObject* obj;
-    InlineBox* box;
-    bool compact;
+        int start;
+        int stop;
+
+        RenderObject *obj;
+        InlineBox* box;
+        
+        // explicit + implicit levels here
+        unsigned char level;
+        bool override : 1;
+        bool compact : 1;
+        
+        BidiRun* nextRun;
+    };
+
+    struct BidiIterator;
+    struct BidiState;
+
 };
 
-} // namespace WebCore
-
-#endif // bidi_h
+#endif

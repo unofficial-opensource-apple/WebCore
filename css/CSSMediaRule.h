@@ -4,7 +4,6 @@
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
  * Copyright (C) 2002, 2006 Apple Computer, Inc.
- * Copyright (C) 2006 Samuel Weinig (sam@webkit.org)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSMediaRule_h
-#define CSSMediaRule_h
+#ifndef CSSMediaRule_H
+#define CSSMediaRule_H
 
 #include "CSSRule.h"
 #include <wtf/RefPtr.h>
@@ -33,29 +32,24 @@ namespace WebCore {
 class CSSRuleList;
 class MediaList;
 
-typedef int ExceptionCode;
-
-class CSSMediaRule : public CSSRule {
+class CSSMediaRule : public CSSRule
+{
 public:
     CSSMediaRule(StyleBase* parent);
-    CSSMediaRule(StyleBase* parent, const String& media);
+    CSSMediaRule(StyleBase* parent, const String &media);
     CSSMediaRule(StyleBase* parent, MediaList* mediaList, CSSRuleList* ruleList);
     virtual ~CSSMediaRule();
-
-    virtual bool isMediaRule() { return true; }
 
     MediaList* media() const { return m_lstMedia.get(); }
     CSSRuleList* cssRules() { return m_lstCSSRules.get(); }
 
-    unsigned insertRule(const String& rule, unsigned index, ExceptionCode&);
-    void deleteRule(unsigned index, ExceptionCode&);
+    unsigned insertRule(const String& rule, unsigned index);
+    void deleteRule(unsigned index);
 
-    // Inherited from CSSRule
-    virtual unsigned short type() const { return MEDIA_RULE; }
-
+    virtual bool isMediaRule() { return true; }
     virtual String cssText() const;
 
-    // Not part of the CSSOM
+    /* Not part of the DOM */
     unsigned append(CSSRule*);
 
 protected:
@@ -63,6 +57,6 @@ protected:
     RefPtr<CSSRuleList> m_lstCSSRules;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSMediaRule_h
+#endif

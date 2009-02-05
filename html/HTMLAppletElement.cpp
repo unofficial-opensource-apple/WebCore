@@ -5,7 +5,6 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
  * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
- * Copyright (C) 2007 Trolltech ASA
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 #include "config.h"
 #include "HTMLAppletElement.h"
@@ -30,7 +29,6 @@
 #include "HTMLNames.h"
 #include "RenderApplet.h"
 #include "RenderInline.h"
-#include "Settings.h"
 
 namespace WebCore {
 
@@ -38,14 +36,15 @@ using namespace HTMLNames;
 
 HTMLAppletElement::HTMLAppletElement(Document *doc)
 : HTMLPlugInElement(appletTag, doc)
+, m_allParamsAvailable(false)
 {
 }
 
 HTMLAppletElement::~HTMLAppletElement()
 {
-#if USE(JAVASCRIPTCORE_BINDINGS)
+#if PLATFORM(MAC)
     // m_instance should have been cleaned up in detach().
-    ASSERT(!m_instance);
+    assert(!m_instance);
 #endif
 }
 
@@ -109,9 +108,9 @@ bool HTMLAppletElement::rendererIsNeeded(RenderStyle *style)
 
 RenderObject *HTMLAppletElement::createRenderer(RenderArena *arena, RenderStyle *style)
 {
-    Settings* settings = document()->settings();
+    Frame *frame = document()->frame();
 
-    if (settings && settings->isJavaEnabled()) {
+    if (frame && frame->javaEnabled()) {
         HashMap<String, String> args;
 
         args.set("code", getAttribute(codeAttr));
@@ -136,20 +135,22 @@ RenderObject *HTMLAppletElement::createRenderer(RenderArena *arena, RenderStyle 
         return new (document()->renderArena()) RenderApplet(this, args);
     }
 
-    return RenderObject::createObject(this, style);
+    return new (document()->renderArena()) RenderInline(this);
 }
 
-#if USE(JAVASCRIPTCORE_BINDINGS)
+#if PLATFORM(MAC)
 KJS::Bindings::Instance *HTMLAppletElement::getInstance() const
 {
-    Settings* settings = document()->settings();
-    if (!settings || !settings->isJavaEnabled())
+    Frame *frame = document()->frame();
+    if (!frame || !frame->javaEnabled())
         return 0;
 
     if (m_instance)
         return m_instance.get();
-    
-    if (RenderApplet* r = static_cast<RenderApplet*>(renderer())) {
+
+    RenderApplet *r = static_cast<RenderApplet*>(renderer());
+
+    if (r) {
         r->createWidgetIfNecessary();
     }
 
@@ -157,20 +158,26 @@ KJS::Bindings::Instance *HTMLAppletElement::getInstance() const
 }
 #endif
 
-void HTMLAppletElement::finishParsingChildren()
+void HTMLAppletElement::closeRenderer()
 {
     // The parser just reached </applet>, so all the params are available now.
-    HTMLPlugInElement::finishParsingChildren();
+    m_allParamsAvailable = true;
     if (renderer())
         renderer()->setNeedsLayout(true); // This will cause it to create its widget & the Java applet
+    HTMLPlugInElement::closeRenderer();
 }
 
 void HTMLAppletElement::detach()
 {
-#if USE(JAVASCRIPTCORE_BINDINGS)
+#if PLATFORM(MAC)
     m_instance = 0;
 #endif
     HTMLPlugInElement::detach();
+}
+
+bool HTMLAppletElement::allParamsAvailable()
+{
+    return m_allParamsAvailable;
 }
 
 String HTMLAppletElement::alt() const

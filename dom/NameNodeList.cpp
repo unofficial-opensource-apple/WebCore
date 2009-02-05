@@ -1,8 +1,10 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -25,22 +27,31 @@
 
 #include "Element.h"
 #include "HTMLNames.h"
-#include <wtf/Assertions.h>
+
+using namespace WebCore;
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-NameNodeList::NameNodeList(PassRefPtr<Node> rootNode, const String& name, DynamicNodeList::Caches* caches)
-    : DynamicNodeList(rootNode, caches)
-    , m_nodeName(name)
+NameNodeList::NameNodeList(Node *n, const String &t)
+  : NodeList(n), nodeName(t)
 {
 }
 
-bool NameNodeList::nodeMatches(Node* testNode) const
+unsigned NameNodeList::length() const
 {
-    ASSERT(testNode->isElementNode());
-    return static_cast<Element*>(testNode)->getAttribute(nameAttr) == m_nodeName;
+    return recursiveLength();
 }
 
-} // namespace WebCore
+Node *NameNodeList::item (unsigned index) const
+{
+    return recursiveItem(index);
+}
+
+bool NameNodeList::nodeMatches(Node *testNode) const
+{
+    return static_cast<Element*>(testNode)->getAttribute(nameAttr) == nodeName;
+}
+
+}

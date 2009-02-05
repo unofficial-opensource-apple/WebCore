@@ -18,25 +18,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLIFrameElement_h
-#define HTMLIFrameElement_h
+#ifndef HTMLIFrameElement_H
+#define HTMLIFrameElement_H
 
-#include "HTMLFrameElementBase.h"
+#include "HTMLFrameElement.h"
 
 namespace WebCore {
 
-class HTMLIFrameElement : public HTMLFrameElementBase
+class HTMLIFrameElement : public HTMLFrameElement
 {
 public:
-    HTMLIFrameElement(Document* doc);
+    HTMLIFrameElement(Document *doc);
+    ~HTMLIFrameElement();
 
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const { return false; }
-    
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
     virtual int tagPriority() const { return 1; }
 
@@ -45,11 +44,13 @@ public:
 
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
+    virtual void willRemove();
     
     virtual void attach();
-
+    virtual void detach();
     virtual bool rendererIsNeeded(RenderStyle*);
-    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
+    virtual RenderObject *createRenderer(RenderArena*, RenderStyle*);
+    virtual void recalcStyle(StyleChange);
     
     virtual bool isURLAttribute(Attribute*) const;
 
@@ -62,10 +63,17 @@ public:
     String width() const;
     void setWidth(const String&);
 
-private:
+    virtual String src() const;
+
+protected:
+    virtual void openURL();
+
+    bool needWidgetUpdate;
+
+ private:
     String oldNameAttr;
 };
 
-} // namespace WebCore
+} //namespace
 
-#endif // HTMLIFrameElement_h
+#endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,28 +23,35 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef AppendNodeCommand_h
-#define AppendNodeCommand_h
+#ifndef __append_node_command_h__
+#define __append_node_command_h__
 
 #include "EditCommand.h"
 
 namespace WebCore {
+    class Node;
+}
 
-class AppendNodeCommand : public EditCommand {
+namespace WebCore {
+
+class AppendNodeCommand : public EditCommand
+{
 public:
-    AppendNodeCommand(Node* parentNode, PassRefPtr<Node> childToAppend);
+    AppendNodeCommand(Document *, Node *appendChild, Node *parentNode);
+    virtual ~AppendNodeCommand() { }
 
     virtual void doApply();
     virtual void doUnapply();
 
-    Node* parentNode() const { return m_parentNode.get(); }
-    Node* childToAppend() const { return m_childToAppend.get(); }
+    Node *appendChild() const { return m_appendChild.get(); }
+    Node *parentNode() const { return m_parentNode.get(); }
 
 private:
+    RefPtr<Node> m_appendChild;
     RefPtr<Node> m_parentNode;
-    RefPtr<Node> m_childToAppend;
 };
 
 } // namespace WebCore
 
-#endif // AppendNodeCommand_h
+#endif // __append_node_command_h__
+

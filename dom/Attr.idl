@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,33 +13,28 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module core {
 
-    interface [
-        GenerateConstructor,
-        InterfaceUUID=EEE8E22B-22C3-4e50-95F4-5E0B8AAD8231,
-        ImplementationUUID=41B16348-D8E7-4d21-BFDB-125705B7E91F
-    ] Attr : EventTargetNode {
+    interface [LegacyParent=KJS::DOMEventTargetNode] Attr : EventTargetNode {
 
         // DOM Level 1
 
         readonly attribute [ConvertNullStringTo=Null] DOMString name;
         readonly attribute boolean specified;
-                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString, CustomSetter] DOMString value 
-                     setter raises(DOMException);
+                 attribute [ConvertNullStringTo=Null, CustomSetter] DOMString value 
+                     setter raises (DOMException);
 
         // DOM Level 2
 
         readonly attribute Element ownerElement;
         
         // extensions
-#if !defined(LANGUAGE_COM)
+
         readonly attribute CSSStyleDeclaration style;
-#endif
     };
 
 }

@@ -1,10 +1,12 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  * Copyright (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -19,25 +21,23 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
 #include "RenderTable.h"
 
 #include "AutoTableLayout.h"
-#include "DeleteButtonController.h"
 #include "Document.h"
 #include "FixedTableLayout.h"
 #include "FrameView.h"
 #include "HTMLNames.h"
-#include "RenderLayer.h"
+#include "TextStream.h"
 #include "RenderTableCell.h"
 #include "RenderTableCol.h"
 #include "RenderTableSection.h"
 #include "RenderView.h"
-#include "TextStream.h"
 
 using namespace std;
 
@@ -47,137 +47,122 @@ using namespace HTMLNames;
 
 RenderTable::RenderTable(Node* node)
     : RenderBlock(node)
-    , m_caption(0)
-    , m_head(0)
-    , m_foot(0)
-    , m_firstBody(0)
-    , m_tableLayout(0)
-    , m_currentBorder(0)
-    , m_frame(Void)
-    , m_rules(None)
-    , m_hasColElements(false)
-    , m_needsSectionRecalc(0)
-    , m_hSpacing(0)
-    , m_vSpacing(0)
-    , m_borderLeft(0)
-    , m_borderRight(0)
 {
-    m_columnPos.fill(0, 2);
-    m_columns.fill(ColumnStruct(), 1);
+    tCaption = 0;
+    head = foot = firstBody = 0;
+    tableLayout = 0;
+    m_currentBorder = 0;
+    
+    rules = None;
+    frame = Void;
+    has_col_elems = false;
+    hspacing = 0;
+    vspacing = 0;
+    padding = 0;
+    needSectionRecalc = false;
+    padding = 0;
+    m_borderLeft = 0;
+    m_borderRight = 0;
+
+    columnPos.resize(2);
+    columnPos.fill(0);
+    columns.resize(1);
+    columns.fill(ColumnStruct());
+
+    columnPos[0] = 0;
 }
 
 RenderTable::~RenderTable()
 {
-    delete m_tableLayout;
+    delete tableLayout;
 }
 
-void RenderTable::setStyle(RenderStyle* newStyle)
+void RenderTable::setStyle(RenderStyle *_style)
 {
     ETableLayout oldTableLayout = style() ? style()->tableLayout() : TAUTO;
-    RenderBlock::setStyle(newStyle);
+    RenderBlock::setStyle(_style);
 
     // In the collapsed border model, there is no cell spacing.
-    m_hSpacing = collapseBorders() ? 0 : style()->horizontalBorderSpacing();
-    m_vSpacing = collapseBorders() ? 0 : style()->verticalBorderSpacing();
-    m_columnPos[0] = m_hSpacing;
+    hspacing = collapseBorders() ? 0 : style()->horizontalBorderSpacing();
+    vspacing = collapseBorders() ? 0 : style()->verticalBorderSpacing();
+    columnPos[0] = hspacing;
 
-    if (!m_tableLayout || style()->tableLayout() != oldTableLayout) {
-        delete m_tableLayout;
+    if (!tableLayout || style()->tableLayout() != oldTableLayout) {
+        delete tableLayout;
 
         // According to the CSS2 spec, you only use fixed table layout if an
         // explicit width is specified on the table.  Auto width implies auto table layout.
         if (style()->tableLayout() == TFIXED && !style()->width().isAuto())
-            m_tableLayout = new FixedTableLayout(this);
+            tableLayout = new FixedTableLayout(this);
         else
-            m_tableLayout = new AutoTableLayout(this);
+            tableLayout = new AutoTableLayout(this);
     }
-}
-
-static inline void resetSectionPointerIfNotBefore(RenderTableSection*& ptr, RenderObject* before)
-{
-    if (!before || !ptr)
-        return;
-    RenderObject* o = before->previousSibling();
-    while (o && o != ptr)
-        o = o->previousSibling();
-    if (!o)
-        ptr = 0;
 }
 
 void RenderTable::addChild(RenderObject* child, RenderObject* beforeChild)
 {
-    // Make sure we don't append things after :after-generated content if we have it.
-    if (!beforeChild && isAfterContent(lastChild()))
-        beforeChild = lastChild();
-
     bool wrapInAnonymousSection = true;
     bool isTableElement = element() && element()->hasTagName(tableTag);
 
-    if (child->isRenderBlock() && child->style()->display() == TABLE_CAPTION) {
-        // First caption wins.
-        if (beforeChild && m_caption) {
-            RenderObject* o = beforeChild->previousSibling();
-            while (o && o != m_caption)
-                o = o->previousSibling();
-            if (!o)
-                m_caption = 0;
-        }
-        if (!m_caption)
-            m_caption = static_cast<RenderBlock*>(child);
-        wrapInAnonymousSection = false;
-    } else if (child->isTableCol()) {
-        m_hasColElements = true;
-        wrapInAnonymousSection = false;
-    } else if (child->isTableSection()) {
-        switch (child->style()->display()) {
-            case TABLE_HEADER_GROUP:
-                if (child->isTableSection()) {
-                    resetSectionPointerIfNotBefore(m_head, beforeChild);
-                    if (!m_head) {
-                        m_head = static_cast<RenderTableSection*>(child);
-                    } else {
-                        resetSectionPointerIfNotBefore(m_firstBody, beforeChild);
-                        if (!m_firstBody) 
-                            m_firstBody = static_cast<RenderTableSection*>(child);
-                    }
-                }
-                wrapInAnonymousSection = false;
-                break;
-            case TABLE_FOOTER_GROUP:
-                if (child->isTableSection()) {
-                    resetSectionPointerIfNotBefore(m_foot, beforeChild);
-                    if (!m_foot) {
-                        m_foot = static_cast<RenderTableSection*>(child);
-                        wrapInAnonymousSection = false;
-                        break;
-                    }
-                }
-                // Fall through.
-            case TABLE_ROW_GROUP:
-                if (child->isTableSection()) {
-                    resetSectionPointerIfNotBefore(m_firstBody, beforeChild);
-                    if (!m_firstBody)
-                        m_firstBody = static_cast<RenderTableSection*>(child);
-                }
-                wrapInAnonymousSection = false;
-                break;
-            default:
-                ASSERT_NOT_REACHED();
-        }
-    } else if (child->isTableCell() || child->isTableRow()) {
-        wrapInAnonymousSection = true;
-    } else {
-        // Allow a form to just sit at the top level.
-        wrapInAnonymousSection = !isTableElement || !child->element() || !(child->element()->hasTagName(formTag) && document()->isHTMLDocument());
-
-        // FIXME: Allow the delete button container element to sit at the top level. This is needed until http://bugs.webkit.org/show_bug.cgi?id=11363 is fixed.
-        if (wrapInAnonymousSection && child->element() && child->element()->isHTMLElement() && static_cast<HTMLElement*>(child->element())->id() == DeleteButtonController::containerElementIdentifier)
+    switch (child->style()->display()) {
+        case TABLE_CAPTION:
+            if (child->isRenderBlock())
+                tCaption = static_cast<RenderBlock *>(child);
             wrapInAnonymousSection = false;
-    }
+            break;
+        case TABLE_COLUMN:
+        case TABLE_COLUMN_GROUP:
+            has_col_elems = true;
+            wrapInAnonymousSection = false;
+            break;
+        case TABLE_HEADER_GROUP:
+            if (!head) {
+                if (child->isTableSection())
+                    head = static_cast<RenderTableSection *>(child);
+            } else if (!firstBody) {
+                if (child->isTableSection())
+                    firstBody = static_cast<RenderTableSection *>(child);
+            }
+            wrapInAnonymousSection = false;
+            break;
+        case TABLE_FOOTER_GROUP:
+            if (!foot) {
+                if (child->isTableSection())
+                    foot = static_cast<RenderTableSection *>(child);
+                wrapInAnonymousSection = false;
+                break;
+            }
+            // fall through
+        case TABLE_ROW_GROUP:
+            if (!firstBody)
+                if (child->isTableSection())
+                    firstBody = static_cast<RenderTableSection *>(child);
+            wrapInAnonymousSection = false;
+            break;
+        case TABLE_CELL:
+        case TABLE_ROW:
+            wrapInAnonymousSection = true;
+            break;
+        case BLOCK:
+        case BOX:
+        case COMPACT:
+        case INLINE:
+        case INLINE_BLOCK:
+        case INLINE_BOX:
+        case INLINE_TABLE:
+        case LIST_ITEM:
+        case NONE:
+        case RUN_IN:
+        case TABLE:
+            // Allow a form to just sit at the top level.
+            wrapInAnonymousSection = !isTableElement || !child->element() || !(child->element()->hasTagName(formTag) && document()->isHTMLDocument());
+            break;
+        }
 
     if (!wrapInAnonymousSection) {
-        // If the next renderer is actually wrapped in an anonymous table section, we need to go up and find that.
-        while (beforeChild && !beforeChild->isTableSection() && !beforeChild->isTableCol() && beforeChild->style()->display() != TABLE_CAPTION)
+        
+        // If the next renderer is actually wrapped in an anonymous table section, we need to go up and find that
+        while (beforeChild && !beforeChild->isTableSection() && !beforeChild->isTableCol())
             beforeChild = beforeChild->parent();
 
         RenderContainer::addChild(child, beforeChild);
@@ -189,15 +174,19 @@ void RenderTable::addChild(RenderObject* child, RenderObject* beforeChild)
         return;
     }
 
-    RenderObject* lastBox = beforeChild;
-    while (lastBox && lastBox->parent()->isAnonymous() && !lastBox->isTableSection() && lastBox->style()->display() != TABLE_CAPTION)
+    RenderObject *lastBox = beforeChild;
+    RenderObject *nextToLastBox = beforeChild;
+    while (lastBox && lastBox->parent()->isAnonymous() &&
+            !lastBox->isTableSection() && lastBox->style()->display() != TABLE_CAPTION) {
+        nextToLastBox = lastBox;
         lastBox = lastBox->parent();
-    if (lastBox && lastBox->isAnonymous() && !isAfterContent(lastBox)) {
-        lastBox->addChild(child, beforeChild);
+    }
+    if (lastBox && lastBox->isAnonymous()) {
+        lastBox->addChild(child, nextToLastBox);
         return;
     }
 
-    if (beforeChild && !beforeChild->isTableSection() && beforeChild->style()->display() != TABLE_CAPTION)
+    if (beforeChild && !beforeChild->isTableSection())
         beforeChild = 0;
     RenderTableSection* section = new (renderArena()) RenderTableSection(document() /* anonymous */);
     RenderStyle* newStyle = new (renderArena()) RenderStyle();
@@ -213,14 +202,15 @@ void RenderTable::calcWidth()
     if (isPositioned())
         calcAbsoluteHorizontal();
 
-    RenderBlock* cb = containingBlock();
-    int availableWidth = cb->availableWidth();
+    RenderBlock *cb = containingBlock();
+    int availableWidth = cb->contentWidth();
 
     LengthType widthType = style()->width().type();
-    if (widthType > Relative && style()->width().isPositive()) {
+    if (widthType > Relative && style()->width().value() > 0) {
         // Percent or fixed table
         m_width = style()->width().calcMinValue(availableWidth);
-        m_width = max(minPrefWidth(), m_width);
+        if (m_minWidth > m_width)
+            m_width = m_minWidth;
     } else {
         // An auto width table should shrink to fit within the line width if necessary in order to 
         // avoid overlapping floats.
@@ -237,74 +227,73 @@ void RenderTable::calcWidth()
         int availContentWidth = max(0, availableWidth - marginTotal);
         
         // Ensure we aren't bigger than our max width or smaller than our min width.
-        m_width = min(availContentWidth, maxPrefWidth());
+        m_width = min(availContentWidth, m_maxWidth);
     }
     
-    m_width = max(m_width, minPrefWidth());
+    m_width = max(m_width, m_minWidth);
 
     // Finally, with our true width determined, compute our margins for real.
     m_marginRight = 0;
     m_marginLeft = 0;
-    calcHorizontalMargins(style()->marginLeft(), style()->marginRight(), availableWidth);
+    calcHorizontalMargins(style()->marginLeft(),style()->marginRight(),availableWidth);
 }
 
 void RenderTable::layout()
 {
     ASSERT(needsLayout());
+    ASSERT(minMaxKnown());
+    ASSERT(!needSectionRecalc);
 
-    if (layoutOnlyPositionedObjects())
+    if (posChildNeedsLayout() && !normalChildNeedsLayout() && !selfNeedsLayout()) {
+        // All we have to is lay out our positioned objects.
+        layoutPositionedObjects(false);
+        setNeedsLayout(false);
         return;
+    }
 
-    recalcSectionsIfNeeded();
-        
-    IntRect oldBounds;
-    IntRect oldOutlineBox;
+    IntRect oldBounds, oldFullBounds;
     bool checkForRepaint = checkForRepaintDuringLayout();
     if (checkForRepaint) {
-        oldBounds = absoluteClippedOverflowRect();
-        oldOutlineBox = absoluteOutlineBox();
+        getAbsoluteRepaintRectIncludingFloats(oldBounds, oldFullBounds);
+        oldBounds.move(view()->layoutDelta());
+        oldFullBounds.move(view()->layoutDelta());
     }
     
-    view()->pushLayoutState(this, IntSize(m_x, m_y));
-
     m_height = 0;
     m_overflowHeight = 0;
     m_overflowTop = 0;
     initMaxMarginValues();
     
-    int oldWidth = m_width;
+    //int oldWidth = m_width;
     calcWidth();
 
-    if (m_caption && m_width != oldWidth)
-        m_caption->setNeedsLayout(true, false);
+    m_overflowWidth = m_width + (collapseBorders() ? outerBorderRight() - borderRight() : 0);
+    m_overflowLeft = collapseBorders() ? borderLeft() - outerBorderLeft() : 0;
 
-    // FIXME: The optimisation below doesn't work since the internal table
+    // the optimisation below doesn't work since the internal table
     // layout could have changed.  we need to add a flag to the table
     // layout that tells us if something has changed in the min max
     // calculations to do it correctly.
 //     if ( oldWidth != m_width || columns.size() + 1 != columnPos.size() )
-    m_tableLayout->layout();
+    tableLayout->layout();
 
     setCellWidths();
 
     // layout child objects
     int calculatedHeight = 0;
-    int oldTableTop = m_caption ? m_caption->height() + m_caption->marginTop() + m_caption->marginBottom() : 0;
+    int oldTableTop = tCaption ? tCaption->height() + tCaption->marginTop() + tCaption->marginBottom() : 0;
 
-    RenderObject* child = firstChild();
+    RenderObject *child = firstChild();
     while (child) {
         // FIXME: What about a form that has a display value that makes it a table section?
         if (child->needsLayout() && !(child->element() && child->element()->hasTagName(formTag)))
             child->layout();
         if (child->isTableSection()) {
-            static_cast<RenderTableSection*>(child)->calcRowHeight();
-            calculatedHeight += static_cast<RenderTableSection*>(child)->layoutRows(0);
+            static_cast<RenderTableSection *>(child)->calcRowHeight();
+            calculatedHeight += static_cast<RenderTableSection *>(child)->layoutRows(0);
         }
         child = child->nextSibling();
     }
-
-    m_overflowWidth = m_width + (collapseBorders() ? outerBorderRight() - borderRight() : 0);
-    m_overflowLeft = collapseBorders() ? borderLeft() - outerBorderLeft() : 0;
 
     // If any table section moved vertically, we will just repaint everything from that
     // section down (it is quite unlikely that any of the following sections
@@ -312,19 +301,19 @@ void RenderTable::layout()
     bool sectionMoved = false;
     int movedSectionTop = 0;
 
-    // FIXME: Collapse caption margin.
-    if (m_caption && m_caption->style()->captionSide() != CAPBOTTOM) {
-        IntRect captionRect(m_caption->xPos(), m_caption->yPos(), m_caption->width(), m_caption->height());
+    // ### collapse caption margin
+    if (tCaption && tCaption->style()->captionSide() != CAPBOTTOM) {
+        IntRect captionRect(tCaption->xPos(), tCaption->yPos(), tCaption->width(), tCaption->height());
 
-        m_caption->setPos(m_caption->marginLeft(), m_height);
-        if (!selfNeedsLayout() && m_caption->checkForRepaintDuringLayout())
-            m_caption->repaintDuringLayoutIfMoved(captionRect);
+        tCaption->setPos(tCaption->marginLeft(), m_height);
+        if (!selfNeedsLayout() && tCaption->checkForRepaintDuringLayout())
+            tCaption->repaintDuringLayoutIfMoved(captionRect.x(), captionRect.y());
 
-        m_height += m_caption->height() + m_caption->marginTop() + m_caption->marginBottom();
-        m_overflowLeft = min(m_overflowLeft, m_caption->xPos() + m_caption->overflowLeft(false));
-        m_overflowWidth = max(m_overflowWidth, m_caption->xPos() + m_caption->overflowWidth(false));
-        m_overflowTop = min(m_overflowTop, m_caption->yPos() + m_caption->overflowTop(false));
-        m_overflowHeight = max(m_overflowHeight, m_caption->yPos() + m_caption->overflowHeight(false));
+        m_height += tCaption->height() + tCaption->marginTop() + tCaption->marginBottom();
+        m_overflowLeft = min(m_overflowLeft, tCaption->xPos() + tCaption->overflowLeft(false));
+        m_overflowWidth = max(m_overflowWidth, tCaption->xPos() + tCaption->overflowWidth(false));
+        m_overflowTop = min(m_overflowTop, tCaption->yPos() + tCaption->overflowTop(false));
+        m_overflowHeight = max(m_overflowHeight, tCaption->yPos() + tCaption->overflowHeight(false));
 
         if (m_height != oldTableTop) {
             sectionMoved = true;
@@ -355,11 +344,11 @@ void RenderTable::layout()
     if (th > calculatedHeight) {
         // we have to redistribute that height to get the constraint correctly
         // just force the first body to the height needed
-        // FIXME: This should take height constraints on all table sections into account and distribute
-        // accordingly. For now this should be good enough.
-        if (m_firstBody) {
-            m_firstBody->calcRowHeight();
-            m_firstBody->layoutRows(th - calculatedHeight);
+        // ### FIXME This should take height constraints on all table sections into account and distribute
+        // accordingly. For now this should be good enough
+        if (firstBody) {
+            firstBody->calcRowHeight();
+            firstBody->layoutRows(th - calculatedHeight);
         } else if (!style()->htmlHacks())
             // Completely empty tables (with no sections or anything) should at least honor specified height
             // in strict mode.
@@ -371,34 +360,44 @@ void RenderTable::layout()
         bl += paddingLeft();
 
     // position the table sections
-    RenderTableSection* section = m_head ? m_head : (m_firstBody ? m_firstBody : m_foot);
+    RenderObject* section = head ? head : (firstBody ? firstBody : foot);
     while (section) {
         if (!sectionMoved && section->yPos() != m_height) {
             sectionMoved = true;
-            movedSectionTop = min(m_height, section->yPos()) + section->overflowTop(false);
+            movedSectionTop = min(m_height, section->yPos());
         }
         section->setPos(bl, m_height);
 
         m_height += section->height();
         m_overflowLeft = min(m_overflowLeft, section->xPos() + section->overflowLeft(false));
         m_overflowWidth = max(m_overflowWidth, section->xPos() + section->overflowWidth(false));
-        m_overflowTop = min(m_overflowTop, section->yPos() + section->overflowTop(false));
-        m_overflowHeight = max(m_overflowHeight, section->yPos() + section->overflowHeight(false));
-        section = sectionBelow(section);
+        // FIXME: Use sectionBelow() instead of the following once sectionBelow() is fixed.
+        // See http://bugs.webkit.org/show_bug.cgi?id=12124
+        if (section == foot)
+            break;
+        if (section == head)
+            section = firstBody ? firstBody : foot;
+        else {
+            do {
+                section = section->nextSibling();
+            } while (section && (section == head || section == foot || !section->isTableSection()));
+            if (!section)
+                section = foot;
+        }
     }
 
     m_height += bpBottom;
+               
+    if (tCaption && tCaption->style()->captionSide() == CAPBOTTOM) {
+        IntRect captionRect(tCaption->xPos(), tCaption->yPos(), tCaption->width(), tCaption->height());
 
-    if (m_caption && m_caption->style()->captionSide() == CAPBOTTOM) {
-        IntRect captionRect(m_caption->xPos(), m_caption->yPos(), m_caption->width(), m_caption->height());
+        tCaption->setPos(tCaption->marginLeft(), m_height);
+        if (!selfNeedsLayout() && tCaption->checkForRepaintDuringLayout())
+            tCaption->repaintDuringLayoutIfMoved(captionRect.x(), captionRect.y());
 
-        m_caption->setPos(m_caption->marginLeft(), m_height);
-        if (!selfNeedsLayout() && m_caption->checkForRepaintDuringLayout())
-            m_caption->repaintDuringLayoutIfMoved(captionRect);
-
-        m_height += m_caption->height() + m_caption->marginTop() + m_caption->marginBottom();
-        m_overflowLeft = min(m_overflowLeft, m_caption->xPos() + m_caption->overflowLeft(false));
-        m_overflowWidth = max(m_overflowWidth, m_caption->xPos() + m_caption->overflowWidth(false));
+        m_height += tCaption->height() + tCaption->marginTop() + tCaption->marginBottom();
+        m_overflowLeft = min(m_overflowLeft, tCaption->xPos() + tCaption->overflowLeft(false));
+        m_overflowWidth = max(m_overflowWidth, tCaption->xPos() + tCaption->overflowWidth(false));
     }
 
     if (isPositioned())
@@ -407,28 +406,16 @@ void RenderTable::layout()
     m_overflowHeight = max(m_overflowHeight, m_height);
 
     // table can be containing block of positioned elements.
-    // FIXME: Only pass true if width or height changed.
+    // ### only pass true if width or height changed.
     layoutPositionedObjects(true);
-
-    if (!hasOverflowClip()) {
-        if (ShadowData* boxShadow = style()->boxShadow()) {
-            m_overflowLeft = min(m_overflowLeft, boxShadow->x - boxShadow->blur);
-            m_overflowWidth = max(m_overflowWidth, m_width + boxShadow->x + boxShadow->blur);
-            m_overflowTop = min(m_overflowTop, boxShadow->y - boxShadow->blur);
-            m_overflowHeight = max(m_overflowHeight, m_height + boxShadow->y + boxShadow->blur);
-        }
-    }
-
-    view()->popLayoutState();
 
     bool didFullRepaint = true;
     // Repaint with our new bounds if they are different from our old bounds.
     if (checkForRepaint)
-        didFullRepaint = repaintAfterLayoutIfNeeded(oldBounds, oldOutlineBox);
+        didFullRepaint = repaintAfterLayoutIfNeeded(oldBounds, oldFullBounds);
     if (!didFullRepaint && sectionMoved) {
         IntRect repaintRect(m_overflowLeft, movedSectionTop, m_overflowWidth - m_overflowLeft, m_overflowHeight - movedSectionTop);
-        if (FrameView* frameView = view()->frameView())
-            frameView->addRepaintInfo(this, repaintRect);
+        view()->frameView()->addRepaintInfo(this, repaintRect);
     }
     
     setNeedsLayout(false);
@@ -436,27 +423,27 @@ void RenderTable::layout()
 
 void RenderTable::setCellWidths()
 {
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
-        if (child->isTableSection())
-            static_cast<RenderTableSection*>(child)->setCellWidths();
-    }
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling())
+        if ( child->isTableSection() )
+            static_cast<RenderTableSection *>(child)->setCellWidths();
 }
 
-void RenderTable::paint(PaintInfo& paintInfo, int tx, int ty)
+void RenderTable::paint(PaintInfo& i, int _tx, int _ty)
 {
-    tx += xPos();
-    ty += yPos();
+    _tx += xPos();
+    _ty += yPos();
 
-    PaintPhase paintPhase = paintInfo.phase;
-
-    int os = 2 * maximalOutlineSize(paintPhase);
-    if (ty + overflowTop(false) >= paintInfo.rect.bottom() + os || ty + overflowHeight(false) <= paintInfo.rect.y() - os)
+    PaintPhase paintPhase = i.phase;
+    
+    int os = 2*maximalOutlineSize(paintPhase);
+    if (_ty + overflowTop() >= i.r.bottom() + os || _ty + overflowHeight() <= i.r.y() - os)
         return;
-    if (tx + overflowLeft(false) >= paintInfo.rect.right() + os || tx + overflowWidth(false) <= paintInfo.rect.x() - os)
+    if (_tx + overflowLeft() >= i.r.right() + os || _tx + overflowWidth() <= i.r.x() - os)
         return;
 
-    if ((paintPhase == PaintPhaseBlockBackground || paintPhase == PaintPhaseChildBlockBackground) && hasBoxDecorations() && style()->visibility() == VISIBLE)
-        paintBoxDecorations(paintInfo, tx, ty);
+    if ((paintPhase == PaintPhaseBlockBackground || paintPhase == PaintPhaseChildBlockBackground)
+        && shouldPaintBackgroundOrBorder() && style()->visibility() == VISIBLE)
+        paintBoxDecorations(i, _tx, _ty);
 
     // We're done.  We don't bother painting any children.
     if (paintPhase == PaintPhaseBlockBackground)
@@ -465,205 +452,217 @@ void RenderTable::paint(PaintInfo& paintInfo, int tx, int ty)
     // We don't paint our own background, but we do let the kids paint their backgrounds.
     if (paintPhase == PaintPhaseChildBlockBackgrounds)
         paintPhase = PaintPhaseChildBlockBackground;
-    PaintInfo info(paintInfo);
-    info.phase = paintPhase;
-    info.paintingRoot = paintingRootForChildren(paintInfo);
-
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
-        if (!child->hasLayer() && (child->isTableSection() || child == m_caption))
-            child->paint(info, tx, ty);
-    }
+    PaintInfo paintInfo(i);
+    paintInfo.phase = paintPhase;
+    
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling())
+        if (!child->layer() && (child->isTableSection() || child == tCaption))
+            child->paint(paintInfo, _tx, _ty);
 
     if (collapseBorders() && paintPhase == PaintPhaseChildBlockBackground && style()->visibility() == VISIBLE) {
         // Collect all the unique border styles that we want to paint in a sorted list.  Once we
         // have all the styles sorted, we then do individual passes, painting each style of border
         // from lowest precedence to highest precedence.
-        info.phase = PaintPhaseCollapsedTableBorders;
-        RenderTableCell::CollapsedBorderStyles borderStyles;
-        RenderObject* stop = nextInPreOrderAfterChildren();
-        for (RenderObject* o = firstChild(); o && o != stop; o = o->nextInPreOrder())
-            if (o->isTableCell())
-                static_cast<RenderTableCell*>(o)->collectBorderStyles(borderStyles);
-        RenderTableCell::sortBorderStyles(borderStyles);
-        size_t count = borderStyles.size();
-        for (size_t i = 0; i < count; ++i) {
-            m_currentBorder = &borderStyles[i];
+        paintInfo.phase = PaintPhaseCollapsedTableBorders;
+        DeprecatedValueList<CollapsedBorderValue> borderStyles;
+        collectBorders(borderStyles);
+        DeprecatedValueListIterator<CollapsedBorderValue> it = borderStyles.begin();
+        DeprecatedValueListIterator<CollapsedBorderValue> end = borderStyles.end();
+        for (; it != end; ++it) {
+            m_currentBorder = &(*it);
             for (RenderObject* child = firstChild(); child; child = child->nextSibling())
                 if (child->isTableSection())
-                    child->paint(info, tx, ty);
+                    child->paint(paintInfo, _tx, _ty);
         }
-        m_currentBorder = 0;
     }
+        
+#ifdef BOX_DEBUG
+    outlineBox(i.p, _tx, _ty, "blue");
+#endif
 }
 
-void RenderTable::paintBoxDecorations(PaintInfo& paintInfo, int tx, int ty)
+void RenderTable::paintBoxDecorations(PaintInfo& i, int _tx, int _ty)
 {
     int w = width();
     int h = height();
-
+    
     // Account for the caption.
-    if (m_caption) {
-        int captionHeight = (m_caption->height() + m_caption->marginBottom() +  m_caption->marginTop());
+    if (tCaption) {
+        int captionHeight = (tCaption->height() + tCaption->marginBottom() +  tCaption->marginTop());
         h -= captionHeight;
-        if (m_caption->style()->captionSide() != CAPBOTTOM)
-            ty += captionHeight;
+        if (tCaption->style()->captionSide() != CAPBOTTOM)
+            _ty += captionHeight;
     }
 
-    int my = max(ty, paintInfo.rect.y());
+    int my = max(_ty, i.r.y());
     int mh;
-    if (ty < paintInfo.rect.y())
-        mh = max(0, h - (paintInfo.rect.y() - ty));
+    if (_ty < i.r.y())
+        mh= max(0, h - (i.r.y() - _ty));
     else
-        mh = min(paintInfo.rect.height(), h);
-
-    paintBoxShadow(paintInfo.context, tx, ty, w, h, style());
+        mh = min(i.r.height(), h);
     
-    paintBackground(paintInfo.context, style()->backgroundColor(), style()->backgroundLayers(), my, mh, tx, ty, w, h);
-
+    paintBackground(i.p, style()->backgroundColor(), style()->backgroundLayers(), my, mh, _tx, _ty, w, h);
+    
     if (style()->hasBorder() && !collapseBorders())
-        paintBorder(paintInfo.context, tx, ty, w, h, style());
+        paintBorder(i.p, _tx, _ty, w, h, style());
 }
 
-void RenderTable::calcPrefWidths()
+void RenderTable::calcMinMaxWidth()
 {
-    ASSERT(prefWidthsDirty());
+    ASSERT(!minMaxKnown());
 
-    recalcSectionsIfNeeded();
+    if (needSectionRecalc)
+        recalcSections();
     recalcHorizontalBorders();
 
-    m_tableLayout->calcPrefWidths(m_minPrefWidth, m_maxPrefWidth);
+    tableLayout->calcMinMaxWidth();
 
-    if (m_caption)
-        m_minPrefWidth = max(m_minPrefWidth, m_caption->minPrefWidth());
+    if (tCaption && tCaption->minWidth() > m_minWidth)
+        m_minWidth = tCaption->minWidth();
 
-    setPrefWidthsDirty(false);
+    setMinMaxKnown();
 }
 
 void RenderTable::splitColumn(int pos, int firstSpan)
 {
     // we need to add a new columnStruct
-    int oldSize = m_columns.size();
-    m_columns.grow(oldSize + 1);
-    int oldSpan = m_columns[pos].span;
+    int oldSize = columns.size();
+    columns.resize(oldSize + 1);
+    int oldSpan = columns[pos].span;
     ASSERT(oldSpan > firstSpan);
-    m_columns[pos].span = firstSpan;
-    memmove(m_columns.data() + pos + 1, m_columns.data() + pos, (oldSize - pos) * sizeof(ColumnStruct));
-    m_columns[pos + 1].span = oldSpan - firstSpan;
+    columns[pos].span = firstSpan;
+    memmove(columns.data() + pos + 1, columns.data() + pos, (oldSize-pos)*sizeof(ColumnStruct));
+    columns[pos+1].span = oldSpan - firstSpan;
 
     // change width of all rows.
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
-        if (child->isTableSection())
-            static_cast<RenderTableSection*>(child)->splitColumn(pos, oldSize + 1);
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling()) {
+        if (child->isTableSection()) {
+            RenderTableSection *section = static_cast<RenderTableSection *>(child);
+            if (section->cCol > pos)
+                section->cCol++;
+            int size = section->numRows();
+            for (int row = 0; row < size; ++row) {
+                section->grid[row].row->resize(oldSize + 1);
+                RenderTableSection::Row &r = *section->grid[row].row;
+                memmove(r.data() + pos + 1, r.data() + pos, (oldSize - pos) * sizeof(RenderTableSection::CellStruct));
+                r[pos + 1].cell = 0;
+                r[pos + 1].inColSpan = r[pos].inColSpan || r[pos].cell;
+            }
+        }
     }
-
-    m_columnPos.grow(numEffCols() + 1);
-    setNeedsLayoutAndPrefWidthsRecalc();
+    columnPos.resize(numEffCols() + 1);
+    setNeedsLayoutAndMinMaxRecalc();
 }
 
 void RenderTable::appendColumn(int span)
 {
     // easy case.
-    int pos = m_columns.size();
+    int pos = columns.size();
     int newSize = pos + 1;
-    m_columns.grow(newSize);
-    m_columns[pos].span = span;
+    columns.resize(newSize);
+    columns[pos].span = span;
 
     // change width of all rows.
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
-        if (child->isTableSection())
-            static_cast<RenderTableSection*>(child)->appendColumn(pos);
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling()) {
+        if (child->isTableSection()) {
+            RenderTableSection *section = static_cast<RenderTableSection *>(child);
+            int size = section->numRows();
+            for (int row = 0; row < size; ++row) {
+                section->grid[row].row->resize(newSize);
+                RenderTableSection::CellStruct& c = section->cellAt(row, pos);
+                c.cell = 0;
+                c.inColSpan = false;
+            }
+        }
     }
-
-    m_columnPos.grow(numEffCols() + 1);
-    setNeedsLayoutAndPrefWidthsRecalc();
+    columnPos.resize(numEffCols() + 1);
+    setNeedsLayoutAndMinMaxRecalc();
 }
 
-RenderTableCol* RenderTable::colElement(int col, bool* startEdge, bool* endEdge) const
+RenderTableCol *RenderTable::colElement(int col) const
 {
-    if (!m_hasColElements)
+    if (!has_col_elems)
         return 0;
-    RenderObject* child = firstChild();
+    RenderObject *child = firstChild();
     int cCol = 0;
-
     while (child) {
         if (child->isTableCol()) {
-            RenderTableCol* colElem = static_cast<RenderTableCol*>(child);
+            RenderTableCol *colElem = static_cast<RenderTableCol *>(child);
             int span = colElem->span();
             if (!colElem->firstChild()) {
-                int startCol = cCol;
-                int endCol = cCol + span - 1;
                 cCol += span;
-                if (cCol > col) {
-                    if (startEdge)
-                        *startEdge = startCol == col;
-                    if (endEdge)
-                        *endEdge = endCol == col;
+                if (cCol > col)
                     return colElem;
-                }
             }
 
-            RenderObject* next = child->firstChild();
+            RenderObject *next = child->firstChild();
             if (!next)
                 next = child->nextSibling();
             if (!next && child->parent()->isTableCol())
                 next = child->parent()->nextSibling();
             child = next;
-        } else if (child == m_caption)
+        } else if (child == tCaption)
             child = child->nextSibling();
         else
             break;
     }
-
     return 0;
 }
 
-void RenderTable::recalcSections() const
+void RenderTable::recalcSectionsIfNeeded()
 {
-    m_caption = 0;
-    m_head = 0;
-    m_foot = 0;
-    m_firstBody = 0;
-    m_hasColElements = false;
+    if (needSectionRecalc)
+        recalcSections();
+}
 
-    // We need to get valid pointers to caption, head, foot and first body again
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
+void RenderTable::recalcSections()
+{
+    tCaption = 0;
+    head = foot = firstBody = 0;
+    has_col_elems = false;
+
+    // We need to get valid pointers to caption, head, foot and firstbody again
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling()) {
         switch (child->style()->display()) {
             case TABLE_CAPTION:
-                if (!m_caption && child->isRenderBlock()) {
-                    m_caption = static_cast<RenderBlock*>(child);
-                    m_caption->setNeedsLayout(true);
+                if (!tCaption && child->isRenderBlock()) {
+                    tCaption = static_cast<RenderBlock*>(child);
+                    tCaption->setNeedsLayout(true);
                 }
                 break;
             case TABLE_COLUMN:
             case TABLE_COLUMN_GROUP:
-                m_hasColElements = true;
+                has_col_elems = true;
                 break;
             case TABLE_HEADER_GROUP:
                 if (child->isTableSection()) {
-                    RenderTableSection* section = static_cast<RenderTableSection*>(child);
-                    if (!m_head)
-                        m_head = section;
-                    else if (!m_firstBody)
-                        m_firstBody = section;
-                    section->recalcCellsIfNeeded();
+                    RenderTableSection *section = static_cast<RenderTableSection *>(child);
+                    if (!head)
+                        head = section;
+                    else if (!firstBody)
+                        firstBody = section;
+                    if (section->needCellRecalc)
+                        section->recalcCells();
                 }
                 break;
             case TABLE_FOOTER_GROUP:
                 if (child->isTableSection()) {
-                    RenderTableSection* section = static_cast<RenderTableSection*>(child);
-                    if (!m_foot)
-                        m_foot = section;
-                    else if (!m_firstBody)
-                        m_firstBody = section;
-                    section->recalcCellsIfNeeded();
+                    RenderTableSection *section = static_cast<RenderTableSection *>(child);
+                    if (!foot)
+                        foot = section;
+                    else if (!firstBody)
+                        firstBody = section;
+                    if (section->needCellRecalc)
+                        section->recalcCells();
                 }
                 break;
             case TABLE_ROW_GROUP:
                 if (child->isTableSection()) {
-                    RenderTableSection* section = static_cast<RenderTableSection*>(child);
-                    if (!m_firstBody)
-                        m_firstBody = section;
-                    section->recalcCellsIfNeeded();
+                    RenderTableSection *section = static_cast<RenderTableSection *>(child);
+                    if (!firstBody)
+                        firstBody = section;
+                    if (section->needCellRecalc)
+                        section->recalcCells();
                 }
                 break;
             default:
@@ -673,34 +672,33 @@ void RenderTable::recalcSections() const
 
     // repair column count (addChild can grow it too much, because it always adds elements to the last row of a section)
     int maxCols = 0;
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling()) {
         if (child->isTableSection()) {
-            RenderTableSection* section = static_cast<RenderTableSection*>(child);
+            RenderTableSection *section = static_cast<RenderTableSection *>(child);
             int sectionCols = section->numColumns();
             if (sectionCols > maxCols)
                 maxCols = sectionCols;
         }
     }
     
-    m_columns.resize(maxCols);
-    m_columnPos.resize(maxCols + 1);
-
-    ASSERT(selfNeedsLayout());
-
-    m_needsSectionRecalc = false;
+    columns.resize(maxCols);
+    columnPos.resize(maxCols+1);
+    
+    needSectionRecalc = false;
+    setNeedsLayout(true);
 }
 
-RenderObject* RenderTable::removeChildNode(RenderObject* child, bool fullRemove)
+RenderObject* RenderTable::removeChildNode(RenderObject* child)
 {
-    setNeedsSectionRecalc();
-    return RenderContainer::removeChildNode(child, fullRemove);
+    setNeedSectionRecalc();
+    return RenderContainer::removeChildNode(child);
 }
 
 int RenderTable::calcBorderLeft() const
 {
     if (collapseBorders()) {
         // Determined by the first cell of the first row. See the CSS 2.1 spec, section 17.6.2.
-        if (!numEffCols())
+        if (numEffCols() == 0)
             return 0;
 
         unsigned borderWidth = 0;
@@ -712,42 +710,44 @@ int RenderTable::calcBorderLeft() const
             borderWidth = tb.width;
 
         int leftmostColumn = style()->direction() == RTL ? numEffCols() - 1 : 0;
-        RenderTableCol* colGroup = colElement(leftmostColumn);
+        RenderTableCol *colGroup = colElement(leftmostColumn);
         if (colGroup) {
             const BorderValue& gb = style()->borderLeft();
             if (gb.style() == BHIDDEN)
                 return 0;
-            if (gb.style() > BHIDDEN)
-                borderWidth = max(borderWidth, static_cast<unsigned>(gb.width));
+            if (gb.style() > BHIDDEN && gb.width > borderWidth)
+                borderWidth = gb.width;
         }
         
-        RenderTableSection* firstNonEmptySection = m_head ? m_head : (m_firstBody ? m_firstBody : m_foot);
-        if (firstNonEmptySection && !firstNonEmptySection->numRows())
-            firstNonEmptySection = sectionBelow(firstNonEmptySection, true);
-        
-        if (firstNonEmptySection) {
-            const BorderValue& sb = firstNonEmptySection->style()->borderLeft();
+        RenderObject *child = firstChild();
+        while (child && !child->isTableSection())
+            child = child->nextSibling();
+        if (child && child->isTableSection()) {
+            RenderTableSection* section = static_cast<RenderTableSection*>(child);
+            
+            if (section->numRows() == 0)
+                return borderWidth / 2;
+            
+            const BorderValue& sb = section->style()->borderLeft();
             if (sb.style() == BHIDDEN)
                 return 0;
+            if (sb.style() > BHIDDEN && sb.width > borderWidth)
+                borderWidth = sb.width;
 
-            if (sb.style() > BHIDDEN)
-                borderWidth = max(borderWidth, static_cast<unsigned>(sb.width));
-
-            const RenderTableSection::CellStruct& cs = firstNonEmptySection->cellAt(0, leftmostColumn);
+            const RenderTableSection::CellStruct& cs = section->cellAt(0, leftmostColumn);
             
             if (cs.cell) {
                 const BorderValue& cb = cs.cell->style()->borderLeft();
                 if (cb.style() == BHIDDEN)
                     return 0;
-
                 const BorderValue& rb = cs.cell->parent()->style()->borderLeft();
                 if (rb.style() == BHIDDEN)
                     return 0;
 
-                if (cb.style() > BHIDDEN)
-                    borderWidth = max(borderWidth, static_cast<unsigned>(cb.width));
-                if (rb.style() > BHIDDEN)
-                    borderWidth = max(borderWidth, static_cast<unsigned>(rb.width));
+                if (cb.style() > BHIDDEN && cb.width > borderWidth)
+                    borderWidth = cb.width;
+                if (rb.style() > BHIDDEN && rb.width > borderWidth)
+                    borderWidth = rb.width;
             }
         }
         return borderWidth / 2;
@@ -759,7 +759,7 @@ int RenderTable::calcBorderRight() const
 {
     if (collapseBorders()) {
         // Determined by the last cell of the first row. See the CSS 2.1 spec, section 17.6.2.
-        if (!numEffCols())
+        if (numEffCols() == 0)
             return 0;
 
         unsigned borderWidth = 0;
@@ -771,42 +771,44 @@ int RenderTable::calcBorderRight() const
             borderWidth = tb.width;
 
         int rightmostColumn = style()->direction() == RTL ? 0 : numEffCols() - 1;
-        RenderTableCol* colGroup = colElement(rightmostColumn);
+        RenderTableCol *colGroup = colElement(rightmostColumn);
         if (colGroup) {
             const BorderValue& gb = style()->borderRight();
             if (gb.style() == BHIDDEN)
                 return 0;
-            if (gb.style() > BHIDDEN)
-                borderWidth = max(borderWidth, static_cast<unsigned>(gb.width));
+            if (gb.style() > BHIDDEN && gb.width > borderWidth)
+                borderWidth = gb.width;
         }
         
-        RenderTableSection* firstNonEmptySection = m_head ? m_head : (m_firstBody ? m_firstBody : m_foot);
-        if (firstNonEmptySection && !firstNonEmptySection->numRows())
-            firstNonEmptySection = sectionBelow(firstNonEmptySection, true);
-        
-        if (firstNonEmptySection) {
-            const BorderValue& sb = firstNonEmptySection->style()->borderRight();
+        RenderObject *child = firstChild();
+        while (child && !child->isTableSection())
+            child = child->nextSibling();
+        if (child && child->isTableSection()) {
+            RenderTableSection* section = static_cast<RenderTableSection*>(child);
+            
+            if (section->numRows() == 0)
+                return (borderWidth + 1) / 2;
+            
+            const BorderValue& sb = section->style()->borderRight();
             if (sb.style() == BHIDDEN)
                 return 0;
+            if (sb.style() > BHIDDEN && sb.width > borderWidth)
+                borderWidth = sb.width;
 
-            if (sb.style() > BHIDDEN)
-                borderWidth = max(borderWidth, static_cast<unsigned>(sb.width));
-
-            const RenderTableSection::CellStruct& cs = firstNonEmptySection->cellAt(0, rightmostColumn);
+            const RenderTableSection::CellStruct& cs = section->cellAt(0, rightmostColumn);
             
             if (cs.cell) {
                 const BorderValue& cb = cs.cell->style()->borderRight();
                 if (cb.style() == BHIDDEN)
                     return 0;
-
                 const BorderValue& rb = cs.cell->parent()->style()->borderRight();
                 if (rb.style() == BHIDDEN)
                     return 0;
 
-                if (cb.style() > BHIDDEN)
-                    borderWidth = max(borderWidth, static_cast<unsigned>(cb.width));
-                if (rb.style() > BHIDDEN)
-                    borderWidth = max(borderWidth, static_cast<unsigned>(rb.width));
+                if (cb.style() > BHIDDEN && cb.width > borderWidth)
+                    borderWidth = cb.width;
+                if (rb.style() > BHIDDEN && rb.width > borderWidth)
+                    borderWidth = rb.width;
             }
         }
         return (borderWidth + 1) / 2;
@@ -840,12 +842,12 @@ int RenderTable::outerBorderTop() const
         return 0;
     int borderWidth = 0;
     RenderTableSection* topSection;
-    if (m_head)
-        topSection = m_head;
-    else if (m_firstBody)
-        topSection = m_firstBody;
-    else if (m_foot)
-        topSection = m_foot;
+    if (head)
+        topSection = head;
+    else if (firstBody)
+        topSection = firstBody;
+    else if (foot)
+        topSection = foot;
     else
         topSection = 0;
     if (topSection) {
@@ -856,8 +858,8 @@ int RenderTable::outerBorderTop() const
     const BorderValue& tb = style()->borderTop();
     if (tb.style() == BHIDDEN)
         return 0;
-    if (tb.style() > BHIDDEN)
-        borderWidth = max(borderWidth, static_cast<int>(tb.width / 2));
+    if (tb.style() > BHIDDEN && (int)(tb.width / 2) > borderWidth)
+        borderWidth = tb.width / 2;
     return borderWidth;
 }
 
@@ -867,13 +869,13 @@ int RenderTable::outerBorderBottom() const
         return 0;
     int borderWidth = 0;
     RenderTableSection* bottomSection;
-    if (m_foot)
-        bottomSection = m_foot;
+    if (foot)
+        bottomSection = foot;
     else {
         RenderObject* child;
         for (child = lastChild(); child && !child->isTableSection(); child = child->previousSibling())
             ;
-        bottomSection = child ? static_cast<RenderTableSection*>(child) : 0;
+        bottomSection = child ? static_cast<RenderTableSection *>(child) : 0;
     }
     if (bottomSection) {
         borderWidth = bottomSection->outerBorderBottom();
@@ -883,8 +885,8 @@ int RenderTable::outerBorderBottom() const
     const BorderValue& tb = style()->borderBottom();
     if (tb.style() == BHIDDEN)
         return 0;
-    if (tb.style() > BHIDDEN)
-        borderWidth = max(borderWidth, static_cast<int>((tb.width + 1) / 2));
+    if (tb.style() > BHIDDEN && (int)(tb.width + 1) / 2 > borderWidth)
+        borderWidth = (tb.width + 1) / 2;
     return borderWidth;
 }
 
@@ -902,10 +904,10 @@ int RenderTable::outerBorderLeft() const
         borderWidth = tb.width / 2;
 
     bool allHidden = true;
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling()) {
         if (!child->isTableSection())
             continue;
-        int sw = static_cast<RenderTableSection*>(child)->outerBorderLeft();
+        int sw = static_cast<RenderTableSection *>(child)->outerBorderLeft();
         if (sw == -1)
             continue;
         else
@@ -932,10 +934,10 @@ int RenderTable::outerBorderRight() const
         borderWidth = (tb.width + 1) / 2;
 
     bool allHidden = true;
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling()) {
         if (!child->isTableSection())
             continue;
-        int sw = static_cast<RenderTableSection*>(child)->outerBorderRight();
+        int sw = static_cast<RenderTableSection *>(child)->outerBorderRight();
         if (sw == -1)
             continue;
         else
@@ -950,44 +952,36 @@ int RenderTable::outerBorderRight() const
 
 RenderTableSection* RenderTable::sectionAbove(const RenderTableSection* section, bool skipEmptySections) const
 {
-    recalcSectionsIfNeeded();
-
-    if (section == m_head)
+    if (section == head)
         return 0;
-
-    RenderObject* prevSection = section == m_foot ? lastChild() : section->previousSibling();
+    RenderObject *prevSection = (section == foot ? lastChild() : section)->previousSibling();
     while (prevSection) {
-        if (prevSection->isTableSection() && prevSection != m_head && prevSection != m_foot && (!skipEmptySections || static_cast<RenderTableSection*>(prevSection)->numRows()))
+        if (prevSection->isTableSection() && prevSection != head && prevSection != foot && (!skipEmptySections || static_cast<RenderTableSection*>(prevSection)->numRows()))
             break;
         prevSection = prevSection->previousSibling();
     }
-    if (!prevSection && m_head && (!skipEmptySections || m_head->numRows()))
-        prevSection = m_head;
+    if (!prevSection && head && (!skipEmptySections || head->numRows()))
+        prevSection = head;
     return static_cast<RenderTableSection*>(prevSection);
 }
 
 RenderTableSection* RenderTable::sectionBelow(const RenderTableSection* section, bool skipEmptySections) const
 {
-    recalcSectionsIfNeeded();
-
-    if (section == m_foot)
+    if (section == foot)
         return 0;
-
-    RenderObject* nextSection = section == m_head ? firstChild() : section->nextSibling();
+    RenderObject *nextSection = (section == head ? firstChild() : section)->nextSibling();
     while (nextSection) {
-        if (nextSection->isTableSection() && nextSection != m_head && nextSection != m_foot && (!skipEmptySections || static_cast<RenderTableSection*>(nextSection)->numRows()))
+        if (nextSection->isTableSection() && nextSection != head && nextSection != foot && (!skipEmptySections || static_cast<RenderTableSection*>(nextSection)->numRows()))
             break;
         nextSection = nextSection->nextSibling();
     }
-    if (!nextSection && m_foot && (!skipEmptySections || m_foot->numRows()))
-        nextSection = m_foot;
+    if (!nextSection && foot && (!skipEmptySections || foot->numRows()))
+        nextSection = foot;
     return static_cast<RenderTableSection*>(nextSection);
 }
 
 RenderTableCell* RenderTable::cellAbove(const RenderTableCell* cell) const
 {
-    recalcSectionsIfNeeded();
-
     // Find the section and row to look in
     int r = cell->row();
     RenderTableSection* section = 0;
@@ -995,7 +989,7 @@ RenderTableCell* RenderTable::cellAbove(const RenderTableCell* cell) const
     if (r > 0) {
         // cell is not in the first row, so use the above row in its own section
         section = cell->section();
-        rAbove = r - 1;
+        rAbove = r-1;
     } else {
         section = sectionAbove(cell->section(), true);
         if (section)
@@ -1010,7 +1004,7 @@ RenderTableCell* RenderTable::cellAbove(const RenderTableCell* cell) const
         do {
             aboveCell = section->cellAt(rAbove, effCol);
             effCol--;
-        } while (!aboveCell.cell && aboveCell.inColSpan && effCol >= 0);
+        } while (!aboveCell.cell && aboveCell.inColSpan && effCol >=0);
         return aboveCell.cell;
     } else
         return 0;
@@ -1018,8 +1012,6 @@ RenderTableCell* RenderTable::cellAbove(const RenderTableCell* cell) const
 
 RenderTableCell* RenderTable::cellBelow(const RenderTableCell* cell) const
 {
-    recalcSectionsIfNeeded();
-
     // Find the section and row to look in
     int r = cell->row() + cell->rowSpan() - 1;
     RenderTableSection* section = 0;
@@ -1027,7 +1019,7 @@ RenderTableCell* RenderTable::cellBelow(const RenderTableCell* cell) const
     if (r < cell->section()->numRows() - 1) {
         // The cell is not in the last row, so use the next row in the section.
         section = cell->section();
-        rBelow = r + 1;
+        rBelow= r+1;
     } else {
         section = sectionBelow(cell->section(), true);
         if (section)
@@ -1042,7 +1034,7 @@ RenderTableCell* RenderTable::cellBelow(const RenderTableCell* cell) const
         do {
             belowCell = section->cellAt(rBelow, effCol);
             effCol--;
-        } while (!belowCell.cell && belowCell.inColSpan && effCol >= 0);
+        } while (!belowCell.cell && belowCell.inColSpan && effCol >=0);
         return belowCell.cell;
     } else
         return 0;
@@ -1050,26 +1042,22 @@ RenderTableCell* RenderTable::cellBelow(const RenderTableCell* cell) const
 
 RenderTableCell* RenderTable::cellBefore(const RenderTableCell* cell) const
 {
-    recalcSectionsIfNeeded();
-
     RenderTableSection* section = cell->section();
     int effCol = colToEffCol(cell->col());
-    if (!effCol)
+    if (effCol == 0)
         return 0;
     
     // If we hit a colspan back up to a real cell.
     RenderTableSection::CellStruct prevCell;
     do {
-        prevCell = section->cellAt(cell->row(), effCol - 1);
+        prevCell = section->cellAt(cell->row(), effCol-1);
         effCol--;
-    } while (!prevCell.cell && prevCell.inColSpan && effCol >= 0);
+    } while (!prevCell.cell && prevCell.inColSpan && effCol >=0);
     return prevCell.cell;
 }
 
 RenderTableCell* RenderTable::cellAfter(const RenderTableCell* cell) const
 {
-    recalcSectionsIfNeeded();
-
     int effCol = colToEffCol(cell->col() + cell->colSpan());
     if (effCol >= numEffCols())
         return 0;
@@ -1095,7 +1083,7 @@ IntRect RenderTable::getOverflowClipRect(int tx, int ty)
     // FIXME: This code assumes (like all our other caption code) that only top/bottom are
     // supported.  When we actually support left/right and stop mapping them to top/bottom,
     // we might have to hack this code first (depending on what order we do these bug fixes in).
-    if (m_caption) {
+    if (tCaption) {
         rect.setHeight(height());
         rect.setY(ty);
     }
@@ -1104,21 +1092,21 @@ IntRect RenderTable::getOverflowClipRect(int tx, int ty)
 }
 
 #ifndef NDEBUG
-void RenderTable::dump(TextStream* stream, DeprecatedString ind) const
+void RenderTable::dump(TextStream *stream, DeprecatedString ind) const
 {
-    if (m_caption)
+    if (tCaption)
         *stream << " tCaption";
-    if (m_head)
+    if (head)
         *stream << " head";
-    if (m_foot)
+    if (foot)
         *stream << " foot";
 
     *stream << endl << ind << "cspans:";
-    for (unsigned i = 0; i < m_columns.size(); i++)
-        *stream << " " << m_columns[i].span;
+    for ( unsigned int i = 0; i < columns.size(); i++ )
+        *stream << " " << columns[i].span;
     *stream << endl << ind;
 
-    RenderBlock::dump(stream, ind);
+    RenderBlock::dump(stream,ind);
 }
 #endif
 

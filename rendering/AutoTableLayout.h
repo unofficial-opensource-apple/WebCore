@@ -16,12 +16,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef AutoTableLayout_h
-#define AutoTableLayout_h
+#ifndef AutoTableLayout_H
+#define AutoTableLayout_H
 
 #include "Length.h"
 #include "TableLayout.h"
@@ -32,28 +32,25 @@ namespace WebCore {
 class RenderTable;
 class RenderTableCell;
 
-class AutoTableLayout : public TableLayout {
+class AutoTableLayout : public TableLayout
+{
 public:
     AutoTableLayout(RenderTable*);
     ~AutoTableLayout();
 
-    virtual void calcPrefWidths(int& minWidth, int& maxWidth);
-    virtual void layout();
+    void calcMinMaxWidth();
+    void layout();
 
 protected:
     void fullRecalc();
     void recalcColumn(int effCol);
-
-    void calcPercentages() const;
-    int totalPercent() const
-    {
+    int totalPercent() const {
         if (m_percentagesDirty)
             calcPercentages();
         return m_totalPercent;
     }
-
+    void calcPercentages() const;
     int calcEffectiveWidth();
-
     void insertSpanCell(RenderTableCell*);
 
     struct Layout {
@@ -62,8 +59,7 @@ protected:
             , maxWidth(0)
             , effMinWidth(0)
             , effMaxWidth(0)
-            , calcWidth(0)
-            , emptyCellsOnly(true) {}
+            , calcWidth(0) {}
         Length width;
         Length effWidth;
         int minWidth;
@@ -71,17 +67,16 @@ protected:
         int effMinWidth;
         int effMaxWidth;
         int calcWidth;
-        bool emptyCellsOnly;
     };
 
-    Vector<Layout, 4> m_layoutStruct;
-    Vector<RenderTableCell*, 4> m_spanCells;
+    Vector<Layout> m_layoutStruct;
+    Vector<RenderTableCell*> m_spanCells;
     bool m_hasPercent : 1;
     mutable bool m_percentagesDirty : 1;
     mutable bool m_effWidthDirty : 1;
     mutable unsigned short m_totalPercent;
 };
 
-} // namespace WebCore
+}
 
-#endif // AutoTableLayout_h
+#endif

@@ -25,9 +25,7 @@
  
 #include "config.h"
 #include "BMPImageDecoder.h"
-
-#if PLATFORM(CAIRO) || PLATFORM(QT) || PLATFORM(WX)
-
+ 
 namespace WebCore
 {
 
@@ -42,5 +40,4 @@ RGBA32Buffer* BMPImageDecoder::frameBufferAtIndex(size_t index)
 }
 
 }
-
-#endif // PLATFORM(CAIRO)
+ 

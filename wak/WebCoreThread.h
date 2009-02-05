@@ -8,9 +8,6 @@
 
 #import <GraphicsServices/GSEvent.h>
 
-#ifndef WebCoreThread_h
-#define WebCoreThread_h
-
 #if defined(__cplusplus)
 extern "C" {
 #endif    
@@ -37,7 +34,6 @@ void WebThreadLock(void);
 void WebThreadUnlock(void);
 bool WebTryThreadLock(void);
 bool WebThreadIsLocked(void);
-bool WebThreadIsLockedOrDisabled(void);
 
 void WebThreadEnable(void);
 bool WebThreadIsEnabled(void);
@@ -55,5 +51,3 @@ void WebThreadPrepareForDrawing(void);
 #if defined(__cplusplus)
 }
 #endif
-
-#endif // WebCoreThread_h

@@ -18,37 +18,37 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
+    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+    Boston, MA 02111-1307, USA.
 
     This class provides all functionality needed for loading images, style sheets and html
     pages from the web. It has a memory cache for these objects.
 */
 
-#ifndef CachedCSSStyleSheet_h
-#define CachedCSSStyleSheet_h
+#ifndef CachedCSSStyleSheet_H
+#define CachedCSSStyleSheet_H
 
 #include "CachedResource.h"
 #include "TextEncoding.h"
 #include <wtf/Vector.h>
 
-namespace WebCore {
-
+namespace WebCore
+{
     class DocLoader;
-    class TextResourceDecoder;
 
-    class CachedCSSStyleSheet : public CachedResource {
+    class CachedCSSStyleSheet : public CachedResource
+    {
     public:
-        CachedCSSStyleSheet(DocLoader*, const String& URL, const String& charset, bool skipCanLoadCheck = false, bool sendResourceLoadCallbacks = true);
+        CachedCSSStyleSheet(DocLoader*, const String& URL, CachePolicy, const DeprecatedString& charset);
+        CachedCSSStyleSheet(const String& URL, const DeprecatedString& stylesheetData);
         virtual ~CachedCSSStyleSheet();
 
         const String& sheet() const { return m_sheet; }
 
         virtual void ref(CachedResourceClient*);
- 
-        virtual void setEncoding(const String&);
-        virtual String encoding() const;
-        virtual void data(PassRefPtr<SharedBuffer> data, bool allDataReceived);
+
+        virtual void setCharset(const DeprecatedString&);
+        virtual void data(Vector<char>&, bool allDataReceived);
         virtual void error();
 
         virtual bool schedule() const { return true; }
@@ -57,7 +57,7 @@ namespace WebCore {
 
     protected:
         String m_sheet;
-        RefPtr<TextResourceDecoder> m_decoder;
+        TextEncoding m_encoding;
     };
 
 }

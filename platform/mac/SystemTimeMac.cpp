@@ -26,8 +26,6 @@
 #include "config.h"
 #include "SystemTime.h"
 
-#include "WebCoreSystemInterface.h"
-
 #include <CoreFoundation/CFDate.h>
 
 namespace WebCore {
@@ -35,11 +33,6 @@ namespace WebCore {
 double currentTime()
 {
     return CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970;
-}
-
-float userIdleTime()
-{
-    return FLT_MAX; // Disable user idle time checks for now.  We may actually want this on the iPhone in the future.
 }
 
 }
