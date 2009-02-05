@@ -1033,6 +1033,15 @@ static HTMLFormElementImpl *formElementFromDOMElement(id <WebDOMElement>element)
     return _part->referrer().getNSString();
 }
 
+- (NSString *)domain
+{
+    DocumentImpl *doc = _part->xmlDocImpl();
+    if (doc && doc->isHTMLDocument()) {
+        return doc->domain().string().getNSString();
+    }
+    return nil;
+}
+
 + (NSString *)stringWithData:(NSData *)data textEncoding:(CFStringEncoding)textEncoding
 {
     if (textEncoding == kCFStringEncodingInvalidId || textEncoding == kCFStringEncodingISOLatin1) {
@@ -1126,6 +1135,7 @@ static HTMLFormElementImpl *formElementFromDOMElement(id <WebDOMElement>element)
 
 -(id)accessibilityTree
 {
+    KWQAccObjectCache::enableAccessibility();
     if (!_part || !_part->xmlDocImpl()) return nil;
     RenderCanvas* root = static_cast<khtml::RenderCanvas *>(_part->xmlDocImpl()->renderer());
     if (!root) return nil;

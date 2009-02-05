@@ -322,7 +322,9 @@ QByteArray HTMLFormElementImpl::formData(bool& ok)
     if(!codec)
         codec = QTextCodec::codecForLocale();
 
+#if !APPLE_CHANGES
     QStringList fileUploads;
+#endif
 
     for (QPtrListIterator<HTMLGenericFormElementImpl> it(formElements); it.current(); ++it) {
         HTMLGenericFormElementImpl* current = it.current();
@@ -367,30 +369,22 @@ QByteArray HTMLFormElementImpl::formData(bool& ok)
                         static_cast<HTMLInputElementImpl*>(current)->inputType() == HTMLInputElementImpl::FILE)
                     {
                         QString path = static_cast<HTMLInputElementImpl*>(current)->value().string();
+#if !APPLE_CHANGES
                         if (path.length()) fileUploads << path;
-
-                        // Turn non-ASCII characters into &-escaped form.
-                        // This doesn't work perfectly, because it doesn't escape &, for example.
-                        // But it seems to be what Gecko does.
-                        QString onlyfilename;
-                        for (uint i = path.findRev('/') + 1; i < path.length(); ++i) {
-                            QChar c = path.at(i).unicode();
-                            if (c.unicode() >= 0x20 && c.unicode() <= 0x7F) {
-                                onlyfilename.append(&c, 1);
-                            } else {
-                                QString ampersandEscape;
-                                ampersandEscape.sprintf("&#%hu;", c.unicode());
-                                onlyfilename.append(ampersandEscape);
-                            }
-                        }
+#endif
 
                         // FIXME: This won't work if the filename includes a " mark,
-                        // or control characters like CR or LF.
-                        hstr += ("; filename=\"" + onlyfilename + "\"").ascii();
+                        // or control characters like CR or LF. This also does strange
+                        // things if the filename includes characters you can't encode
+                        // in the website's character set.
+                        hstr += "; filename=\"";
+                        hstr += codec->fromUnicode(path.mid(path.findRev('/') + 1));
+                        hstr += "\"";
+
                         if(!static_cast<HTMLInputElementImpl*>(current)->value().isEmpty())
                         {
 #if APPLE_CHANGES
-                            QString mimeType = part ? KWQ(part)->mimeTypeForFileName(onlyfilename) : QString();
+                            QString mimeType = part ? KWQ(part)->mimeTypeForFileName(path) : QString();
 #else
                             KMimeType::Ptr ptr = KMimeType::findByURL(KURL(path));
                             QString mimeType = ptr->name();
@@ -1373,9 +1367,11 @@ void HTMLInputElementImpl::parseAttribute(AttributeImpl *attr)
             setChanged();     // at the default value right now.
         break;
     case ATTR_CHECKED:
-        m_defaultChecked = attr->val();
-        if (m_useDefaultChecked)   // We only need to setChanged if the form is looking
-            setChanged();          // at the default checked state right now.
+        m_defaultChecked = attr->val() != 0;
+        if (m_useDefaultChecked) {
+            setChecked(m_defaultChecked);
+            m_useDefaultChecked = true;
+        }
         break;
     case ATTR_MAXLENGTH:
         m_maxLen = attr->val() ? attr->val()->toInt() : -1;
@@ -1704,8 +1700,8 @@ bool HTMLInputElementImpl::encoding(const QTextCodec* codec, khtml::encodingList
 void HTMLInputElementImpl::reset()
 {
     setValue(DOMString());
+    setChecked(m_defaultChecked);
     m_useDefaultChecked = true;
-    m_checked = m_defaultChecked;
 }
 
 void HTMLInputElementImpl::setChecked(bool _checked)
