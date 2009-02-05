@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,106 +26,74 @@
 #ifndef Cursor_h
 #define Cursor_h
 
-#include "Image.h"
-#include "IntPoint.h"
-#include <wtf/RefPtr.h>
+#include <wtf/Platform.h>
 
 #if PLATFORM(WIN)
 typedef struct HICON__* HICON;
 typedef HICON HCURSOR;
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefCounted.h>
-#elif PLATFORM(MAC)
-#include <wtf/RetainPtr.h>
+#include <Shared.h>
+#include <wtf/RefPtr.h>
 #elif PLATFORM(GTK)
-#include "GRefPtrGtk.h"
+#include <gdk/gdk.h>
 #elif PLATFORM(QT)
 #include <QCursor>
-#elif PLATFORM(CHROMIUM)
-#include "PlatformCursor.h"
-#elif PLATFORM(BLACKBERRY)
-#include <BlackBerryPlatformCursor.h>
 #endif
 
-
-#if PLATFORM(WX)
-class wxCursor;
+#if PLATFORM(MAC)
+#ifdef __OBJC__
+@class NSCursor;
+#else
+class NSCursor;
 #endif
-
-#if PLATFORM(WIN)
-typedef struct HICON__ *HICON;
-typedef HICON HCURSOR;
-#endif
-
-#if PLATFORM(WIN) || PLATFORM(MAC) || PLATFORM(GTK) || PLATFORM(QT) || PLATFORM(EFL)
-#define WTF_USE_LAZY_NATIVE_CURSOR 1
 #endif
 
 namespace WebCore {
 
     class Image;
+    class IntPoint;
 
+#if PLATFORM(WIN)
+    class SharedCursor : public Shared<SharedCursor> {
+    public:
+        SharedCursor(HCURSOR nativeCursor) : m_nativeCursor(nativeCursor) {}
+        ~SharedCursor() {
+            DestroyIcon(m_nativeCursor);
+        }
+        HCURSOR nativeCursor() const { return m_nativeCursor; }
+    private:
+        HCURSOR m_nativeCursor;
+    };
+    typedef RefPtr<SharedCursor> PlatformCursor;
+#elif PLATFORM(MAC)
+    typedef NSCursor* PlatformCursor;
+#elif PLATFORM(GTK)
+    typedef GdkCursor* PlatformCursor;
+#elif PLATFORM(QT) && !defined(QT_NO_CURSOR)
+    typedef QCursor PlatformCursor;
+#else
     typedef void* PlatformCursor;
+#endif
 
     class Cursor {
     public:
-        enum Type {
-            Pointer,
-            Cross,
-            Hand,
-            IBeam,
-            Wait,
-            Help,
-            EastResize,
-            NorthResize,
-            NorthEastResize,
-            NorthWestResize,
-            SouthResize,
-            SouthEastResize,
-            SouthWestResize,
-            WestResize,
-            NorthSouthResize,
-            EastWestResize,
-            NorthEastSouthWestResize,
-            NorthWestSouthEastResize,
-            ColumnResize,
-            RowResize,
-            MiddlePanning,
-            EastPanning,
-            NorthPanning,
-            NorthEastPanning,
-            NorthWestPanning,
-            SouthPanning,
-            SouthEastPanning,
-            SouthWestPanning,
-            WestPanning,
-            Move,
-            VerticalText,
-            Cell,
-            ContextMenu,
-            Alias,
-            Progress,
-            NoDrop,
-            Copy,
-            None,
-            NotAllowed,
-            ZoomIn,
-            ZoomOut,
-            Grab,
-            Grabbing,
-            Custom
-        };
-
-        static const Cursor& fromType(Cursor::Type);
-
         Cursor()
-        {
-        }
+#if !PLATFORM(QT)
+        : m_impl(0)
+#endif
+        { }
 
+        Cursor(Image*, const IntPoint& hotspot);
+        Cursor(const Cursor&);
+        ~Cursor();
+        Cursor& operator=(const Cursor&);
+
+        Cursor(PlatformCursor);
+        PlatformCursor impl() const { return m_impl; }
+
+     private:
+        PlatformCursor m_impl;
     };
 
-    IntPoint determineHotSpot(Image*, const IntPoint& specifiedHotSpot);
-    
     const Cursor& pointerCursor();
     const Cursor& crossCursor();
     const Cursor& handCursor();
@@ -147,15 +115,6 @@ namespace WebCore {
     const Cursor& northWestSouthEastResizeCursor();
     const Cursor& columnResizeCursor();
     const Cursor& rowResizeCursor();
-    const Cursor& middlePanningCursor();
-    const Cursor& eastPanningCursor();
-    const Cursor& northPanningCursor();
-    const Cursor& northEastPanningCursor();
-    const Cursor& northWestPanningCursor();
-    const Cursor& southPanningCursor();
-    const Cursor& southEastPanningCursor();
-    const Cursor& southWestPanningCursor();
-    const Cursor& westPanningCursor();
     const Cursor& verticalTextCursor();
     const Cursor& cellCursor();
     const Cursor& contextMenuCursor();
@@ -167,8 +126,6 @@ namespace WebCore {
     const Cursor& zoomOutCursor();
     const Cursor& copyCursor();
     const Cursor& noneCursor();
-    const Cursor& grabCursor();
-    const Cursor& grabbingCursor();
 
 } // namespace WebCore
 

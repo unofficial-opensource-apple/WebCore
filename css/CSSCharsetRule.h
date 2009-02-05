@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -27,21 +29,24 @@
 
 namespace WebCore {
 
+typedef int ExceptionCode;
+
 class CSSCharsetRule : public CSSRule {
 public:
-    static PassRefPtr<CSSCharsetRule> create(CSSStyleSheet* parent, const String& encoding)
-    {
-        return adoptRef(new CSSCharsetRule(parent, encoding));
-    }
+    CSSCharsetRule(StyleBase* parent, const String& encoding);
+    virtual ~CSSCharsetRule();
 
-    const String& encoding() const { return m_encoding; }
+    virtual bool isCharsetRule() { return true; }
+
+    String encoding() const { return m_encoding; }
     void setEncoding(const String& encoding, ExceptionCode&) { m_encoding = encoding; }
 
-    String cssText() const;
+    // Inherited from CSSRule
+    virtual unsigned short type() const { return CHARSET_RULE; }
 
-private:
-    CSSCharsetRule(CSSStyleSheet* parent, const String& encoding);
+    virtual String cssText() const;
 
+protected:
     String m_encoding;
 };
 

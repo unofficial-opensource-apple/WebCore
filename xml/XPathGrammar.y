@@ -1,6 +1,6 @@
 /*
  * Copyright 2005 Frerich Raabe <raabe@kde.org>
- * Copyright (C) 2006 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  * Copyright (C) 2007 Alexey Proskuryakov <ap@webkit.org>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,16 +29,14 @@
 
 #include "config.h"
 
+#if ENABLE(XPATH)
+
 #include "XPathFunctions.h"
 #include "XPathNSResolver.h"
 #include "XPathParser.h"
 #include "XPathPath.h"
 #include "XPathPredicate.h"
 #include "XPathVariableReference.h"
-#include <wtf/FastMalloc.h>
-
-#define YYMALLOC fastMalloc
-#define YYFREE fastFree
 
 #define YYENABLE_NLS 0
 #define YYLTYPE_IS_TRIVIAL 1
@@ -70,8 +68,8 @@ using namespace XPath;
 
 %{
 
-static int xpathyylex(YYSTYPE* yylval) { return Parser::current()->lex(yylval); }
-static void xpathyyerror(const char*) { }
+int xpathyylex(YYSTYPE *yylval) { return Parser::current()->lex(yylval); }
+void xpathyyerror(const char *str) { }
     
 %}
 
@@ -84,7 +82,7 @@ static void xpathyyerror(const char*) { }
 %token <str> VARIABLEREFERENCE NUMBER
 %token DOTDOT SLASHSLASH
 %token <str> NAMETEST
-%token XPATH_ERROR
+%token ERROR
 
 %type <locationPath> LocationPath
 %type <locationPath> AbsoluteLocationPath
@@ -552,3 +550,5 @@ UnaryExpr:
     ;
 
 %%
+
+#endif

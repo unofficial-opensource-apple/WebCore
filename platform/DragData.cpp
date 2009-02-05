@@ -26,31 +26,17 @@
 #include "config.h"
 #include "DragData.h"
 
-#if ENABLE(DRAG_SUPPORT)
 namespace WebCore {
 
 #if !PLATFORM(MAC)
 DragData::DragData(DragDataRef data, const IntPoint& clientPosition, const IntPoint& globalPosition, 
-    DragOperation sourceOperationMask, DragApplicationFlags flags)
+    DragOperation sourceOperationMask)
     : m_clientPosition(clientPosition)
     , m_globalPosition(globalPosition)
     , m_platformDragData(data)
     , m_draggingSourceOperationMask(sourceOperationMask)
-    , m_applicationFlags(flags)
 {  
-}
-
-DragData::DragData(const String&, const IntPoint& clientPosition, const IntPoint& globalPosition,
-    DragOperation sourceOperationMask, DragApplicationFlags flags)
-    : m_clientPosition(clientPosition)
-    , m_globalPosition(globalPosition)
-    , m_platformDragData(0)
-    , m_draggingSourceOperationMask(sourceOperationMask)
-    , m_applicationFlags(flags)
-{
 }
 #endif
 
-} // namespace WebCore
-
-#endif // ENABLE(DRAG_SUPPORT)
+}

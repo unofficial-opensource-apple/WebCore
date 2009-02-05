@@ -1,6 +1,6 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
- * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,17 +21,9 @@
 #ifndef Chrome_h
 #define Chrome_h
 
-#include "Cursor.h"
 #include "FocusDirection.h"
-#include "HostWindow.h"
 #include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
-
-#ifndef __OBJC__
-class WAKView;
-#else
-@class WAKView;
-#endif
 
 #if PLATFORM(MAC)
 #ifndef __OBJC__
@@ -42,76 +34,53 @@ class NSView;
 namespace WebCore {
 
     class ChromeClient;
-#if ENABLE(INPUT_TYPE_COLOR)
-    class ColorChooser;
-    class ColorChooserClient;
-#endif
-    class FileChooser;
-    class FileIconLoader;
+    class ContextMenu;
     class FloatRect;
     class Frame;
-    class Geolocation;
     class HitTestResult;
     class IntRect;
-    class NavigationAction;
-    class Node;
     class Page;
-    class PopupMenu;
-    class PopupMenuClient;
-    class SearchPopupMenu;
-
-    struct FrameLoadRequest;
-    struct ViewportArguments;
-    struct WindowFeatures;
+    class String;
     
-    class Chrome : public HostWindow {
+    struct FrameLoadRequest;
+    
+    enum MessageSource {
+        HTMLMessageSource,
+        XMLMessageSource,
+        JSMessageSource,
+        CSSMessageSource,
+        OtherMessageSource
+    };
+
+    enum MessageLevel {
+        TipMessageLevel,
+        LogMessageLevel,
+        WarningMessageLevel,
+        ErrorMessageLevel
+    };
+
+    class Chrome {
     public:
+        Chrome(Page*, ChromeClient*);
         ~Chrome();
 
-        static PassOwnPtr<Chrome> create(Page*, ChromeClient*);
-
         ChromeClient* client() { return m_client; }
-
-        // HostWindow methods.
-
-        virtual void invalidateRootView(const IntRect&, bool) OVERRIDE;
-        virtual void invalidateContentsAndRootView(const IntRect&, bool) OVERRIDE;
-        virtual void invalidateContentsForSlowScroll(const IntRect&, bool);
-        virtual void scroll(const IntSize&, const IntRect&, const IntRect&);
-#if USE(TILED_BACKING_STORE)
-        virtual void delegatedScrollRequested(const IntPoint& scrollPoint);
-#endif
-        virtual IntPoint screenToRootView(const IntPoint&) const OVERRIDE;
-        virtual IntRect rootViewToScreen(const IntRect&) const OVERRIDE;
-        virtual PlatformPageClient platformPageClient() const;
-        virtual void scrollbarsModeDidChange() const;
-        virtual void setCursor(const Cursor&);
-        virtual void setCursorHiddenUntilMouseMoves(bool);
-
-#if ENABLE(REQUEST_ANIMATION_FRAME)
-        virtual void scheduleAnimation();
-#endif
-
-        void scrollRectIntoView(const IntRect&) const;
-
-        void contentsSizeChanged(Frame*, const IntSize&) const;
-        void layoutUpdated(Frame*) const;
 
         void setWindowRect(const FloatRect&) const;
         FloatRect windowRect() const;
 
         FloatRect pageRect() const;
         
+        float scaleFactor();
+
         void focus() const;
         void unfocus() const;
 
         bool canTakeFocus(FocusDirection) const;
         void takeFocus(FocusDirection) const;
 
-        void focusedNodeChanged(Node*) const;
-        void focusedFrameChanged(Frame*) const;
-
-        Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&, const NavigationAction&) const;
+        Page* createWindow(Frame*, const FrameLoadRequest&) const;
+        Page* createModalDialog(Frame*, const FrameLoadRequest&) const;
         void show() const;
 
         bool canRunModal() const;
@@ -132,6 +101,8 @@ namespace WebCore {
         
         void setResizable(bool) const;
 
+        void addMessageToConsole(MessageSource, MessageLevel, const String& message, unsigned lineNumber, const String& sourceID);
+
         bool canRunBeforeUnloadConfirmPanel();
         bool runBeforeUnloadConfirmPanel(const String& message, Frame* frame);
 
@@ -139,15 +110,14 @@ namespace WebCore {
 
         void runJavaScriptAlert(Frame*, const String&);
         bool runJavaScriptConfirm(Frame*, const String&);
-        bool runJavaScriptPrompt(Frame*, const String& message, const String& defaultValue, String& result);
+        bool runJavaScriptPrompt(Frame*, const String& message, const String& defaultValue, String& result);                
         void setStatusbarText(Frame*, const String&);
         bool shouldInterruptJavaScript();
 
-#if ENABLE(REGISTER_PROTOCOL_HANDLER)
-        void registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title);
-#endif
-
         IntRect windowResizerRect() const;
+        void addToDirtyRegion(const IntRect&);
+        void scrollBackingStore(int dx, int dy, const IntRect& scrollViewRect, const IntRect& clipRect);
+        void updateBackingStore();
 
         void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags);
 
@@ -155,38 +125,13 @@ namespace WebCore {
 
         void print(Frame*);
 
-#if ENABLE(INPUT_TYPE_COLOR)
-        PassOwnPtr<ColorChooser> createColorChooser(ColorChooserClient*, const Color& initialColor);
-#endif
-
-        void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
-        void loadIconForFiles(const Vector<String>&, FileIconLoader*);
-#if ENABLE(DIRECTORY_UPLOAD)
-        void enumerateChosenDirectory(FileChooser*);
-#endif
-
-        void dispatchViewportPropertiesDidChange(const ViewportArguments&) const;
-
-        bool requiresFullscreenForVideoPlayback();
-
 #if PLATFORM(MAC)
         void focusNSView(NSView*);
 #endif
 
-        bool selectItemWritingDirectionIsNatural();
-        bool selectItemAlignmentFollowsMenuWritingDirection();
-        bool hasOpenedPopup() const;
-        PassRefPtr<PopupMenu> createPopupMenu(PopupMenuClient*) const;
-        PassRefPtr<SearchPopupMenu> createSearchPopupMenu(PopupMenuClient*) const;
-
-        void setDispatchViewportDataDidChangeSuppressed(bool b) { m_isDispatchViewportDataDidChangeSuppressed = b; }
-
     private:
-        Chrome(Page*, ChromeClient*);
-
         Page* m_page;
         ChromeClient* m_client;
-        bool m_isDispatchViewportDataDidChangeSuppressed;
     };
 }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,91 +26,45 @@
 #include "config.h"
 #include "KURL.h"
 
-#include <wtf/RetainPtr.h>
+#include <wtf/Vector.h>
 #include <CoreFoundation/CFURL.h>
-
-#include "RuntimeApplicationChecksIOS.h"
-#include <CoreFoundation/CFPriv.h>
 
 using namespace std;
 
 namespace WebCore {
 
-#if !USE(WTFURL)
-
-typedef Vector<char, 512> CharBuffer;
-
-CFURLRef createCFURLFromBuffer(const CharBuffer&);
-
 KURL::KURL(CFURLRef url)
 {
-    if (!url) {
-        parse(0);
-        return;
-    }
-
-    CFIndex bytesLength = CFURLGetBytes(url, 0, 0);
-    Vector<char, 512> buffer(bytesLength + 1);
-    char* bytes = &buffer[0];
-    CFURLGetBytes(url, reinterpret_cast<UInt8*>(bytes), bytesLength);
-    bytes[bytesLength] = '\0';
-    parse(bytes);
+    if (url) {
+        CFIndex bytesLength = CFURLGetBytes(url, 0, 0);
+        Vector<char, 2048> buffer(bytesLength + 6); // 6 for "file:", 1 for NUL terminator
+        char* bytes = &buffer[5];
+        CFURLGetBytes(url, (UInt8*)bytes, bytesLength);
+        bytes[bytesLength] = '\0';
+        if (bytes[0] == '/') {
+            buffer[0] = 'f';
+            buffer[1] = 'i';
+            buffer[2] = 'l';
+            buffer[3] = 'e';
+            buffer[4] = ':';
+            parse(buffer.data(), 0);
+        } else
+            parse(bytes, 0);
+    } else
+        parse("", 0);
 }
 
-CFURLRef createCFURLFromBuffer(const CharBuffer& buffer)
+CFURLRef KURL::createCFURL() const
 {
+    const UInt8 *bytes = (const UInt8 *)urlString.latin1();
     // NOTE: We use UTF-8 here since this encoding is used when computing strings when returning URL components
     // (e.g calls to NSURL -path). However, this function is not tolerant of illegal UTF-8 sequences, which
     // could either be a malformed string or bytes in a different encoding, like Shift-JIS, so we fall back
     // onto using ISO Latin-1 in those cases.
-    CFURLRef result = CFURLCreateAbsoluteURLWithBytes(0, reinterpret_cast<const UInt8*>(buffer.data()), buffer.size(), kCFStringEncodingUTF8, 0, true);
+    CFURLRef result = CFURLCreateAbsoluteURLWithBytes(0, bytes, urlString.length(), kCFStringEncodingUTF8, 0, true);
     if (!result)
-        result = CFURLCreateAbsoluteURLWithBytes(0, reinterpret_cast<const UInt8*>(buffer.data()), buffer.size(), kCFStringEncodingISOLatin1, 0, true);
+        result = CFURLCreateAbsoluteURLWithBytes(0, bytes, urlString.length(), kCFStringEncodingISOLatin1, 0, true);
     return result;
 }
-
-#if !PLATFORM(MAC) && !(PLATFORM(QT) && USE(QTKIT))
-CFURLRef KURL::createCFURL() const
-{
-    // FIXME: What should this return for invalid URLs?
-    // Currently it throws away the high bytes of the characters in the string in that case,
-    // which is clearly wrong.
-    CharBuffer buffer;
-    copyToBuffer(buffer);
-    return createCFURLFromBuffer(buffer);
-}
-#endif
-
-#if !(PLATFORM(QT) && USE(QTKIT))
-String KURL::fileSystemPath() const
-{
-    RetainPtr<CFURLRef> cfURL(AdoptCF, createCFURL());
-    if (!cfURL)
-        return String();
-
-#if PLATFORM(WIN)
-    CFURLPathStyle pathStyle = kCFURLWindowsPathStyle;
-#else
-    CFURLPathStyle pathStyle = kCFURLPOSIXPathStyle;
-#endif
-    return RetainPtr<CFStringRef>(AdoptCF, CFURLCopyFileSystemPath(cfURL.get(), pathStyle)).get();
-}
-#endif
-
-#else // USE(WTFURL)
-
-KURL::KURL(CFURLRef)
-{
-    // FIXME: Add WTFURL Implementation.
-    invalidate();
-}
-
-CFURLRef KURL::createCFURL() const
-{
-    // FIXME: Add WTFURL Implementation.
-    return 0;
-}
-
-#endif // USE(WTFURL)
 
 }

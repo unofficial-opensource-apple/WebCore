@@ -1,5 +1,7 @@
 /*
- * Copyright (C) 2006, 2011, 2012 Apple Computer, Inc.
+ * This file is part of the DOM implementation for KDE.
+ *
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -30,11 +32,8 @@ namespace WebCore {
 HTMLOptionsCollection::HTMLOptionsCollection(HTMLSelectElement* select)
     : HTMLCollection(select, SelectOptions)
 {
-}
-
-PassOwnPtr<HTMLOptionsCollection> HTMLOptionsCollection::create(HTMLSelectElement* select)
-{
-    return adoptPtr(new HTMLOptionsCollection(select));
+    ASSERT(!info);
+    info = select->collectionInfo();
 }
 
 void HTMLOptionsCollection::add(PassRefPtr<HTMLOptionElement> element, ExceptionCode &ec)
@@ -57,7 +56,7 @@ void HTMLOptionsCollection::add(PassRefPtr<HTMLOptionElement> element, int index
     }
 
     ec = 0;
-    HTMLSelectElement* select = toHTMLSelectElement(base());
+    HTMLSelectElement* select = static_cast<HTMLSelectElement*>(m_base.get());
 
     if (index == -1 || unsigned(index) >= length())
         select->add(newOption, 0, ec);
@@ -67,24 +66,19 @@ void HTMLOptionsCollection::add(PassRefPtr<HTMLOptionElement> element, int index
     ASSERT(ec == 0);
 }
 
-void HTMLOptionsCollection::remove(int index)
-{
-    toHTMLSelectElement(base())->remove(index);
-}
-
 int HTMLOptionsCollection::selectedIndex() const
 {
-    return toHTMLSelectElement(base())->selectedIndex();
+    return static_cast<HTMLSelectElement*>(m_base.get())->selectedIndex();
 }
 
 void HTMLOptionsCollection::setSelectedIndex(int index)
 {
-    toHTMLSelectElement(base())->setSelectedIndex(index);
+    static_cast<HTMLSelectElement*>(m_base.get())->setSelectedIndex(index);
 }
 
 void HTMLOptionsCollection::setLength(unsigned length, ExceptionCode& ec)
 {
-    toHTMLSelectElement(base())->setLength(length, ec);
+    static_cast<HTMLSelectElement*>(m_base.get())->setLength(length, ec);
 }
 
 } //namespace

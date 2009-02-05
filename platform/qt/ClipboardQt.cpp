@@ -1,8 +1,5 @@
 /*
  * Copyright (C) 2007 Apple Inc.  All rights reserved.
- * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
- * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
- * Copyright (C) 2010 Sencha, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,345 +20,150 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
 #include "config.h"
 #include "ClipboardQt.h"
 
-#include "CachedImage.h"
-#include "DataTransferItemListQt.h"
+#include "NotImplemented.h"
+#include "DeprecatedString.h"
 #include "Document.h"
-#include "DragData.h"
-#include "Element.h"
-#include "FileList.h"
 #include "Frame.h"
-#include "HTMLNames.h"
-#include "HTMLParserIdioms.h"
-#include "Image.h"
 #include "IntPoint.h"
 #include "KURL.h"
-#include "NotImplemented.h"
 #include "PlatformString.h"
 #include "Range.h"
-#include "RenderImage.h"
-#include "markup.h"
-#include <wtf/text/StringHash.h>
-
-#include <QGuiApplication>
-#include <QClipboard>
+#include "StringHash.h"
 #include <QList>
 #include <QMimeData>
 #include <QStringList>
-#include <QTextCodec>
 #include <QUrl>
-#include <qdebug.h>
 
-#define methodDebug() qDebug("ClipboardQt: %s", __FUNCTION__)
 
 namespace WebCore {
-
-static bool isTextMimeType(const String& type)
-{
-    return type == "text/plain" || type.startsWith("text/plain;");
-}
-
-static bool isHtmlMimeType(const String& type)
-{
-    return type == "text/html" || type.startsWith("text/html;");
-}
-
-PassRefPtr<Clipboard> Clipboard::create(ClipboardAccessPolicy policy, DragData* dragData, Frame* frame)
-{
-    return ClipboardQt::create(policy, dragData->platformData(), frame);
-}
-
-ClipboardQt::ClipboardQt(ClipboardAccessPolicy policy, const QMimeData* readableClipboard, Frame* frame)
-    : Clipboard(policy, DragAndDrop)
+    
+ClipboardQt::ClipboardQt(ClipboardAccessPolicy policy, const QMimeData* readableClipboard, bool forDragging)
+    : Clipboard(policy, forDragging)
     , m_readableData(readableClipboard)
     , m_writableData(0)
-    , m_frame(frame)
 {
-    Q_ASSERT(policy == ClipboardReadable || policy == ClipboardTypesReadable);
-}
+    ASSERT(m_readableData);
+}    
 
-ClipboardQt::ClipboardQt(ClipboardAccessPolicy policy, ClipboardType clipboardType, Frame* frame)
-    : Clipboard(policy, clipboardType)
-    , m_readableData(0)
-    , m_writableData(0)
-    , m_frame(frame)
+ClipboardQt::ClipboardQt(ClipboardAccessPolicy policy, bool forDragging)
+    : Clipboard(policy, forDragging)
 {
-    Q_ASSERT(policy == ClipboardReadable || policy == ClipboardWritable || policy == ClipboardNumb);
-
-#ifndef QT_NO_CLIPBOARD
-    if (policy != ClipboardWritable) {
-        Q_ASSERT(isForCopyAndPaste());
-        m_readableData = QGuiApplication::clipboard()->mimeData();
-    }
-#endif
+    m_writableData = new QMimeData();
+    m_readableData = m_writableData;    
 }
 
 ClipboardQt::~ClipboardQt()
 {
-    if (m_writableData && isForCopyAndPaste())
-        m_writableData = 0;
-    else
+    if (m_writableData)
         delete m_writableData;
     m_readableData = 0;
 }
 
 void ClipboardQt::clearData(const String& type)
 {
-    if (policy() != ClipboardWritable)
-        return;
-
-    if (m_writableData) {
-        m_writableData->removeFormat(type);
-        if (m_writableData->formats().isEmpty()) {
-            if (isForDragAndDrop())
-                delete m_writableData;
-            m_writableData = 0;
-        }
-    }
-#ifndef QT_NO_CLIPBOARD
-    if (isForCopyAndPaste())
-        QGuiApplication::clipboard()->setMimeData(m_writableData);
-#endif
+    ASSERT(m_writableData);
+    notImplemented();
 }
 
-void ClipboardQt::clearAllData()
+void ClipboardQt::clearAllData() 
 {
-    if (policy() != ClipboardWritable)
-        return;
-
-#ifndef QT_NO_CLIPBOARD
-    if (isForCopyAndPaste())
-        QGuiApplication::clipboard()->setMimeData(0);
-    else
-#endif
-        delete m_writableData;
-    m_writableData = 0;
+    ASSERT(m_writableData);
+    m_writableData->clear();
 }
 
-String ClipboardQt::getData(const String& type) const
+String ClipboardQt::getData(const String& type, bool& success) const 
 {
-
-    if (policy() != ClipboardReadable)
-        return String();
-
-    if (isHtmlMimeType(type) && m_readableData->hasHtml())
-        return m_readableData->html();
-
-    if (isTextMimeType(type) && m_readableData->hasText())
-        return m_readableData->text();
-
-    ASSERT(m_readableData);
-    QByteArray rawData = m_readableData->data(type);
-    QString data = QTextCodec::codecForName("UTF-16")->toUnicode(rawData);
-    return data;
+    ASSERT(m_writableData);
+    QByteArray data = m_writableData->data(QString(type));
+    success = !data.isEmpty();
+    return String(data.data(), data.size());
 }
 
-bool ClipboardQt::setData(const String& type, const String& data)
+bool ClipboardQt::setData(const String& type, const String& data) 
 {
-    if (policy() != ClipboardWritable)
-        return false;
-
-    if (!m_writableData)
-        m_writableData = new QMimeData;
-
-    if (isTextMimeType(type))
-        m_writableData->setText(QString(data));
-    else if (isHtmlMimeType(type))
-        m_writableData->setHtml(QString(data));
-    else {
-        QByteArray array(reinterpret_cast<const char*>(data.characters()), data.length() * 2);
-        m_writableData->setData(QString(type), array);
-    }
-
+    ASSERT(m_writableData);
+    QByteArray array(reinterpret_cast<const char*>(data.characters()),
+                     data.length());
+    m_writableData->setData(QString(type), array);
     return true;
 }
 
 // extensions beyond IE's API
 HashSet<String> ClipboardQt::types() const
 {
-    if (policy() != ClipboardReadable && policy() != ClipboardTypesReadable)
-        return HashSet<String>();
-
-    ASSERT(m_readableData);
     HashSet<String> result;
-    QStringList formats = m_readableData->formats();
-    for (int i = 0; i < formats.count(); ++i)
-        result.add(formats.at(i));
+    QStringList formats = m_writableData->formats();
+    for (int i = 0; i < formats.count(); ++i) {
+        String type(formats.at(i).toLatin1().data());
+        result.add(type);
+    }
     return result;
 }
 
-PassRefPtr<FileList> ClipboardQt::files() const
-{
-    if (policy() != ClipboardReadable || !m_readableData->hasUrls())
-        return FileList::create();
-
-    RefPtr<FileList> fileList = FileList::create();
-    QList<QUrl> urls = m_readableData->urls();
-
-    for (int i = 0; i < urls.size(); i++) {
-        QUrl url = urls[i];
-        if (url.scheme() != QLatin1String("file"))
-            continue;
-        fileList->append(File::create(url.toLocalFile()));
-    }
-
-    return fileList.release();
+IntPoint ClipboardQt::dragLocation() const 
+{ 
+    notImplemented();
+    return IntPoint(0,0);
 }
 
-void ClipboardQt::setDragImage(CachedImage* image, const IntPoint& point)
+CachedImage* ClipboardQt::dragImage() const 
 {
-    setDragImage(image, 0, point);
+    notImplemented();
+    return 0; 
 }
 
-void ClipboardQt::setDragImageElement(Node* node, const IntPoint& point)
+void ClipboardQt::setDragImage(CachedImage*, const IntPoint&) 
 {
-    setDragImage(0, node, point);
+    notImplemented();
 }
 
-void ClipboardQt::setDragImage(CachedImage* image, Node *node, const IntPoint &loc)
+Node* ClipboardQt::dragImageElement() 
 {
-    if (policy() != ClipboardImageWritable && policy() != ClipboardWritable)
-        return;
+    notImplemented();
+    return 0; 
+}
 
-    if (m_dragImage)
-        m_dragImage->removeClient(this);
-    m_dragImage = image;
-    if (m_dragImage)
-        m_dragImage->addClient(this);
-
-    m_dragLoc = loc;
-    m_dragImageElement = node;
+void ClipboardQt::setDragImageElement(Node*, const IntPoint&)
+{
+    notImplemented();
 }
 
 DragImageRef ClipboardQt::createDragImage(IntPoint& dragLoc) const
-{
-    if (!m_dragImage)
-        return 0;
-    dragLoc = m_dragLoc;
-    return m_dragImage->image()->nativeImageForCurrentFrame();
-}
-
-
-static CachedImage* getCachedImage(Element* element)
-{
-    // Attempt to pull CachedImage from element
-    ASSERT(element);
-    RenderObject* renderer = element->renderer();
-    if (!renderer || !renderer->isImage())
-        return 0;
-
-    RenderImage* image = toRenderImage(renderer);
-    if (image->cachedImage() && !image->cachedImage()->errorOccurred())
-        return image->cachedImage();
-
+{ 
+    notImplemented();
     return 0;
 }
 
-void ClipboardQt::declareAndWriteDragImage(Element* element, const KURL& url, const String& title, Frame* frame)
+void ClipboardQt::declareAndWriteDragImage(Element*, const KURL&, const String&, Frame*) 
 {
-    ASSERT(frame);
+    ASSERT(m_writableData);
+    notImplemented();
+}
 
-    // WebCore::writeURL(m_writableDataObject.get(), url, title, true, false);
-    if (!m_writableData)
-        m_writableData = new QMimeData;
-
-    CachedImage* cachedImage = getCachedImage(element);
-    if (!cachedImage || !cachedImage->imageForRenderer(element->renderer()) || !cachedImage->isLoaded())
-        return;
-    QPixmap* pixmap = cachedImage->imageForRenderer(element->renderer())->nativeImageForCurrentFrame();
-    if (pixmap)
-        m_writableData->setImageData(*pixmap);
-
+void ClipboardQt::writeURL(const KURL& url, const String&, Frame* frame) 
+{
+    ASSERT(m_writableData);
     QList<QUrl> urls;
-    urls.append(url);
-
-    m_writableData->setText(title);
+    urls.append(QUrl(frame->document()->completeURL(url.url())));
     m_writableData->setUrls(urls);
-    m_writableData->setHtml(createMarkup(element, IncludeNode, 0, ResolveAllURLs));
-#ifndef QT_NO_CLIPBOARD
-    if (isForCopyAndPaste())
-        QGuiApplication::clipboard()->setMimeData(m_writableData);
-#endif
 }
 
-void ClipboardQt::writeURL(const KURL& url, const String& title, Frame* frame)
+void ClipboardQt::writeRange(Range* range, Frame*) 
 {
-    ASSERT(frame);
-
-    QList<QUrl> urls;
-    urls.append(frame->document()->completeURL(url.string()));
-    if (!m_writableData)
-        m_writableData = new QMimeData;
-    m_writableData->setUrls(urls);
-    m_writableData->setText(title);
-#ifndef QT_NO_CLIPBOARD
-    if (isForCopyAndPaste())
-        QGuiApplication::clipboard()->setMimeData(m_writableData);
-#endif
+    ASSERT(m_writableData);
+    m_writableData->setText(range->text());
+    m_writableData->setHtml(range->toHTML());
 }
 
-void ClipboardQt::writeRange(Range* range, Frame* frame)
+bool ClipboardQt::hasData() 
 {
-    ASSERT(range);
-    ASSERT(frame);
-
-    if (!m_writableData)
-        m_writableData = new QMimeData;
-    QString text = frame->editor()->selectedText();
-    text.replace(QChar(0xa0), QLatin1Char(' '));
-    m_writableData->setText(text);
-    m_writableData->setHtml(createMarkup(range, 0, AnnotateForInterchange, false, ResolveNonLocalURLs));
-#ifndef QT_NO_CLIPBOARD
-    if (isForCopyAndPaste())
-        QGuiApplication::clipboard()->setMimeData(m_writableData);
-#endif
+    return m_readableData->formats().count() > 0;
 }
-
-void ClipboardQt::writePlainText(const String& str)
-{
-    if (!m_writableData)
-        m_writableData = new QMimeData;
-    QString text = str;
-    text.replace(QChar(0xa0), QLatin1Char(' '));
-    m_writableData->setText(text);
-#ifndef QT_NO_CLIPBOARD
-    if (isForCopyAndPaste())
-        QGuiApplication::clipboard()->setMimeData(m_writableData);
-#endif
-}
-
-bool ClipboardQt::hasData()
-{
-    const QMimeData *data = m_readableData ? m_readableData : m_writableData;
-    if (!data)
-        return false;
-    return data->formats().count() > 0;
-}
-
-#if ENABLE(DATA_TRANSFER_ITEMS)
-PassRefPtr<DataTransferItemList> ClipboardQt::items()
-{
-
-    if (!m_frame && !m_frame->document())
-        return 0;
-
-    RefPtr<DataTransferItemListQt> items = DataTransferItemListQt::create(this, m_frame->document()->scriptExecutionContext());
-
-    if (!m_readableData)
-        return items;
-
-    if (isForCopyAndPaste() && policy() == ClipboardReadable) {
-        const QStringList types = m_readableData->formats();
-        for (int i = 0; i < types.count(); ++i)
-            items->addPasteboardItem(types.at(i));
-    }
-    return items;
-}
-#endif
 
 }

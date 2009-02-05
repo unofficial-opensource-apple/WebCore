@@ -28,18 +28,13 @@
 #include "Image.h"
 
 #include "AffineTransform.h"
-#include "BitmapImage.h"
 #include "GraphicsContext.h"
 #include "IntRect.h"
-#include "Length.h"
 #include "MIMETypeRegistry.h"
-#include "SharedBuffer.h"
-#include "WKGraphics.h"
-#include <math.h>
-#include <wtf/MainThread.h>
-#include <wtf/StdLibExtras.h>
 
-#if USE(CG)
+#include <math.h>
+
+#if PLATFORM(CG)
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
@@ -54,17 +49,15 @@ Image::~Image()
 {
 }
 
-Image* Image::nullImage()
-{
-    ASSERT(isMainThread() || pthread_main_np());
-    DEFINE_STATIC_LOCAL(RefPtr<Image>, nullImage, (BitmapImage::create()));;
-    return nullImage.get();
-}
-
 bool Image::supportsType(const String& type)
 {
     return MIMETypeRegistry::isSupportedImageResourceMIMEType(type); 
 } 
+
+bool Image::isNull() const
+{
+    return size().isEmpty();
+}
 
 bool Image::setData(PassRefPtr<SharedBuffer> data, bool allDataReceived)
 {
@@ -75,41 +68,78 @@ bool Image::setData(PassRefPtr<SharedBuffer> data, bool allDataReceived)
     int length = m_data->size();
     if (!length)
         return true;
+
+#ifdef kImageBytesCutoff
+    // This is a hack to help with testing display of partially-loaded images.
+    // To enable it, define kImageBytesCutoff to be a size smaller than that of the image files
+    // being loaded. They'll never finish loading.
+    if (length > kImageBytesCutoff) {
+        length = kImageBytesCutoff;
+        allDataReceived = false;
+    }
+#endif
     
     return dataChanged(allDataReceived);
 }
 
-void Image::fillWithSolidColor(GraphicsContext* ctxt, const FloatRect& dstRect, const Color& color, ColorSpace styleColorSpace, CompositeOperator op)
+IntRect Image::rect() const
+{
+    return IntRect(IntPoint(), size());
+}
+
+int Image::width() const
+{
+    return size().width();
+}
+
+int Image::height() const
+{
+    return size().height();
+}
+
+void Image::fillWithSolidColor(GraphicsContext* ctxt, const FloatRect& dstRect, const Color& color, CompositeOperator op)
 {
     if (color.alpha() <= 0)
         return;
     
-    CompositeOperator previousOperator = ctxt->compositeOperation();
+    ctxt->save();
     ctxt->setCompositeOperation(!color.hasAlpha() && op == CompositeSourceOver ? CompositeCopy : op);
-    ctxt->fillRect(dstRect, color, styleColorSpace);
-    ctxt->setCompositeOperation(previousOperator);
+    ctxt->fillRect(dstRect, color);
+    ctxt->restore();
 }
 
-void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& destRect, const FloatPoint& srcPoint, const FloatSize& scaledTileSize, ColorSpace styleColorSpace, CompositeOperator op)
+static inline FloatSize calculatePatternScale(const FloatRect& dstRect, const FloatRect& srcRect, Image::TileRule hRule, Image::TileRule vRule)
+{
+    float scaleX = 1.0f, scaleY = 1.0f;
+    
+    if (hRule == Image::StretchTile)
+        scaleX = dstRect.width() / srcRect.width();
+    if (vRule == Image::StretchTile)
+        scaleY = dstRect.height() / srcRect.height();
+    
+    if (hRule == Image::RepeatTile)
+        scaleX = scaleY;
+    if (vRule == Image::RepeatTile)
+        scaleY = scaleX;
+    
+    return FloatSize(scaleX, scaleY);
+}
+
+
+void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& destRect, const FloatPoint& srcPoint, const FloatSize& scaledTileSize, CompositeOperator op)
 {    
+    if (!nativeImageForCurrentFrame())
+        return;
+    
     if (mayFillWithSolidColor()) {
-        fillWithSolidColor(ctxt, destRect, solidColor(), styleColorSpace, op);
+        fillWithSolidColor(ctxt, destRect, solidColor(), op);
         return;
     }
 
-    // See <https://webkit.org/b/59043>.
-#if !PLATFORM(WX)
-    ASSERT(!isBitmapImage() || notSolidColor());
-#endif
-
     FloatSize intrinsicTileSize = size();
-    if (hasRelativeWidth())
-        intrinsicTileSize.setWidth(scaledTileSize.width());
-    if (hasRelativeHeight())
-        intrinsicTileSize.setHeight(scaledTileSize.height());
-
     FloatSize scale(scaledTileSize.width() / intrinsicTileSize.width(),
                     scaledTileSize.height() / intrinsicTileSize.height());
+    AffineTransform patternTransform = AffineTransform().scale(scale.width(), scale.height());
 
     FloatRect oneTileRect;
     oneTileRect.setX(destRect.x() + fmodf(fmodf(-srcPoint.x(), scaledTileSize.width()) - scaledTileSize.width(), scaledTileSize.width()));
@@ -123,103 +153,50 @@ void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& destRect, const Fl
         visibleSrcRect.setY((destRect.y() - oneTileRect.y()) / scale.height());
         visibleSrcRect.setWidth(destRect.width() / scale.width());
         visibleSrcRect.setHeight(destRect.height() / scale.height());
-        draw(ctxt, destRect, visibleSrcRect, styleColorSpace, op);
+        draw(ctxt, destRect, visibleSrcRect, op);
         return;
     }
 
-    // When using accelerated drawing on iOS, it's faster to stretch an image than to tile it.
-    if (ctxt->isAcceleratedContext()) {
-        if (size().width() == 1 && intersection(oneTileRect, destRect).height() == destRect.height()) {
-            FloatRect visibleSrcRect;
-            visibleSrcRect.setX(0);
-            visibleSrcRect.setY((destRect.y() - oneTileRect.y()) / scale.height());
-            visibleSrcRect.setWidth(1);
-            visibleSrcRect.setHeight(destRect.height() / scale.height());
-            draw(ctxt, destRect, visibleSrcRect, styleColorSpace, op);
-            return;
-        }
-        if (size().height() == 1 && intersection(oneTileRect, destRect).width() == destRect.width()) {
-            FloatRect visibleSrcRect;
-            visibleSrcRect.setX((destRect.x() - oneTileRect.x()) / scale.width());
-            visibleSrcRect.setY(0);
-            visibleSrcRect.setWidth(destRect.width() / scale.width());
-            visibleSrcRect.setHeight(1);
-            draw(ctxt, destRect, visibleSrcRect, styleColorSpace, op);
-            return;
-        }
-    }
-
-    // CGPattern uses lots of memory got caching when the tile size is large (4691859, 6239505).
-    // Memory consumption depends on the transformed tile size which can get larger than the original
-    // tile if user zooms in enough.
-    const float maxPatternTilePixels = 512 * 512;
-    FloatRect transformedTileSize = ctxt->getCTM().mapRect(FloatRect(FloatPoint(), scaledTileSize));
-    float transformedTileSizePixels = transformedTileSize.width() * transformedTileSize.height();
-    if (transformedTileSizePixels > maxPatternTilePixels) {
-        float fromY = (destRect.y() - oneTileRect.y()) / scale.height();
-        float toY = oneTileRect.y();
-        while (toY < CGRectGetMaxY(destRect)) {
-            float fromX = (destRect.x() - oneTileRect.x()) / scale.width();
-            float toX = oneTileRect.x();
-            while (toX < CGRectGetMaxX(destRect)) {
-                CGRect toRect = CGRectIntersection(destRect, CGRectMake(toX, toY, oneTileRect.width(), oneTileRect.height()));
-                CGRect fromRect = CGRectMake(fromX, fromY, toRect.size.width / scale.width(), toRect.size.height / scale.height());
-                draw(ctxt, toRect, fromRect, styleColorSpace, op);
-                toX += oneTileRect.width();
-                fromX = 0;
-            }
-            toY += oneTileRect.height();
-            fromY = 0;
-        }
-        return;
-    }
-
-    AffineTransform patternTransform = AffineTransform().scaleNonUniform(scale.width(), scale.height());
     FloatRect tileRect(FloatPoint(), intrinsicTileSize);    
-    drawPattern(ctxt, tileRect, patternTransform, oneTileRect.location(), styleColorSpace, op, destRect);
+    drawPattern(ctxt, tileRect, patternTransform, oneTileRect.location(), op, destRect);
     
-    startAnimation(false);
+    startAnimation();
 }
 
 // FIXME: Merge with the other drawTiled eventually, since we need a combination of both for some things.
-void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& dstRect, const FloatRect& srcRect,
-    const FloatSize& tileScaleFactor, TileRule hRule, TileRule vRule, ColorSpace styleColorSpace, CompositeOperator op)
+void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& dstRect, const FloatRect& srcRect, TileRule hRule, TileRule vRule, CompositeOperator op)
 {    
+    if (!nativeImageForCurrentFrame())
+        return;
+
     if (mayFillWithSolidColor()) {
-        fillWithSolidColor(ctxt, dstRect, solidColor(), styleColorSpace, op);
+        fillWithSolidColor(ctxt, dstRect, solidColor(), op);
         return;
     }
     
-    // FIXME: We do not support 'round' or 'space' yet. For now just map them to 'repeat'.
-    if (hRule == RoundTile || hRule == SpaceTile)
+    // FIXME: We do not support 'round' yet.  For now just map it to 'repeat'.
+    if (hRule == RoundTile)
         hRule = RepeatTile;
-    if (vRule == RoundTile || vRule == SpaceTile)
+    if (vRule == RoundTile)
         vRule = RepeatTile;
 
-    AffineTransform patternTransform = AffineTransform().scaleNonUniform(tileScaleFactor.width(), tileScaleFactor.height());
+    FloatSize scale = calculatePatternScale(dstRect, srcRect, hRule, vRule);
+    AffineTransform patternTransform = AffineTransform().scale(scale.width(), scale.height());
 
     // We want to construct the phase such that the pattern is centered (when stretch is not
     // set for a particular rule).
-    float hPhase = tileScaleFactor.width() * srcRect.x();
-    float vPhase = tileScaleFactor.height() * srcRect.y();
-    float scaledTileWidth = tileScaleFactor.width() * srcRect.width();
-    float scaledTileHeight = tileScaleFactor.height() * srcRect.height();
+    float hPhase = scale.width() * srcRect.x();
+    float vPhase = scale.height() * srcRect.y();
     if (hRule == Image::RepeatTile)
-        hPhase -= (dstRect.width() - scaledTileWidth) / 2;
+        hPhase -= fmodf(dstRect.width(), scale.width() * srcRect.width()) / 2.0f;
     if (vRule == Image::RepeatTile)
-        vPhase -= (dstRect.height() - scaledTileHeight) / 2; 
+        vPhase -= fmodf(dstRect.height(), scale.height() * srcRect.height()) / 2.0f;
     FloatPoint patternPhase(dstRect.x() - hPhase, dstRect.y() - vPhase);
     
-    drawPattern(ctxt, srcRect, patternTransform, patternPhase, styleColorSpace, op, dstRect);
+    drawPattern(ctxt, srcRect, patternTransform, patternPhase, op, dstRect);
 
-    startAnimation(false);
+    startAnimation();
 }
 
-void Image::computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsicHeight, FloatSize& intrinsicRatio)
-{
-    intrinsicRatio = size();
-    intrinsicWidth = Length(intrinsicRatio.width(), Fixed);
-    intrinsicHeight = Length(intrinsicRatio.height(), Fixed);
-}
 
 }

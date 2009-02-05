@@ -33,79 +33,11 @@
 #include "FrameLoaderClient.h"
 #include "ResourceHandle.h"
 
-#include "MIMETypeRegistry.h"
-#include "RuntimeApplicationChecksIOS.h"
-
-#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
-#include "InspectorInstrumentation.h"
-#endif
-
-#if USE(CFNETWORK)
-@interface NSCachedURLResponse (Details)
--(id)_initWithCFCachedURLResponse:(CFCachedURLResponseRef)cachedResponse;
--(CFCachedURLResponseRef)_CFCachedURLResponse;
-@end
-#endif
-
 namespace WebCore {
 
-#if USE(CFNETWORK)
-
-CFCachedURLResponseRef ResourceLoader::willCacheResponse(ResourceHandle*, CFCachedURLResponseRef cachedResponse)
+NSCachedURLResponse* ResourceLoader::willCacheResponse(ResourceHandle* handle, NSCachedURLResponse* response)
 {
-    if (m_options.sendLoadCallbacks == DoNotSendCallbacks)
-        return 0;
-
-    RetainPtr<NSCachedURLResponse> nsCachedResponse(AdoptNS, [[NSCachedURLResponse alloc] _initWithCFCachedURLResponse:cachedResponse]);
-    return [frameLoader()->client()->willCacheResponse(documentLoader(), identifier(), nsCachedResponse.get()) _CFCachedURLResponse];
-}
-
-#else
-
-NSCachedURLResponse* ResourceLoader::willCacheResponse(ResourceHandle*, NSCachedURLResponse* response)
-{
-    if (m_options.sendLoadCallbacks == DoNotSendCallbacks)
-        return 0;
-
     return frameLoader()->client()->willCacheResponse(documentLoader(), identifier(), response);
 }
-
-#endif
-
-#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
-
-void ResourceLoader::didReceiveDataArray(CFArrayRef dataArray)
-{
-    // Protect this in this delegate method since the additional processing can do
-    // anything including possibly derefing this; one example of this is Radar 3266216.
-    RefPtr<ResourceLoader> protector(this);
-
-    CFIndex arrayCount = CFArrayGetCount(dataArray);
-    for (CFIndex i = 0; i < arrayCount; ++i) {
-        CFDataRef data = static_cast<CFDataRef>(CFArrayGetValueAtIndex(dataArray, i));
-        int dataLen = static_cast<int>(CFDataGetLength(data));
-
-        if (m_options.shouldBufferData == BufferData) {
-            if (!m_resourceData)
-                m_resourceData = SharedBuffer::create();
-            m_resourceData->append(data);
-        }
-
-        // FIXME: If we get a resource with more than 2B bytes, this code won't do the right thing.
-        // However, with today's computers and networking speeds, this won't happen in practice.
-        // Could be an issue with a giant local file.
-        if (m_options.sendLoadCallbacks == SendCallbacks && m_frame)
-            frameLoader()->notifier()->didReceiveData(this, reinterpret_cast<const char*>(CFDataGetBytePtr(data)), dataLen, dataLen);
-    }
-}
-
-void ResourceLoader::didReceiveDataArray(ResourceHandle*, CFArrayRef dataArray)
-{
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willReceiveResourceData(m_frame.get(), identifier());
-    didReceiveDataArray(dataArray);
-    InspectorInstrumentation::didReceiveResourceData(cookie);
-}
-
-#endif
 
 }

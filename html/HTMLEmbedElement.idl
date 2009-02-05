@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,30 +20,25 @@
 
 module html {
 
-    interface [
-        CustomNamedSetter,
-        JSCustomGetOwnPropertySlotAndDescriptor,
-        CustomCall
-    ] HTMLEmbedElement : HTMLElement {
-    attribute [Reflect] DOMString align;
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-    attribute [Reflect] DOMString height;
+    interface [GenerateConstructor, CustomPutFunction, CustomGetOwnPropertySlot, CustomCall, HasOverridingNameGetter] HTMLEmbedElement : HTMLElement {
+                 attribute [ConvertNullToNullString] DOMString align;
+#if defined(LANGUAGE_JAVASCRIPT)
+                 attribute [ConvertNullToNullString] DOMString height;
 #else
-    attribute [Reflect] long height;
+                 attribute [ConvertFromString] long height;
 #endif
-    attribute [Reflect] DOMString name;
-    attribute [Reflect, URL] DOMString src;
-    attribute [Reflect] DOMString type;
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-    attribute [Reflect] DOMString width;
+                 attribute [ConvertNullToNullString] DOMString name;
+                 attribute [ConvertNullToNullString] DOMString src;
+                 attribute [ConvertNullToNullString] DOMString type;
+#if defined(LANGUAGE_JAVASCRIPT)
+                 attribute [ConvertNullToNullString] DOMString width;
 #else
-    attribute [Reflect] long width;
+                 attribute [ConvertFromString] long width;
 #endif
 
-#if defined(ENABLE_SVG) && ENABLE_SVG
-#if !defined(LANGUAGE_OBJECTIVE_C) || !LANGUAGE_OBJECTIVE_C || defined(ENABLE_SVG_DOM_OBJC_BINDINGS) && ENABLE_SVG_DOM_OBJC_BINDINGS
-    [CheckSecurityForNode] SVGDocument getSVGDocument() raises(DOMException);
-#endif
+#if ENABLE_SVG
+        [SVGCheckSecurityDocument] SVGDocument getSVGDocument()
+            raises(DOMException);
 #endif
     };
 

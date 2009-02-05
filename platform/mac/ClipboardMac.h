@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,70 +23,61 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+// An implementation of the clipboard class from IE that talks to the Cocoa Pasteboard
+
 #ifndef ClipboardMac_h
 #define ClipboardMac_h
 
-#include "CachedImage.h"
+#include "IntPoint.h"
 #include "Clipboard.h"
+#include "ClipboardAccessPolicy.h"
+#include "CachedResourceClient.h"
 #include <wtf/RetainPtr.h>
 
-OBJC_CLASS NSImage;
+#ifdef __OBJC__
+@class NSImage;
+@class NSPasteboard;
+#else
+class NSImage;
+class NSPasteboard;
+typedef unsigned NSDragOperation;
+#endif
 
 namespace WebCore {
 
 class Frame;
-class FileList;
 
-class ClipboardMac : public Clipboard, public CachedImageClient {
-    WTF_MAKE_FAST_ALLOCATED;
+class ClipboardMac : public Clipboard, public CachedResourceClient {
 public:
-    enum ClipboardContents {
-        DragAndDropData,
-        DragAndDropFiles,
-        CopyAndPasteGeneric
-    };
-
-    static PassRefPtr<ClipboardMac> create(ClipboardType clipboardType, const String& pasteboardName, ClipboardAccessPolicy policy, ClipboardContents clipboardContents, Frame* frame)
-    {
-        return adoptRef(new ClipboardMac(clipboardType, pasteboardName, policy, clipboardContents, frame));
-    }
-
+    ClipboardMac(bool forDragging, NSPasteboard *, ClipboardAccessPolicy, Frame* = 0);
     virtual ~ClipboardMac();
     
     void clearData(const String& type);
     void clearAllData();
-    String getData(const String& type) const;
+    String getData(const String& type, bool& success) const;
     bool setData(const String& type, const String& data);
     
     virtual bool hasData();
     
     // extensions beyond IE's API
     virtual HashSet<String> types() const;
-    virtual PassRefPtr<FileList> files() const;
 
     void setDragImage(CachedImage*, const IntPoint&);
     void setDragImageElement(Node *, const IntPoint&);
     
     virtual DragImageRef createDragImage(IntPoint& dragLoc) const;
-#if ENABLE(DRAG_SUPPORT)
     virtual void declareAndWriteDragImage(Element*, const KURL&, const String& title, Frame*);
-#endif
     virtual void writeRange(Range*, Frame* frame);
     virtual void writeURL(const KURL&, const String&, Frame* frame);
-    virtual void writePlainText(const String&);
     
     // Methods for getting info in Cocoa's type system
     NSImage *dragNSImage(NSPoint&) const; // loc converted from dragLoc, based on whole image size
-    const String& pasteboardName() { return m_pasteboardName; }
-
+    NSPasteboard *pasteboard() { return m_pasteboard.get(); }
 private:
-    ClipboardMac(ClipboardType, const String& pasteboardName, ClipboardAccessPolicy, ClipboardContents, Frame*);
-
     void setDragImage(CachedImage*, Node*, const IntPoint&);
 
-    String m_pasteboardName;
+    RetainPtr<NSPasteboard> m_pasteboard;
     int m_changeCount;
-    ClipboardContents m_clipboardContents;
     Frame* m_frame; // used on the source side to generate dragging images
 };
 

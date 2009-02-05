@@ -25,25 +25,18 @@
 
 #include "config.h"
 #include "Cursor.h"
-#include "Image.h"
 
 #include <wx/defs.h>
 #include <wx/cursor.h>
-#include <wx/image.h>
 
 namespace WebCore {
 
 Cursor::Cursor(const Cursor& other)
-    : m_platformCursor(other.m_platformCursor)
+    : m_impl(other.m_impl)
 {
 }
 
-Cursor::Cursor(Image* image, const IntPoint&) 
-{
-    m_platformCursor = 0;
-    // FIXME: figure out why the below code causes a crash  
-    //m_platformCursor = new wxCursor( image->getWxBitmap()->ConvertToImage() );
-}
+Cursor::Cursor(Image*, const IntPoint&) { }
 
 Cursor::~Cursor()
 {
@@ -51,12 +44,12 @@ Cursor::~Cursor()
 
 Cursor& Cursor::operator=(const Cursor& other)
 {
-    m_platformCursor = other.m_platformCursor;
+    m_impl = other.m_impl;
     return *this;
 }
 
 Cursor::Cursor(wxCursor* c)
-    : m_platformCursor(c)
+    : m_impl(c)
 {
 }
 
@@ -181,51 +174,6 @@ const Cursor& rowResizeCursor()
     static Cursor c = new wxCursor(wxCURSOR_SIZING);
     return c;
 }
-    
-const Cursor& middlePanningCursor()
-{
-    return moveCursor();
-}
-
-const Cursor& eastPanningCursor()
-{
-    return eastResizeCursor();
-}
-
-const Cursor& northPanningCursor()
-{
-    return northResizeCursor();
-}
-
-const Cursor& northEastPanningCursor()
-{
-    return northEastResizeCursor();
-}
-
-const Cursor& northWestPanningCursor()
-{
-    return northWestResizeCursor();
-}
-
-const Cursor& southPanningCursor()
-{
-    return southResizeCursor();
-}
-
-const Cursor& southEastPanningCursor()
-{
-    return southEastResizeCursor();
-}
-
-const Cursor& southWestPanningCursor()
-{
-    return southWestResizeCursor();
-}
-
-const Cursor& westPanningCursor()
-{
-    return westResizeCursor();
-}    
 
 const Cursor& verticalTextCursor()
 {
@@ -264,8 +212,8 @@ const Cursor& copyCursor()
 
 const Cursor& noneCursor()
 {
-    // TODO: Determine if we can find a better cursor for this.
-    return pointerCursor();
+    // fix me
+    return NULL;
 }
 
 const Cursor& notAllowedCursor()
@@ -273,35 +221,4 @@ const Cursor& notAllowedCursor()
     static Cursor c = new wxCursor(wxCURSOR_NO_ENTRY);
     return c;
 }
-
-const Cursor& zoomInCursor()
-{
-    static Cursor c = new wxCursor(wxCURSOR_MAGNIFIER);
-    return c;
-}
-
-const Cursor& zoomOutCursor()
-{
-    // TODO: Find a way to implement in/out magnifiers in wx.
-    return zoomInCursor();
-}
-
-const Cursor& grabCursor()
-{
-    // TODO: Determine if we can find a better cursor for this.
-    return pointerCursor();
-}
-
-const Cursor& grabbingCursor()
-{
-    // TODO: Determine if we can find a better cursor for this.
-    return pointerCursor();
-}
-
-const Cursor& moveCursor()
-{
-    static Cursor c = new wxCursor(wxCURSOR_SIZING);
-    return c;
-}
-
 }

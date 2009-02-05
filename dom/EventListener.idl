@@ -21,12 +21,7 @@
 module events {
 
     // Introduced in DOM Level 2:
-    interface [
-        JSNoStaticTables,
-        ObjCProtocol,
-        CPPPureInterface,
-        OmitConstructor
-    ] EventListener {
+    interface [ObjCProtocol] EventListener {
         void               handleEvent(in Event evt);
     };
 

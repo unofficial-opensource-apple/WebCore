@@ -19,8 +19,8 @@
 
 module html {
 
-    interface HTMLTitleElement : HTMLElement {
-        attribute  [TreatNullAs=NullString] DOMString            text;
+    interface [GenerateConstructor] HTMLTitleElement : HTMLElement {
+        attribute  [ConvertNullToNullString] DOMString            text;
     };
 
 }

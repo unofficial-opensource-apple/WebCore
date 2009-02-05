@@ -1,6 +1,7 @@
 /*
- * Copyright (C) 2006 Rob Buis <buis@kde.org>
- * Copyright (C) 2008 Apple Inc. All right reserved.
+ * This file is part of the DOM implementation for KDE.
+ *
+ * Copyright (C) 2006, Rob Buis <buis@kde.org>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,39 +24,18 @@
 
 #include "CSSImageValue.h"
 #include "IntPoint.h"
-#include <wtf/HashSet.h>
 
 namespace WebCore {
 
-class Element;
-class SVGElement;
-
 class CSSCursorImageValue : public CSSImageValue {
 public:
-    static PassRefPtr<CSSCursorImageValue> create(const String& url, const IntPoint& hotSpot)
-    {
-        return adoptRef(new CSSCursorImageValue(url, hotSpot));
-    }
+    CSSCursorImageValue(const String& url, const IntPoint& hotspot, StyleBase*);
+    virtual ~CSSCursorImageValue();
 
-    ~CSSCursorImageValue();
+    IntPoint hotspot() const { return m_hotspot; }
 
-    IntPoint hotSpot() const { return m_hotSpot; }
-
-    bool updateIfSVGCursorIsUsed(Element*);
-    StyleCachedImage* cachedImage(CachedResourceLoader*);
-
-#if ENABLE(SVG)
-    void removeReferencedElement(SVGElement*);
-#endif
-
-private:
-    CSSCursorImageValue(const String& url, const IntPoint& hotSpot);
-
-    IntPoint m_hotSpot;
-
-#if ENABLE(SVG)
-    HashSet<SVGElement*> m_referencedElements;
-#endif
+protected:
+    IntPoint m_hotspot;
 };
 
 } // namespace WebCore

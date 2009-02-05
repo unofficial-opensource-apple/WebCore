@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,34 +25,28 @@
 #define CSSFontFaceRule_h
 
 #include "CSSRule.h"
-#include "PropertySetCSSStyleDeclaration.h"
-#include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
-class CSSStyleDeclaration;
-class StyleRuleFontFace;
-class StyleRuleCSSStyleDeclaration;
+class CSSMutableStyleDeclaration;
 
 class CSSFontFaceRule : public CSSRule {
 public:
-    static PassRefPtr<CSSFontFaceRule> create(StyleRuleFontFace* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSFontFaceRule(rule, sheet)); }
+    CSSFontFaceRule(StyleBase* parent);
+    virtual ~CSSFontFaceRule();
 
-    ~CSSFontFaceRule();
+    virtual bool isFontFaceRule() { return true; }
 
-    CSSStyleDeclaration* style() const;
+    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
 
-    String cssText() const;
+    // Inherited from CSSRule
+    virtual unsigned short type() const { return FONT_FACE_RULE; }
 
-    void reattach(StyleRuleFontFace*);
+    virtual String cssText() const;
 
-private:
-    CSSFontFaceRule(StyleRuleFontFace*, CSSStyleSheet* parent);
-
-    RefPtr<StyleRuleFontFace> m_fontFaceRule;
-    
-    mutable RefPtr<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;
+protected:
+    RefPtr<CSSMutableStyleDeclaration> m_style;
 };
 
 } // namespace WebCore

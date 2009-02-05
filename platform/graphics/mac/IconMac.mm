@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,3 +18,55 @@
  *
  */
 
+#import "config.h"
+#import "Icon.h"
+
+#import "GraphicsContext.h"
+#import "LocalCurrentGraphicsContext.h"
+#import "PlatformString.h"
+#import <wtf/PassRefPtr.h>
+
+namespace WebCore {
+
+Icon::Icon()
+{
+}
+
+Icon::Icon(NSImage *image)
+    : m_nsImage(image)
+{
+    // Need this because WebCore uses AppKit's flipped coordinate system exclusively.
+    [image setFlipped:YES];
+}
+
+Icon::~Icon()
+{
+}
+
+PassRefPtr<Icon> Icon::newIconForFile(const String& filename)
+{
+    // Don't pass relative filenames -- we don't want a result that depends on the current directory.
+    // Need 0U here to disambiguate String::operator[] from operator(NSString*, int)[]
+    if (filename.isEmpty() || filename[0U] != '/')
+        return 0;
+
+    NSImage* image = [[NSWorkspace sharedWorkspace] iconForFile:filename];
+    if (!image)
+        return 0;
+
+    return new Icon(image);
+}
+
+void Icon::paint(GraphicsContext* context, const IntRect& rect)
+{
+    if (context->paintingDisabled())
+        return;
+
+    LocalCurrentGraphicsContext localCurrentGC(context);
+
+    [m_nsImage.get() drawInRect:rect
+        fromRect:NSMakeRect(0, 0, [m_nsImage.get() size].width, [m_nsImage.get() size].height)
+        operation:NSCompositeSourceOver fraction:1.0f];
+}
+
+}

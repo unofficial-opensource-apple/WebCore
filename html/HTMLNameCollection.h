@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,26 +26,21 @@
 #define HTMLNameCollection_h
 
 #include "HTMLCollection.h"
-
-#include <wtf/text/AtomicString.h>
+#include "PlatformString.h"
 
 namespace WebCore {
 
 class Document;
 
-class HTMLNameCollection : public HTMLCollection {
+class HTMLNameCollection : public HTMLCollection
+{
 public:
-    static PassOwnPtr<HTMLNameCollection> create(Document* document, CollectionType type, const AtomicString& name)
-    {
-        return adoptPtr(new HTMLNameCollection(document, type, name));
-    }
+    HTMLNameCollection(Document*, HTMLCollection::Type type, const String &name);
+    
+    virtual Node* traverseNextItem(Node*) const;
 
 private:
-    HTMLNameCollection(Document*, CollectionType, const AtomicString& name);
-
-    virtual Element* itemAfter(Element*) const OVERRIDE;
-
-    AtomicString m_name;
+    String m_name;
 };
 
 }

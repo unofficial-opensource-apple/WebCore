@@ -26,13 +26,11 @@
 #ifndef visible_units_h
 #define visible_units_h
 
-#include "EditingBehaviorTypes.h"
-#include "EditingBoundary.h"
-#include "TextDirection.h"
+#include "Document.h"
+#include "TextAffinity.h"
 
 namespace WebCore {
 
-class Node;
 class VisiblePosition;
 
 enum EWordSide { RightWordIfOnBoundary = false, LeftWordIfOnBoundary = true };
@@ -42,9 +40,6 @@ VisiblePosition startOfWord(const VisiblePosition &, EWordSide = RightWordIfOnBo
 VisiblePosition endOfWord(const VisiblePosition &, EWordSide = RightWordIfOnBoundary);
 VisiblePosition previousWordPosition(const VisiblePosition &);
 VisiblePosition nextWordPosition(const VisiblePosition &);
-VisiblePosition rightWordPosition(const VisiblePosition&, bool skipsSpaceWhenMovingRight);
-VisiblePosition leftWordPosition(const VisiblePosition&, bool skipsSpaceWhenMovingRight);
-bool isStartOfWord(const VisiblePosition&);
 
 // sentences
 VisiblePosition startOfSentence(const VisiblePosition &);
@@ -55,29 +50,24 @@ VisiblePosition nextSentencePosition(const VisiblePosition &);
 // lines
 VisiblePosition startOfLine(const VisiblePosition &);
 VisiblePosition endOfLine(const VisiblePosition &);
-VisiblePosition previousLinePosition(const VisiblePosition&, int lineDirectionPoint, EditableType = ContentIsEditable);
-VisiblePosition nextLinePosition(const VisiblePosition&, int lineDirectionPoint, EditableType = ContentIsEditable);
+VisiblePosition previousLinePosition(const VisiblePosition &, int x);
+VisiblePosition nextLinePosition(const VisiblePosition &, int x);
 bool inSameLine(const VisiblePosition &, const VisiblePosition &);
 bool isStartOfLine(const VisiblePosition &);
 bool isEndOfLine(const VisiblePosition &);
-VisiblePosition logicalStartOfLine(const VisiblePosition &);
-VisiblePosition logicalEndOfLine(const VisiblePosition &);
-VisiblePosition leftBoundaryOfLine(const VisiblePosition&, TextDirection);
-VisiblePosition rightBoundaryOfLine(const VisiblePosition&, TextDirection);
 
 // paragraphs (perhaps a misnomer, can be divided by line break elements)
-VisiblePosition startOfParagraph(const VisiblePosition&, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
-VisiblePosition endOfParagraph(const VisiblePosition&, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
-VisiblePosition startOfNextParagraph(const VisiblePosition&);
+VisiblePosition startOfParagraph(const VisiblePosition &);
+VisiblePosition endOfParagraph(const VisiblePosition &);
 VisiblePosition previousParagraphPosition(const VisiblePosition &, int x);
 VisiblePosition nextParagraphPosition(const VisiblePosition &, int x);
-bool isStartOfParagraph(const VisiblePosition &, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
-bool isEndOfParagraph(const VisiblePosition &, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
-bool inSameParagraph(const VisiblePosition &, const VisiblePosition &, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
+bool inSameParagraph(const VisiblePosition &, const VisiblePosition &);
+bool isStartOfParagraph(const VisiblePosition &);
+bool isEndOfParagraph(const VisiblePosition &);
 
 // blocks (true paragraphs; line break elements don't break blocks)
-VisiblePosition startOfBlock(const VisiblePosition &, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
-VisiblePosition endOfBlock(const VisiblePosition &, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
+VisiblePosition startOfBlock(const VisiblePosition &);
+VisiblePosition endOfBlock(const VisiblePosition &);
 bool inSameBlock(const VisiblePosition &, const VisiblePosition &);
 bool isStartOfBlock(const VisiblePosition &);
 bool isEndOfBlock(const VisiblePosition &);

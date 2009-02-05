@@ -24,26 +24,18 @@
  */
 
 #include "config.h"
-#include "ClipboardWx.h"
-
-#include "FileList.h"
 #include "HashTable.h"
+#include "ClipboardWx.h"
 #include "IntPoint.h"
-#include "NotImplemented.h"
-#include "Pasteboard.h"
 #include "PlatformString.h"
-#include <wtf/text/StringHash.h>
-
+#include "StringHash.h"
+#include "Pasteboard.h"
+#include "NotImplemented.h"
 
 namespace WebCore {
     
-PassRefPtr<Clipboard> Clipboard::create(ClipboardAccessPolicy, DragData*, Frame*)
-{
-    return 0;
-}
-
-ClipboardWx::ClipboardWx(ClipboardAccessPolicy policy, ClipboardType clipboardType) 
-    : Clipboard(policy, clipboardType)
+ClipboardWx::ClipboardWx(ClipboardAccessPolicy policy, bool forDragging) 
+    : Clipboard(policy, forDragging)
 {
 }
 
@@ -57,7 +49,7 @@ void ClipboardWx::clearAllData()
     Pasteboard::generalPasteboard()->clear();
 }
 
-String ClipboardWx::getData(const String& type) const 
+String ClipboardWx::getData(const String& type, bool& success) const 
 {
     notImplemented();
     return ""; 
@@ -75,12 +67,6 @@ HashSet<String> ClipboardWx::types() const
     notImplemented();
     HashSet<String> result;
     return result;
-}
-
-PassRefPtr<FileList> ClipboardWx::files() const
-{
-    notImplemented();
-    return 0;
 }
 
 IntPoint ClipboardWx::dragLocation() const 
@@ -136,11 +122,6 @@ bool ClipboardWx::hasData()
 {
     notImplemented();
     return false;
-}
-
-void ClipboardWx::writePlainText(const WTF::String& text)
-{
-    Pasteboard::generalPasteboard()->writePlainText(text);
 }
 
 }

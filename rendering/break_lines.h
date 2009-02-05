@@ -1,4 +1,6 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2005 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -25,16 +27,14 @@
 
 namespace WebCore {
 
-class LazyLineBreakIterator;
+    int nextBreakablePosition(const UChar*, int pos, int len, bool breakNBSP = false);
 
-int nextBreakablePosition(LazyLineBreakIterator&, int pos, bool breakNBSP = false);
-
-inline bool isBreakable(LazyLineBreakIterator& lazyBreakIterator, int pos, int& nextBreakable, bool breakNBSP = false)
-{
-    if (pos > nextBreakable)
-        nextBreakable = nextBreakablePosition(lazyBreakIterator, pos, breakNBSP);
-    return pos == nextBreakable;
-}
+    inline bool isBreakable(const UChar* str, int pos, int len, int& nextBreakable, bool breakNBSP = false)
+    {
+        if (pos > nextBreakable)
+            nextBreakable = nextBreakablePosition(str, pos, len, breakNBSP);
+        return pos == nextBreakable;
+    }
 
 } // namespace WebCore
 

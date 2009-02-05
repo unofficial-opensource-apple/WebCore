@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,40 +23,14 @@
 
 #include "DOMWindow.h"
 #include "Frame.h"
-#include "FrameLoader.h"
-#include "RenderPart.h"
-
-#if ENABLE(SVG)
-#include "ExceptionCode.h"
-#include "SVGDocument.h"
-#endif
 
 namespace WebCore {
 
 HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document, CreateFrameOwnerElement)
+    : HTMLElement(tagName, document)
     , m_contentFrame(0)
-    , m_sandboxFlags(SandboxNone)
+    , m_createdByParser(false)
 {
-}
-
-RenderPart* HTMLFrameOwnerElement::renderPart() const
-{
-    // HTMLObjectElement and HTMLEmbedElement may return arbitrary renderers
-    // when using fallback content.
-    if (!renderer() || !renderer()->isRenderPart())
-        return 0;
-    return toRenderPart(renderer());
-}
-
-void HTMLFrameOwnerElement::disconnectContentFrame()
-{
-    // This causes an unload event thus cannot be a part of removedFrom().
-    if (Frame* frame = contentFrame()) {
-        RefPtr<Frame> protect(frame);
-        frame->loader()->frameDetached();
-        frame->disconnectOwnerElement();
-    }
 }
 
 HTMLFrameOwnerElement::~HTMLFrameOwnerElement()
@@ -74,27 +48,5 @@ DOMWindow* HTMLFrameOwnerElement::contentWindow() const
 {
     return m_contentFrame ? m_contentFrame->domWindow() : 0;
 }
-
-void HTMLFrameOwnerElement::setSandboxFlags(SandboxFlags flags)
-{
-    m_sandboxFlags = flags;
-}
-
-bool HTMLFrameOwnerElement::isKeyboardFocusable(KeyboardEvent* event) const
-{
-    return m_contentFrame && HTMLElement::isKeyboardFocusable(event);
-}
-
-#if ENABLE(SVG)
-SVGDocument* HTMLFrameOwnerElement::getSVGDocument(ExceptionCode& ec) const
-{
-    Document* doc = contentDocument();
-    if (doc && doc->isSVGDocument())
-        return static_cast<SVGDocument*>(doc);
-    // Spec: http://www.w3.org/TR/SVG/struct.html#InterfaceGetSVGDocument
-    ec = NOT_SUPPORTED_ERR;
-    return 0;
-}
-#endif
 
 } // namespace WebCore

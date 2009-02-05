@@ -1,6 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,53 +23,27 @@
 #ifndef StyleSheetList_h
 #define StyleSheetList_h
 
-#include <wtf/Forward.h>
-#include <wtf/RefCounted.h>
-#include <wtf/PassRefPtr.h>
-#include <wtf/Vector.h>
+#include "Shared.h"
+#include "DeprecatedPtrList.h"
 
 namespace WebCore {
 
-class Document;
-class HTMLStyleElement;
 class StyleSheet;
 
-typedef Vector<RefPtr<StyleSheet> > StyleSheetVector;
-
-class StyleSheetList : public RefCounted<StyleSheetList> {
+class StyleSheetList : public Shared<StyleSheetList>
+{
 public:
-    static PassRefPtr<StyleSheetList> create(Document* doc) { return adoptRef(new StyleSheetList(doc)); }
     ~StyleSheetList();
-
-    void documentDestroyed();
 
     unsigned length() const;
     StyleSheet* item(unsigned index);
 
-    HTMLStyleElement* getNamedItem(const String&) const;
+    void add(StyleSheet*);
+    void remove(StyleSheet*);
 
-    const StyleSheetVector& vector() const
-    {
-        return m_sheets;
-    }
-
-    void swap(StyleSheetVector& sheets)
-    {
-        m_sheets.swap(sheets);
-    }
-
-    Document* document()
-    {
-        return m_doc;
-    }
-
-private:
-    StyleSheetList(Document*);
-
-    Document* m_doc;
-    StyleSheetVector m_sheets;
+    DeprecatedPtrList<StyleSheet> styleSheets;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // StyleSheetList_h
+#endif

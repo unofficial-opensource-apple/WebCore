@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,23 +20,7 @@
 
 module core {
 
-    interface [
-        JSCustomHeader,
-        JSCustomMarkFunction,
-        JSCustomPushEventHandlerScope,
-        JSCustomIsReachable,
-        JSCustomFinalize,
-        CustomToJSObject,
-        EventTarget,
-        JSGenerateToNativeObject,
-        JSInlineGetOwnPropertySlot,
-        ObjCPolymorphic,
-        V8DependentLifetime
-    ] Node
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        : Object, EventTarget
-#endif /* defined(LANGUAGE_OBJECTIVE_C) */
-     {
+    interface [CustomMarkFunction, GenerateConstructor, GenerateNativeConverter, GenerateToJS, ObjCCustomInternalImpl] Node {        
         // NodeType
         const unsigned short      ELEMENT_NODE                   = 1;
         const unsigned short      ATTRIBUTE_NODE                 = 2;
@@ -51,10 +35,10 @@ module core {
         const unsigned short      DOCUMENT_FRAGMENT_NODE         = 11;
         const unsigned short      NOTATION_NODE                  = 12;
 
-        readonly attribute [TreatReturnedNullStringAs=Null] DOMString        nodeName;
+        readonly attribute [ConvertNullStringTo=Null] DOMString        nodeName;
 
                  // FIXME: the spec says this can also raise on retrieval.
-                 attribute [TreatReturnedNullStringAs=Null, TreatNullAs=NullString] DOMString        nodeValue
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString        nodeValue
                      setter raises(DOMException);
 
         readonly attribute unsigned short   nodeType;
@@ -67,47 +51,48 @@ module core {
         readonly attribute NamedNodeMap     attributes;
         readonly attribute Document         ownerDocument;
 
-        [ObjCLegacyUnnamedParameters, Custom] Node insertBefore(in [CustomReturn] Node newChild,
-                                                                in Node refChild)
+        [OldStyleObjC, Custom] Node insertBefore(in [Return] Node newChild, 
+                                                 in Node refChild)
             raises(DOMException);
-        [ObjCLegacyUnnamedParameters, Custom] Node replaceChild(in Node newChild,
-                                                                in [CustomReturn] Node oldChild)
+        [OldStyleObjC, Custom] Node replaceChild(in Node newChild, 
+                                                 in [Return] Node oldChild)
             raises(DOMException);
-        [Custom] Node               removeChild(in [CustomReturn] Node oldChild)
+        [Custom] Node               removeChild(in [Return] Node oldChild)
             raises(DOMException);
-        [Custom] Node               appendChild(in [CustomReturn] Node newChild)
+        [Custom] Node               appendChild(in [Return] Node newChild)
             raises(DOMException);
 
         boolean            hasChildNodes();
-        Node               cloneNode(in [Optional=DefaultIsUndefined] boolean deep);
+        Node               cloneNode(in boolean deep);
         void               normalize();
 
         // Introduced in DOM Level 2:
 
-        [ObjCLegacyUnnamedParameters] boolean isSupported(in [Optional=DefaultIsUndefined] DOMString feature, 
-                                           in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString version);
+        [OldStyleObjC] boolean isSupported(in DOMString feature, 
+                                           in [ConvertNullToNullString] DOMString version);
 
-        readonly attribute [TreatReturnedNullStringAs=Null] DOMString        namespaceURI;
-                 attribute [TreatReturnedNullStringAs=Null, TreatNullAs=NullString] DOMString        prefix
+        readonly attribute [ConvertNullStringTo=Null] DOMString        namespaceURI;
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString        prefix
                      setter raises(DOMException);
-        readonly attribute [TreatReturnedNullStringAs=Null] DOMString        localName;
+        readonly attribute [ConvertNullStringTo=Null] DOMString        localName;
 
         boolean            hasAttributes();
 
         // Introduced in DOM Level 3:
 
-        readonly attribute [TreatReturnedNullStringAs=Null] DOMString       baseURI;
+        readonly attribute [ConvertNullStringTo=Null] DOMString       baseURI;
 
                  // FIXME: the spec says this can also raise on retrieval.
-                 attribute [TreatReturnedNullStringAs=Null, TreatNullAs=NullString] DOMString       textContent
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString       textContent
                      setter raises(DOMException);
 
-        boolean            isSameNode(in [Optional=DefaultIsUndefined] Node other);
-        boolean            isEqualNode(in [Optional=DefaultIsUndefined] Node other);
-        [TreatReturnedNullStringAs=Null] DOMString          lookupPrefix(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString namespaceURI);
-        boolean            isDefaultNamespace(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString namespaceURI);
-        [TreatReturnedNullStringAs=Null] DOMString          lookupNamespaceURI(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString prefix);
+        boolean            isSameNode(in Node other);
+        boolean            isEqualNode(in Node other);
+        [ConvertNullStringTo=Null] DOMString          lookupPrefix(in [ConvertNullToNullString] DOMString namespaceURI);
+        boolean            isDefaultNamespace(in [ConvertNullToNullString] DOMString namespaceURI);
+        [ConvertNullStringTo=Null] DOMString          lookupNamespaceURI(in [ConvertNullToNullString] DOMString prefix);
 
+#if 0
         // DocumentPosition
         const unsigned short      DOCUMENT_POSITION_DISCONNECTED = 0x01;
         const unsigned short      DOCUMENT_POSITION_PRECEDING    = 0x02;
@@ -116,12 +101,9 @@ module core {
         const unsigned short      DOCUMENT_POSITION_CONTAINED_BY = 0x10;
         const unsigned short      DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 0x20;
 
-        unsigned short     compareDocumentPosition(in [Optional=DefaultIsUndefined] Node other);
+        unsigned short     compareDocumentPosition(in Node other)
+            raises(DOMException);
 
-        // Introduced in DOM4
-        boolean contains(in [Optional=DefaultIsUndefined] Node other);
-
-#if 0
         DOMObject          getFeature(in DOMString feature, 
                                       in DOMString version);
         DOMUserData        setUserData(in DOMString key, 
@@ -130,40 +112,13 @@ module core {
         DOMUserData        getUserData(in DOMString key);
 #endif /* 0 */
 
-        // IE extensions
-        readonly attribute Element          parentElement;
+        // IE extentions
+        readonly attribute Node             parentElement;
 
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
+#if defined(LANGUAGE_OBJECTIVE_C)
         // Objective-C extensions
         readonly attribute boolean          isContentEditable;
-
-        void inspect();
 #endif /* defined(LANGUAGE_OBJECTIVE_C) */
-
-#if !defined(LANGUAGE_CPP) || !LANGUAGE_CPP
-#if !defined(LANGUAGE_OBJECTIVE_C) || !LANGUAGE_OBJECTIVE_C
-        void addEventListener(in DOMString type, 
-                              in EventListener listener, 
-                              in [Optional] boolean useCapture);
-        void removeEventListener(in DOMString type, 
-                                 in EventListener listener, 
-                                 in [Optional] boolean useCapture);
-        boolean dispatchEvent(in Event event)
-            raises(EventException);
-#endif
-#endif
-
-#if defined(LANGUAGE_CPP) && LANGUAGE_CPP
-        [Custom] void addEventListener(in DOMString type, 
-                                          in EventListener listener, 
-                                          in boolean useCapture);
-        [Custom] void removeEventListener(in DOMString type, 
-                                             in EventListener listener, 
-                                             in boolean useCapture);
-        boolean dispatchEvent(in Event event)
-            raises(EventException);
-#endif
-
     };
 
 }

@@ -1,8 +1,7 @@
 /*
  * Copyright (C) 2006 Zack Rusin <zack@kde.org>
  * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
- * Copyright (C) 2008 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2007 Trolltech ASA
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,8 +28,8 @@
 #include "config.h"
 #include "MIMETypeRegistry.h"
 
-#include <wtf/Assertions.h>
-#include <wtf/MainThread.h>
+#include "NotImplemented.h"
+#include "qwebobjectplugin_p.h"
 
 namespace WebCore {
 
@@ -39,9 +38,8 @@ struct ExtensionMap {
     const char* mimeType;
 };
 
-static const ExtensionMap extensionMap[] = {
+static const ExtensionMap extensionMap [] = {
     { "bmp", "image/bmp" },
-    { "css", "text/css" },
     { "gif", "image/gif" },
     { "html", "text/html" },
     { "htm", "text/html" },
@@ -50,18 +48,6 @@ static const ExtensionMap extensionMap[] = {
     { "jpg", "image/jpeg" },
     { "js", "application/x-javascript" },
     { "mng", "video/x-mng" },
-    { "mp4", "video/mp4" },
-    { "m4v", "video/mp4" },
-    { "m4a", "audio/x-m4a" },
-    { "mp3", "audio/mp3" },
-    { "ogv", "video/ogg" },
-    { "oga", "audio/ogg" },
-    { "ogm", "audio/ogg" },
-    { "ogg", "audio/ogg" },
-    { "webm", "video/webm" },
-    { "webm", "audio/webm" },
-    { "wav", "audio/wav" },
-    { "mov", "video/quicktime" },
     { "pbm", "image/x-portable-bitmap" },
     { "pgm", "image/x-portable-graymap" },
     { "pdf", "application/pdf" },
@@ -78,15 +64,11 @@ static const ExtensionMap extensionMap[] = {
     { "xpm", "image/x-xpm" },
     { "xsl", "text/xsl" },
     { "xhtml", "application/xhtml+xml" },
-    { "wml", "text/vnd.wap.wml" },
-    { "wmlc", "application/vnd.wap.wmlc" },
     { 0, 0 }
 };
 
 String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
 {
-    ASSERT(isMainThread());
-
     String s = ext.lower();
 
     const ExtensionMap *e = extensionMap;
@@ -95,14 +77,11 @@ String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
             return e->mimeType;
         ++e;
     }
+    QString type = QWebFactoryLoader::self()->mimeTypeForExtension(ext);
+    if (!type.isEmpty())
+        return type;
 
-    return String();
-}
-
-bool MIMETypeRegistry::isApplicationPluginMIMEType(const String& mimeType)
-{
-    return mimeType.startsWith("application/x-qt-plugin", false)
-        || mimeType.startsWith("application/x-qt-styled-widget", false);
+    return "application/octet-stream";
 }
 
 }

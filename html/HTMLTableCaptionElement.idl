@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,10 +20,10 @@
 
 module html {
 
-    interface [
-        JSGenerateToNativeObject
-    ] HTMLTableCaptionElement : HTMLElement {
-        attribute [Reflect] DOMString align;
+    interface [GenerateNativeConverter, GenerateConstructor] HTMLTableCaptionElement : HTMLElement {
+
+        attribute [ConvertNullToNullString] DOMString       align;
+
     };
 
 }

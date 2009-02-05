@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2011, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,94 +25,126 @@
 #ifndef HTMLCollection_h
 #define HTMLCollection_h
 
-#include "Node.h"
-#include "CollectionType.h"
+#include "Shared.h"
 #include <wtf/Forward.h>
 #include <wtf/HashMap.h>
-#include <wtf/PassOwnPtr.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
-class Document;
-class Element;
+class AtomicString;
+class AtomicStringImpl;
+class Node;
 class NodeList;
+class String;
 
-class HTMLCollection {
+class HTMLCollection : public Shared<HTMLCollection> {
 public:
-    static PassOwnPtr<HTMLCollection> create(Node* base, CollectionType);
+    enum Type {
+        // from JSHTMLDocument
+        DocImages = 0, // all IMG elements in the document
+        DocApplets,   // all OBJECT and APPLET elements
+        DocEmbeds,    // all EMBED elements
+        DocObjects,   // all OBJECT elements
+        DocForms,     // all FORMS
+        DocLinks,     // all A _and_ AREA elements with a value for href
+        DocAnchors,      // all A elements with a value for name
+        DocScripts,   // all SCRIPT element
+        // from HTMLTable, HTMLTableSection, HTMLTableRow
+        TableRows,    // all rows in this table or tablesection
+        TableTBodies, // all TBODY elements in this table
+        TSectionRows, // all rows elements in this table section
+        TRCells,      // all CELLS in this row
+        // from SELECT
+        SelectOptions,
+        // from HTMLMap
+        MapAreas,
+        DocAll,        // "all" elements (IE)
+        NodeChildren,   // first-level children (IE)
+        WindowNamedItems,
+        DocumentNamedItems
+    };
+
+    enum {
+        UnnamedCollectionTypes = NodeChildren + 1,
+        CollectionTypes = DocumentNamedItems + 1
+    };
+
+    HTMLCollection(Node *_base, HTMLCollection::Type _type);
     virtual ~HTMLCollection();
-
-    void ref() { m_base->ref(); }
-    void deref() { m_base->deref(); }
-
+    
     unsigned length() const;
+    
+    virtual Node *item(unsigned index) const;
+    virtual Node *firstItem() const;
+    virtual Node *nextItem() const;
 
-    virtual Node* item(unsigned index) const;
-    virtual Node* nextItem() const;
+    virtual Node *namedItem(const String &name, bool caseSensitive = true) const;
+    // In case of multiple items named the same way
+    virtual Node *nextNamedItem(const String &name) const;
 
-    virtual Node* namedItem(const AtomicString& name) const;
-
-    Node* firstItem() const;
-
-    bool hasNamedItem(const AtomicString& name) const;
-    void namedItems(const AtomicString& name, Vector<RefPtr<Node> >&) const;
-
+    // Extension
     PassRefPtr<NodeList> tags(const String&);
 
-    Node* base() const { return m_base; }
-    CollectionType type() const { return static_cast<CollectionType>(m_type); }
+    void namedItems(const AtomicString &name, Vector<RefPtr<Node> >&) const;
 
-protected:
-    HTMLCollection(Node* base, CollectionType);
+    Node *base() { return m_base.get(); }
 
-    void invalidateCacheIfNeeded() const;
+    struct CollectionInfo {
+        CollectionInfo();
+        CollectionInfo(const CollectionInfo&);
+        CollectionInfo& operator=(const CollectionInfo& other)
+        {
+            CollectionInfo tmp(other);    
+            swap(tmp);
+            return *this;
+        }
+        
+        ~CollectionInfo();
+        void reset();
+        void swap(CollectionInfo&);
 
-    virtual void updateNameCache() const;
-    virtual Element* itemAfter(Element*) const;
-
-    typedef HashMap<AtomicStringImpl*, OwnPtr<Vector<Element*> > > NodeCacheMap;
-    static void append(NodeCacheMap&, const AtomicString&, Element*);
-
-    mutable struct {
+        unsigned int version;
+        Node *current;
+        unsigned int position;
+        unsigned int length;
+        int elementsArrayPosition;
+        typedef HashMap<AtomicStringImpl*, Vector<Node*>*> NodeCacheMap;
         NodeCacheMap idCache;
         NodeCacheMap nameCache;
-        uint64_t version;
-        Element* current;
-        unsigned position;
-        unsigned length;
-        int elementsArrayPosition;
-        bool hasLength;
+        bool haslength;
         bool hasNameCache;
-
-        void clear()
+    private:
+        static void copyCacheMap(NodeCacheMap& dest, const NodeCacheMap& src)
         {
-            idCache.clear();
-            nameCache.clear();
-            version = 0;
-            current = 0;
-            position = 0;
-            length = 0;
-            elementsArrayPosition = 0;
-            hasLength = false;
-            hasNameCache = false;
+            ASSERT(dest.isEmpty());
+            NodeCacheMap::const_iterator end = src.end();
+            for (NodeCacheMap::const_iterator it = src.begin(); it != end; ++it)
+                dest.add(it->first, new Vector<Node*>(*it->second));
         }
-    } m_cache;
+    };
 
-private:
-    static bool shouldIncludeChildren(CollectionType);
-    bool checkForNameMatch(Element*, bool checkName, const AtomicString& name) const;
+    Type collectionType() const { return type; }
 
+protected:
+    virtual void updateNameCache() const;
+
+    virtual Node *traverseNextItem(Node *start) const;
+    bool checkForNameMatch(Node *node, bool checkName, const String &name, bool caseSensitive) const;
     virtual unsigned calcLength() const;
+    virtual void resetCollectionInfo() const;
+    // the base node, the collection refers to
+    RefPtr<Node> m_base;
+    // The collection list the following elements
+    Type type;
+    mutable CollectionInfo *info;
 
-    bool isAcceptableElement(Element*) const;
+    // For nextNamedItem()
+    mutable bool idsDone;
 
-    bool m_includeChildren : 1;
-    unsigned m_type : 5; // CollectionType
-
-    Node* m_base;
+    mutable bool m_ownsInfo;
 };
 
-} // namespace
+} //namespace
 
 #endif

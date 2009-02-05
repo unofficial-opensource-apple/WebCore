@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,7 +21,6 @@
  * Boston, MA 02110-1301, USA.
  *
  */
-
 #ifndef HTMLBaseElement_h
 #define HTMLBaseElement_h
 
@@ -27,20 +28,32 @@
 
 namespace WebCore {
 
-class HTMLBaseElement : public HTMLElement {
+class HTMLBaseElement : public HTMLElement
+{
 public:
-    static PassRefPtr<HTMLBaseElement> create(const QualifiedName&, Document*);
+    HTMLBaseElement(Document*);
+    ~HTMLBaseElement();
 
-private:
-    HTMLBaseElement(const QualifiedName&, Document*);
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
+    virtual int tagPriority() const { return 0; }
 
-    virtual String target() const;
-    virtual bool isURLAttribute(Attribute*) const;
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
+    String href() const { return m_href; }
+    virtual String target() const { return m_target; }
+
+    virtual void parseMappedAttribute(MappedAttribute*);
+    virtual void insertedIntoDocument();
+    virtual void removedFromDocument();
+
+    void process();
+    
+    void setHref(const String&);
+    void setTarget(const String&);
+
+protected:
+    String m_href;
+    String m_target;
 };
 
-} // namespace
+} //namespace
 
 #endif

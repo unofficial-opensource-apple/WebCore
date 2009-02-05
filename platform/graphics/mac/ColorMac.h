@@ -31,16 +31,20 @@
 
 #include "Color.h"
 
+#ifdef __OBJC__
+@class NSColor;
+#else
+class NSColor;
+#endif
 
 namespace WebCore {
     
+    Color colorFromNSColor(NSColor *);
+    NSColor* nsColor(const Color&);
 
     bool usesTestModeFocusRingColor();
     void setUsesTestModeFocusRingColor(bool);
     
-    // Focus ring color used for testing purposes.
-    RGBA32 oldAquaFocusRingColor();
-
 }
 
 #endif

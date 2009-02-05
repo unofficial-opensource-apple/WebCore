@@ -1,7 +1,7 @@
-/*
+/**
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,7 +23,6 @@
 #include "config.h"
 #include "HTMLLIElement.h"
 
-#include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "HTMLNames.h"
@@ -33,55 +32,47 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLLIElement::HTMLLIElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLLIElement::HTMLLIElement(Document* doc)
+    : HTMLElement(HTMLNames::liTag, doc)
+    , m_requestedValue(0)
 {
-    ASSERT(hasTagName(liTag));
 }
 
-PassRefPtr<HTMLLIElement> HTMLLIElement::create(Document* document)
+bool HTMLLIElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
 {
-    return adoptRef(new HTMLLIElement(liTag, document));
+    if (attrName == typeAttr) {
+        result = eListItem; // Share with <ol> since all the values are the same
+        return false;
+    }
+    
+    return HTMLElement::mapToEntry(attrName, result);
 }
 
-PassRefPtr<HTMLLIElement> HTMLLIElement::create(const QualifiedName& tagName, Document* document)
-{
-    return adoptRef(new HTMLLIElement(tagName, document));
-}
-
-bool HTMLLIElement::isPresentationAttribute(const QualifiedName& name) const
-{
-    if (name == typeAttr)
-        return true;
-    return HTMLElement::isPresentationAttribute(name);
-}
-
-void HTMLLIElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
-{
-    if (attr->name() == typeAttr) {
-        if (attr->value() == "a")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueLowerAlpha);
-        else if (attr->value() == "A")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueUpperAlpha);
-        else if (attr->value() == "i")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueLowerRoman);
-        else if (attr->value() == "I")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueUpperRoman);
-        else if (attr->value() == "1")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueDecimal);
-        else
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, attr->value());
-    } else
-        HTMLElement::collectStyleForAttribute(attr, style);
-}
-
-void HTMLLIElement::parseAttribute(Attribute* attr)
+void HTMLLIElement::parseMappedAttribute(MappedAttribute* attr)
 {
     if (attr->name() == valueAttr) {
-        if (renderer() && renderer()->isListItem())
-            parseValue(attr->value());
+        m_requestedValue = attr->value().toInt();
+        if (renderer() && renderer()->isListItem()) {
+            if (m_requestedValue > 0)
+                static_cast<RenderListItem*>(renderer())->setExplicitValue(m_requestedValue);
+            else
+                static_cast<RenderListItem*>(renderer())->clearExplicitValue();
+        }
+    } else if (attr->name() == typeAttr) {
+        if (attr->value() == "a")
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_LOWER_ALPHA);
+        else if (attr->value() == "A")
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_UPPER_ALPHA);
+        else if (attr->value() == "i")
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_LOWER_ROMAN);
+        else if (attr->value() == "I")
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_UPPER_ROMAN);
+        else if (attr->value() == "1")
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_DECIMAL);
+        else
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, attr->value());
     } else
-        HTMLElement::parseAttribute(attr);
+        HTMLElement::parseMappedAttribute(attr);
 }
 
 void HTMLLIElement::attach()
@@ -91,7 +82,7 @@ void HTMLLIElement::attach()
     HTMLElement::attach();
 
     if (renderer() && renderer()->isListItem()) {
-        RenderListItem* render = toRenderListItem(renderer());
+        RenderListItem* render = static_cast<RenderListItem*>(renderer());
 
         // Find the enclosing list node.
         Node* listNode = 0;
@@ -106,20 +97,31 @@ void HTMLLIElement::attach()
         if (!listNode)
             render->setNotInList(true);
 
-        parseValue(fastGetAttribute(valueAttr));
+        if (m_requestedValue > 0)
+            render->setExplicitValue(m_requestedValue);
+        else
+            render->clearExplicitValue();
     }
 }
 
-inline void HTMLLIElement::parseValue(const AtomicString& value)
+String HTMLLIElement::type() const
 {
-    ASSERT(renderer() && renderer()->isListItem());
+    return getAttribute(typeAttr);
+}
 
-    bool valueOK;
-    int requestedValue = value.toInt(&valueOK);
-    if (valueOK)
-        toRenderListItem(renderer())->setExplicitValue(requestedValue);
-    else
-        toRenderListItem(renderer())->clearExplicitValue();
+void HTMLLIElement::setType(const String& value)
+{
+    setAttribute(typeAttr, value);
+}
+
+int HTMLLIElement::value() const
+{
+    return getAttribute(valueAttr).toInt();
+}
+
+void HTMLLIElement::setValue(int value)
+{
+    setAttribute(valueAttr, String::number(value));
 }
 
 }

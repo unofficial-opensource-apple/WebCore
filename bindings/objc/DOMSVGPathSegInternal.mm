@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,6 +30,8 @@
 
 #import "DOMSVGPathSegInternal.h"
 
+#import "DOMInternal.h"
+#import "DOMSVGPathSeg.h"
 #import "DOMSVGPathSegArcAbs.h"
 #import "DOMSVGPathSegArcRel.h"
 #import "DOMSVGPathSegClosePath.h"
@@ -51,53 +53,102 @@
 #import "DOMSVGPathSegMovetoAbs.h"
 #import "DOMSVGPathSegMovetoRel.h"
 #import "SVGPathSeg.h"
+#import <objc/objc-class.h>
 
-Class kitClass(WebCore::SVGPathSeg* impl)
+@implementation DOMSVGPathSeg (WebCoreInternal)
+
+- (WebCore::SVGPathSeg *)_SVGPathSeg
 {
+    return reinterpret_cast<WebCore::SVGPathSeg*>(_internal);
+}
+
+- (id)_initWithSVGPathSeg:(WebCore::SVGPathSeg *)impl
+{
+    ASSERT(impl);
+
+    [super _init];
+    _internal = reinterpret_cast<DOMObjectInternal*>(impl);
+    impl->ref();
+    WebCore::addDOMWrapper(self, impl);
+    return self;
+}
+
++ (DOMSVGPathSeg *)_wrapSVGPathSeg:(WebCore::SVGPathSeg *)impl
+{
+    if (!impl)
+        return nil;
+    id cachedInstance;
+    cachedInstance = WebCore::getDOMWrapper(impl);
+    if (cachedInstance)
+        return [[cachedInstance retain] autorelease];
+
+    Class wrapperClass = nil;
     switch (impl->pathSegType()) {
         case WebCore::SVGPathSeg::PATHSEG_UNKNOWN:
-            return [DOMSVGPathSeg class];
+            wrapperClass = [DOMSVGPathSeg class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CLOSEPATH:
-            return [DOMSVGPathSegClosePath class];
+            wrapperClass = [DOMSVGPathSegClosePath class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_MOVETO_ABS:
-            return [DOMSVGPathSegMovetoAbs class];
+            wrapperClass = [DOMSVGPathSegMovetoAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_MOVETO_REL:
-            return [DOMSVGPathSegMovetoRel class];
+            wrapperClass = [DOMSVGPathSegMovetoRel class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_LINETO_ABS:
-            return [DOMSVGPathSegLinetoAbs class];
+            wrapperClass = [DOMSVGPathSegLinetoAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_LINETO_REL:
-            return [DOMSVGPathSegLinetoRel class];
+            wrapperClass = [DOMSVGPathSegLinetoRel class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CURVETO_CUBIC_ABS:
-            return [DOMSVGPathSegCurvetoCubicAbs class];
+            wrapperClass = [DOMSVGPathSegCurvetoCubicAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CURVETO_CUBIC_REL:
-            return [DOMSVGPathSegCurvetoCubicRel class];
+            wrapperClass = [DOMSVGPathSegCurvetoCubicRel class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CURVETO_QUADRATIC_ABS:
-            return [DOMSVGPathSegCurvetoQuadraticAbs class];
+            wrapperClass = [DOMSVGPathSegCurvetoQuadraticAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CURVETO_QUADRATIC_REL:
-            return [DOMSVGPathSegCurvetoQuadraticRel class];
+            wrapperClass = [DOMSVGPathSegCurvetoQuadraticRel class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_ARC_ABS:
-            return [DOMSVGPathSegArcAbs class];
+            wrapperClass = [DOMSVGPathSegArcAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_ARC_REL:
-            return [DOMSVGPathSegArcRel class];
+            wrapperClass = [DOMSVGPathSegArcRel class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_LINETO_HORIZONTAL_ABS:
-            return [DOMSVGPathSegLinetoHorizontalAbs class];
+            wrapperClass = [DOMSVGPathSegLinetoHorizontalAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_LINETO_HORIZONTAL_REL:
-            return [DOMSVGPathSegLinetoHorizontalRel class];
+            wrapperClass = [DOMSVGPathSegLinetoHorizontalRel class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_LINETO_VERTICAL_ABS:
-            return [DOMSVGPathSegLinetoVerticalAbs class];
+            wrapperClass = [DOMSVGPathSegLinetoVerticalAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_LINETO_VERTICAL_REL:
-            return [DOMSVGPathSegLinetoVerticalRel class];
+            wrapperClass = [DOMSVGPathSegLinetoVerticalRel class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CURVETO_CUBIC_SMOOTH_ABS:
-            return [DOMSVGPathSegCurvetoCubicSmoothAbs class];
+            wrapperClass = [DOMSVGPathSegCurvetoCubicSmoothAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CURVETO_CUBIC_SMOOTH_REL:
-            return [DOMSVGPathSegCurvetoCubicSmoothRel class];
+            wrapperClass = [DOMSVGPathSegCurvetoCubicSmoothRel class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CURVETO_QUADRATIC_SMOOTH_ABS:
-            return [DOMSVGPathSegCurvetoQuadraticSmoothAbs class];
+            wrapperClass = [DOMSVGPathSegCurvetoQuadraticSmoothAbs class];
+            break;
         case WebCore::SVGPathSeg::PATHSEG_CURVETO_QUADRATIC_SMOOTH_REL:
-            return [DOMSVGPathSegCurvetoQuadraticSmoothRel class];
+            wrapperClass = [DOMSVGPathSegCurvetoQuadraticSmoothRel class];
+            break;
     }
-    ASSERT_NOT_REACHED();
-    return nil;
+
+    return [[[wrapperClass alloc] _initWithSVGPathSeg:impl] autorelease];
 }
+
+@end
 
 #endif // ENABLE(SVG)

@@ -35,8 +35,8 @@
  *
  * ***** END LICENSE BLOCK ***** */
 
-#ifndef GIFImageReader_h
-#define GIFImageReader_h
+#ifndef _GIF_H_
+#define _GIF_H_
 
 // Define ourselves as the clientPtr.  Mozilla just hacked their C++ callback class into this old C decoder,
 // so we will too.
@@ -46,8 +46,6 @@
 #define MAX_BITS            4097 /* 2^MAX_LZW_BITS+1 */
 #define MAX_COLORS           256
 #define MAX_HOLD_SIZE        256
-
-const int cLoopCountNotSeen = -2;
 
 /* gif2.h  
    The interface for the GIF87/89a decoder. 
@@ -69,12 +67,24 @@ typedef enum {
     gif_consume_block,
     gif_skip_block,
     gif_done,
+    gif_oom,
+    gif_error,
     gif_comment_extension,
     gif_application_extension,
     gif_netscape_extension_block,
     gif_consume_netscape_extension,
     gif_consume_comment
 } gstate;
+
+/* "Disposal" method indicates how the image should be handled in the
+   framebuffer before the subsequent image is displayed. */
+typedef enum 
+{
+    DISPOSE_NOT_SPECIFIED      = 0,
+    DISPOSE_KEEP               = 1, /* Leave it in the framebuffer */
+    DISPOSE_OVERWRITE_BGCOLOR  = 2, /* Overwrite with background color */
+    DISPOSE_OVERWRITE_PREVIOUS = 3  /* Save-under */
+} gdispose;
 
 struct GIFFrameReader {
     /* LZW decoder state machine */
@@ -101,7 +111,7 @@ struct GIFFrameReader {
     unsigned int x_offset, y_offset;    /* With respect to "screen" origin */
     unsigned int height, width;
     int tpixel;                 /* Index of transparent pixel */
-    WebCore::ImageFrame::FrameDisposalMethod disposal_method;   /* Restore to background, leave in place, etc.*/
+    gdispose disposal_method;   /* Restore to background, leave in place, etc.*/
     unsigned char *local_colormap;    /* Per-image colormap */
     int local_colormap_size;    /* Size of local colormap array. */
     
@@ -130,7 +140,7 @@ struct GIFFrameReader {
 
         x_offset = y_offset = width = height = 0;
         tpixel = 0;
-        disposal_method = WebCore::ImageFrame::DisposeNotSpecified;
+        disposal_method = DISPOSE_NOT_SPECIFIED;
 
         local_colormap = 0;
         local_colormap_size = 0;
@@ -166,7 +176,7 @@ struct GIFImageReader {
     unsigned screen_width;       /* Logical screen width & height */
     unsigned screen_height;
     int global_colormap_size;   /* Size of global colormap array. */
-    unsigned images_decoded;    /* Counts completed frames for animated GIFs */
+    int images_decoded;         /* Counts completed frames for animated GIFs */
     int images_count;           /* Counted all frames seen so far (including incomplete frames) */
     int loop_count;             /* Netscape specific extension block to control
                                    the number of animation loops a GIF renders. */
@@ -187,11 +197,15 @@ struct GIFImageReader {
         screen_bgcolor = version = 0;
         screen_width = screen_height = 0;
         global_colormap_size = images_decoded = images_count = 0;
-        loop_count = cLoopCountNotSeen;
+        loop_count = -1;
         count = 0;
     }
 
     ~GIFImageReader() {
+        close();
+    }
+
+    void close() {
         delete []global_colormap;
         global_colormap = 0;
         delete frame_reader;
@@ -202,8 +216,9 @@ struct GIFImageReader {
               WebCore::GIFImageDecoder::GIFQuery query = WebCore::GIFImageDecoder::GIFFullQuery, unsigned haltAtFrame = -1);
 
 private:
-    bool output_row();
-    bool do_lzw(const unsigned char *q);
+    void output_row();
+    int do_lzw(const unsigned char *q);
 };
 
 #endif
+

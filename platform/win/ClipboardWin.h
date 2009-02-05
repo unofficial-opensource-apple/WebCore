@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,75 +26,53 @@
 #ifndef ClipboardWin_h
 #define ClipboardWin_h
 
-#include "COMPtr.h"
-#include "CachedImage.h"
 #include "Clipboard.h"
-#include "DragData.h"
+
+#include "CachedResourceClient.h"
+#include "IntPoint.h"
+#include "COMPtr.h"
 
 struct IDataObject;
 
 namespace WebCore {
 
-class CachedImage;
-class Frame;
-class IntPoint;
-class WCDataObject;
+    class CachedImage;
+    class IntPoint;
+    class WCDataObject;
 
-// State available during IE's events for drag and drop and copy/paste
-class ClipboardWin : public Clipboard, public CachedImageClient {
-    WTF_MAKE_FAST_ALLOCATED;
-public:
-    static PassRefPtr<ClipboardWin> create(ClipboardType clipboardType, IDataObject* dataObject, ClipboardAccessPolicy policy, Frame* frame)
-    {
-        return adoptRef(new ClipboardWin(clipboardType, dataObject, policy, frame));
-    }
-    static PassRefPtr<ClipboardWin> create(ClipboardType clipboardType, WCDataObject* dataObject, ClipboardAccessPolicy policy, Frame* frame)
-    {
-        return adoptRef(new ClipboardWin(clipboardType, dataObject, policy, frame));
-    }
-    static PassRefPtr<ClipboardWin> create(ClipboardType clipboardType, const DragDataMap& dataMap, ClipboardAccessPolicy policy, Frame* frame)
-    {
-        return adoptRef(new ClipboardWin(clipboardType, dataMap, policy, frame));
-    }
-    ~ClipboardWin();
+    // State available during IE's events for drag and drop and copy/paste
+    class ClipboardWin : public Clipboard, public CachedResourceClient {
+    public:
+        ClipboardWin(bool isForDragging, IDataObject* dataObject, ClipboardAccessPolicy policy);
+        ClipboardWin(bool isForDragging, WCDataObject* dataObject, ClipboardAccessPolicy policy);
+        ~ClipboardWin();
+    
+        void clearData(const String& type);
+        void clearAllData();
+        String getData(const String& type, bool& success) const;
+        bool setData(const String& type, const String& data);
+    
+        // extensions beyond IE's API
+        HashSet<String> types() const;
+    
+        void setDragImage(CachedImage*, const IntPoint&);
+        void setDragImageElement(Node*, const IntPoint&);
 
-    void clearData(const String& type);
-    void clearAllData();
-    String getData(const String& type) const;
-    bool setData(const String& type, const String& data);
+        virtual DragImageRef createDragImage(IntPoint& dragLoc) const;
+        virtual void declareAndWriteDragImage(Element*, const KURL&, const String& title, Frame*);
+        virtual void writeURL(const KURL&, const String&, Frame*);
+        virtual void writeRange(Range*, Frame*);
 
-    // extensions beyond IE's API
-    virtual HashSet<String> types() const;
-    virtual PassRefPtr<FileList> files() const;
+        virtual bool hasData();
 
-    void setDragImage(CachedImage*, const IntPoint&);
-    void setDragImageElement(Node*, const IntPoint&);
-
-    virtual DragImageRef createDragImage(IntPoint& dragLoc) const;
-    virtual void declareAndWriteDragImage(Element*, const KURL&, const String& title, Frame*);
-    virtual void writeURL(const KURL&, const String&, Frame*);
-    virtual void writeRange(Range*, Frame*);
-    virtual void writePlainText(const String&);
-
-    virtual bool hasData();
-
-    COMPtr<IDataObject> dataObject() { return m_dataObject; }
-
-    void setExternalDataObject(IDataObject *dataObject);
-
-private:
-    ClipboardWin(ClipboardType, IDataObject*, ClipboardAccessPolicy, Frame*);
-    ClipboardWin(ClipboardType, WCDataObject*, ClipboardAccessPolicy, Frame*);
-    ClipboardWin(ClipboardType, const DragDataMap&, ClipboardAccessPolicy, Frame*);
-
-    void resetFromClipboard();
-    void setDragImage(CachedImage*, Node*, const IntPoint&);
-
-    COMPtr<IDataObject> m_dataObject;
-    COMPtr<WCDataObject> m_writableDataObject;
-    DragDataMap m_dragDataMap;
-    Frame* m_frame;
-};
+        COMPtr<IDataObject> dataObject() { return m_dataObject; }
+    private:
+        void resetFromClipboard();
+        void setDragImage(CachedImage*, Node*, const IntPoint&);
+        COMPtr<IDataObject> m_dataObject;
+        COMPtr<WCDataObject> m_writableDataObject;
+        Frame* m_frame;
+    };
 
 } // namespace WebCore
 

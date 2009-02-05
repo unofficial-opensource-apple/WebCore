@@ -30,31 +30,28 @@
 #ifndef Screen_h
 #define Screen_h
 
-#include "DOMWindowProperty.h"
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefCounted.h>
+#include "Shared.h"
 
 namespace WebCore {
 
     class Frame;
 
-    class Screen : public RefCounted<Screen>, public DOMWindowProperty {
+    class Screen : public Shared<Screen> {
     public:
-        static PassRefPtr<Screen> create(Frame *frame) { return adoptRef(new Screen(frame)); }
+        Screen(Frame*);
+        void disconnectFrame();
 
-        unsigned horizontalDPI() const;
-        unsigned verticalDPI() const;
         unsigned height() const;
         unsigned width() const;
         unsigned colorDepth() const;
         unsigned pixelDepth() const;
-        int availLeft() const;
-        int availTop() const;
+        unsigned availLeft() const;
+        unsigned availTop() const;
         unsigned availHeight() const;
         unsigned availWidth() const;
-        
+
     private:
-        explicit Screen(Frame*);
+        Frame* m_frame;
     };
 
 } // namespace WebCore

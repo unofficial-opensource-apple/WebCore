@@ -1,7 +1,9 @@
 /*
+ * This file is part of the KDE project.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,22 +25,22 @@
 #ifndef RenderFrameSet_h
 #define RenderFrameSet_h
 
-#include "RenderBox.h"
+#include "RenderContainer.h"
 
 namespace WebCore {
 
 class HTMLFrameSetElement;
 class MouseEvent;
-class RenderFrame;
 
 enum FrameEdge { LeftFrameEdge, RightFrameEdge, TopFrameEdge, BottomFrameEdge };
 
-struct FrameEdgeInfo {
+struct FrameEdgeInfo
+{
     FrameEdgeInfo(bool preventResize = false, bool allowBorder = true)
-        : m_preventResize(4)
-        , m_allowBorder(4)
     {
+        m_preventResize.resize(4);
         m_preventResize.fill(preventResize);
+        m_allowBorder.resize(4);
         m_allowBorder.fill(allowBorder);
     }
 
@@ -53,14 +55,19 @@ private:
     Vector<bool> m_allowBorder;
 };
 
-class RenderFrameSet : public RenderBox {
+class RenderFrameSet : public RenderContainer {
 public:
     RenderFrameSet(HTMLFrameSetElement*);
     virtual ~RenderFrameSet();
 
-    const RenderObjectChildList* children() const { return &m_children; }
-    RenderObjectChildList* children() { return &m_children; }
+    virtual const char* renderName() const { return "RenderFrameSet"; }
+    virtual bool isFrameSet() const { return true; }
 
+    virtual void layout();
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
+    virtual void paint(PaintInfo& paintInfo, int tx, int ty);
+    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
+    
     FrameEdgeInfo edgeInfo() const;
 
     bool userResize(MouseEvent*);
@@ -71,13 +78,14 @@ public:
     bool canResizeRow(const IntPoint&) const;
     bool canResizeColumn(const IntPoint&) const;
 
-    void notifyFrameEdgeInfoChanged();
+#ifndef NDEBUG
+    virtual void dump(TextStream*, DeprecatedString ind = "") const;
+#endif
 
 private:
     static const int noSplit = -1;
 
-    class GridAxis {
-        WTF_MAKE_NONCOPYABLE(GridAxis);
+    class GridAxis : Noncopyable {
     public:
         GridAxis();
         void resize(int);
@@ -89,29 +97,15 @@ private:
         int m_splitResizeOffset;
     };
 
-    virtual RenderObjectChildList* virtualChildren() { return children(); }
-    virtual const RenderObjectChildList* virtualChildren() const { return children(); }
-
-    virtual const char* renderName() const { return "RenderFrameSet"; }
-    virtual bool isFrameSet() const { return true; }
-
-    virtual void layout();
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
-    virtual CursorDirective getCursor(const LayoutPoint&, Cursor&) const;
-
     inline HTMLFrameSetElement* frameSet() const;
 
-    bool flattenFrameSet() const;
-
+    bool canResize(const IntPoint&) const;
     void setIsResizing(bool);
 
     void layOutAxis(GridAxis&, const Length*, int availableSpace);
     void computeEdgeInfo();
     void fillFromEdgeInfo(const FrameEdgeInfo& edgeInfo, int r, int c);
     void positionFrames();
-    void positionFramesWithFlattening();
 
     int splitPosition(const GridAxis&, int split) const;
     int hitTestSplit(const GridAxis&, int position) const;
@@ -119,10 +113,8 @@ private:
     void startResizing(GridAxis&, int position);
     void continueResizing(GridAxis&, int position);
 
-    void paintRowBorder(const PaintInfo&, const IntRect&);
-    void paintColumnBorder(const PaintInfo&, const IntRect&);
-
-    RenderObjectChildList m_children;
+    void paintRowBorder(const PaintInfo& paintInfo, const IntRect& rect);
+    void paintColumnBorder(const PaintInfo& paintInfo, const IntRect& rect);
 
     GridAxis m_rows;
     GridAxis m_cols;
@@ -130,16 +122,6 @@ private:
     bool m_isResizing;
     bool m_isChildResizing;
 };
-
-
-inline RenderFrameSet* toRenderFrameSet(RenderObject* object)
-{
-    ASSERT(!object || object->isFrameSet());
-    return static_cast<RenderFrameSet*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderFrameSet(const RenderFrameSet*);
 
 } // namespace WebCore
 

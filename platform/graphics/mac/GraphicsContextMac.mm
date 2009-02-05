@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,16 +26,9 @@
 #import "config.h"
 #import "GraphicsContext.h"
 
-#import "GraphicsContextPlatformPrivateCG.h"
-#import <wtf/StdLibExtras.h>
-
-#import "Color.h"
-#import "WKGraphics.h"
-#import <wtf/UnusedParam.h>
+#import "../cg/GraphicsContextPlatformPrivate.h"
 
 #import "WebCoreSystemInterface.h"
-
-@class NSColor;
 
 // FIXME: More of this should use CoreGraphics instead of AppKit.
 // FIXME: More of this should move into GraphicsContextCG.cpp.
@@ -46,65 +39,114 @@ namespace WebCore {
 // calls in this file are all exception-safe, so we don't block
 // exceptions for those.
 
-
-void GraphicsContext::drawFocusRing(const Vector<IntRect>& rects, int width, int offset, const Color& color)
+void GraphicsContext::drawFocusRing(const Color& color)
 {
-    UNUSED_PARAM(rects);
-    UNUSED_PARAM(width);
-    UNUSED_PARAM(offset);
-    UNUSED_PARAM(color);
+    if (paintingDisabled())
+        return;
+
+    int radius = (focusRingWidth() - 1) / 2;
+    int offset = radius + focusRingOffset();
+    CGColorRef colorRef = color.isValid() ? cgColor(color) : 0;
+
+    CGMutablePathRef focusRingPath = CGPathCreateMutable();
+    const Vector<IntRect>& rects = focusRingRects();
+    unsigned rectCount = rects.size();
+    for (unsigned i = 0; i < rectCount; i++)
+        CGPathAddRect(focusRingPath, 0, CGRectInset(rects[i], -offset, -offset));
+
+    CGContextRef context = platformContext();
+
+    // FIXME: This works only inside a NSView's drawRect method. The view must be
+    // focused and this context must be the current NSGraphicsContext.
+    ASSERT(context == [[NSGraphicsContext currentContext] graphicsPort]);
+    NSView* view = [NSView focusView];
+    ASSERT(view);
+
+    const NSRect* drawRects;
+#ifdef __LP64__
+    long count;
+#else
+    int count;
+#endif
+    [view getRectsBeingDrawn:&drawRects count:&count];
+
+    // We have to pass in our own clip rectangles here because a bug in CG
+    // seems to inflate the clip (thus allowing the focus ring to paint
+    // slightly outside the clip).
+    NSRect transformedClipRect = [view convertRect:m_data->m_focusRingClip toView:nil];
+    for (int i = 0; i < count; ++i) {
+        NSRect transformedRect = [view convertRect:drawRects[i] toView:nil];
+        NSRect rectToUse = NSIntersectionRect(transformedRect, transformedClipRect);
+        if (!NSIsEmptyRect(rectToUse)) {
+            CGContextBeginPath(context);
+            CGContextAddPath(context, focusRingPath);
+            wkDrawFocusRing(context, *(CGRect *)&rectToUse, colorRef, radius);
+        }
+    }
+
+    CGColorRelease(colorRef);
+
+    CGPathRelease(focusRingPath);
 }
 
-
-static CGPatternRef createDotPattern(bool& usingDot, const char* resourceName)
+void GraphicsContext::setCompositeOperation(CompositeOperator op)
 {
-    CGImageRef image = WKGraphicsCreateImageFromBundleWithName(resourceName);
-    ASSERT(image); // if image is not available, we want to know
-    CGPatternRef dotPattern = WKCreatePatternFromCGImage(image);
-    CGImageRelease(image);
-    usingDot = true;
-    return dotPattern;
+    if (paintingDisabled())
+        return;
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+    [[NSGraphicsContext graphicsContextWithGraphicsPort:platformContext() flipped:YES]
+        setCompositingOperation:(NSCompositingOperation)op];
+    [pool drain];
 }
 
-// WebKit on Mac is a standard platform component, so it must use the standard platform artwork for underline.
-void GraphicsContext::drawLineForDocumentMarker(const FloatPoint& point, float width, DocumentMarkerLineStyle style)
+void GraphicsContext::drawLineForMisspellingOrBadGrammar(const IntPoint& point, int width, bool grammar)
 {
     if (paintingDisabled())
         return;
         
-    // These are the same for misspelling or bad grammar.
-    int patternHeight = cMisspellingLineThickness;
-    float patternWidth = cMisspellingLinePatternWidth;
+    // Constants for spelling pattern color
+    static RetainPtr<NSColor> spellingPatternColor = nil;
+    static bool usingDotForSpelling = false;
 
+    // Constants for grammar pattern color
+    static RetainPtr<NSColor> grammarPatternColor = nil;
+    static bool usingDotForGrammar = false;
+    
+    // These are the same for misspelling or bad grammar
+    int patternHeight = cMisspellingLineThickness;
+    int patternWidth = cMisspellingLinePatternWidth;
+ 
+    // Initialize pattern color if needed
+    if (!grammar && !spellingPatternColor) {
+        NSImage *image = [NSImage imageNamed:@"SpellingDot"];
+        ASSERT(image); // if image is not available, we want to know
+        NSColor *color = (image ? [NSColor colorWithPatternImage:image] : nil);
+        if (color)
+            usingDotForSpelling = true;
+        else
+            color = [NSColor redColor];
+        spellingPatternColor = color;
+    }
+    
+    if (grammar && !grammarPatternColor) {
+        NSImage *image = [NSImage imageNamed:@"GrammarDot"];
+        ASSERT(image); // if image is not available, we want to know
+        NSColor *color = (image ? [NSColor colorWithPatternImage:image] : nil);
+        if (color)
+            usingDotForGrammar = true;
+        else
+            color = [NSColor greenColor];
+        grammarPatternColor = color;
+    }
+    
     bool usingDot;
-    CGPatternRef dotPattern;
-    switch (style) {
-        case DocumentMarkerSpellingLineStyle:
-        {
-            // Constants for spelling pattern color.
-            static bool usingDotForSpelling = false;
-            DEFINE_STATIC_LOCAL(RetainPtr<CGPatternRef>, spellingPattern, (createDotPattern(usingDotForSpelling, "SpellingDot")));
-            dotPattern = spellingPattern.get();
-            usingDot = usingDotForSpelling;
-            break;
-        }
-        case DocumentMarkerGrammarLineStyle:
-        {
-            ASSERT_NOT_REACHED();
-            return;
-        }
-        case TextCheckingDictationPhraseWithAlternativesLineStyle:
-        {
-            static bool usingDotForDictationPhraseWithAlternatives = false;
-            DEFINE_STATIC_LOCAL(RetainPtr<CGPatternRef>, dictationPhraseWithAlternativesPattern, (createDotPattern(usingDotForDictationPhraseWithAlternatives, "DictationPhraseWithAlternativesDot")));
-            dotPattern = dictationPhraseWithAlternativesPattern.get();
-            usingDot = usingDotForDictationPhraseWithAlternatives;
-            break;
-        }
-        default:
-            // FIXME: Should remove default case so we get compile-time errors.
-            ASSERT_NOT_REACHED();
-            return;
+    NSColor *patternColor;
+    if (grammar) {
+        usingDot = usingDotForGrammar;
+        patternColor = grammarPatternColor.get();
+    } else {
+        usingDot = usingDotForSpelling;
+        patternColor = spellingPatternColor.get();
     }
 
     // Make sure to draw only complete dots.
@@ -114,25 +156,24 @@ void GraphicsContext::drawLineForDocumentMarker(const FloatPoint& point, float w
     // space between adjacent misspelled words was underlined.
     if (usingDot) {
         // allow slightly more considering that the pattern ends with a transparent pixel
-        float widthMod = fmodf(width, patternWidth);
+        int widthMod = width % patternWidth;
         if (patternWidth - widthMod > cMisspellingLinePatternGapWidth)
             width -= widthMod;
     }
     
     // FIXME: This code should not use NSGraphicsContext currentContext
     // In order to remove this requirement we will need to use CGPattern instead of NSColor
-    // FIXME: This code should not be using wkSetPatternPhaseInUserSpace, as this approach is wrong
-    // for transforms.
-
-    // Draw underline.
-    CGContextRef context = platformContext();
+    
+    // Draw underline
+    NSGraphicsContext *currentContext = [NSGraphicsContext currentContext];
+    CGContextRef context = (CGContextRef)[currentContext graphicsPort];
     CGContextSaveGState(context);
 
-    WKSetPattern(context, dotPattern, YES, YES);
+    [patternColor set];
 
     wkSetPatternPhaseInUserSpace(context, point);
 
-    WKRectFillUsingOperation(context, CGRectMake(point.x(), point.y(), width, patternHeight), kCGCompositeSover);
+    NSRectFillUsingOperation(NSMakeRect(point.x(), point.y(), width, patternHeight), NSCompositeSourceOver);
     
     CGContextRestoreGState(context);
 }

@@ -28,65 +28,35 @@
 #define FloatRect_h
 
 #include "FloatPoint.h"
-#include <wtf/Vector.h>
 
-#include <CoreGraphics/CGGeometry.h>
-
-#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM)
+#if PLATFORM(CG)
 typedef struct CGRect CGRect;
 #endif
 
+#if PLATFORM(MAC)
+#ifdef NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES
+typedef struct CGRect NSRect;
+#else
+typedef struct _NSRect NSRect;
+#endif
+#endif
 
 #if PLATFORM(QT)
-QT_BEGIN_NAMESPACE
 class QRectF;
-QT_END_NAMESPACE
-#endif
-
-#if PLATFORM(WX) && USE(WXGC)
-class wxRect2DDouble;
-#endif
-
-#if PLATFORM(BLACKBERRY)
-namespace BlackBerry {
-namespace Platform {
-class FloatRect;
-}
-}
-#endif
-
-#if USE(SKIA)
-struct SkRect;
-#endif
-
-#if USE(CAIRO)
-typedef struct _cairo_rectangle cairo_rectangle_t;
 #endif
 
 namespace WebCore {
 
-#if PLATFORM(OPENVG)
-class VGRect;
-#endif
-
-class FractionalLayoutRect;
 class IntRect;
-class IntPoint;
 
 class FloatRect {
 public:
-    enum ContainsMode {
-        InsideOrOnStroke,
-        InsideButNotOnStroke
-    };
-
     FloatRect() { }
     FloatRect(const FloatPoint& location, const FloatSize& size)
         : m_location(location), m_size(size) { }
     FloatRect(float x, float y, float width, float height)
         : m_location(FloatPoint(x, y)), m_size(FloatSize(width, height)) { }
     FloatRect(const IntRect&);
-    FloatRect(const FractionalLayoutRect&);
 
     static FloatRect narrowPrecision(double x, double y, double width, double height);
 
@@ -98,8 +68,6 @@ public:
 
     float x() const { return m_location.x(); }
     float y() const { return m_location.y(); }
-    float maxX() const { return x() + width(); }
-    float maxY() const { return y() + height(); }
     float width() const { return m_size.width(); }
     float height() const { return m_size.height(); }
 
@@ -109,61 +77,25 @@ public:
     void setHeight(float height) { m_size.setHeight(height); }
 
     bool isEmpty() const { return m_size.isEmpty(); }
-    bool isZero() const { return m_size.isZero(); }
-    bool isExpressibleAsIntRect() const;
 
-    FloatPoint center() const { return FloatPoint(x() + width() / 2, y() + height() / 2); }
+    float right() const { return x() + width(); }
+    float bottom() const { return y() + height(); }
 
     void move(const FloatSize& delta) { m_location += delta; } 
-    void moveBy(const FloatPoint& delta) { m_location.move(delta.x(), delta.y()); }
-    void move(float dx, float dy) { m_location.move(dx, dy); }
-
-    void expand(const FloatSize& size) { m_size += size; }
-    void expand(float dw, float dh) { m_size.expand(dw, dh); }
-    void contract(const FloatSize& size) { m_size -= size; }
-    void contract(float dw, float dh) { m_size.expand(-dw, -dh); }
-
-    void shiftXEdgeTo(float edge)
-    {
-        float delta = edge - x();
-        setX(edge);
-        setWidth(std::max(0.0f, width() - delta));
-    }
-    void shiftMaxXEdgeTo(float edge)
-    {
-        float delta = edge - maxX();
-        setWidth(std::max(0.0f, width() + delta));
-    }
-    void shiftYEdgeTo(float edge)
-    {
-        float delta = edge - y();
-        setY(edge);
-        setHeight(std::max(0.0f, height() - delta));
-    }
-    void shiftMaxYEdgeTo(float edge)
-    {
-        float delta = edge - maxY();
-        setHeight(std::max(0.0f, height() + delta));
-    }
-
-    FloatPoint minXMinYCorner() const { return m_location; } // typically topLeft
-    FloatPoint maxXMinYCorner() const { return FloatPoint(m_location.x() + m_size.width(), m_location.y()); } // typically topRight
-    FloatPoint minXMaxYCorner() const { return FloatPoint(m_location.x(), m_location.y() + m_size.height()); } // typically bottomLeft
-    FloatPoint maxXMaxYCorner() const { return FloatPoint(m_location.x() + m_size.width(), m_location.y() + m_size.height()); } // typically bottomRight
+    void move(float dx, float dy) { m_location.move(dx, dy); } 
 
     bool intersects(const FloatRect&) const;
     bool contains(const FloatRect&) const;
-    bool contains(const FloatPoint&, ContainsMode = InsideOrOnStroke) const;
 
     void intersect(const FloatRect&);
     void unite(const FloatRect&);
-    void uniteEvenIfEmpty(const FloatRect&);
-    void uniteIfNonZero(const FloatRect&);
 
     // Note, this doesn't match what IntRect::contains(IntPoint&) does; the int version
     // is really checking for containment of 1x1 rect, but that doesn't make sense with floats.
     bool contains(float px, float py) const
-        { return px >= x() && px <= maxX() && py >= y() && py <= maxY(); }
+        { return px >= x() && px <= right() && py >= y() && py <= bottom(); }
+    bool contains(const FloatPoint& point) const { return contains(point.x(), point.y()); }
+
 
     void inflateX(float dx) {
         m_location.setX(m_location.x() - dx);
@@ -174,62 +106,31 @@ public:
         m_size.setHeight(m_size.height() + dy + dy);
     }
     void inflate(float d) { inflateX(d); inflateY(d); }
-    void scale(float s) { scale(s, s); }
-    void scale(float sx, float sy);
+    void scale(float s);
 
-    FloatRect transposedRect() const { return FloatRect(m_location.transposedPoint(), m_size.transposedSize()); }
-
-    // Re-initializes this rectangle to fit the sets of passed points.
-    void fitToPoints(const FloatPoint& p0, const FloatPoint& p1);
-    void fitToPoints(const FloatPoint& p0, const FloatPoint& p1, const FloatPoint& p2);
-    void fitToPoints(const FloatPoint& p0, const FloatPoint& p1, const FloatPoint& p2, const FloatPoint& p3);
-
-#if PLATFORM(BLACKBERRY)
-    FloatRect(const BlackBerry::Platform::FloatRect&);
-    operator BlackBerry::Platform::FloatRect() const;
-#endif
-
-#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM)
+#if PLATFORM(CG)
     FloatRect(const CGRect&);
     operator CGRect() const;
 #endif
 
+#if PLATFORM(MAC) && !defined(NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES)
+    FloatRect(const NSRect&);
+    operator NSRect() const;
+#endif
 
 #if PLATFORM(QT)
     FloatRect(const QRectF&);
     operator QRectF() const;
-    FloatRect normalized() const;
 #endif
-
-#if PLATFORM(WX) && USE(WXGC)
-    FloatRect(const wxRect2DDouble&);
-    operator wxRect2DDouble() const;
-#endif
-
-#if USE(SKIA)
-    FloatRect(const SkRect&);
-    operator SkRect() const;
-#endif
-
-#if PLATFORM(OPENVG)
-    operator VGRect() const;
-#endif
-
-#if USE(CAIRO)
-    FloatRect(const cairo_rectangle_t&);
-    operator cairo_rectangle_t() const;
+#if PLATFORM(SYMBIAN)
+    FloatRect(const TRect&);
+    operator TRect() const;
+    TRect rect() const;
 #endif
 
 private:
     FloatPoint m_location;
     FloatSize m_size;
-
-    void setLocationAndSizeFromEdges(float left, float top, float right, float bottom)
-    {
-        m_location.set(left, top);
-        m_size.setWidth(right - left);
-        m_size.setHeight(bottom - top);
-    }
 };
 
 inline FloatRect intersection(const FloatRect& a, const FloatRect& b)
@@ -246,23 +147,6 @@ inline FloatRect unionRect(const FloatRect& a, const FloatRect& b)
     return c;
 }
 
-FloatRect unionRect(const Vector<FloatRect>&);
-
-inline FloatRect& operator+=(FloatRect& a, const FloatRect& b)
-{
-    a.move(b.x(), b.y());
-    a.setWidth(a.width() + b.width());
-    a.setHeight(a.height() + b.height());
-    return a;
-}
-
-inline FloatRect operator+(const FloatRect& a, const FloatRect& b)
-{
-    FloatRect c = a;
-    c += b;
-    return c;
-}
-
 inline bool operator==(const FloatRect& a, const FloatRect& b)
 {
     return a.location() == b.location() && a.size() == b.size();
@@ -274,14 +158,6 @@ inline bool operator!=(const FloatRect& a, const FloatRect& b)
 }
 
 IntRect enclosingIntRect(const FloatRect&);
-
-// Returns a valid IntRect contained within the given FloatRect.
-IntRect enclosedIntRect(const FloatRect&);
-
-IntRect roundedIntRect(const FloatRect&);
-
-// Map rect r from srcRect to an equivalent rect in destRect.
-FloatRect mapRect(const FloatRect& r, const FloatRect& srcRect, const FloatRect& destRect);
 
 }
 

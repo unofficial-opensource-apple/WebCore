@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,46 +20,45 @@
 
 module core {
 
-    interface [
-        JSGenerateToNativeObject,
-        JSInlineGetOwnPropertySlot
-    ] Element : Node {
+    interface [GenerateConstructor, GenerateNativeConverter] Element : EventTargetNode {
 
         // DOM Level 1 Core
 
-        readonly attribute [TreatReturnedNullStringAs=Null] DOMString tagName;
+        readonly attribute [ConvertNullStringTo=Null] DOMString tagName;
 
-        [TreatReturnedNullStringAs=Null] DOMString getAttribute(in [Optional=DefaultIsUndefined] DOMString name);
-        [ObjCLegacyUnnamedParameters] void setAttribute(in [Optional=DefaultIsUndefined] DOMString name,
-                                         in [Optional=DefaultIsUndefined] DOMString value)
+        [ConvertNullStringTo=Null] DOMString getAttribute(in DOMString name);
+        [OldStyleObjC, Custom] void setAttribute(in DOMString name,
+                                                 in DOMString value)
             raises(DOMException);
-        void removeAttribute(in [Optional=DefaultIsUndefined] DOMString name);
-        Attr getAttributeNode(in [Optional=DefaultIsUndefined] DOMString name);
-        Attr setAttributeNode(in [Optional=DefaultIsUndefined] Attr newAttr)
+        void removeAttribute(in DOMString name)
             raises(DOMException);
-        Attr removeAttributeNode(in [Optional=DefaultIsUndefined] Attr oldAttr)
+        Attr getAttributeNode(in DOMString name);
+        [Custom] Attr setAttributeNode(in Attr newAttr)
             raises(DOMException);
-        NodeList getElementsByTagName(in [Optional=DefaultIsUndefined] DOMString name);
+        Attr removeAttributeNode(in Attr oldAttr)
+            raises(DOMException);
+        NodeList getElementsByTagName(in DOMString name);
 
         // DOM Level 2 Core
 
-        [ObjCLegacyUnnamedParameters] DOMString getAttributeNS(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString namespaceURI,
-                                                in [Optional=DefaultIsUndefined] DOMString localName);
-        [ObjCLegacyUnnamedParameters] void setAttributeNS(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString namespaceURI,
-                                           in [Optional=DefaultIsUndefined] DOMString qualifiedName, 
-                                           in [Optional=DefaultIsUndefined] DOMString value)
+        [OldStyleObjC] DOMString getAttributeNS(in [ConvertNullToNullString] DOMString namespaceURI,
+                                                in DOMString localName);
+        [OldStyleObjC, Custom] void setAttributeNS(in [ConvertNullToNullString] DOMString namespaceURI,
+                                                   in DOMString qualifiedName, 
+                                                   in DOMString value)
             raises(DOMException);
-        [ObjCLegacyUnnamedParameters] void removeAttributeNS(in [TreatNullAs=NullString] DOMString namespaceURI,
-                                              in DOMString localName);
-        [ObjCLegacyUnnamedParameters] NodeList getElementsByTagNameNS(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString namespaceURI,
-                                                       in [Optional=DefaultIsUndefined] DOMString localName);
-        [ObjCLegacyUnnamedParameters] Attr getAttributeNodeNS(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString namespaceURI,
-                                               in [Optional=DefaultIsUndefined] DOMString localName);
-        Attr setAttributeNodeNS(in [Optional=DefaultIsUndefined] Attr newAttr)
+        [OldStyleObjC] void removeAttributeNS(in [ConvertNullToNullString] DOMString namespaceURI,
+                                              in DOMString localName)
+            raises(DOMException);
+        [OldStyleObjC] NodeList getElementsByTagNameNS(in [ConvertNullToNullString] DOMString namespaceURI,
+                                                       in DOMString localName);
+        [OldStyleObjC] Attr getAttributeNodeNS(in [ConvertNullToNullString] DOMString namespaceURI,
+                                               in DOMString localName);
+        [Custom] Attr setAttributeNodeNS(in Attr newAttr)
             raises(DOMException);
         boolean hasAttribute(in DOMString name);
-        [ObjCLegacyUnnamedParameters] boolean hasAttributeNS(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString namespaceURI,
-                                              in [Optional=DefaultIsUndefined] DOMString localName);
+        [OldStyleObjC] boolean hasAttributeNS(in [ConvertNullToNullString] DOMString namespaceURI,
+                                              in DOMString localName);
 
         readonly attribute CSSStyleDeclaration style;
 
@@ -83,139 +82,24 @@ module core {
         void blur();
         void scrollIntoView(in [Optional] boolean alignWithTop);
 
+        // IE extensions
+
+        Node insertAdjacentElement(in DOMString position, 
+                                   in Node element)
+            raises(DOMException);
+        boolean contains(in Element element);
+
         // WebKit extensions
 
         void scrollIntoViewIfNeeded(in [Optional] boolean centerIfNeeded);
-        void scrollByLines(in [Optional=DefaultIsUndefined] long lines);
-        void scrollByPages(in [Optional=DefaultIsUndefined] long pages);
+        void scrollByLines(in long lines);
+        void scrollByPages(in long pages);
 
-#if defined(ENABLE_ANIMATION_API) && ENABLE_ANIMATION_API
-        WebKitAnimationList webkitGetAnimations();
-#endif
-
-        // HTML 5
-        NodeList getElementsByClassName(in [Optional=DefaultIsUndefined] DOMString name);
-
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-        readonly attribute DOMStringMap dataset;
-#endif
-
-        // NodeSelector - Selector API
-        Element querySelector(in DOMString selectors)
-            raises(DOMException);
-        NodeList querySelectorAll(in DOMString selectors)
-            raises(DOMException);
-
-        // WebKit extension, pending specification.
-        boolean webkitMatchesSelector(in [Optional=DefaultIsUndefined] DOMString selectors)
-            raises(DOMException);
-
-        // ElementTraversal API
-        readonly attribute Element firstElementChild;
-        readonly attribute Element lastElementChild;
-        readonly attribute Element previousElementSibling;
-        readonly attribute Element nextElementSibling;
-        readonly attribute unsigned long childElementCount;
-
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-        // CSSOM View Module API
-        ClientRectList getClientRects();
-        ClientRect getBoundingClientRect();
-#endif
-
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
+#if defined(LANGUAGE_OBJECTIVE_C)
         // Objective-C extensions
         readonly attribute DOMString innerText;
-#endif
+#endif /* defined(LANGUAGE_OBJECTIVE_C) */
 
-#if defined(ENABLE_FULLSCREEN_API) && ENABLE_FULLSCREEN_API
-        // Mozilla version
-        const unsigned short ALLOW_KEYBOARD_INPUT = 1;
-        [V8EnabledAtRuntime] void webkitRequestFullScreen(in [Optional=DefaultIsUndefined] unsigned short flags);
-
-        // W3C version
-        [V8EnabledAtRuntime] void webkitRequestFullscreen();
-#endif
-
-        // CSS Regions API
-        readonly attribute DOMString webkitRegionOverflow;
-
-#if !defined(LANGUAGE_OBJECTIVE_C) || !LANGUAGE_OBJECTIVE_C
-        // Event handler DOM attributes
-        attribute [NotEnumerable] EventListener onabort;
-        attribute [NotEnumerable] EventListener onblur;
-        attribute [NotEnumerable] EventListener onchange;
-        attribute [NotEnumerable] EventListener onclick;
-        attribute [NotEnumerable] EventListener oncontextmenu;
-        attribute [NotEnumerable] EventListener ondblclick;
-        attribute [NotEnumerable] EventListener ondrag;
-        attribute [NotEnumerable] EventListener ondragend;
-        attribute [NotEnumerable] EventListener ondragenter;
-        attribute [NotEnumerable] EventListener ondragleave;
-        attribute [NotEnumerable] EventListener ondragover;
-        attribute [NotEnumerable] EventListener ondragstart;
-        attribute [NotEnumerable] EventListener ondrop;
-        attribute [NotEnumerable] EventListener onerror;
-        attribute [NotEnumerable] EventListener onfocus;
-        attribute [NotEnumerable] EventListener oninput;
-        attribute [NotEnumerable] EventListener oninvalid;
-        attribute [NotEnumerable] EventListener onkeydown;
-        attribute [NotEnumerable] EventListener onkeypress;
-        attribute [NotEnumerable] EventListener onkeyup;
-        attribute [NotEnumerable] EventListener onload;
-        attribute [NotEnumerable] EventListener onmousedown;
-        attribute [NotEnumerable] EventListener onmousemove;
-        attribute [NotEnumerable] EventListener onmouseout;
-        attribute [NotEnumerable] EventListener onmouseover;
-        attribute [NotEnumerable] EventListener onmouseup;
-        attribute [NotEnumerable] EventListener onmousewheel;
-        attribute [NotEnumerable] EventListener onscroll;
-        attribute [NotEnumerable] EventListener onselect;
-        attribute [NotEnumerable] EventListener onsubmit;
-
-        // attribute [NotEnumerable] EventListener oncanplay;
-        // attribute [NotEnumerable] EventListener oncanplaythrough;
-        // attribute [NotEnumerable] EventListener ondurationchange;
-        // attribute [NotEnumerable] EventListener onemptied;
-        // attribute [NotEnumerable] EventListener onended;
-        // attribute [NotEnumerable] EventListener onloadeddata;
-        // attribute [NotEnumerable] EventListener onloadedmetadata;
-        // attribute [NotEnumerable] EventListener onloadstart;
-        // attribute [NotEnumerable] EventListener onpause;
-        // attribute [NotEnumerable] EventListener onplay;
-        // attribute [NotEnumerable] EventListener onplaying;
-        // attribute [NotEnumerable] EventListener onprogress;
-        // attribute [NotEnumerable] EventListener onratechange;
-        // attribute [NotEnumerable] EventListener onreadystatechange;
-        // attribute [NotEnumerable] EventListener onseeked;
-        // attribute [NotEnumerable] EventListener onseeking;
-        // attribute [NotEnumerable] EventListener onshow;
-        // attribute [NotEnumerable] EventListener onstalled;
-        // attribute [NotEnumerable] EventListener onsuspend;
-        // attribute [NotEnumerable] EventListener ontimeupdate;
-        // attribute [NotEnumerable] EventListener onvolumechange;
-        // attribute [NotEnumerable] EventListener onwaiting;
-
-        // WebKit extensions
-        attribute [NotEnumerable] EventListener onbeforecut;
-        attribute [NotEnumerable] EventListener oncut;
-        attribute [NotEnumerable] EventListener onbeforecopy;
-        attribute [NotEnumerable] EventListener oncopy;
-        attribute [NotEnumerable] EventListener onbeforepaste;
-        attribute [NotEnumerable] EventListener onpaste;
-        attribute [NotEnumerable] EventListener onreset;
-        attribute [NotEnumerable] EventListener onsearch;
-        attribute [NotEnumerable] EventListener onselectstart;
-        attribute [NotEnumerable,V8EnabledAtRuntime] EventListener ontouchstart;
-        attribute [NotEnumerable,V8EnabledAtRuntime] EventListener ontouchmove;
-        attribute [NotEnumerable,V8EnabledAtRuntime] EventListener ontouchend;
-        attribute [NotEnumerable,V8EnabledAtRuntime] EventListener ontouchcancel;
-        attribute [NotEnumerable] EventListener ongesturestart;
-        attribute [NotEnumerable] EventListener ongesturechange;
-        attribute [NotEnumerable] EventListener ongestureend;
-        attribute [NotEnumerable, Conditional=FULLSCREEN_API] EventListener onwebkitfullscreenchange;
-        attribute [NotEnumerable, Conditional=FULLSCREEN_API] EventListener onwebkitfullscreenerror;
-#endif
     };
 
 }

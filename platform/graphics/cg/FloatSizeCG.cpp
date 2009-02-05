@@ -27,9 +27,9 @@
 #include "config.h"
 #include "FloatSize.h"
 
-#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM) || (PLATFORM(QT) && USE(QTKIT))
+#if PLATFORM(CG)
 
-#include <CoreGraphics/CoreGraphics.h>
+#include <ApplicationServices/ApplicationServices.h>
 
 namespace WebCore {
 
@@ -44,4 +44,4 @@ FloatSize::operator CGSize() const
 
 }
 
-#endif // USE(CG)
+#endif // PLATFORM(CG)

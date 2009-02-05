@@ -20,16 +20,18 @@
 
 module core {
 
-    interface ProcessingInstruction : Node {
+    interface [GenerateConstructor] ProcessingInstruction : Node {
 
         // DOM Level 1
 
-        readonly attribute [TreatReturnedNullStringAs=Null] DOMString target;
-                 attribute [TreatReturnedNullStringAs=Null, TreatNullAs=NullString] DOMString data
+        readonly attribute [ConvertNullStringTo=Null] DOMString target;
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString data
                      setter raises(DOMException);
 
         // interface LinkStyle from DOM Level 2 Style Sheets
+
         readonly attribute StyleSheet sheet;
+
     };
 
 }

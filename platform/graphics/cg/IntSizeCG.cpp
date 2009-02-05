@@ -26,9 +26,9 @@
 #include "config.h"
 #include "IntSize.h"
 
-#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM)
+#if PLATFORM(CG)
 
-#include <CoreGraphics/CoreGraphics.h>
+#include <ApplicationServices/ApplicationServices.h>
 
 namespace WebCore {
 
@@ -43,4 +43,4 @@ IntSize::operator CGSize() const
 
 }
 
-#endif // USE(CG)
+#endif // PLATFORM(CG)

@@ -19,17 +19,13 @@
 
 module core {
 
-    interface Text : CharacterData {
+    interface [GenerateConstructor] Text : CharacterData {
 
         // DOM Level 1
 
-        Text splitText(in [IsIndex,Optional=DefaultIsUndefined] unsigned long offset)
+        Text splitText(in [IsIndex] unsigned long offset)
             raises (DOMException);
 
-        // Introduced in DOM Level 3:
-        readonly attribute DOMString       wholeText;
-        Text               replaceWholeText(in [Optional=DefaultIsUndefined] DOMString content)
-                                            raises(DOMException);
     };
 
 }

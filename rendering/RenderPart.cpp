@@ -1,9 +1,10 @@
-/*
+/**
+ * This file is part of the KDE project.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
- * Copyright (C) 2004, 2005, 2006, 2009 Apple Inc. All rights reserved.
- * Copyright (C) Research In Motion Limited 2011. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,91 +22,96 @@
  * Boston, MA 02110-1301, USA.
  *
  */
-
 #include "config.h"
 #include "RenderPart.h"
 
+#include "Document.h"
 #include "Frame.h"
+#include "FrameTree.h"
 #include "FrameView.h"
-#include "HTMLFrameElementBase.h"
-#include "PluginViewBase.h"
-#include "RenderSVGRoot.h"
-#include "RenderView.h"
-
-using namespace std;
+#include "HTMLFrameOwnerElement.h"
+#include "HTMLNames.h"
+#include "Page.h"
 
 namespace WebCore {
 
-RenderPart::RenderPart(Element* node)
+using namespace HTMLNames;
+
+RenderPart::RenderPart(HTMLFrameOwnerElement* node)
     : RenderWidget(node)
 {
+    // init RenderObject attributes
     setInline(false);
 }
 
 RenderPart::~RenderPart()
 {
-    clearWidget();
+    // Since deref ends up calling setWidget back on us, need to make sure
+    // that widget is already 0 so it won't do any work.
+    Widget* widget = m_widget;
+    m_widget = 0;
+    if (widget && widget->isFrameView())
+        static_cast<FrameView*>(widget)->deref();
+    else
+        delete widget;
 }
 
-void RenderPart::setWidget(PassRefPtr<Widget> widget)
+void RenderPart::setWidget(Widget* widget)
 {
-    if (widget == this->widget())
-        return;
+    if (widget != m_widget) {
+        if (widget && widget->isFrameView())
+            static_cast<FrameView*>(widget)->ref();
+        RenderWidget::setWidget(widget);
 
-    RenderWidget::setWidget(widget);
-
-    // make sure the scrollbars are set correctly for restore
-    // ### find better fix
-    viewCleared();
+        // make sure the scrollbars are set correctly for restore
+        // ### find better fix
+        viewCleared();
+    }
 }
 
 void RenderPart::viewCleared()
 {
 }
 
-#if USE(ACCELERATED_COMPOSITING)
-bool RenderPart::requiresLayer() const
+void RenderPart::deleteWidget()
 {
-    if (RenderWidget::requiresLayer())
-        return true;
-    
-    return requiresAcceleratedCompositing();
+    if (m_widget && m_widget->isFrameView())
+        static_cast<FrameView*>(m_widget)->deref();
+    else
+        delete m_widget;
 }
 
-bool RenderPart::requiresAcceleratedCompositing() const
+// FIXME: This should not be necessary.  Remove this once WebKit knows to properly schedule
+// layouts using WebCore when objects resize.
+void RenderPart::updateWidgetPosition()
 {
-    // There are two general cases in which we can return true. First, if this is a plugin 
-    // renderer and the plugin has a layer, then we need a layer. Second, if this is 
-    // a renderer with a contentDocument and that document needs a layer, then we need
-    // a layer.
-    if (widget() && widget()->isPluginViewBase() && static_cast<PluginViewBase*>(widget())->platformLayer())
-        return true;
-
-    if (!node() || !node()->isFrameOwnerElement())
-        return false;
-
-    HTMLFrameOwnerElement* element = static_cast<HTMLFrameOwnerElement*>(node());
-    if (Document* contentDocument = element->contentDocument()) {
-        if (RenderView* view = contentDocument->renderView())
-            return view->usesCompositing();
+    if (!m_widget)
+        return;
+    
+    int x, y, width, height;
+    absolutePosition(x, y);
+    x += borderLeft() + paddingLeft();
+    y += borderTop() + paddingTop();
+    width = m_width - borderLeft() - borderRight() - paddingLeft() - paddingRight();
+    height = m_height - borderTop() - borderBottom() - paddingTop() - paddingBottom();
+    IntRect newBounds(x,y,width,height);
+    bool boundsChanged = newBounds != m_widget->frameGeometry();
+    if (boundsChanged) {
+        // The widget changed positions.  Update the frame geometry.
+        RenderArena *arena = ref();
+        element()->ref();
+        m_widget->setFrameGeometry(newBounds);
+        element()->deref();
+        deref(arena);
     }
 
-    return false;
-}
-#endif
-
-bool RenderPart::needsPreferredWidthsRecalculation() const
-{
-    if (RenderWidget::needsPreferredWidthsRecalculation())
-        return true;
-    return embeddedContentBox();
-}
-
-RenderBox* RenderPart::embeddedContentBox() const
-{
-    if (!node() || !widget() || !widget()->isFrameView())
-        return 0;
-    return static_cast<FrameView*>(widget())->embeddedContentBox();
+    // if the frame bounds got changed, or if view needs layout (possibly indicating
+    // content size is wrong) we have to do a layout to set the right widget size
+    if (m_widget && m_widget->isFrameView()) {
+        FrameView* frameView = static_cast<FrameView*>(m_widget);
+        if (boundsChanged || frameView->needsLayout())
+            frameView->layout();
+    }
 }
 
 }

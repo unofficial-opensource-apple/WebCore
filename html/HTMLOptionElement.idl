@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2010 Apple, Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,23 +20,22 @@
 
 module html {
 
-    interface [
-        JSGenerateToNativeObject,
-        NamedConstructor=Option(in [Optional=DefaultIsNullString] DOMString data, in [Optional=DefaultIsNullString] DOMString value, in [Optional=DefaultIsUndefined] boolean defaultSelected, in [Optional=DefaultIsUndefined] boolean selected),
-        ConstructorRaisesException
-    ] HTMLOptionElement : HTMLElement {
-        attribute [Reflect] boolean disabled;
-        readonly attribute HTMLFormElement form;
-        attribute DOMString label;
-        attribute [Reflect=selected] boolean defaultSelected;
-        attribute boolean selected;
-        attribute DOMString value;
-
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-        attribute DOMString text setter raises(DOMException);
+    interface [GenerateNativeConverter] HTMLOptionElement : HTMLElement {
+        readonly attribute  HTMLFormElement      form;
+                 attribute  boolean              defaultSelected;
+#if defined(LANGUAGE_JAVASCRIPT)
+                 attribute  [ConvertNullToNullString] DOMString            text
+                     setter raises(DOMException);
+                 attribute  long                 index
+                     setter raises(DOMException); // FIXME: We disallow setting in violation of DOM 1 HTML.
 #else
-        readonly attribute DOMString text;
+        readonly attribute  DOMString            text;
+        readonly attribute  long                 index;
 #endif
-        readonly attribute long index;
+                 attribute  boolean              disabled;
+                 attribute  [ConvertNullToNullString] DOMString            label;
+                 attribute  boolean              selected;
+                 attribute  [ConvertNullToNullString] DOMString            value;
     };
+
 }

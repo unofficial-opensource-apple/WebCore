@@ -1,6 +1,8 @@
 /*
+ * This file is part of the HTML widget for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,77 +24,50 @@
 #ifndef RenderWidget_h
 #define RenderWidget_h
 
-#include "OverlapTestRequestClient.h"
 #include "RenderReplaced.h"
-#include "Widget.h"
 
 namespace WebCore {
 
-class RenderWidget : public RenderReplaced, private OverlapTestRequestClient {
+class Widget;
+
+class RenderWidget : public RenderReplaced {
 public:
+    RenderWidget(Node*);
     virtual ~RenderWidget();
 
-    Widget* widget() const { return m_widget.get(); }
-    virtual void setWidget(PassRefPtr<Widget>);
+    virtual bool isWidget() const { return true; }
 
+    virtual void setStyle(RenderStyle*);
+
+    virtual void paint(PaintInfo&, int tx, int ty);
+
+    virtual void destroy();
+    virtual void layout();
+
+    Widget* widget() const { return m_widget; }
     static RenderWidget* find(const Widget*);
-
-    void updateWidgetPosition();
-    void widgetPositionsUpdated();
-    IntRect windowClipRect() const;
-
-    void notifyWidget(WidgetNotification);
-    
-    static void suspendWidgetHierarchyUpdates();
-    static void resumeWidgetHierarchyUpdates();
 
     RenderArena* ref() { ++m_refCount; return renderArena(); }
     void deref(RenderArena*);
 
-protected:
-    RenderWidget(Node*);
+    virtual void setSelectionState(SelectionState);
 
-    FrameView* frameView() const { return m_frameView; }
+    virtual void updateWidgetPosition();
 
-    void clearWidget();
-
-    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
-    virtual void layout();
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-    virtual CursorDirective getCursor(const LayoutPoint&, Cursor&) const;
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
+    virtual void setWidget(Widget*);
 
 private:
-    virtual bool isWidget() const { return true; }
+    void resizeWidget(Widget*, int w, int h);
 
-    virtual void willBeDestroyed();
-    virtual void destroy();
-    virtual void setSelectionState(SelectionState);
-    virtual void setOverlapTestResult(bool);
+    virtual void deleteWidget();
 
-    bool setWidgetGeometry(const LayoutRect&);
-    bool updateWidgetGeometry();
+protected:
+    Widget* m_widget;
+    FrameView* m_view;
 
-    RefPtr<Widget> m_widget;
-    FrameView* m_frameView;
-    IntRect m_clipRect; // The rectangle needs to remain correct after scrolling, so it is stored in content view coordinates, and not clipped to window.
+private:
     int m_refCount;
 };
-
-inline RenderWidget* toRenderWidget(RenderObject* object)
-{
-    ASSERT(!object || object->isWidget());
-    return static_cast<RenderWidget*>(object);
-}
-
-inline const RenderWidget* toRenderWidget(const RenderObject* object)
-{
-    ASSERT(!object || object->isWidget());
-    return static_cast<const RenderWidget*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderWidget(const RenderWidget*);
 
 } // namespace WebCore
 

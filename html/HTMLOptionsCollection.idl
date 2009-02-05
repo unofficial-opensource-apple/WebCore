@@ -20,22 +20,19 @@
 
 module html {
 
-    interface [
-        JSGenerateToNativeObject,
-        CustomIndexedSetter
-    ] HTMLOptionsCollection : HTMLCollection {
+    // FIXME: The W3C spec says that HTMLOptionsCollection should not have a parent class.
+
+    interface [GenerateNativeConverter, HasCustomIndexSetter] HTMLOptionsCollection : HTMLCollection {
                  attribute long selectedIndex;
                  attribute [Custom] unsigned long length
                         setter raises (DOMException);
 
-        [Custom] void add(in [Optional=DefaultIsUndefined] HTMLOptionElement option, 
-                          in [Optional] unsigned long index)
+        void add(in HTMLOptionElement option, in [Optional] unsigned long index)
              raises (DOMException);
-        [Custom] void remove(in [Optional=DefaultIsUndefined] unsigned long index);
 
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        Node item(in unsigned long index); 
-        Node namedItem(in DOMString name); 
+#if !defined(LANGUAGE_JAVASCRIPT)
+        Node item(in unsigned long index);
+        Node namedItem(in DOMString name);
 #endif
     };
 

@@ -26,287 +26,251 @@
 #include "config.h"
 #include "ScrollView.h"
 
+#include <algorithm>
 #include "FloatRect.h"
 #include "IntRect.h"
-#include "NotImplemented.h"
-#include "PlatformWheelEvent.h"
-#include "Scrollbar.h"
 
-#include <algorithm>
 #include <stdio.h>
+#include "NotImplemented.h"
 
 #include <wx/defs.h>
-#include <wx/scrolbar.h>
 #include <wx/scrolwin.h>
-#include <wx/event.h>
 
 using namespace std;
 
 namespace WebCore {
 
-class ScrollView::ScrollViewPrivate : public wxEvtHandler {
-
+class ScrollView::ScrollViewPrivate {
 public:
-    ScrollViewPrivate(ScrollView* scrollView)
-        : wxEvtHandler()
-        , m_scrollView(scrollView)
+    ScrollViewPrivate()
+        : hasStaticBackground(false)
+        , suppressScrollbars(false)
         , vScrollbarMode(ScrollbarAuto)
         , hScrollbarMode(ScrollbarAuto)
-        , viewStart(0, 0)
     {
     }
-
-    void bindEvents(wxWindow* win)
-    {
-        // TODO: is there an easier way to Connect to a range of events? these are contiguous.
-        win->Connect(wxEVT_SCROLLWIN_TOP,          wxScrollWinEventHandler(ScrollViewPrivate::OnScrollWinEvents), NULL, this);
-        win->Connect(wxEVT_SCROLLWIN_BOTTOM,       wxScrollWinEventHandler(ScrollViewPrivate::OnScrollWinEvents), NULL, this);
-        win->Connect(wxEVT_SCROLLWIN_LINEUP,       wxScrollWinEventHandler(ScrollViewPrivate::OnScrollWinEvents), NULL, this);
-        win->Connect(wxEVT_SCROLLWIN_LINEDOWN,     wxScrollWinEventHandler(ScrollViewPrivate::OnScrollWinEvents), NULL, this);
-        win->Connect(wxEVT_SCROLLWIN_PAGEUP,       wxScrollWinEventHandler(ScrollViewPrivate::OnScrollWinEvents), NULL, this);
-        win->Connect(wxEVT_SCROLLWIN_PAGEDOWN,     wxScrollWinEventHandler(ScrollViewPrivate::OnScrollWinEvents), NULL, this);
-        win->Connect(wxEVT_SCROLLWIN_THUMBTRACK,   wxScrollWinEventHandler(ScrollViewPrivate::OnScrollWinEvents), NULL, this);
-        win->Connect(wxEVT_SCROLLWIN_THUMBRELEASE, wxScrollWinEventHandler(ScrollViewPrivate::OnScrollWinEvents), NULL, this);
-    }
-    
-    void OnScrollWinEvents(wxScrollWinEvent& e)
-    {
-        wxEventType scrollType(e.GetEventType());
-        bool horiz = e.GetOrientation() == wxHORIZONTAL;
-
-        wxPoint pos(viewStart);
- 
-        if (scrollType == wxEVT_SCROLLWIN_THUMBTRACK || scrollType == wxEVT_SCROLLWIN_THUMBRELEASE) {
-            if (horiz) 
-                pos.x = e.GetPosition();
-            else       
-                pos.y = e.GetPosition();
-        }
-        else if (scrollType == wxEVT_SCROLLWIN_LINEDOWN) {
-            if (horiz) 
-                pos.x += Scrollbar::pixelsPerLineStep();
-            else       
-                pos.y += Scrollbar::pixelsPerLineStep();
-        }
-        else if (scrollType == wxEVT_SCROLLWIN_LINEUP) {
-            if (horiz) 
-                pos.x -= Scrollbar::pixelsPerLineStep();
-            else       
-                pos.y -= Scrollbar::pixelsPerLineStep();
-        }
-        else if (scrollType == wxEVT_SCROLLWIN_PAGEUP) {
-            if (horiz) 
-                pos.x -= max<int>(m_scrollView->visibleWidth() * Scrollbar::minFractionToStepWhenPaging(), m_scrollView->visibleWidth() - Scrollbar::maxOverlapBetweenPages());
-            else       
-                pos.y -= max<int>(m_scrollView->visibleHeight() * Scrollbar::minFractionToStepWhenPaging(), m_scrollView->visibleHeight() - Scrollbar::maxOverlapBetweenPages());
-        }
-        else if (scrollType == wxEVT_SCROLLWIN_PAGEDOWN) {
-            if (horiz) 
-                pos.x += max<int>(m_scrollView->visibleWidth() * Scrollbar::minFractionToStepWhenPaging(), m_scrollView->visibleWidth() - Scrollbar::maxOverlapBetweenPages());
-            else       
-                pos.y += max<int>(m_scrollView->visibleHeight() * Scrollbar::minFractionToStepWhenPaging(), m_scrollView->visibleHeight() - Scrollbar::maxOverlapBetweenPages());
-        }
-        else
-            return e.Skip();
-
-        m_scrollView->setScrollPosition(IntPoint(pos.x, pos.y));
-    }
-
-    ScrollView* m_scrollView;
-
+    IntSize scrollOffset;
+    IntSize contentsSize;
+    bool hasStaticBackground;
+    bool suppressScrollbars;
     ScrollbarMode vScrollbarMode;
     ScrollbarMode hScrollbarMode;
-    wxPoint viewStart;
 };
 
-void ScrollView::platformInit()
+ScrollView::ScrollView()
+    : m_data(new ScrollViewPrivate())
 {
-    m_data = new ScrollViewPrivate(this);
 }
 
-
-void ScrollView::platformDestroy()
+ScrollView::~ScrollView()
 {
     delete m_data;
 }
 
-void ScrollView::setPlatformWidget(wxWindow* win)
-{
-    Widget::setPlatformWidget(win);
-    m_data->bindEvents(win);
-}
-
-void ScrollView::platformRepaintContentRectangle(const IntRect& updateRect, bool now)
+void ScrollView::updateContents(const IntRect& updateRect, bool now)
 {
     // we need to convert coordinates to scrolled position
     wxRect contentsRect = updateRect;
-    contentsRect.Offset(-scrollX(), -scrollY());
-    wxWindow* win = platformWidget();
-    if (win) {
+    contentsRect.Offset(-contentsX(), -contentsY());
+    wxScrolledWindow* win = nativeWindow();
+    if (win){
         win->RefreshRect(contentsRect, true);
         if (now)
             win->Update();
     }
 }
 
-IntRect ScrollView::platformVisibleContentRect(bool includeScrollbars) const
+void ScrollView::update()
 {
-    wxWindow* win = platformWidget();
-    if (!win)
-        return IntRect();
-
-    int width, height;
-
-    if (includeScrollbars)
-        win->GetSize(&width, &height);
-    else
-        win->GetClientSize(&width, &height);
-        
-    return IntRect(m_data->viewStart.x, m_data->viewStart.y, width, height);
+    wxScrolledWindow* win = nativeWindow();
+    if (win){
+        win->Update();
+    }
 }
 
-void ScrollView::platformSetScrollPosition(const IntPoint& scrollPoint)
+int ScrollView::visibleWidth() const
 {
-    wxWindow* win = platformWidget();
-
-    wxPoint scrollOffset = m_data->viewStart;
-    wxPoint orig(scrollOffset);
-    wxPoint newScrollOffset(scrollPoint);
-
-    wxRect vRect(win->GetVirtualSize());
-    wxRect cRect(win->GetClientSize());
-
-    // clamp to scroll area
-    if (newScrollOffset.x < 0)
-        newScrollOffset.x = 0;
-    else if (newScrollOffset.x + cRect.width > vRect.width)
-        newScrollOffset.x = max(0, vRect.width - cRect.width);
-
-    if (newScrollOffset.y < 0)
-        newScrollOffset.y = 0;
-    else if (newScrollOffset.y + cRect.height > vRect.height)
-        newScrollOffset.y = max(0, vRect.height - cRect.height);
-
-    if (newScrollOffset == scrollOffset)
-        return;
-
-    m_data->viewStart = newScrollOffset;
-
-    wxPoint delta(orig - newScrollOffset);
-
-    if (canBlitOnScroll())
-        win->ScrollWindow(delta.x, delta.y);
-    else
-        win->Refresh();
-
-    adjustScrollbars();
+    int width = 0;
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+        win->GetClientSize(&width, NULL);
+    
+    return width;
 }
 
-bool ScrollView::platformScroll(ScrollDirection, ScrollGranularity)
+int ScrollView::visibleHeight() const
+{
+    int height = 0;
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+        win->GetClientSize(NULL, &height);
+    
+    return height;
+}
+
+FloatRect ScrollView::visibleContentRect() const
+{
+    return FloatRect(contentsX(),contentsY(),visibleWidth(),visibleHeight());
+}
+
+void ScrollView::setContentsPos(int newX, int newY)
+{
+    int dx = newX - contentsX();
+    int dy = newY - contentsY();
+    scrollBy(dx, dy);
+}
+
+void ScrollView::resizeContents(int w,int h)
+{
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+    {
+        win->SetVirtualSize(w, h);
+        win->SetScrollRate(20, 20);
+    }
+}
+
+int ScrollView::contentsX() const
+{
+    int x = 0;
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+    {
+        int sUnitX = 1;
+        win->GetViewStart(&x, NULL);
+        win->GetScrollPixelsPerUnit(&sUnitX, NULL);
+        x *= sUnitX;
+    }
+    return x;
+}
+
+int ScrollView::contentsY() const
+{
+    int y = 0;
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+    {
+        int sUnitY = 1;
+        win->GetViewStart(NULL, &y);
+        win->GetScrollPixelsPerUnit(&sUnitY, NULL);
+        y *= sUnitY;
+    }
+    return y;
+}
+
+int ScrollView::contentsWidth() const
+{
+    int width = 0;
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+        win->GetVirtualSize(&width, NULL);
+    return width;
+}
+
+int ScrollView::contentsHeight() const
+{
+    int height = 0;
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+        win->GetVirtualSize(NULL, &height);
+    return height;
+}
+
+FloatRect ScrollView::visibleContentRectConsideringExternalScrollers() const
+{
+    // FIXME: clip this rect if parent scroll views cut off the visible
+    // area.
+    return visibleContentRect();
+}
+
+IntSize ScrollView::scrollOffset() const
+{
+    return IntSize(contentsX(), contentsY());
+}
+
+IntSize ScrollView::maximumScroll() const
 {
     notImplemented();
-    return true;
+    return IntSize(0, 0);
 }
 
-void ScrollView::platformSetContentsSize()
+void ScrollView::scrollBy(int dx, int dy)
 {
-    wxWindow* win = platformWidget();
-    if (!win)
-        return;
-
-    win->SetVirtualSize(m_contentsSize.width(), m_contentsSize.height());
-    adjustScrollbars();
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+        win->Scroll(dx, dy);
 }
 
-void ScrollView::adjustScrollbars(int x, int y, bool refresh)
+WebCore::ScrollbarMode ScrollView::hScrollbarMode() const
 {
-    wxWindow* win = platformWidget();
-    if (!win)
-        return;
+    return m_data->hScrollbarMode;
+}
 
-    wxRect crect(win->GetClientRect()), vrect(win->GetVirtualSize());
+WebCore::ScrollbarMode ScrollView::vScrollbarMode() const
+{
+    return m_data->vScrollbarMode;
+}
 
-    if (x == -1) x = m_data->viewStart.x;
-    if (y == -1) y = m_data->viewStart.y;
+void ScrollView::setHScrollbarMode(ScrollbarMode newMode)
+{
+    notImplemented();
+}
 
-    long style = win->GetWindowStyle();
+void ScrollView::setVScrollbarMode(ScrollbarMode newMode)
+{
+    notImplemented();
+}
 
-    // by setting the wxALWAYS_SHOW_SB wxWindow flag before
-    // each SetScrollbar call, we can control the scrollbars
-    // visibility individually.
-
-    // horizontal scrollbar
-    switch (m_data->hScrollbarMode) {
-        case ScrollbarAlwaysOff:
-            win->SetWindowStyleFlag(style & ~wxALWAYS_SHOW_SB);
-            win->SetScrollbar(wxHORIZONTAL, 0, 0, 0, refresh);
-            break;
-
-        case ScrollbarAuto:
-            win->SetWindowStyleFlag(style & ~wxALWAYS_SHOW_SB);
-            win->SetScrollbar(wxHORIZONTAL, x, crect.width, vrect.width, refresh);
-            break;
-
-        default: // ScrollbarAlwaysOn
-            win->SetWindowStyleFlag(style | wxALWAYS_SHOW_SB);
-            win->SetScrollbar(wxHORIZONTAL, x, crect.width, vrect.width, refresh);
-            break;
-    }
-
-    // vertical scrollbar
-    switch (m_data->vScrollbarMode) {
-        case ScrollbarAlwaysOff:
-            win->SetWindowStyleFlag(style & ~wxALWAYS_SHOW_SB);
-            win->SetScrollbar(wxVERTICAL, 0, 0, 0, refresh);
-            break;
-
-        case ScrollbarAlwaysOn:
-            win->SetWindowStyleFlag(style | wxALWAYS_SHOW_SB);
-            win->SetScrollbar(wxVERTICAL, y, crect.height, vrect.height, refresh);
-            break;
-
-        default: // case ScrollbarAuto:
-            win->SetWindowStyleFlag(style & ~wxALWAYS_SHOW_SB);
-            win->SetScrollbar(wxVERTICAL, y, crect.height, vrect.height, refresh);
+void ScrollView::updateScrollBars()
+{
+    wxScrolledWindow* win = nativeWindow();
+    if (win)
+    {
+        //if (m_data->vScrollbarMode != ScrollBarMode::ScrollbarAlwaysOff)
     }
 }
 
-void ScrollView::platformSetScrollbarModes()
+void ScrollView::setStaticBackground(bool flag)
 {
-    bool needsAdjust = false;
-
-    if (m_data->hScrollbarMode != horizontalScrollbarMode() ) {
-        m_data->hScrollbarMode = horizontalScrollbarMode();
-        needsAdjust = true;
-    }
-
-    if (m_data->vScrollbarMode != verticalScrollbarMode() ) {
-        m_data->vScrollbarMode = verticalScrollbarMode();
-        needsAdjust = true;
-    }
-
-    if (needsAdjust)
-        adjustScrollbars();
+    m_data->hasStaticBackground = flag;
 }
 
-void ScrollView::platformScrollbarModes(ScrollbarMode& horizontal, ScrollbarMode& vertical) const
+void ScrollView::suppressScrollbars(bool suppressed, bool repaintOnSuppress)
 {
-    horizontal = m_data->hScrollbarMode;
-    vertical = m_data->vScrollbarMode;
+    m_data->suppressScrollbars = suppressed;
 }
 
-void ScrollView::platformSetCanBlitOnScroll(bool canBlitOnScroll)
+void ScrollView::setScrollbarsMode(ScrollbarMode newMode)
 {
-    m_canBlitOnScroll = canBlitOnScroll;
+    m_data->hScrollbarMode = m_data->vScrollbarMode = newMode;
 }
 
-bool ScrollView::platformCanBlitOnScroll() const
+IntPoint ScrollView::contentsToWindow(const IntPoint& point) const
 {
-    return m_canBlitOnScroll;
+    return point - scrollOffset();
+}
+
+IntPoint ScrollView::windowToContents(const IntPoint& point) const
+{
+    return point + scrollOffset();
+}
+
+bool ScrollView::inWindow() const 
+{
+    // NB: This is called from RenderObject::willRenderImage
+    // and really seems to be more of a "is the window in a valid state" test,
+    // despite the API name.
+    return nativeWindow() != NULL; 
+}
+
+void ScrollView::wheelEvent(PlatformWheelEvent&)
+{ 
+    // do nothing, 
+    // FIXME: not sure if any ports need to handle this, actually...
 }
 
 // used for subframes support
-void ScrollView::platformAddChild(Widget* widget)
+void ScrollView::addChild(Widget*) 
 {
     // NB: In all cases I'm aware of,
     // by the time this is called the ScrollView is already a child
@@ -314,38 +278,35 @@ void ScrollView::platformAddChild(Widget* widget)
     // we need to do anything here.
 }
 
-void ScrollView::platformRemoveChild(Widget* widget)
-{
-    if (platformWidget()) {
-        platformWidget()->RemoveChild(widget->platformWidget());
-        // FIXME: Is this the right place to do deletion? I see
+void ScrollView::removeChild(Widget* widget) 
+{ 
+    if (nativeWindow() && widget->nativeWindow())
+    {
+        nativeWindow()->RemoveChild(widget->nativeWindow());
+        // FIXME: Is this the right place to do deletion? I see 
         // detachFromParent2/3/4, initiated by FrameLoader::detachFromParent,
         // but I'm not sure if it's better to handle there or not.
-        widget->platformWidget()->Destroy();
+        widget->nativeWindow()->Destroy();
     }
 }
 
-IntRect ScrollView::platformContentsToScreen(const IntRect& rect) const
-{
-    if (platformWidget()) {
-        wxRect wxrect = rect;
-        platformWidget()->ClientToScreen(&wxrect.x, &wxrect.y);
-        return wxrect;
-    }
-    return IntRect();
+void ScrollView::scrollRectIntoViewRecursively(const IntRect& rect) 
+{ 
+    // NB: This is used by RenderLayer::scrollRectToVisible and the idea
+    // is that if this position is not visible due to parent scroll views,
+    // those parents are scrolled as well to make it visible.
+    
+    // For now, just scroll the current window.
+    setContentsPos(rect.x(), rect.y());
 }
 
-IntPoint ScrollView::platformScreenToContents(const IntPoint& point) const
+
+PlatformScrollbar* ScrollView::scrollbarUnderMouse(const PlatformMouseEvent& mouseEvent) 
 {
-    if (platformWidget()) {
-        return platformWidget()->ScreenToClient(point);
-    }
-    return IntPoint();
+    // AFAICT this is only used for platforms that provide 
+    // feedback when mouse is hovered over.
+    return 0; 
 }
 
-bool ScrollView::platformIsOffscreen() const
-{
-    return !platformWidget() || !platformWidget()->IsShownOnScreen();
-}
 
 }

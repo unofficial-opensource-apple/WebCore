@@ -29,25 +29,23 @@
 #ifndef BarInfo_h
 #define BarInfo_h
 
-#include "DOMWindowProperty.h"
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefCounted.h>
+#include "Shared.h"
 
 namespace WebCore {
 
     class Frame;
 
-    class BarInfo : public RefCounted<BarInfo>, public DOMWindowProperty {
+    class BarInfo : public Shared<BarInfo> {
     public:
         enum Type { Locationbar, Menubar, Personalbar, Scrollbars, Statusbar, Toolbar };
+    
+        BarInfo(Frame*, Type);
+        void disconnectFrame();
 
-        static PassRefPtr<BarInfo> create(Frame* frame, Type type) { return adoptRef(new BarInfo(frame, type)); }
-
-        Type type() const;
         bool visible() const;
 
     private:
-        BarInfo(Frame*, Type);
+        Frame* m_frame;
         Type m_type;
     };
 

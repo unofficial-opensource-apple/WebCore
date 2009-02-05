@@ -1,4 +1,6 @@
 /**
+ * This file is part of the KDE project.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
@@ -24,7 +26,6 @@
 #include "config.h"
 #include "RenderFrameSet.h"
 
-#include "Cursor.h"
 #include "Document.h"
 #include "EventHandler.h"
 #include "EventNames.h"
@@ -35,16 +36,16 @@
 #include "HitTestRequest.h"
 #include "HitTestResult.h"
 #include "MouseEvent.h"
-#include "PaintInfo.h"
 #include "RenderFrame.h"
-#include "RenderLayer.h"
 #include "RenderView.h"
-#include "Settings.h"
+#include "TextStream.h"
 
 namespace WebCore {
 
+using namespace EventNames;
+
 RenderFrameSet::RenderFrameSet(HTMLFrameSetElement* frameSet)
-    : RenderBox(frameSet)
+    : RenderContainer(frameSet)
     , m_isResizing(false)
     , m_isChildResizing(false)
 {
@@ -67,7 +68,7 @@ inline HTMLFrameSetElement* RenderFrameSet::frameSet() const
 
 static Color borderStartEdgeColor()
 {
-    return Color(170, 170, 170);
+    return Color(170,170,170);
 }
 
 static Color borderEndEdgeColor()
@@ -89,14 +90,13 @@ void RenderFrameSet::paintColumnBorder(const PaintInfo& paintInfo, const IntRect
     
     // Fill first.
     GraphicsContext* context = paintInfo.context;
-    ColorSpace colorSpace = style()->colorSpace();
-    context->fillRect(borderRect, frameSet()->hasBorderColor() ? style()->visitedDependentColor(CSSPropertyBorderLeftColor) : borderFillColor(), colorSpace);
+    context->fillRect(borderRect, frameSet()->hasBorderColor() ? style()->borderLeftColor() : borderFillColor());
     
     // Now stroke the edges but only if we have enough room to paint both edges with a little
     // bit of the fill color showing through.
     if (borderRect.width() >= 3) {
-        context->fillRect(IntRect(borderRect.location(), IntSize(1, height())), borderStartEdgeColor(), colorSpace);
-        context->fillRect(IntRect(IntPoint(borderRect.maxX() - 1, borderRect.y()), IntSize(1, height())), borderEndEdgeColor(), colorSpace);
+        context->fillRect(IntRect(borderRect.topLeft(), IntSize(1, height())), borderStartEdgeColor());
+        context->fillRect(IntRect(borderRect.topRight(), IntSize(1, height())), borderEndEdgeColor());
     }
 }
 
@@ -109,18 +109,17 @@ void RenderFrameSet::paintRowBorder(const PaintInfo& paintInfo, const IntRect& b
     
     // Fill first.
     GraphicsContext* context = paintInfo.context;
-    ColorSpace colorSpace = style()->colorSpace();
-    context->fillRect(borderRect, frameSet()->hasBorderColor() ? style()->visitedDependentColor(CSSPropertyBorderLeftColor) : borderFillColor(), colorSpace);
+    context->fillRect(borderRect, frameSet()->hasBorderColor() ? style()->borderLeftColor() : borderFillColor());
 
     // Now stroke the edges but only if we have enough room to paint both edges with a little
     // bit of the fill color showing through.
     if (borderRect.height() >= 3) {
-        context->fillRect(IntRect(borderRect.location(), IntSize(width(), 1)), borderStartEdgeColor(), colorSpace);
-        context->fillRect(IntRect(IntPoint(borderRect.x(), borderRect.maxY() - 1), IntSize(width(), 1)), borderEndEdgeColor(), colorSpace);
+        context->fillRect(IntRect(borderRect.topLeft(), IntSize(width(), 1)), borderStartEdgeColor());
+        context->fillRect(IntRect(borderRect.bottomLeft(), IntSize(width(), 1)), borderEndEdgeColor());
     }
 }
 
-void RenderFrameSet::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderFrameSet::paint(PaintInfo& paintInfo, int tx, int ty)
 {
     if (paintInfo.phase != PaintPhaseForeground)
         return;
@@ -129,20 +128,22 @@ void RenderFrameSet::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
     if (!child)
         return;
 
-    LayoutPoint adjustedPaintOffset = paintOffset + location();
+    // Add in our offsets.
+    tx += m_x;
+    ty += m_y;
 
     int rows = frameSet()->totalRows();
     int cols = frameSet()->totalCols();
-    LayoutUnit borderThickness = frameSet()->border();
+    int borderThickness = frameSet()->border();
     
-    LayoutUnit yPos = 0;
+    int yPos = 0;
     for (int r = 0; r < rows; r++) {
-        LayoutUnit xPos = 0;
+        int xPos = 0;
         for (int c = 0; c < cols; c++) {
-            child->paint(paintInfo, adjustedPaintOffset);
+            child->paint(paintInfo, tx, ty);
             xPos += m_cols.m_sizes[c];
             if (borderThickness && m_cols.m_allowBorder[c + 1]) {
-                paintColumnBorder(paintInfo, pixelSnappedIntRect(LayoutRect(adjustedPaintOffset.x() + xPos, adjustedPaintOffset.y() + yPos, borderThickness, height())));
+                paintColumnBorder(paintInfo, IntRect(tx + xPos, ty + yPos, borderThickness, height()));
                 xPos += borderThickness;
             }
             child = child->nextSibling();
@@ -151,23 +152,23 @@ void RenderFrameSet::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
         }
         yPos += m_rows.m_sizes[r];
         if (borderThickness && m_rows.m_allowBorder[r + 1]) {
-            paintRowBorder(paintInfo, pixelSnappedIntRect(LayoutRect(adjustedPaintOffset.x(), adjustedPaintOffset.y() + yPos, width(), borderThickness)));
+            paintRowBorder(paintInfo, IntRect(tx, ty + yPos, width(), borderThickness));
             yPos += borderThickness;
         }
     }
 }
 
 bool RenderFrameSet::nodeAtPoint(const HitTestRequest& request, HitTestResult& result,
-    const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction action)
+    int x, int y, int tx, int ty, HitTestAction action)
 {
     if (action != HitTestForeground)
         return false;
 
-    bool inside = RenderBox::nodeAtPoint(request, result, pointInContainer, accumulatedOffset, action)
-        || m_isResizing;
+    bool inside = RenderContainer::nodeAtPoint(request, result, x, y, tx, ty, action)
+        || m_isResizing || canResize(IntPoint(x, y));
 
     if (inside && frameSet()->noResize()
-            && !request.readOnly() && !result.innerNode() && !request.touchMove()) {
+            && !request.readonly && !result.innerNode()) {
         result.setInnerNode(node());
         result.setInnerNonSharedNode(node());
     }
@@ -215,7 +216,7 @@ void RenderFrameSet::layOutAxis(GridAxis& axis, const Length* grid, int availabl
         // Count the total length of all of the fixed columns/rows -> totalFixed
         // Count the number of columns/rows which are fixed -> countFixed
         if (grid[i].isFixed()) {
-            gridLayout[i] = max(grid[i].intValue(), 0);
+            gridLayout[i] = max(grid[i].value(), 0);
             totalFixed += gridLayout[i];
             countFixed++;
         }
@@ -223,7 +224,7 @@ void RenderFrameSet::layOutAxis(GridAxis& axis, const Length* grid, int availabl
         // Count the total percentage of all of the percentage columns/rows -> totalPercent
         // Count the number of columns/rows which are percentages -> countPercent
         if (grid[i].isPercent()) {
-            gridLayout[i] = max(intValueForLength(grid[i], availableLen), 0);
+            gridLayout[i] = max(grid[i].calcValue(availableLen), 0);
             totalPercent += gridLayout[i];
             countPercent++;
         }
@@ -231,7 +232,7 @@ void RenderFrameSet::layOutAxis(GridAxis& axis, const Length* grid, int availabl
         // Count the total relative of all the relative columns/rows -> totalRelative
         // Count the number of columns/rows which are relative -> countRelative
         if (grid[i].isRelative()) {
-            totalRelative += max(grid[i].intValue(), 1);
+            totalRelative += max(grid[i].value(), 1);
             countRelative++;
         }            
     }
@@ -276,7 +277,7 @@ void RenderFrameSet::layOutAxis(GridAxis& axis, const Length* grid, int availabl
 
         for (int i = 0; i < gridLen; ++i) {
             if (grid[i].isRelative()) {
-                gridLayout[i] = (max(grid[i].intValue(), 1) * remainingRelative) / totalRelative;
+                gridLayout[i] = (max(grid[i].value(), 1) * remainingRelative) / totalRelative;
                 remainingLen -= gridLayout[i];
                 lastRelative = i;
             }
@@ -328,7 +329,7 @@ void RenderFrameSet::layOutAxis(GridAxis& axis, const Length* grid, int availabl
     }
     
     // If we still have some left over space we probably ended up with a remainder of
-    // a division. We cannot spread it evenly anymore. If we have any percentage 
+    // a division. We can not spread it evenly anymore. If we have any percentage 
     // columns/rows simply spread the remainder equally over all available percentage columns, 
     // regardless of their size.
     if (remainingLen && countPercent) {
@@ -380,15 +381,6 @@ void RenderFrameSet::layOutAxis(GridAxis& axis, const Length* grid, int availabl
     }
 }
 
-void RenderFrameSet::notifyFrameEdgeInfoChanged()
-{
-    if (needsLayout())
-        return;
-    // FIXME: We should only recompute the edge info with respect to the frame that changed
-    // and its adjacent frame(s) instead of recomputing the edge info for the entire frameset.
-    computeEdgeInfo();
-}
-
 void RenderFrameSet::fillFromEdgeInfo(const FrameEdgeInfo& edgeInfo, int r, int c)
 {
     if (edgeInfo.allowBorder(LeftFrameEdge))
@@ -427,9 +419,9 @@ void RenderFrameSet::computeEdgeInfo()
         for (int c = 0; c < cols; ++c) {
             FrameEdgeInfo edgeInfo;
             if (child->isFrameSet())
-                edgeInfo = toRenderFrameSet(child)->edgeInfo();
+                edgeInfo = static_cast<RenderFrameSet*>(child)->edgeInfo();
             else
-                edgeInfo = toRenderFrame(child)->edgeInfo();
+                edgeInfo = static_cast<RenderFrame*>(child)->edgeInfo();
             fillFromEdgeInfo(edgeInfo, r, c);
             child = child->nextSibling();
             if (!child)
@@ -463,55 +455,47 @@ void RenderFrameSet::layout()
     ASSERT(needsLayout());
 
     bool doFullRepaint = selfNeedsLayout() && checkForRepaintDuringLayout();
-    LayoutRect oldBounds;
+    IntRect oldBounds;
     if (doFullRepaint)
         oldBounds = absoluteClippedOverflowRect();
 
-    if (!parent()->isFrameSet() && !document()->printing()) {
-        setWidth(view()->viewWidth());
-        setHeight(view()->viewHeight());
+    if (!parent()->isFrameSet()) {
+        FrameView* v = view()->frameView();
+        m_width = v->visibleWidth();
+        m_height = v->visibleHeight();
     }
 
-    unsigned cols = frameSet()->totalCols();
-    unsigned rows = frameSet()->totalRows();
+    size_t cols = frameSet()->totalCols();
+    size_t rows = frameSet()->totalRows();
 
     if (m_rows.m_sizes.size() != rows || m_cols.m_sizes.size() != cols) {
         m_rows.resize(rows);
         m_cols.resize(cols);
     }
 
-    LayoutUnit borderThickness = frameSet()->border();
-    layOutAxis(m_rows, frameSet()->rowLengths(), height() - (rows - 1) * borderThickness);
-    layOutAxis(m_cols, frameSet()->colLengths(), width() - (cols - 1) * borderThickness);
+    int borderThickness = frameSet()->border();
+    layOutAxis(m_rows, frameSet()->rowLengths(), m_height - (rows - 1) * borderThickness);
+    layOutAxis(m_cols, frameSet()->colLengths(), m_width - (cols - 1) * borderThickness);
 
-    if (flattenFrameSet())
-        positionFramesWithFlattening();
-    else
-        positionFrames();
+    positionFrames();
 
-    RenderBox::layout();
+    RenderContainer::layout();
 
     computeEdgeInfo();
 
     if (doFullRepaint) {
         view()->repaintViewRectangle(oldBounds);
-        LayoutRect newBounds = absoluteClippedOverflowRect();
+        IntRect newBounds = absoluteClippedOverflowRect();
         if (newBounds != oldBounds)
             view()->repaintViewRectangle(newBounds);
     }
-
-    // If this FrameSet has a transform matrix then we need to recompute it
-    // because the transform origin is a function the size of the RenderFrameSet
-    // which may not be computed until it is attached to the render tree.
-    if (layer() && hasTransform())
-        layer()->updateTransform();
 
     setNeedsLayout(false);
 }
 
 void RenderFrameSet::positionFrames()
 {
-    RenderBox* child = firstChildBox();
+    RenderObject* child = firstChild();
     if (!child)
         return;
 
@@ -524,20 +508,20 @@ void RenderFrameSet::positionFrames()
         int xPos = 0;
         int height = m_rows.m_sizes[r];
         for (int c = 0; c < cols; c++) {
-            child->setLocation(IntPoint(xPos, yPos));
+            child->setPos(xPos, yPos);
             int width = m_cols.m_sizes[c];
 
             // has to be resized and itself resize its contents
             if (width != child->width() || height != child->height()) {
                 child->setWidth(width);
                 child->setHeight(height);
-                child->setNeedsLayout(true, MarkOnlyThis);
+                child->setNeedsLayout(true);
                 child->layout();
             }
 
             xPos += width + borderThickness;
 
-            child = child->nextSiblingBox();
+            child = child->nextSibling();
             if (!child)
                 return;
         }
@@ -545,124 +529,11 @@ void RenderFrameSet::positionFrames()
     }
 
     // all the remaining frames are hidden to avoid ugly spurious unflowed frames
-    for (; child; child = child->nextSiblingBox()) {
+    for (; child; child = child->nextSibling()) {
         child->setWidth(0);
         child->setHeight(0);
         child->setNeedsLayout(false);
     }
-}
-
-void RenderFrameSet::positionFramesWithFlattening()
-{
-    RenderBox* child = firstChildBox();
-    if (!child)
-        return;
-
-    int rows = frameSet()->totalRows();
-    int cols = frameSet()->totalCols();
-
-    int borderThickness = frameSet()->border();
-    bool repaintNeeded = false;
-
-    // calculate frameset height based on actual content height to eliminate scrolling
-    bool out = false;
-    for (int r = 0; r < rows && !out; r++) {
-        int extra = 0;
-        int height = m_rows.m_sizes[r];
-
-        for (int c = 0; c < cols; c++) {
-            IntRect oldFrameRect = pixelSnappedIntRect(child->frameRect());
-
-            int width = m_cols.m_sizes[c];
-
-            bool fixedWidth = frameSet()->colLengths() && frameSet()->colLengths()[c].isFixed();
-            bool fixedHeight = frameSet()->rowLengths() && frameSet()->rowLengths()[r].isFixed();
-
-            // has to be resized and itself resize its contents
-            if (!fixedWidth)
-                child->setWidth(width ? width + extra / (cols - c) : 0);
-            else
-                child->setWidth(width);
-            child->setHeight(height);
-
-            child->setNeedsLayout(true);
-
-            if (child->isFrameSet())
-                toRenderFrameSet(child)->layout();
-            else
-                toRenderFrame(child)->layoutWithFlattening(fixedWidth, fixedHeight);
-
-            if (child->height() > m_rows.m_sizes[r])
-                m_rows.m_sizes[r] = child->height();
-            if (child->width() > m_cols.m_sizes[c])
-                m_cols.m_sizes[c] = child->width();
-
-            if (child->frameRect() != oldFrameRect)
-                repaintNeeded = true;
-
-            // difference between calculated frame width and the width it actually decides to have
-            extra += width - m_cols.m_sizes[c];
-
-            child = child->nextSiblingBox();
-            if (!child) {
-                out = true;
-                break;
-            }
-        }
-    }
-
-    int xPos = 0;
-    int yPos = 0;
-    out = false;
-    child = firstChildBox();
-    for (int r = 0; r < rows && !out; r++) {
-        xPos = 0;
-        for (int c = 0; c < cols; c++) {
-            // ensure the rows and columns are filled
-            IntRect oldRect = pixelSnappedIntRect(child->frameRect());
-
-            child->setLocation(IntPoint(xPos, yPos));
-            child->setHeight(m_rows.m_sizes[r]);
-            child->setWidth(m_cols.m_sizes[c]);
-
-            if (child->frameRect() != oldRect) {
-                repaintNeeded = true;
-
-                // update to final size
-                child->setNeedsLayout(true);
-                if (child->isFrameSet())
-                    toRenderFrameSet(child)->layout();
-                else
-                    toRenderFrame(child)->layoutWithFlattening(true, true);
-            }
-
-            xPos += m_cols.m_sizes[c] + borderThickness;
-            child = child->nextSiblingBox();
-            if (!child) {
-                out = true;
-                break;
-            }
-        }
-        yPos += m_rows.m_sizes[r] + borderThickness;
-    }
-
-    setWidth(xPos - borderThickness);
-    setHeight(yPos - borderThickness);
-
-    if (repaintNeeded)
-        repaint();
-
-    // all the remaining frames are hidden to avoid ugly spurious unflowed frames
-    for (; child; child = child->nextSiblingBox()) {
-        child->setWidth(0);
-        child->setHeight(0);
-        child->setNeedsLayout(false);
-    }
-}
-
-bool RenderFrameSet::flattenFrameSet() const
-{
-    return frame() && frame()->settings() && frame()->settings()->frameFlatteningEnabled();
 }
 
 void RenderFrameSet::startResizing(GridAxis& axis, int position)
@@ -693,27 +564,22 @@ void RenderFrameSet::continueResizing(GridAxis& axis, int position)
 
 bool RenderFrameSet::userResize(MouseEvent* evt)
 {
-    if (flattenFrameSet())
-        return false;
-
     if (!m_isResizing) {
         if (needsLayout())
             return false;
-        if (evt->type() == eventNames().mousedownEvent && evt->button() == LeftButton) {
-            FloatPoint localPos = absoluteToLocal(evt->absoluteLocation(), false, true);
-            startResizing(m_cols, localPos.x());
-            startResizing(m_rows, localPos.y());
+        if (evt->type() == mousedownEvent && evt->button() == LeftButton) {
+            startResizing(m_cols, evt->pageX() - xPos());
+            startResizing(m_rows, evt->pageY() - yPos());
             if (m_cols.m_splitBeingResized != noSplit || m_rows.m_splitBeingResized != noSplit) {
                 setIsResizing(true);
                 return true;
             }
         }
     } else {
-        if (evt->type() == eventNames().mousemoveEvent || (evt->type() == eventNames().mouseupEvent && evt->button() == LeftButton)) {
-            FloatPoint localPos = absoluteToLocal(evt->absoluteLocation(), false, true);
-            continueResizing(m_cols, localPos.x());
-            continueResizing(m_rows, localPos.y());
-            if (evt->type() == eventNames().mouseupEvent && evt->button() == LeftButton) {
+        if (evt->type() == mousemoveEvent || (evt->type() == mouseupEvent && evt->button() == LeftButton)) {
+            continueResizing(m_cols, evt->pageX() - xPos());
+            continueResizing(m_rows, evt->pageY() - yPos());
+            if (evt->type() == mouseupEvent && evt->button() == LeftButton) {
                 setIsResizing(false);
                 return true;
             }
@@ -726,11 +592,10 @@ bool RenderFrameSet::userResize(MouseEvent* evt)
 void RenderFrameSet::setIsResizing(bool isResizing)
 {
     m_isResizing = isResizing;
-    for (RenderObject* ancestor = parent(); ancestor; ancestor = ancestor->parent()) {
-        if (ancestor->isFrameSet())
-            toRenderFrameSet(ancestor)->m_isChildResizing = isResizing;
-    }
-    if (Frame* frame = this->frame())
+    for (RenderObject* p = parent(); p; p = p->parent())
+        if (p->isFrameSet())
+            static_cast<RenderFrameSet*>(p)->m_isChildResizing = isResizing;
+    if (Frame* frame = document()->frame())
         frame->eventHandler()->setResizingFrameSet(isResizing ? frameSet() : 0);
 }
 
@@ -744,15 +609,20 @@ bool RenderFrameSet::isResizingColumn() const
     return m_isResizing && m_cols.m_splitBeingResized != noSplit;
 }
 
+bool RenderFrameSet::canResize(const IntPoint& p) const
+{
+    return hitTestSplit(m_cols, p.x()) != noSplit || hitTestSplit(m_rows, p.y()) != noSplit;
+}
+
 bool RenderFrameSet::canResizeRow(const IntPoint& p) const
 {
-    int r = hitTestSplit(m_rows, p.y());
+    int r = hitTestSplit(m_rows, p.y() - yPos());
     return r != noSplit && m_rows.m_allowBorder[r] && !m_rows.m_preventResize[r];
 }
 
 bool RenderFrameSet::canResizeColumn(const IntPoint& p) const
 {
-    int c = hitTestSplit(m_cols, p.x());
+    int c = hitTestSplit(m_cols, p.x() - xPos());
     return c != noSplit && m_cols.m_allowBorder[c] && !m_cols.m_preventResize[c];
 }
 
@@ -795,23 +665,25 @@ int RenderFrameSet::hitTestSplit(const GridAxis& axis, int position) const
     return noSplit;
 }
 
-bool RenderFrameSet::isChildAllowed(RenderObject* child, RenderStyle*) const
+bool RenderFrameSet::isChildAllowed(RenderObject* child, RenderStyle* style) const
 {
     return child->isFrame() || child->isFrameSet();
 }
 
-CursorDirective RenderFrameSet::getCursor(const LayoutPoint& point, Cursor& cursor) const
+#ifndef NDEBUG
+void RenderFrameSet::dump(TextStream* stream, DeprecatedString ind) const
 {
-    IntPoint roundedPoint = roundedIntPoint(point);
-    if (canResizeRow(roundedPoint)) {
-        cursor = rowResizeCursor();
-        return SetCursor;
-    }
-    if (canResizeColumn(roundedPoint)) {
-        cursor = columnResizeCursor();
-        return SetCursor;
-    }
-    return RenderBox::getCursor(point, cursor);
+    *stream << " totalrows=" << frameSet()->totalRows();
+    *stream << " totalcols=" << frameSet()->totalCols();
+
+    for (int i = 1; i <= frameSet()->totalRows(); i++)
+        *stream << " hSplitvar(" << i << ")=" << m_rows.m_preventResize[i];
+
+    for (int i = 1; i < frameSet()->totalCols(); i++)
+        *stream << " vSplitvar(" << i << ")=" << m_cols.m_preventResize[i];
+
+    RenderContainer::dump(stream,ind);
 }
+#endif
 
 } // namespace WebCore

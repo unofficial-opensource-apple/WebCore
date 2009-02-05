@@ -1,5 +1,6 @@
-/*
- * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+/**
+ *
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,36 +26,45 @@
 
 namespace WebCore {
 
+    class HTMLDivElement;
     class HTMLInputElement;
+    class HTMLSliderThumbElement;
     class MouseEvent;
-    class SliderThumbElement;
     
     class RenderSlider : public RenderBlock {
     public:
         RenderSlider(HTMLInputElement*);
-        virtual ~RenderSlider();
+        ~RenderSlider();
 
+        virtual const char* renderName() const { return "RenderSlider"; }
+        virtual bool isSlider() const { return true; }
+
+        virtual short baselinePosition( bool, bool ) const;
+        virtual void calcPrefWidths();
+        virtual void setStyle(RenderStyle*);
+        virtual void layout();
+        virtual void updateFromElement();
+        
+        bool mouseEventIsInThumb(MouseEvent*);
+
+        void setValueForPosition(int position);
+        double setPositionFromValue(bool inLayout = false);
+        int positionForOffset(const IntPoint&);
+
+        void valueChanged();
+        
+        int currentPosition();
+        void setCurrentPosition(int pos);        
+        
+        void forwardEvent(Event*);
         bool inDragMode() const;
 
     private:
-        virtual const char* renderName() const { return "RenderSlider"; }
-        virtual bool isSlider() const { return true; }
-        virtual bool canBeReplacedWithInlineRunIn() const OVERRIDE;
+        RenderStyle* createThumbStyle(RenderStyle* parentStyle);
+        int trackSize();
 
-        virtual LayoutUnit baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
-        virtual void computePreferredLogicalWidths();
-        virtual bool requiresForcedStyleRecalcPropagation() const { return true; }
-        virtual void layout();
-    };
-
-    inline RenderSlider* toRenderSlider(RenderObject* object)
-    {
-        ASSERT(!object || object->isSlider());
-        return static_cast<RenderSlider*>(object);
-    }
-
-    // This will catch anyone doing an unnecessary cast.
-    void toRenderSlider(const RenderSlider*);
+        RefPtr<HTMLSliderThumbElement> m_thumb;
+};
 
 } // namespace WebCore
 

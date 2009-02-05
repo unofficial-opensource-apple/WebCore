@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,79 +24,72 @@
 #ifndef HTMLFormElement_h
 #define HTMLFormElement_h
 
-#include "CheckedRadioButtons.h"
-#include "FormState.h"
-#include "FormSubmission.h"
+#include "HTMLCollection.h" 
 #include "HTMLElement.h"
-#include <wtf/OwnPtr.h>
 
-#include "Autocapitalize.h"
+#include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
 class Event;
-class FormAssociatedElement;
 class FormData;
-class HTMLFormControlElement;
+class HTMLGenericFormElement;
 class HTMLImageElement;
 class HTMLInputElement;
 class HTMLFormCollection;
-class TextEncoding;
 
 class HTMLFormElement : public HTMLElement {
 public:
-    static PassRefPtr<HTMLFormElement> create(Document*);
-    static PassRefPtr<HTMLFormElement> create(const QualifiedName&, Document*);
+    HTMLFormElement(Document*);
     virtual ~HTMLFormElement();
 
-    HTMLCollection* elements();
-    void getNamedElements(const AtomicString&, Vector<RefPtr<Node> >&);
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
+    virtual int tagPriority() const { return 3; }
 
+    virtual void attach();
+    virtual void insertedIntoDocument();
+    virtual void removedFromDocument();
+ 
+    virtual void handleLocalEvents(Event*, bool useCapture);
+     
+    PassRefPtr<HTMLCollection> elements();
+    void getNamedElements(const AtomicString&, Vector<RefPtr<Node> >&);
+    
     unsigned length() const;
     Node* item(unsigned index);
 
-    String enctype() const { return m_attributes.encodingType(); }
+    String enctype() const { return m_enctype; }
     void setEnctype(const String&);
 
-    String encoding() const { return m_attributes.encodingType(); }
-    void setEncoding(const String& value) { setEnctype(value); }
+    String encoding() const { return m_enctype; }
+    void setEncoding(const String& enctype) { setEnctype(enctype); }
 
-    bool shouldAutocomplete() const;
+    bool autoComplete() const { return m_autocomplete; }
 
-    bool autocorrect() const;
-    void setAutocorrect(bool);
+    virtual void parseMappedAttribute(MappedAttribute*);
 
-    WebAutocapitalizeType autocapitalizeType() const;
-    const AtomicString& autocapitalize() const;
-    void setAutocapitalize(const AtomicString&);
-
-    // FIXME: Should rename these two functions to say "form control" or "form-associated element" instead of "form element".
-    void registerFormElement(FormAssociatedElement*);
-    void removeFormElement(FormAssociatedElement*);
-
+    void registerFormElement(HTMLGenericFormElement*);
+    void removeFormElement(HTMLGenericFormElement*);
     void registerImgElement(HTMLImageElement*);
     void removeImgElement(HTMLImageElement*);
 
-    bool prepareForSubmission(Event*);
+    bool prepareSubmit(Event*);
     void submit();
-    void submitFromJavaScript();
+    void submit(Event*, bool activateSubmitButton = false);
     void reset();
 
-    // Used to indicate a malformed state to keep from applying the bottom margin of the form.
-    // FIXME: Would probably be better to call this wasUnclosed; that's more specific.
-    void setMalformed(bool malformed) { m_wasMalformed = malformed; }
-    bool isMalformed() const { return m_wasMalformed; }
+    void setMalformed(bool malformed) { m_malformed = malformed; }
+    virtual bool isMalformed() { return m_malformed; }
 
-    void setDemoted(bool demoted) { m_wasDemoted = demoted; }
-
-    void submitImplicitly(Event*, bool fromImplicitSubmissionTrigger);
+    virtual bool isURLAttribute(Attribute*) const;
+    
+    void submitClick(Event*);
     bool formWouldHaveSecureSubmission(const String& url);
 
     String name() const;
+    void setName(const String&);
 
-    bool noValidate() const;
-
-    String acceptCharset() const { return m_attributes.acceptCharset(); }
+    String acceptCharset() const;
     void setAcceptCharset(const String&);
 
     String action() const;
@@ -106,78 +99,54 @@ public:
     void setMethod(const String&);
 
     virtual String target() const;
-
-    bool wasUserSubmitted() const;
-
-    HTMLFormControlElement* defaultButton() const;
-
-    bool checkValidity();
-
-    HTMLFormControlElement* elementForAlias(const AtomicString&);
-    void addElementAlias(HTMLFormControlElement*, const AtomicString& alias);
-
-    CheckedRadioButtons& checkedRadioButtons() { return m_checkedRadioButtons; }
-
-    const Vector<FormAssociatedElement*>& associatedElements() const { return m_associatedElements; }
+    void setTarget(const String&);
     
-    void getTextFieldValues(StringPairVector& fieldNamesAndValues) const;
+    PassRefPtr<HTMLGenericFormElement> elementForAlias(const AtomicString&);
+    void addElementAlias(HTMLGenericFormElement*, const AtomicString& alias);
 
+    // FIXME: Change this to be private after getting rid of all the clients.
+    Vector<HTMLGenericFormElement*> formElements;
+
+    class CheckedRadioButtons {
+    public:
+        void addButton(HTMLGenericFormElement*);
+        void removeButton(HTMLGenericFormElement*);
+        HTMLInputElement* checkedButtonForGroup(const AtomicString& name) const;
+
+    private:
+        typedef HashMap<AtomicStringImpl*, HTMLInputElement*> NameToInputMap;
+        OwnPtr<NameToInputMap> m_nameToCheckedRadioButtonMap;
+    };
+    
+    CheckedRadioButtons& checkedRadioButtons() { return m_checkedRadioButtons; }
+    
 private:
-    HTMLFormElement(const QualifiedName&, Document*);
-
-    virtual bool rendererIsNeeded(const NodeRenderingContext&);
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void didNotifyDescendantInseretions(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
-
-    virtual void handleLocalEvents(Event*);
-
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-
-    virtual bool isURLAttribute(Attribute*) const;
-
-    virtual void documentDidResumeFromPageCache();
-
-    virtual void didMoveToNewDocument(Document* oldDocument) OVERRIDE;
-
-    virtual bool shouldRegisterAsNamedItem() const OVERRIDE { return true; }
-
-    void submit(Event*, bool activateSubmitButton, bool processingUserGesture, FormSubmissionTrigger);
-
-    unsigned formElementIndexWithFormAttribute(Element*);
-    unsigned formElementIndex(FormAssociatedElement*);
-
-    // Returns true if the submission should proceed.
-    bool validateInteractively(Event*);
-
-    // Validates each of the controls, and stores controls of which 'invalid'
-    // event was not canceled to the specified vector. Returns true if there
-    // are any invalid controls in this form.
-    bool checkInvalidControlsAndCollectUnhandled(Vector<RefPtr<FormAssociatedElement> >&);
+    void parseEnctype(const String&);
+    PassRefPtr<FormData> formData(const char* boundary) const;
+    unsigned formElementIndex(HTMLGenericFormElement*);
 
     friend class HTMLFormCollection;
 
-    typedef HashMap<RefPtr<AtomicStringImpl>, RefPtr<HTMLFormControlElement> > AliasMap;
-
-    FormSubmission::Attributes m_attributes;
-    OwnPtr<AliasMap> m_elementAliases;
-    OwnPtr<HTMLFormCollection> m_elementsCollection;
+    typedef HashMap<RefPtr<AtomicStringImpl>, RefPtr<HTMLGenericFormElement> > AliasMap;
+    
+    AliasMap* m_elementAliases;
+    HTMLCollection::CollectionInfo* collectionInfo;
 
     CheckedRadioButtons m_checkedRadioButtons;
-
-    unsigned m_associatedElementsBeforeIndex;
-    unsigned m_associatedElementsAfterIndex;
-    Vector<FormAssociatedElement*> m_associatedElements;
-    Vector<HTMLImageElement*> m_imageElements;
-
-    bool m_wasUserSubmitted;
-    bool m_isSubmittingOrPreparingForSubmission;
-    bool m_shouldSubmit;
-
-    bool m_isInResetFunction;
-
-    bool m_wasMalformed;
-    bool m_wasDemoted;
+    
+    Vector<HTMLImageElement*> imgElements;
+    String m_url;
+    String m_target;
+    String m_enctype;
+    String m_acceptcharset;
+    bool m_post : 1;
+    bool m_multipart : 1;
+    bool m_autocomplete : 1;
+    bool m_insubmit : 1;
+    bool m_doingsubmit : 1;
+    bool m_inreset : 1;
+    bool m_malformed : 1;
+    String oldNameAttr;
 };
 
 } // namespace WebCore

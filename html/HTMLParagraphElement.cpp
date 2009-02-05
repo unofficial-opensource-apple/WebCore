@@ -1,7 +1,9 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,11 +21,9 @@
  * Boston, MA 02110-1301, USA.
  *
  */
-
 #include "config.h"
 #include "HTMLParagraphElement.h"
 
-#include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "Document.h"
@@ -33,42 +33,49 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-inline HTMLParagraphElement::HTMLParagraphElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLParagraphElement::HTMLParagraphElement(Document *doc)
+    : HTMLElement(pTag, doc)
 {
-    ASSERT(hasTagName(pTag));
 }
 
-PassRefPtr<HTMLParagraphElement> HTMLParagraphElement::create(Document* document)
+bool HTMLParagraphElement::checkDTD(const Node* newChild)
 {
-    return adoptRef(new HTMLParagraphElement(pTag, document));
+    return inInlineTagList(newChild) || (document()->inCompatMode() && newChild->hasTagName(tableTag));
 }
 
-PassRefPtr<HTMLParagraphElement> HTMLParagraphElement::create(const QualifiedName& tagName, Document* document)
+bool HTMLParagraphElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
 {
-    return adoptRef(new HTMLParagraphElement(tagName, document));
+    if (attrName == alignAttr) {
+        result = eBlock; // We can share with DIV here.
+        return false;
+    }
+    return HTMLElement::mapToEntry(attrName, result);
 }
 
-bool HTMLParagraphElement::isPresentationAttribute(const QualifiedName& name) const
-{
-    if (name == alignAttr)
-        return true;
-    return HTMLElement::isPresentationAttribute(name);
-}
-
-void HTMLParagraphElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
+void HTMLParagraphElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == alignAttr) {
+        String v = attr->value();
         if (equalIgnoringCase(attr->value(), "middle") || equalIgnoringCase(attr->value(), "center"))
-            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitCenter);
+            addCSSProperty(attr, CSS_PROP_TEXT_ALIGN, CSS_VAL__WEBKIT_CENTER);
         else if (equalIgnoringCase(attr->value(), "left"))
-            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitLeft);
+            addCSSProperty(attr, CSS_PROP_TEXT_ALIGN, CSS_VAL__WEBKIT_LEFT);
         else if (equalIgnoringCase(attr->value(), "right"))
-            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitRight);
+            addCSSProperty(attr, CSS_PROP_TEXT_ALIGN, CSS_VAL__WEBKIT_RIGHT);
         else
-            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, attr->value());
+            addCSSProperty(attr, CSS_PROP_TEXT_ALIGN, v);
     } else
-        HTMLElement::collectStyleForAttribute(attr, style);
+        HTMLElement::parseMappedAttribute(attr);
+}
+
+String HTMLParagraphElement::align() const
+{
+    return getAttribute(alignAttr);
+}
+
+void HTMLParagraphElement::setAlign(const String &value)
+{
+    setAttribute(alignAttr, value);
 }
 
 }

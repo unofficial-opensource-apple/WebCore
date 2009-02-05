@@ -1,7 +1,9 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,45 +24,23 @@
 #include "config.h"
 #include "CSSFontFaceRule.h"
 
-#include "StylePropertySet.h"
-#include "StyleRule.h"
+#include "CSSMutableStyleDeclaration.h"
 
 namespace WebCore {
 
-CSSFontFaceRule::CSSFontFaceRule(StyleRuleFontFace* fontFaceRule, CSSStyleSheet* parent)
-    : CSSRule(parent, CSSRule::FONT_FACE_RULE)
-    , m_fontFaceRule(fontFaceRule)
+CSSFontFaceRule::CSSFontFaceRule(StyleBase* parent)
+    : CSSRule(parent)
 {
 }
 
 CSSFontFaceRule::~CSSFontFaceRule()
 {
-    if (m_propertiesCSSOMWrapper)
-        m_propertiesCSSOMWrapper->clearParentRule();
-}
-
-CSSStyleDeclaration* CSSFontFaceRule::style() const
-{
-    if (!m_propertiesCSSOMWrapper)
-        m_propertiesCSSOMWrapper = StyleRuleCSSStyleDeclaration::create(m_fontFaceRule->properties(), const_cast<CSSFontFaceRule*>(this));
-    return m_propertiesCSSOMWrapper.get();
 }
 
 String CSSFontFaceRule::cssText() const
 {
-    String result("@font-face");
-    result += " { ";
-    result += m_fontFaceRule->properties()->asText();
-    result += "}";
-    return result;
-}
-
-void CSSFontFaceRule::reattach(StyleRuleFontFace* rule)
-{
-    ASSERT(rule);
-    m_fontFaceRule = rule;
-    if (m_propertiesCSSOMWrapper)
-        m_propertiesCSSOMWrapper->reattach(m_fontFaceRule->properties());
+    // FIXME: Implement!
+    return String();
 }
 
 } // namespace WebCore

@@ -28,55 +28,25 @@
 
 #include "Document.h"
 #include "HTMLFormElement.h"
-
-#if ENABLE(MICRODATA)
-#include "MicroDataItemValue.h"
-#endif
+#include "kjs_dom.h"
 
 namespace WebCore {
 
-using namespace JSC;
+using namespace KJS;
 
-#if ENABLE(MICRODATA)
-static JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, MicroDataItemValue* itemValue)
-{
-    if (!itemValue)
-        return jsNull();
-    if (itemValue->isNode())
-        return toJS(exec, globalObject, itemValue->getNode());
-    return jsString(exec, itemValue->getString());
-}
-#endif
-
-ScopeChainNode* JSHTMLElement::pushEventHandlerScope(ExecState* exec, ScopeChainNode* scope) const
+void JSHTMLElement::pushEventHandlerScope(ExecState* exec, ScopeChain& scope) const
 {
     HTMLElement* element = impl();
 
     // The document is put on first, fall back to searching it only after the element and form.
-    scope = scope->push(asObject(toJS(exec, globalObject(), element->ownerDocument())));
+    scope.push(static_cast<JSObject*>(toJS(exec, element->ownerDocument())));
 
     // The form is next, searched before the document, but after the element itself.
     if (HTMLFormElement* form = element->form())
-        scope = scope->push(asObject(toJS(exec, globalObject(), form)));
+        scope.push(static_cast<JSObject*>(toJS(exec, form)));
 
     // The element is on top, searched first.
-    return scope->push(asObject(toJS(exec, globalObject(), element)));
+    scope.push(static_cast<JSObject*>(toJS(exec, element)));
 }
-
-#if ENABLE(MICRODATA)
-JSValue JSHTMLElement::itemValue(ExecState* exec) const
-{
-    HTMLElement* element = impl();
-    return toJS(exec, globalObject(), WTF::getPtr(element->itemValue()));
-}
-
-void JSHTMLElement::setItemValue(ExecState* exec, JSValue value)
-{
-    HTMLElement* imp = impl();
-    ExceptionCode ec = 0;
-    imp->setItemValue(valueToStringWithNullCheck(exec, value), ec);
-    setDOMException(exec, ec);
-}
-#endif
 
 } // namespace WebCore

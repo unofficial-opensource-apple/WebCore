@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,25 +25,19 @@
 #define HTMLLabelElement_h
 
 #include "HTMLElement.h"
-#include "LabelableElement.h"
 
 namespace WebCore {
 
 class HTMLLabelElement : public HTMLElement {
 public:
-    static PassRefPtr<HTMLLabelElement> create(const QualifiedName&, Document*);
+    HTMLLabelElement(Document*);
+    virtual ~HTMLLabelElement();
 
-    LabelableElement* control();
-    HTMLFormElement* form() const;
-
-    virtual bool willRespondToMouseClickEvents() OVERRIDE;
-
-private:
-    HTMLLabelElement(const QualifiedName&, Document*);
+    virtual int tagPriority() const { return 5; }
 
     virtual bool isFocusable() const;
 
-    virtual void accessKeyAction(bool sendMouseEvents);
+    virtual void accessKeyAction(bool sendToAnyElement);
 
     // Overridden to update the hover/active state of the corresponding control.
     virtual void setActive(bool = true, bool pause = false);
@@ -52,7 +46,18 @@ private:
     // Overridden to either click() or focus() the corresponding control.
     virtual void defaultEventHandler(Event*);
 
+    HTMLElement* correspondingControl();
+
+    String accessKey() const;
+    void setAccessKey(const String&);
+
+    String htmlFor() const;
+    void setHtmlFor(const String&);
+
     void focus(bool restorePreviousSelection = true);
+
+ private:
+    String m_formElementID;
 };
 
 } //namespace

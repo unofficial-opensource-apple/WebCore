@@ -29,21 +29,9 @@
 #import "config.h"
 #import "WebCoreNSStringExtras.h"
 
-#import <wtf/RetainPtr.h>
-
-BOOL stringIsCaseInsensitiveEqualToString(NSString *first, NSString *second)
-{
-    return [first compare:second options:(NSCaseInsensitiveSearch|NSLiteralSearch)] == NSOrderedSame;
-}
-
 BOOL hasCaseInsensitiveSuffix(NSString *string, NSString *suffix)
 {
     return [string rangeOfString:suffix options:(NSCaseInsensitiveSearch | NSBackwardsSearch | NSAnchoredSearch)].location != NSNotFound;
-}
-
-BOOL hasCaseInsensitivePrefix(NSString *string, NSString *prefix)
-{
-    return [string rangeOfString:prefix options:(NSCaseInsensitiveSearch | NSAnchoredSearch)].location != NSNotFound;
 }
 
 BOOL hasCaseInsensitiveSubstring(NSString *string, NSString *substring)
@@ -72,4 +60,3 @@ NSString *filenameByFixingIllegalCharacters(NSString *string)
     
     return filename;
 }
-

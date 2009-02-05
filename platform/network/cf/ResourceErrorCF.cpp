@@ -24,54 +24,46 @@
  */
 
 #include "config.h"
+#include "KURL.h"
 #include "ResourceError.h"
 
 #if USE(CFNETWORK)
 
-#include "KURL.h"
-#include <CoreFoundation/CFError.h>
-#include <CFNetwork/CFNetworkErrors.h>
-#include <wtf/RetainPtr.h>
-#include <wtf/UnusedParam.h>
+// FIXME: Once <rdar://problem/5050881> is fixed we can remove this extern "C"
 
-#if PLATFORM(WIN)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
-#endif
+extern "C" {
+#include <CFNetwork/CFNetworkErrors.h>
+}
+
+#include <CoreFoundation/CFError.h>
+#include <WTF/RetainPtr.h>
 
 namespace WebCore {
-
-ResourceError::ResourceError(CFErrorRef cfError)
-    : m_dataIsUpToDate(false)
-    , m_platformError(cfError)
-{
-    m_isNull = !cfError;
-}
-
-#if PLATFORM(WIN)
-ResourceError::ResourceError(const String& domain, int errorCode, const String& failingURL, const String& localizedDescription, CFDataRef certificate)
-    : ResourceErrorBase(domain, errorCode, failingURL, localizedDescription)
-    , m_dataIsUpToDate(true)
-    , m_certificate(certificate)
-{
-}
-
-PCCERT_CONTEXT ResourceError::certificate() const
-{
-    if (!m_certificate)
-        return 0;
-    
-    return reinterpret_cast<PCCERT_CONTEXT>(CFDataGetBytePtr(m_certificate.get()));
-}
-#endif // PLATFORM(WIN)
 
 const CFStringRef failingURLStringKey = CFSTR("NSErrorFailingURLStringKey");
 const CFStringRef failingURLKey = CFSTR("NSErrorFailingURLKey");
 
-void ResourceError::platformLazyInit()
+// FIXME: Once <rdar://problem/5050841> is fixed we can remove this constructor.
+ResourceError::ResourceError(CFStreamError error)
+    : m_errorCode(error.error)
+    , m_isNull(false)
+    , m_dataIsUpToDate(true)
 {
-    if (m_dataIsUpToDate)
-        return;
+    switch(error.domain) {
+    case kCFStreamErrorDomainCustom:
+        m_domain ="NSCustomErrorDomain";
+        break;
+    case kCFStreamErrorDomainPOSIX:
+        m_domain = "NSPOSIXErrorDomain";
+        break;
+    case kCFStreamErrorDomainMacOSStatus:
+        m_domain = "NSOSStatusErrorDomain";
+        break;
+    }
+}
 
+void ResourceError::unpackPlatformError()
+{
     if (!m_platformError)
         return;
 
@@ -84,10 +76,6 @@ void ResourceError::platformLazyInit()
         m_domain = "NSPOSIXErrorDomain";
     else if (domain == kCFErrorDomainOSStatus)
         m_domain = "NSOSStatusErrorDomain";
-    else if (domain == kCFErrorDomainWinSock)
-        m_domain = "kCFErrorDomainWinSock";
-    else
-        m_domain = domain;
 
     m_errorCode = CFErrorGetCode(m_platformError.get());
 
@@ -107,36 +95,18 @@ void ResourceError::platformLazyInit()
             }
         }
         m_localizedDescription = (CFStringRef) CFDictionaryGetValue(userInfo.get(), kCFErrorLocalizedDescriptionKey);
-        
-#if PLATFORM(WIN)
-        m_certificate = wkGetSSLPeerCertificateData(userInfo.get());
-#endif
     }
 
     m_dataIsUpToDate = true;
 }
 
-void ResourceError::platformCopy(ResourceError& errorCopy) const
-{
-#if PLATFORM(WIN)
-    errorCopy.m_certificate = m_certificate;
-#else
-    UNUSED_PARAM(errorCopy);
-#endif
-}
-
-bool ResourceError::platformCompare(const ResourceError& a, const ResourceError& b)
-{
-    return a.cfError() == b.cfError();
-}
-
-CFErrorRef ResourceError::cfError() const
+ResourceError::operator CFErrorRef() const
 {
     if (m_isNull) {
         ASSERT(!m_platformError);
-        return 0;
+        return nil;
     }
-
+    
     if (!m_platformError) {
         RetainPtr<CFMutableDictionaryRef> userInfo(AdoptCF, CFDictionaryCreateMutable(0, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
 
@@ -148,15 +118,10 @@ CFErrorRef ResourceError::cfError() const
         if (!m_failingURL.isEmpty()) {
             RetainPtr<CFStringRef> failingURLString(AdoptCF, m_failingURL.createCFString());
             CFDictionarySetValue(userInfo.get(), failingURLStringKey, failingURLString.get());
-            RetainPtr<CFURLRef> url(AdoptCF, CFURLCreateWithString(0, failingURLString.get(), 0));
+            RetainPtr<CFURLRef> url(AdoptCF, KURL(m_failingURL.deprecatedString()).createCFURL());
             CFDictionarySetValue(userInfo.get(), failingURLKey, url.get());
         }
 
-#if PLATFORM(WIN)
-        if (m_certificate)
-            wkSetSSLPeerCertificateData(userInfo.get(), m_certificate.get());
-#endif
-        
         RetainPtr<CFStringRef> domainString(AdoptCF, m_domain.createCFString());
         m_platformError.adoptCF(CFErrorCreate(0, domainString.get(), m_errorCode, userInfo.get()));
     }
@@ -164,34 +129,9 @@ CFErrorRef ResourceError::cfError() const
     return m_platformError.get();
 }
 
-ResourceError::operator CFErrorRef() const
+ResourceError::operator CFStreamError() const
 {
-    return cfError();
-}
-
-// FIXME: Once <rdar://problem/5050841> is fixed we can remove this constructor.
-ResourceError::ResourceError(CFStreamError error)
-    : m_dataIsUpToDate(true)
-{
-    m_isNull = false;
-    m_errorCode = error.error;
-
-    switch(error.domain) {
-    case kCFStreamErrorDomainCustom:
-        m_domain ="NSCustomErrorDomain";
-        break;
-    case kCFStreamErrorDomainPOSIX:
-        m_domain = "NSPOSIXErrorDomain";
-        break;
-    case kCFStreamErrorDomainMacOSStatus:
-        m_domain = "NSOSStatusErrorDomain";
-        break;
-    }
-}
-
-CFStreamError ResourceError::cfStreamError() const
-{
-    lazyInit();
+    unpackPlatformErrorIfNeeded();
 
     CFStreamError result;
     result.error = m_errorCode;
@@ -202,17 +142,10 @@ CFStreamError ResourceError::cfStreamError() const
         result.domain = kCFStreamErrorDomainPOSIX;
     else if (m_domain == "NSOSStatusErrorDomain")
         result.domain = kCFStreamErrorDomainMacOSStatus;
-    else {
-        result.domain = kCFStreamErrorDomainCustom;
+    else
         ASSERT_NOT_REACHED();
-    }
 
     return result;
-}
-
-ResourceError::operator CFStreamError() const
-{
-    return cfStreamError();
 }
 
 } // namespace WebCore

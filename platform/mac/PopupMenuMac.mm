@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2006, 2008, 2010, 2011 Apple Inc. All rights reserved.
- * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,45 +18,40 @@
  */
 
 #import "config.h"
-#import "PopupMenuMac.h"
+#import "PopupMenu.h"
 
-#import "AXObjectCache.h"
-#import "Chrome.h"
-#import "ChromeClient.h"
 #import "EventHandler.h"
+#import "FontData.h"
 #import "Frame.h"
 #import "FrameView.h"
 #import "HTMLNames.h"
 #import "HTMLOptGroupElement.h"
 #import "HTMLOptionElement.h"
 #import "HTMLSelectElement.h"
-#import "Page.h"
-#import "PopupMenuClient.h"
-#import "SimpleFontData.h"
 #import "WebCoreSystemInterface.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-PopupMenuMac::PopupMenuMac(PopupMenuClient* client)
+PopupMenu::PopupMenu(PopupMenuClient* client)
     : m_popupClient(client)
 {
 }
 
-PopupMenuMac::~PopupMenuMac()
+PopupMenu::~PopupMenu()
 {
     if (m_popup)
         [m_popup.get() setControlView:nil];
 }
 
-void PopupMenuMac::clear()
+void PopupMenu::clear()
 {
     if (m_popup)
         [m_popup.get() removeAllItems];
 }
 
-void PopupMenuMac::populate()
+void PopupMenu::populate()
 {
     if (m_popup)
         clear();
@@ -75,11 +69,6 @@ void PopupMenuMac::populate()
     if (!client()->shouldPopOver())
         [m_popup.get() addItemWithTitle:@""];
 
-#ifndef BUILDING_ON_LEOPARD
-    TextDirection menuTextDirection = client()->menuStyle().textDirection();
-    [m_popup.get() setUserInterfaceLayoutDirection:menuTextDirection == LTR ? NSUserInterfaceLayoutDirectionLeftToRight : NSUserInterfaceLayoutDirectionRightToLeft];
-#endif // !defined(BUILDING_ON_LEOPARD)
-
     ASSERT(client());
     int size = client()->listSize();
 
@@ -87,61 +76,33 @@ void PopupMenuMac::populate()
         if (client()->itemIsSeparator(i))
             [[m_popup.get() menu] addItem:[NSMenuItem separatorItem]];
         else {
-            PopupMenuStyle style = client()->itemStyle(i);
+            RenderStyle* style = client()->itemStyle(i);
             NSMutableDictionary* attributes = [[NSMutableDictionary alloc] init];
-            if (style.font() != Font()) {
-                NSFont *font = style.font().primaryFont()->getNSFont();
-                if (!font) {
-                    CGFloat size = style.font().primaryFont()->platformData().size();
-                    font = style.font().weight() < FontWeightBold ? [NSFont systemFontOfSize:size] : [NSFont boldSystemFontOfSize:size];
-                }
-                [attributes setObject:font forKey:NSFontAttributeName];
-            }
-
-#ifndef BUILDING_ON_LEOPARD
-            RetainPtr<NSMutableParagraphStyle> paragraphStyle(AdoptNS, [[NSParagraphStyle defaultParagraphStyle] mutableCopy]);
-            [paragraphStyle.get() setAlignment:menuTextDirection == LTR ? NSLeftTextAlignment : NSRightTextAlignment];
-            NSWritingDirection writingDirection = style.textDirection() == LTR ? NSWritingDirectionLeftToRight : NSWritingDirectionRightToLeft;
-            [paragraphStyle.get() setBaseWritingDirection:writingDirection];
-            if (style.hasTextDirectionOverride()) {
-                RetainPtr<NSNumber> writingDirectionValue(AdoptNS, [[NSNumber alloc] initWithInteger:writingDirection + NSTextWritingDirectionOverride]);
-                RetainPtr<NSArray> writingDirectionArray(AdoptNS, [[NSArray alloc] initWithObjects:writingDirectionValue.get(), nil]);
-                [attributes setObject:writingDirectionArray.get() forKey:NSWritingDirectionAttributeName];
-            }
-            [attributes setObject:paragraphStyle.get() forKey:NSParagraphStyleAttributeName];
-#endif // !defined(BUILDING_ON_LEOPARD)
-
+            if (style->font() != Font())
+                [attributes setObject:style->font().primaryFont()->getNSFont() forKey:NSFontAttributeName];
             // FIXME: Add support for styling the foreground and background colors.
             // FIXME: Find a way to customize text color when an item is highlighted.
-            NSAttributedString *string = [[NSAttributedString alloc] initWithString:client()->itemText(i) attributes:attributes];
+            NSAttributedString* string = [[NSAttributedString alloc] initWithString:client()->itemText(i) attributes:attributes];
             [attributes release];
 
             [m_popup.get() addItemWithTitle:@""];
-            NSMenuItem *menuItem = [m_popup.get() lastItem];
+            NSMenuItem* menuItem = [m_popup.get() lastItem];
             [menuItem setAttributedTitle:string];
             [menuItem setEnabled:client()->itemIsEnabled(i)];
-            [menuItem setToolTip:client()->itemToolTip(i)];
             [string release];
-            
-            // Allow the accessible text of the item to be overriden if necessary.
-            if (AXObjectCache::accessibilityEnabled()) {
-                NSString *accessibilityOverride = client()->itemAccessibilityText(i);
-                if ([accessibilityOverride length])
-                    [menuItem accessibilitySetOverrideValue:accessibilityOverride forAttribute:NSAccessibilityDescriptionAttribute];
-            }
         }
     }
 
     [[m_popup.get() menu] setMenuChangedMessagesEnabled:messagesEnabled];
 }
 
-void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
+void PopupMenu::show(const IntRect& r, FrameView* v, int index)
 {
     populate();
     int numItems = [m_popup.get() numberOfItems];
     if (numItems <= 0) {
         if (client())
-            client()->popupDidHide();
+            client()->hidePopup();
         return;
     }
     ASSERT(numItems > index);
@@ -150,7 +111,7 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
     if (index == -1 && numItems == 2 && !client()->shouldPopOver() && ![[m_popup.get() itemAtIndex:1] isEnabled])
         index = 0;
 
-    NSView* view = v->documentView();
+    NSView* view = v->getDocumentView();
 
     [m_popup.get() attachPopUpWithFrame:r inView:view];
     [m_popup.get() selectItemAtIndex:index];
@@ -158,7 +119,7 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
     NSMenu* menu = [m_popup.get() menu];
     
     NSPoint location;
-    NSFont* font = client()->menuStyle().font().primaryFont()->getNSFont();
+    NSFont* font = client()->clientStyle()->font().primaryFont()->getNSFont();
 
     // These values were borrowed from AppKit to match their placement of the menu.
     const int popOverHorizontalAdjust = -10;
@@ -183,14 +144,13 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
     RefPtr<Frame> frame = v->frame();
     NSEvent* event = [frame->eventHandler()->currentNSEvent() retain];
     
-    RefPtr<PopupMenuMac> protector(this);
+    RefPtr<PopupMenu> protector(this);
 
     RetainPtr<NSView> dummyView(AdoptNS, [[NSView alloc] initWithFrame:r]);
     [view addSubview:dummyView.get()];
     location = [dummyView.get() convertPoint:location fromView:view];
     
-    if (Page* page = frame->page())
-        page->chrome()->client()->willPopUpMenu(menu);
+    frame->willPopupMenu(menu);
     wkPopupMenu(menu, location, roundf(NSWidth(r)), dummyView.get(), index, font);
 
     [m_popup.get() dismissPopUp];
@@ -198,7 +158,7 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
 
     if (client()) {
         int newIndex = [m_popup.get() indexOfSelectedItem];
-        client()->popupDidHide();
+        client()->hidePopup();
 
         // Adjust newIndex for hidden first item.
         if (!client()->shouldPopOver())
@@ -215,18 +175,18 @@ void PopupMenuMac::show(const IntRect& r, FrameView* v, int index)
     [event release];
 }
 
-void PopupMenuMac::hide()
+void PopupMenu::hide()
 {
     [m_popup.get() dismissPopUp];
 }
     
-void PopupMenuMac::updateFromElement()
+void PopupMenu::updateFromElement()
 {
 }
 
-void PopupMenuMac::disconnectClient()
+bool PopupMenu::itemWritingDirectionIsNatural()
 {
-    m_popupClient = 0;
+    return true;
 }
 
 }

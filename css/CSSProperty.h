@@ -1,4 +1,6 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
@@ -21,10 +23,7 @@
 #ifndef CSSProperty_h
 #define CSSProperty_h
 
-#include "CSSPropertyNames.h"
 #include "CSSValue.h"
-#include "RenderStyleConstants.h"
-#include "TextDirection.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 
@@ -32,39 +31,41 @@ namespace WebCore {
 
 class CSSProperty {
 public:
-    CSSProperty(CSSPropertyID propID, PassRefPtr<CSSValue> value, bool important = false, CSSPropertyID shorthandID = CSSPropertyInvalid, bool implicit = false)
+    CSSProperty(int propID, PassRefPtr<CSSValue> value, bool important = false, int shorthandID = 0, bool implicit = false)
         : m_id(propID)
         , m_shorthandID(shorthandID)
         , m_important(important)
         , m_implicit(implicit)
-        , m_inherited(isInheritedProperty(propID))
         , m_value(value)
     {
     }
 
-    CSSPropertyID id() const { return static_cast<CSSPropertyID>(m_id); }
-    CSSPropertyID shorthandID() const { return static_cast<CSSPropertyID>(m_shorthandID); }
+    CSSProperty& operator=(const CSSProperty& other)
+    {
+        m_id = other.m_id;
+        m_shorthandID = other.m_shorthandID;
+        m_important = other.m_important;
+        m_value = other.m_value;
+        return *this;
+    }
+
+    int id() const { return m_id; }
+    int shorthandID() const { return m_shorthandID; }
 
     bool isImportant() const { return m_important; }
     bool isImplicit() const { return m_implicit; }
-    bool isInherited() const { return m_inherited; }
 
     CSSValue* value() const { return m_value.get(); }
-
+    
     String cssText() const;
 
-    void wrapValueInCommaSeparatedList();
+    friend bool operator==(const CSSProperty&, const CSSProperty&);
 
-    static CSSPropertyID resolveDirectionAwareProperty(CSSPropertyID, TextDirection, WritingMode);
-    static bool isInheritedProperty(CSSPropertyID);
-
-private:
-    // Make sure the following fits in 4 bytes. Really.
-    unsigned m_id : 14;
-    unsigned m_shorthandID : 14; // If this property was set as part of a shorthand, gives the shorthand.
-    unsigned m_important : 1;
-    unsigned m_implicit : 1; // Whether or not the property was set implicitly as the result of a shorthand.
-    unsigned m_inherited : 1;
+    // make sure the following fits in 4 bytes.
+    int m_id;
+    int m_shorthandID;  // If this property was set as part of a shorthand, gives the shorthand.
+    bool m_important : 1;
+    bool m_implicit : 1; // Whether or not the property was set implicitly as the result of a shorthand.
 
     RefPtr<CSSValue> m_value;
 };

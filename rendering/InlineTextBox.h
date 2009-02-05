@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999 Lars Knoll (knoll@kde.org)
  * (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,46 +25,34 @@
 #ifndef InlineTextBox_h
 #define InlineTextBox_h
 
-#include "InlineBox.h"
-#include "RenderText.h" // so textRenderer() can be inline
-#include "TextRun.h"
-#include <wtf/text/StringBuilder.h>
+#include "DocumentMarker.h"
+#include "InlineRunBox.h"
+#include "RenderText.h"
 
 namespace WebCore {
-
-struct CompositionUnderline;
-class DocumentMarker;
 
 const unsigned short cNoTruncation = USHRT_MAX;
 const unsigned short cFullTruncation = USHRT_MAX - 1;
 
-class BufferForAppendingHyphen : public StringBuilder {
-public:
-    BufferForAppendingHyphen() { reserveCapacity(256); }
-};
+class String;
+class StringImpl;
+class HitTestResult;
+class Position;
 
-// Helper functions shared by InlineTextBox / SVGRootInlineBox
-void updateGraphicsContext(GraphicsContext*, const Color& fillColor, const Color& strokeColor, float strokeThickness, ColorSpace);
-Color correctedTextColor(Color textColor, Color backgroundColor);
+struct CompositionUnderline;
 
-class InlineTextBox : public InlineBox {
+class InlineTextBox : public InlineRunBox {
 public:
     InlineTextBox(RenderObject* obj)
-        : InlineBox(obj)
-        , m_prevTextBox(0)
-        , m_nextTextBox(0)
+        : InlineRunBox(obj)
         , m_start(0)
         , m_len(0)
         , m_truncation(cNoTruncation)
     {
     }
 
-    virtual void destroy(RenderArena*);
-
-    InlineTextBox* prevTextBox() const { return m_prevTextBox; }
-    InlineTextBox* nextTextBox() const { return m_nextTextBox; }
-    void setNextTextBox(InlineTextBox* n) { m_nextTextBox = n; }
-    void setPreviousTextBox(InlineTextBox* p) { m_prevTextBox = p; }
+    InlineTextBox* nextTextBox() const { return static_cast<InlineTextBox*>(nextLineBox()); }
+    InlineTextBox* prevTextBox() const { return static_cast<InlineTextBox*>(prevLineBox()); }
 
     unsigned start() const { return m_start; }
     unsigned end() const { return m_len ? m_start + m_len - 1 : m_start; }
@@ -73,97 +63,55 @@ public:
 
     void offsetRun(int d) { m_start += d; }
 
-    unsigned short truncation() { return m_truncation; }
+    virtual int selectionTop();
+    virtual int selectionHeight();
 
-    using InlineBox::hasHyphen;
-    using InlineBox::setHasHyphen;
-    using InlineBox::canHaveLeadingExpansion;
-    using InlineBox::setCanHaveLeadingExpansion;
-
-    static inline bool compareByStart(const InlineTextBox* first, const InlineTextBox* second) { return first->start() < second->start(); }
-
-    virtual LayoutUnit baselinePosition(FontBaseline) const;
-    virtual LayoutUnit lineHeight() const;
-
-    bool getEmphasisMarkPosition(RenderStyle*, TextEmphasisPosition&) const;
-
-    LayoutRect logicalOverflowRect() const;
-    void setLogicalOverflowRect(const LayoutRect&);
-    LayoutUnit logicalTopVisualOverflow() const { return logicalOverflowRect().y(); }
-    LayoutUnit logicalBottomVisualOverflow() const { return logicalOverflowRect().maxY(); }
-    LayoutUnit logicalLeftVisualOverflow() const { return logicalOverflowRect().x(); }
-    LayoutUnit logicalRightVisualOverflow() const { return logicalOverflowRect().maxX(); }
-
-#ifndef NDEBUG
-    virtual void showBox(int = 0) const;
-    virtual const char* boxName() const;
-#endif
-private:
-    LayoutUnit selectionTop();
-    LayoutUnit selectionBottom();
-    LayoutUnit selectionHeight();
-
-    TextRun constructTextRun(RenderStyle*, const Font&, BufferForAppendingHyphen* = 0) const;
-    TextRun constructTextRun(RenderStyle*, const Font&, const UChar*, int length, int maximumLength, BufferForAppendingHyphen* = 0) const;
-
-public:
-    virtual FloatRect calculateBoundaries() const { return FloatRect(x(), y(), width(), height()); }
-
-    virtual LayoutRect localSelectionRect(int startPos, int endPos);
+    IntRect selectionRect(int absx, int absy, int startPos, int endPos);
     bool isSelected(int startPos, int endPos) const;
     void selectionStartEnd(int& sPos, int& ePos);
 
-protected:
-    virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom);
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom);
+    virtual void paint(RenderObject::PaintInfo&, int tx, int ty);
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty);
 
-public:
-    RenderText* textRenderer() const;
+    RenderText* textObject() const;
 
-private:
     virtual void deleteLine(RenderArena*);
     virtual void extractLine();
     virtual void attachLine();
 
-public:
     virtual RenderObject::SelectionState selectionState();
 
-private:
     virtual void clearTruncation() { m_truncation = cNoTruncation; }
-    virtual float placeEllipsisBox(bool flowIsLTR, float visibleLeftEdge, float visibleRightEdge, float ellipsisWidth, float &truncatedWidth, bool& foundBox) OVERRIDE;
+    virtual int placeEllipsisBox(bool ltr, int blockEdge, int ellipsisWidth, bool& foundBox);
 
-public:
     virtual bool isLineBreak() const;
 
-    void setExpansion(int newExpansion)
-    {
-        m_logicalWidth -= expansion();
-        InlineBox::setExpansion(newExpansion);
-        m_logicalWidth += newExpansion;
-    }
+    void setSpaceAdd(int add) { m_width -= m_toAdd; m_toAdd = add; m_width += m_toAdd; }
+    int spaceAdd() { return m_toAdd; }
 
-private:
-    virtual bool isInlineTextBox() const { return true; }    
+    virtual bool isInlineTextBox() { return true; }    
+    virtual bool isText() const { return m_treatAsText; }
+    void setIsText(bool b) { m_treatAsText = b; }
 
-public:
+    void paintDecoration(GraphicsContext*, int tx, int ty, int decoration);
+    void paintSelection(GraphicsContext*, int tx, int ty, RenderStyle*, const Font*);
+    void paintCompositionBackground(GraphicsContext*, int tx, int ty, RenderStyle*, const Font*, int startPos, int endPos);
+    void paintDocumentMarkers(GraphicsContext*, int tx, int ty, RenderStyle*, const Font*, bool background);
+    void paintSpellingOrGrammarMarker(GraphicsContext*, int tx, int ty, DocumentMarker, RenderStyle*, const Font*, bool grammar);
+    void paintTextMatchMarker(GraphicsContext*, int tx, int ty, DocumentMarker, RenderStyle*, const Font*);
+    void paintCompositionUnderline(GraphicsContext*, int tx, int ty, const CompositionUnderline&);
+#if PLATFORM(MAC)
+    void paintCustomHighlight(int tx, int ty, const AtomicString& type);
+#endif
     virtual int caretMinOffset() const;
     virtual int caretMaxOffset() const;
+    virtual unsigned caretMaxRenderedOffset() const;
 
-private:
-    float textPos() const; // returns the x position relative to the left start of the text line.
-
-public:
-    virtual int offsetForPosition(float x, bool includePartialGlyphs = true) const;
-    virtual float positionForOffset(int offset) const;
+    int textPos() const;
+    int offsetForPosition(int x, bool includePartialGlyphs = true) const;
+    int positionForOffset(int offset) const;
 
     bool containsCaretOffset(int offset) const; // false for offset after line break
-
-    // Needs to be public, so the static paintTextWithShadows() function can use it.
-    static FloatSize applyShadowToGraphicsContext(GraphicsContext*, const ShadowData*, const FloatRect& textRect, bool stroked, bool opaque, bool horizontal);
-
-private:
-    InlineTextBox* m_prevTextBox; // The previous box that also uses our RenderObject
-    InlineTextBox* m_nextTextBox; // The next box that also uses our RenderObject
 
     int m_start;
     unsigned short m_len;
@@ -171,46 +119,13 @@ private:
     unsigned short m_truncation; // Where to truncate when text overflow is applied.  We use special constants to
                       // denote no truncation (the whole run paints) and full truncation (nothing paints at all).
 
-protected:
-    void paintCompositionBackground(GraphicsContext*, const FloatPoint& boxOrigin, RenderStyle*, const Font&, int startPos, int endPos);
-    void paintDocumentMarkers(GraphicsContext*, const FloatPoint& boxOrigin, RenderStyle*, const Font&, bool background);
-    void paintCompositionUnderline(GraphicsContext*, const FloatPoint& boxOrigin, const CompositionUnderline&);
-#if PLATFORM(MAC)
-    void paintCustomHighlight(const LayoutPoint&, const AtomicString& type);
-#endif
-
 private:
-    void paintDecoration(GraphicsContext*, const FloatPoint& boxOrigin, int decoration, const ShadowData*);
-    void paintSelection(GraphicsContext*, const FloatPoint& boxOrigin, RenderStyle*, const Font&);
-    void paintDocumentMarker(GraphicsContext*, const FloatPoint& boxOrigin, DocumentMarker*, RenderStyle*, const Font&, bool grammar);
-    void paintTextMatchMarker(GraphicsContext*, const FloatPoint& boxOrigin, DocumentMarker*, RenderStyle*, const Font&);
-    void computeRectForReplacementMarker(DocumentMarker*, RenderStyle*, const Font&);
-
-    TextRun::ExpansionBehavior expansionBehavior() const
-    {
-        return (canHaveLeadingExpansion() ? TextRun::AllowLeadingExpansion : TextRun::ForbidLeadingExpansion)
-            | (expansion() && nextLeafChild() ? TextRun::AllowTrailingExpansion : TextRun::ForbidTrailingExpansion);
-    }
+    friend class RenderText;
 };
 
-inline InlineTextBox* toInlineTextBox(InlineBox* inlineBox)
+inline RenderText* InlineTextBox::textObject() const
 {
-    ASSERT(!inlineBox || inlineBox->isInlineTextBox());
-    return static_cast<InlineTextBox*>(inlineBox);
-}
-
-inline const InlineTextBox* toInlineTextBox(const InlineBox* inlineBox)
-{
-    ASSERT(!inlineBox || inlineBox->isInlineTextBox());
-    return static_cast<const InlineTextBox*>(inlineBox);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toInlineTextBox(const InlineTextBox*);
-
-inline RenderText* InlineTextBox::textRenderer() const
-{
-    return toRenderText(renderer());
+    return static_cast<RenderText*>(m_object);
 }
 
 } // namespace WebCore

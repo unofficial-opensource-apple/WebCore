@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,14 +26,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef NetscapePlugInStreamLoader_h
-#define NetscapePlugInStreamLoader_h
-
 #include "ResourceLoader.h"
 #include <wtf/Forward.h>
 
-namespace WebCore {
+#ifdef __OBJC__
+#import "WebPlugInStreamLoaderDelegate.h"
+#endif
 
+namespace WebCore {
+#if USE(CFNETWORK)
     class NetscapePlugInStreamLoader;
 
     class NetscapePlugInStreamLoaderClient {
@@ -42,35 +43,44 @@ namespace WebCore {
         virtual void didReceiveData(NetscapePlugInStreamLoader*, const char*, int) = 0;
         virtual void didFail(NetscapePlugInStreamLoader*, const ResourceError&) = 0;
         virtual void didFinishLoading(NetscapePlugInStreamLoader*) { }
-        virtual bool wantsAllStreams() const { return false; }
-
-    protected:
-        virtual ~NetscapePlugInStreamLoaderClient() { }
     };
+#endif
+
+#ifdef __OBJC__
+        typedef id <WebPlugInStreamLoaderDelegate> PlugInStreamLoaderDelegate;
+#else
+        class NetscapePlugInStreamLoaderClient;
+        typedef NetscapePlugInStreamLoaderClient* PlugInStreamLoaderDelegate;
+#endif
 
     class NetscapePlugInStreamLoader : public ResourceLoader {
     public:
-        static PassRefPtr<NetscapePlugInStreamLoader> create(Frame*, NetscapePlugInStreamLoaderClient*, const ResourceRequest&);
+        static PassRefPtr<NetscapePlugInStreamLoader> create(Frame*, PlugInStreamLoaderDelegate);
         virtual ~NetscapePlugInStreamLoader();
 
         bool isDone() const;
 
-    private:
+#if PLATFORM(MAC) || USE(CFNETWORK)
         virtual void didReceiveResponse(const ResourceResponse&);
-        virtual void didReceiveData(const char*, int, long long encodedDataLength, bool allAtOnce);
-        virtual void didFinishLoading(double finishTime);
+        virtual void didReceiveData(const char *, int, long long lengthReceived, bool allAtOnce);
+        virtual void didFinishLoading();
         virtual void didFail(const ResourceError&);
 
         virtual void releaseResources();
+#endif
 
-        NetscapePlugInStreamLoader(Frame*, NetscapePlugInStreamLoaderClient*);
+    private:
+        NetscapePlugInStreamLoader(Frame*, PlugInStreamLoaderDelegate);
 
-        virtual void willCancel(const ResourceError&);
-        virtual void didCancel(const ResourceError&);
+#if PLATFORM(MAC) || USE(CFNETWORK)
+        virtual void didCancel(const ResourceError& error);
+#endif
 
+#if PLATFORM(MAC)
+        RetainPtr<PlugInStreamLoaderDelegate > m_stream;
+#elif USE(CFNETWORK)
         NetscapePlugInStreamLoaderClient* m_client;
+#endif
     };
 
 }
-
-#endif // NetscapePlugInStreamLoader_h

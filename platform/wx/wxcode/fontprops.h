@@ -47,5 +47,3 @@ private:
     float m_xHeight;
         
 };
-
-bool wxFontContainsCharacters(void* font, const UChar* characters, int length);

@@ -28,10 +28,7 @@
 
 module window {
 
-    interface [
-        JSGenerateIsReachable=ImplFrame,
-        OmitConstructor
-    ] BarInfo {
+    interface BarInfo {
         readonly attribute boolean visible;
     };
 

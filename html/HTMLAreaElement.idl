@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,18 +20,16 @@
 
 module html {
 
-    interface HTMLAreaElement : HTMLElement {
-        attribute [Reflect] DOMString alt;
-        attribute [Reflect] DOMString coords;
-        attribute [Reflect, URL] DOMString href;
-        attribute [Reflect] boolean noHref;
-        attribute [Reflect] DOMString ping;
-        attribute [Reflect] DOMString shape;
-        attribute [Reflect] DOMString target;
+    interface [GenerateConstructor] HTMLAreaElement : HTMLElement {
+        attribute [ConvertNullToNullString] DOMString accessKey;
+        attribute [ConvertNullToNullString] DOMString alt;
+        attribute [ConvertNullToNullString] DOMString coords;
+        attribute [ConvertNullToNullString] DOMString href;
+        attribute boolean noHref;
+        attribute [ConvertNullToNullString] DOMString shape;
+        attribute long tabIndex;
+        attribute [ConvertNullToNullString] DOMString target;
 
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        attribute [Reflect] DOMString accessKey;
-#endif
         // IE Extensions
         readonly attribute DOMString hash;
         readonly attribute DOMString host;
@@ -41,7 +39,7 @@ module html {
         readonly attribute DOMString protocol;
         readonly attribute DOMString search;
 
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
+#if defined(LANGUAGE_OBJECTIVE_C)
         // Objective-C extension:
         readonly attribute URL absoluteLinkURL;
 #endif

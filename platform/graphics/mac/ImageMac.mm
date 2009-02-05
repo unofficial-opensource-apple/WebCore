@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,18 +27,11 @@
 #import "BitmapImage.h"
 
 #import "FloatRect.h"
+#import "FoundationExtras.h"
 #import "GraphicsContext.h"
 #import "PlatformString.h"
-#import "SharedBuffer.h"
-
-@interface WebCoreBundleFinder : NSObject
-@end
-
-@implementation WebCoreBundleFinder
-@end
-
-#include <CoreGraphics/CoreGraphics.h>
-#include <ImageIO/ImageIO.h>
+#import "WebCoreFrameBridge.h"
+#import "WebCoreSystemInterface.h"
 
 namespace WebCore {
 
@@ -51,25 +44,21 @@ void BitmapImage::invalidatePlatformData()
     if (m_frames.size() != 1)
         return;
 
+    m_nsImage = 0;
     m_tiffRep = 0;
 }
 
-PassRefPtr<Image> Image::loadPlatformResource(const char *name)
+Image* Image::loadPlatformResource(const char *name)
 {
-    NSBundle *bundle = [NSBundle bundleForClass:[WebCoreBundleFinder class]];
-    NSString *imagePath = [bundle pathForResource:[NSString stringWithUTF8String:name] ofType:@"png"];
+    NSBundle *bundle = [NSBundle bundleForClass:[WebCoreFrameBridge class]];
+    NSString *imagePath = [bundle pathForResource:[NSString stringWithUTF8String:name] ofType:@"tiff"];
     NSData *namedImageData = [NSData dataWithContentsOfFile:imagePath];
     if (namedImageData) {
-        RefPtr<Image> image = BitmapImage::create();
+        Image* image = new BitmapImage;
         image->setData(SharedBuffer::wrapNSData(namedImageData), true);
-        return image.release();
+        return image;
     }
-
-    // We have reports indicating resource loads are failing, but we don't yet know the root cause(s).
-    // Two theories are bad installs (image files are missing), and too-many-open-files.
-    // See rdar://5607381
-    ASSERT_NOT_REACHED();
-    return Image::nullImage();
+    return 0;
 }
 
 CFDataRef BitmapImage::getTIFFRepresentation()
@@ -96,19 +85,32 @@ CFDataRef BitmapImage::getTIFFRepresentation()
     
     RetainPtr<CFMutableDataRef> data(AdoptCF, CFDataCreateMutable(0, 0));
     // FIXME:  Use type kCGImageTypeIdentifierTIFF constant once is becomes available in the API
-    RetainPtr<CGImageDestinationRef> destination(AdoptCF, CGImageDestinationCreateWithData(data.get(), CFSTR("public.tiff"), numValidFrames, 0));
-
+    CGImageDestinationRef destination = CGImageDestinationCreateWithData(data.get(), CFSTR("public.tiff"), numValidFrames, 0);
+    
     if (!destination)
         return 0;
     
     for (unsigned i = 0; i < numValidFrames; ++i)
-        CGImageDestinationAddImage(destination.get(), images[i], 0);
+        CGImageDestinationAddImage(destination, images[i], 0);
 
-    CGImageDestinationFinalize(destination.get());
+    CGImageDestinationFinalize(destination);
+    CFRelease(destination);
 
     m_tiffRep = data;
     return m_tiffRep.get();
 }
 
+NSImage* BitmapImage::getNSImage()
+{
+    if (m_nsImage)
+        return m_nsImage.get();
+
+    CFDataRef data = getTIFFRepresentation();
+    if (!data)
+        return 0;
+    
+    m_nsImage.adoptNS([[NSImage alloc] initWithData:(NSData*)data]);
+    return m_nsImage.get();
+}
 
 }

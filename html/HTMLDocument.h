@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,8 +25,6 @@
 
 #include "CachedResourceClient.h"
 #include "Document.h"
-#include <wtf/HashCountedSet.h>
-#include <wtf/text/AtomicStringHash.h>
 
 namespace WebCore {
 
@@ -35,15 +33,16 @@ class HTMLElement;
 
 class HTMLDocument : public Document, public CachedResourceClient {
 public:
-    static PassRefPtr<HTMLDocument> create(Frame* frame, const KURL& url)
-    {
-        return adoptRef(new HTMLDocument(frame, url));
-    }
-    static PassRefPtr<HTMLDocument> createSynthesizedDocument(Frame* frame, const KURL& url)
-    {
-        return adoptRef(new HTMLDocument(frame, url, true));
-    }
+    HTMLDocument(DOMImplementation*, Frame*);
     virtual ~HTMLDocument();
+
+    virtual bool isHTMLDocument() const { return true; }
+
+    String lastModified() const;
+    String cookie() const;
+    void setCookie(const String&);
+
+    void setBody(HTMLElement*, ExceptionCode&);
 
     int width();
     int height();
@@ -53,11 +52,6 @@ public:
 
     String designMode() const;
     void setDesignMode(const String&);
-
-    virtual void setCompatibilityModeFromDoctype();
-
-    Element* activeElement();
-    bool hasFocus();
 
     String bgColor();
     void setBgColor(const String&);
@@ -70,47 +64,32 @@ public:
     String vlinkColor();
     void setVlinkColor(const String&);
 
-    void clear();
-
     void captureEvents();
     void releaseEvents();
 
-    void addNamedItem(const AtomicString& name);
-    void removeNamedItem(const AtomicString& name);
-    bool hasNamedItem(AtomicStringImpl* name);
+    virtual Tokenizer* createTokenizer();
 
-    void addExtraNamedItem(const AtomicString& name);
-    void removeExtraNamedItem(const AtomicString& name);
-    bool hasExtraNamedItem(AtomicStringImpl* name);
+    virtual bool childAllowed(Node*);
 
-protected:
-    HTMLDocument(Frame*, const KURL&, bool isSynthesized = false);
+    virtual PassRefPtr<Element> createElement(const String& tagName, ExceptionCode&);
+
+    virtual void determineParseMode(const String&);
+
+    void addNamedItem(const String& name);
+    void removeNamedItem(const String& name);
+    bool hasNamedItem(const String& name);
+
+    void addDocExtraNamedItem(const String& name);
+    void removeDocExtraNamedItem(const String& name);
+    bool hasDocExtraNamedItem(const String& name);
+
+    typedef HashMap<StringImpl*, int> NameCountMap;
 
 private:
-    virtual PassRefPtr<Element> createElement(const AtomicString& tagName, ExceptionCode&);
-
-    virtual bool isFrameSet() const;
-    virtual PassRefPtr<DocumentParser> createParser();
-
-    void addItemToMap(HashCountedSet<AtomicStringImpl*>&, const AtomicString&);
-    void removeItemFromMap(HashCountedSet<AtomicStringImpl*>&, const AtomicString&);
-
-    HashCountedSet<AtomicStringImpl*> m_namedItemCounts;
-    HashCountedSet<AtomicStringImpl*> m_extraNamedItemCounts;
+    NameCountMap namedItemCounts;
+    NameCountMap docExtraNamedItemCounts;
 };
 
-inline bool HTMLDocument::hasNamedItem(AtomicStringImpl* name)
-{
-    ASSERT(name);
-    return m_namedItemCounts.contains(name);
-}
+} // namespace
 
-inline bool HTMLDocument::hasExtraNamedItem(AtomicStringImpl* name)
-{
-    ASSERT(name);
-    return m_extraNamedItemCounts.contains(name);
-}
-
-} // namespace WebCore
-
-#endif // HTMLDocument_h
+#endif

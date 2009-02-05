@@ -24,15 +24,13 @@
  */
 
 #include "config.h"
-
 #include "Pasteboard.h"
+
 #include "DocumentFragment.h"
 #include "Editor.h"
-#include "Frame.h"
-#include "KURL.h"
 #include "markup.h"
-#include "NotImplemented.h"
 #include "PlatformString.h"
+#include "KURL.h"
 
 #include <wx/defs.h>
 #include <wx/dataobj.h>
@@ -52,15 +50,11 @@ Pasteboard* Pasteboard::generalPasteboard()
 
 void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
-    if (wxTheClipboard->Open()) {
-        wxTheClipboard->SetData( new wxTextDataObject(frame->editor()->selectedText()) );
-        wxTheClipboard->Close();
-    }
-}
-
-void Pasteboard::writePlainText(const String& text)
-{
-    if (wxTheClipboard->Open()) {
+    if (wxTheClipboard->Open())
+    {
+        String text = frame->selectedText();
+        text.replace('\\', frame->backslashAsCurrencySymbol());
+        
         wxTheClipboard->SetData( new wxTextDataObject(text) );
         wxTheClipboard->Close();
     }
@@ -68,46 +62,27 @@ void Pasteboard::writePlainText(const String& text)
 
 bool Pasteboard::canSmartReplace()
 {
-    notImplemented();
     return false;
 }
 
 String Pasteboard::plainText(Frame* frame)
 {
-    notImplemented();
     return String();
 }
 
 PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefPtr<Range> context,
                                                           bool allowPlainText, bool& chosePlainText)
 {
-    RefPtr<DocumentFragment> fragment = 0;
-    if (wxTheClipboard->Open()) {
-        if (allowPlainText && wxTheClipboard->IsSupported( wxDF_TEXT )) {
-            wxTextDataObject data;
-            wxTheClipboard->GetData( data );
-            chosePlainText = true;
-            fragment = createFragmentFromText(context.get(), data.GetText());
-        }
-        wxTheClipboard->Close();
-    }
-    if (fragment)
-        return fragment.release();
-    
     return 0;
 }
 
 void Pasteboard::writeURL(const KURL& url, const String&, Frame*)
 {
-    if (wxTheClipboard->Open()) {
-        wxTheClipboard->SetData( new wxTextDataObject( url.string() ) );
+    if (wxTheClipboard->Open())
+    {
+        wxTheClipboard->SetData( new wxTextDataObject( url.url() ) );
         wxTheClipboard->Close();
     }
-}
-
-void Pasteboard::writeClipboard(Clipboard*)
-{
-    notImplemented();
 }
 
 void Pasteboard::clear()
@@ -115,9 +90,8 @@ void Pasteboard::clear()
     wxTheClipboard->Clear();
 }
 
-void Pasteboard::writeImage(Node*, const KURL&, const String& title)
+void Pasteboard::writeImage(const HitTestResult&)
 {
-    notImplemented();
 }
     
 }

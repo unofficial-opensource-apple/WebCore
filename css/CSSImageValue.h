@@ -1,6 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2008, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,46 +23,23 @@
 #ifndef CSSImageValue_h
 #define CSSImageValue_h
 
-#include "CSSValue.h"
-#include <wtf/RefPtr.h>
+#include "CSSPrimitiveValue.h"
+#include "CachedResourceClient.h"
 
 namespace WebCore {
 
-class CachedResourceLoader;
-class StyleCachedImage;
-class StyleImage;
+class DocLoader;
 
-class CSSImageValue : public CSSValue {
+class CSSImageValue : public CSSPrimitiveValue, public CachedResourceClient {
 public:
-    static PassRefPtr<CSSImageValue> create(const String& url) { return adoptRef(new CSSImageValue(url)); }
-    static PassRefPtr<CSSImageValue> create(const String& url, StyleImage* image) { return adoptRef(new CSSImageValue(url, image)); }
-    ~CSSImageValue();
+    CSSImageValue();
+    CSSImageValue(const String& url, StyleBase*);
+    virtual ~CSSImageValue();
 
-    StyleCachedImage* cachedImage(CachedResourceLoader*);
-    // Returns a StyleCachedImage if the image is cached already, otherwise a StylePendingImage.
-    StyleImage* cachedOrPendingImage();
-
-    const String& url() { return m_url; }
-
-    String customCssText() const;
-
-    PassRefPtr<CSSValue> cloneForCSSOM() const;
-
-    bool hasFailedOrCanceledSubresources() const;
+    CachedImage* image(DocLoader*);
 
 protected:
-    CSSImageValue(ClassType, const String& url);
-
-    StyleCachedImage* cachedImage(CachedResourceLoader*, const String& url);
-    String cachedImageURL();
-    void clearCachedImage();
-
-private:
-    explicit CSSImageValue(const String& url);
-    CSSImageValue(const String& url, StyleImage*);
-
-    String m_url;
-    RefPtr<StyleImage> m_image;
+    CachedImage* m_image;
     bool m_accessedImage;
 };
 

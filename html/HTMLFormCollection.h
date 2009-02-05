@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,7 +21,6 @@
  * Boston, MA 02110-1301, USA.
  *
  */
-
 #ifndef HTMLFormCollection_h
 #define HTMLFormCollection_h
 
@@ -27,32 +28,32 @@
 
 namespace WebCore {
 
-class HTMLFormElement;
 class QualifiedName;
 
-// This class is just a big hack to find form elements even in malformed HTML elements.
-// The famous <table><tr><form><td> problem.
-
-class HTMLFormCollection : public HTMLCollection {
+// this whole class is just a big hack to find form elements even in
+// malformed HTML elements
+// the famous <table><tr><form><td> problem
+class HTMLFormCollection : public HTMLCollection
+{
 public:
-    static PassOwnPtr<HTMLFormCollection> create(HTMLFormElement*);
+    // base must inherit HTMLGenericFormElement or this won't work
+    HTMLFormCollection(Node* _base);
+    ~HTMLFormCollection();
 
-    virtual ~HTMLFormCollection();
+    virtual Node *item ( unsigned index ) const;
+    virtual Node *firstItem() const;
+    virtual Node *nextItem() const;
 
-    virtual Node* item(unsigned index) const;
-    virtual Node* nextItem() const;
+    virtual Node *namedItem ( const String &name, bool caseSensitive = true ) const;
+    virtual Node *nextNamedItem( const String &name ) const;
 
-    virtual Node* namedItem(const AtomicString& name) const;
-
-private:
-    HTMLFormCollection(HTMLFormElement*);
-
+protected:
     virtual void updateNameCache() const;
     virtual unsigned calcLength() const;
-
-    Element* getNamedItem(const QualifiedName& attrName, const AtomicString& name) const;
-    Element* getNamedFormItem(const QualifiedName& attrName, const String& name, int duplicateNumber) const;
-
+    virtual Node *getNamedItem(Node* current, const QualifiedName& attrName, const String& name, bool caseSensitive) const;
+    virtual Node *nextNamedItemInternal( const String &name ) const;
+private:
+    Node* getNamedFormItem(const QualifiedName& attrName, const String& name, int duplicateNumber, bool caseSensitive) const;
     mutable int currentPos;
 };
 

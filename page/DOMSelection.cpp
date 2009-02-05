@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2007 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,482 +30,188 @@
 #include "config.h"
 #include "DOMSelection.h"
 
-#include "Document.h"
-#include "ExceptionCode.h"
 #include "Frame.h"
-#include "FrameSelection.h"
 #include "Node.h"
 #include "PlatformString.h"
 #include "Range.h"
-#include "TextIterator.h"
-#include "TreeScope.h"
-#include "htmlediting.h"
+#include "SelectionController.h"
 
 namespace WebCore {
 
-static Node* selectionShadowAncestor(Frame* frame)
-{
-    Node* node = frame->selection()->selection().base().anchorNode();
-    if (!node)
-        return 0;
-
-    if (!node->isInShadowTree())
-        return 0;
-
-    Node* shadowAncestor = node->shadowAncestorNode();
-    while (shadowAncestor->isInShadowTree())
-        shadowAncestor = shadowAncestor->shadowAncestorNode();
-    return shadowAncestor;
-}
-
 DOMSelection::DOMSelection(Frame* frame)
-    : DOMWindowProperty(frame)
+    : m_frame(frame)
 {
 }
 
-const VisibleSelection& DOMSelection::visibleSelection() const
+Frame* DOMSelection::frame() const
 {
-    ASSERT(m_frame);
-    return m_frame->selection()->selection();
+    return m_frame;
 }
 
-static Position anchorPosition(const VisibleSelection& selection)
+void DOMSelection::disconnectFrame()
 {
-    Position anchor = selection.isBaseFirst() ? selection.start() : selection.end();
-    return anchor.parentAnchoredEquivalent();
-}
-
-static Position focusPosition(const VisibleSelection& selection)
-{
-    Position focus = selection.isBaseFirst() ? selection.end() : selection.start();
-    return focus.parentAnchoredEquivalent();
-}
-
-static Position basePosition(const VisibleSelection& selection)
-{
-    return selection.base().parentAnchoredEquivalent();
-}
-
-static Position extentPosition(const VisibleSelection& selection)
-{
-    return selection.extent().parentAnchoredEquivalent();
+    m_frame = 0;
 }
 
 Node* DOMSelection::anchorNode() const
 {
     if (!m_frame)
         return 0;
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame))
-        return shadowAncestor->parentNodeGuaranteedHostFree();
-    return anchorPosition(visibleSelection()).containerNode();
-}
-
-int DOMSelection::anchorOffset() const
-{
-    if (!m_frame)
-        return 0;
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame))
-        return shadowAncestor->nodeIndex();
-    return anchorPosition(visibleSelection()).offsetInContainerNode();
-}
-
-Node* DOMSelection::focusNode() const
-{
-    if (!m_frame)
-        return 0;
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame))
-        return shadowAncestor->parentNodeGuaranteedHostFree();
-    return focusPosition(visibleSelection()).containerNode();
-}
-
-int DOMSelection::focusOffset() const
-{
-    if (!m_frame)
-        return 0;
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame))
-        return shadowAncestor->nodeIndex();
-    return focusPosition(visibleSelection()).offsetInContainerNode();
+    return m_frame->selectionController()->anchorNode();
 }
 
 Node* DOMSelection::baseNode() const
 {
     if (!m_frame)
         return 0;
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame))
-        return shadowAncestor->parentNodeGuaranteedHostFree();
-    return basePosition(visibleSelection()).containerNode();
+    return m_frame->selectionController()->baseNode();
+}
+
+int DOMSelection::anchorOffset() const
+{
+    if (!m_frame)
+        return 0;
+    return m_frame->selectionController()->anchorOffset();
 }
 
 int DOMSelection::baseOffset() const
 {
     if (!m_frame)
         return 0;
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame))
-        return shadowAncestor->nodeIndex();
-    return basePosition(visibleSelection()).offsetInContainerNode();
+    return m_frame->selectionController()->baseOffset();
+}
+
+Node* DOMSelection::focusNode() const
+{
+    if (!m_frame)
+        return 0;
+    return m_frame->selectionController()->focusNode();
 }
 
 Node* DOMSelection::extentNode() const
 {
     if (!m_frame)
         return 0;
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame))
-        return shadowAncestor->parentNodeGuaranteedHostFree();
-    return extentPosition(visibleSelection()).containerNode();
+    return m_frame->selectionController()->extentNode();
+}
+
+int DOMSelection::focusOffset() const
+{
+    if (!m_frame)
+        return 0;
+    return m_frame->selectionController()->focusOffset();
 }
 
 int DOMSelection::extentOffset() const
 {
     if (!m_frame)
         return 0;
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame))
-        return shadowAncestor->nodeIndex();
-    return extentPosition(visibleSelection()).offsetInContainerNode();
+    return m_frame->selectionController()->extentOffset();
 }
 
 bool DOMSelection::isCollapsed() const
 {
-    if (!m_frame || selectionShadowAncestor(m_frame))
-        return true;
-    return !m_frame->selection()->isRange();
+    if (!m_frame)
+        return false;
+    return m_frame->selectionController()->isCollapsed();
 }
 
 String DOMSelection::type() const
 {
     if (!m_frame)
         return String();
-
-    FrameSelection* selection = m_frame->selection();
-
-    // This is a WebKit DOM extension, incompatible with an IE extension
-    // IE has this same attribute, but returns "none", "text" and "control"
-    // http://msdn.microsoft.com/en-us/library/ms534692(VS.85).aspx
-    if (selection->isNone())
-        return "None";
-    if (selection->isCaret())
-        return "Caret";
-    return "Range";
+    return m_frame->selectionController()->type();
 }
 
 int DOMSelection::rangeCount() const
 {
     if (!m_frame)
         return 0;
-    return m_frame->selection()->isNone() ? 0 : 1;
+    return m_frame->selectionController()->rangeCount();
 }
 
 void DOMSelection::collapse(Node* node, int offset, ExceptionCode& ec)
 {
     if (!m_frame)
         return;
-
-    if (offset < 0) {
-        ec = INDEX_SIZE_ERR;
-        return;
-    }
-
-    if (!isValidForPosition(node))
-        return;
-
-    // FIXME: Eliminate legacy editing positions
-    m_frame->selection()->moveTo(VisiblePosition(createLegacyEditingPosition(node, offset), DOWNSTREAM));
+    m_frame->selectionController()->collapse(node, offset, ec);
 }
 
-void DOMSelection::collapseToEnd(ExceptionCode& ec)
+void DOMSelection::collapseToEnd()
 {
     if (!m_frame)
         return;
-
-    const VisibleSelection& selection = m_frame->selection()->selection();
-
-    if (selection.isNone()) {
-        ec = INVALID_STATE_ERR;
-        return;
-    }
-
-    m_frame->selection()->moveTo(VisiblePosition(selection.end(), DOWNSTREAM));
+    m_frame->selectionController()->collapseToEnd();
 }
 
-void DOMSelection::collapseToStart(ExceptionCode& ec)
+void DOMSelection::collapseToStart()
 {
     if (!m_frame)
         return;
-
-    const VisibleSelection& selection = m_frame->selection()->selection();
-
-    if (selection.isNone()) {
-        ec = INVALID_STATE_ERR;
-        return;
-    }
-
-    m_frame->selection()->moveTo(VisiblePosition(selection.start(), DOWNSTREAM));
+    m_frame->selectionController()->collapseToStart();
 }
 
 void DOMSelection::empty()
 {
     if (!m_frame)
         return;
-    m_frame->selection()->clear();
+    m_frame->selectionController()->empty();
 }
 
 void DOMSelection::setBaseAndExtent(Node* baseNode, int baseOffset, Node* extentNode, int extentOffset, ExceptionCode& ec)
 {
     if (!m_frame)
         return;
-
-    if (baseOffset < 0 || extentOffset < 0) {
-        ec = INDEX_SIZE_ERR;
-        return;
-    }
-
-    if (!isValidForPosition(baseNode) || !isValidForPosition(extentNode))
-        return;
-
-    // FIXME: Eliminate legacy editing positions
-    VisiblePosition visibleBase = VisiblePosition(createLegacyEditingPosition(baseNode, baseOffset), DOWNSTREAM);
-    VisiblePosition visibleExtent = VisiblePosition(createLegacyEditingPosition(extentNode, extentOffset), DOWNSTREAM);
-
-    m_frame->selection()->moveTo(visibleBase, visibleExtent);
+    m_frame->selectionController()->setBaseAndExtent(baseNode, baseOffset, extentNode, extentOffset, ec);
 }
 
 void DOMSelection::setPosition(Node* node, int offset, ExceptionCode& ec)
 {
     if (!m_frame)
         return;
-    if (offset < 0) {
-        ec = INDEX_SIZE_ERR;
-        return;
-    }
-
-    if (!isValidForPosition(node))
-        return;
-
-    // FIXME: Eliminate legacy editing positions
-    m_frame->selection()->moveTo(VisiblePosition(createLegacyEditingPosition(node, offset), DOWNSTREAM));
+    m_frame->selectionController()->setPosition(node, offset, ec);
 }
 
-void DOMSelection::modify(const String& alterString, const String& directionString, const String& granularityString)
+void DOMSelection::setPosition(Node* node, ExceptionCode& ec)
 {
     if (!m_frame)
         return;
-
-    FrameSelection::EAlteration alter;
-    if (equalIgnoringCase(alterString, "extend"))
-        alter = FrameSelection::AlterationExtend;
-    else if (equalIgnoringCase(alterString, "move"))
-        alter = FrameSelection::AlterationMove;
-    else
-        return;
-
-    SelectionDirection direction;
-    if (equalIgnoringCase(directionString, "forward"))
-        direction = DirectionForward;
-    else if (equalIgnoringCase(directionString, "backward"))
-        direction = DirectionBackward;
-    else if (equalIgnoringCase(directionString, "left"))
-        direction = DirectionLeft;
-    else if (equalIgnoringCase(directionString, "right"))
-        direction = DirectionRight;
-    else
-        return;
-
-    TextGranularity granularity;
-    if (equalIgnoringCase(granularityString, "character"))
-        granularity = CharacterGranularity;
-    else if (equalIgnoringCase(granularityString, "word"))
-        granularity = WordGranularity;
-    else if (equalIgnoringCase(granularityString, "sentence"))
-        granularity = SentenceGranularity;
-    else if (equalIgnoringCase(granularityString, "line"))
-        granularity = LineGranularity;
-    else if (equalIgnoringCase(granularityString, "paragraph"))
-        granularity = ParagraphGranularity;
-    else if (equalIgnoringCase(granularityString, "lineboundary"))
-        granularity = LineBoundary;
-    else if (equalIgnoringCase(granularityString, "sentenceboundary"))
-        granularity = SentenceBoundary;
-    else if (equalIgnoringCase(granularityString, "paragraphboundary"))
-        granularity = ParagraphBoundary;
-    else if (equalIgnoringCase(granularityString, "documentboundary"))
-        granularity = DocumentBoundary;
-    else
-        return;
-
-    m_frame->selection()->modify(alter, direction, granularity);
+    m_frame->selectionController()->setPosition(node, 0, ec);
 }
 
-void DOMSelection::extend(Node* node, int offset, ExceptionCode& ec)
+void DOMSelection::modify(const String& alter, const String& direction, const String& granularity)
 {
     if (!m_frame)
         return;
-
-    if (!node) {
-        ec = TYPE_MISMATCH_ERR;
-        return;
-    }
-
-    if (offset < 0 || offset > (node->offsetInCharacters() ? caretMaxOffset(node) : (int)node->childNodeCount())) {
-        ec = INDEX_SIZE_ERR;
-        return;
-    }
-
-    if (!isValidForPosition(node))
-        return;
-
-    // FIXME: Eliminate legacy editing positions
-    m_frame->selection()->setExtent(VisiblePosition(createLegacyEditingPosition(node, offset), DOWNSTREAM));
+    m_frame->selectionController()->modify(alter, direction, granularity);
 }
 
 PassRefPtr<Range> DOMSelection::getRangeAt(int index, ExceptionCode& ec)
 {
     if (!m_frame)
         return 0;
-
-    if (index < 0 || index >= rangeCount()) {
-        ec = INDEX_SIZE_ERR;
-        return 0;
-    }
-
-    // If you're hitting this, you've added broken multi-range selection support
-    ASSERT(rangeCount() == 1);
-
-    if (Node* shadowAncestor = selectionShadowAncestor(m_frame)) {
-        ContainerNode* container = shadowAncestor->parentNodeGuaranteedHostFree();
-        int offset = shadowAncestor->nodeIndex();
-        return Range::create(shadowAncestor->document(), container, offset, container, offset);
-    }
-
-    const VisibleSelection& selection = m_frame->selection()->selection();
-    return selection.firstRange();
+    return m_frame->selectionController()->getRangeAt(index, ec);
 }
 
 void DOMSelection::removeAllRanges()
 {
     if (!m_frame)
         return;
-    m_frame->selection()->clear();
+    m_frame->selectionController()->removeAllRanges();
 }
 
-void DOMSelection::addRange(Range* r)
+void DOMSelection::addRange(Range* range)
 {
     if (!m_frame)
         return;
-    if (!r)
-        return;
-
-    FrameSelection* selection = m_frame->selection();
-
-    if (selection->isNone()) {
-        selection->setSelection(VisibleSelection(r));
-        return;
-    }
-
-    RefPtr<Range> range = selection->selection().toNormalizedRange();
-    ExceptionCode ec = 0;
-    if (r->compareBoundaryPoints(Range::START_TO_START, range.get(), ec) == -1) {
-        // We don't support discontiguous selection. We don't do anything if r and range don't intersect.
-        if (r->compareBoundaryPoints(Range::START_TO_END, range.get(), ec) > -1) {
-            if (r->compareBoundaryPoints(Range::END_TO_END, range.get(), ec) == -1)
-                // The original range and r intersect.
-                selection->setSelection(VisibleSelection(r->startPosition(), range->endPosition(), DOWNSTREAM));
-            else
-                // r contains the original range.
-                selection->setSelection(VisibleSelection(r));
-        }
-    } else {
-        // We don't support discontiguous selection. We don't do anything if r and range don't intersect.
-        if (r->compareBoundaryPoints(Range::END_TO_START, range.get(), ec) < 1 && !ec) {
-            if (r->compareBoundaryPoints(Range::END_TO_END, range.get(), ec) == -1)
-                // The original range contains r.
-                selection->setSelection(VisibleSelection(range.get()));
-            else
-                // The original range and r intersect.
-                selection->setSelection(VisibleSelection(range->startPosition(), r->endPosition(), DOWNSTREAM));
-        }
-    }
-}
-
-void DOMSelection::deleteFromDocument()
-{
-    if (!m_frame)
-        return;
-
-    FrameSelection* selection = m_frame->selection();
-
-    if (selection->isNone())
-        return;
-
-    if (isCollapsed())
-        selection->modify(FrameSelection::AlterationExtend, DirectionBackward, CharacterGranularity);
-
-    RefPtr<Range> selectedRange = selection->selection().toNormalizedRange();
-    if (!selectedRange)
-        return;
-
-    ExceptionCode ec = 0;
-    selectedRange->deleteContents(ec);
-    ASSERT(!ec);
-
-    setBaseAndExtent(selectedRange->startContainer(ec), selectedRange->startOffset(ec), selectedRange->startContainer(ec), selectedRange->startOffset(ec), ec);
-    ASSERT(!ec);
-}
-
-bool DOMSelection::containsNode(const Node* n, bool allowPartial) const
-{
-    if (!m_frame)
-        return false;
-
-    FrameSelection* selection = m_frame->selection();
-
-    if (!n || m_frame->document() != n->document() || selection->isNone())
-        return false;
-
-    ContainerNode* parentNode = n->parentNode();
-    unsigned nodeIndex = n->nodeIndex();
-    RefPtr<Range> selectedRange = selection->selection().toNormalizedRange();
-
-    if (!parentNode)
-        return false;
-
-    ExceptionCode ec = 0;
-    bool nodeFullySelected = Range::compareBoundaryPoints(parentNode, nodeIndex, selectedRange->startContainer(ec), selectedRange->startOffset(ec), ec) >= 0 && !ec
-        && Range::compareBoundaryPoints(parentNode, nodeIndex + 1, selectedRange->endContainer(ec), selectedRange->endOffset(ec), ec) <= 0 && !ec;
-    ASSERT(!ec);
-    if (nodeFullySelected)
-        return true;
-
-    bool nodeFullyUnselected = (Range::compareBoundaryPoints(parentNode, nodeIndex, selectedRange->endContainer(ec), selectedRange->endOffset(ec), ec) > 0 && !ec)
-        || (Range::compareBoundaryPoints(parentNode, nodeIndex + 1, selectedRange->startContainer(ec), selectedRange->startOffset(ec), ec) < 0 && !ec);
-    ASSERT(!ec);
-    if (nodeFullyUnselected)
-        return false;
-
-    return allowPartial || n->isTextNode();
-}
-
-void DOMSelection::selectAllChildren(Node* n, ExceptionCode& ec)
-{
-    if (!n)
-        return;
-
-    // This doesn't (and shouldn't) select text node characters.
-    setBaseAndExtent(n, 0, n, n->childNodeCount(), ec);
+    m_frame->selectionController()->addRange(range);
 }
 
 String DOMSelection::toString()
 {
     if (!m_frame)
         return String();
-
-    return plainText(m_frame->selection()->selection().toNormalizedRange().get());
-}
-
-bool DOMSelection::isValidForPosition(Node* node) const
-{
-    ASSERT(m_frame);
-    if (!node)
-        return true;
-    return node->document() == m_frame->document();
+    return m_frame->selectionController()->toString();
 }
 
 } // namespace WebCore

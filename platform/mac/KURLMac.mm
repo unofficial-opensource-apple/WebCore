@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,68 +23,46 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#import "config.h"
+#include "config.h"
 #import "KURL.h"
 
 #import "FoundationExtras.h"
-#import <CoreFoundation/CFURL.h>
+#import <wtf/Assertions.h>
+#import <wtf/Vector.h>
 
 namespace WebCore {
 
-#if !USE(WTFURL)
-
-typedef Vector<char, 512> CharBuffer;
-extern CFURLRef createCFURLFromBuffer(const CharBuffer& buffer);
-
 KURL::KURL(NSURL *url)
 {
-    if (!url) {
-        parse(0);
-        return;
-    }
-
-    CFIndex bytesLength = CFURLGetBytes(reinterpret_cast<CFURLRef>(url), 0, 0);
-    Vector<char, 512> buffer(bytesLength + 1);
-    char* bytes = &buffer[0];
-    CFURLGetBytes(reinterpret_cast<CFURLRef>(url), reinterpret_cast<UInt8*>(bytes), bytesLength);
-    bytes[bytesLength] = '\0';
-    parse(bytes);
+    if (url) {
+        CFIndex bytesLength = CFURLGetBytes((CFURLRef)url, 0, 0);
+        Vector<char, 2048> buffer(bytesLength + 6);  // 5 for "file:", 1 for NUL terminator
+        char *bytes = &buffer[5];
+        CFURLGetBytes((CFURLRef)url, (UInt8 *)bytes, bytesLength);
+        bytes[bytesLength] = '\0';
+        if (bytes[0] == '/') {
+            buffer[0] = 'f';
+            buffer[1] = 'i';
+            buffer[2] = 'l';
+            buffer[3] = 'e';
+            buffer[4] = ':';
+            parse(buffer.data(), 0);
+        } else
+            parse(bytes, 0);
+    } else
+        parse(0, 0);
 }
 
-KURL::operator NSURL *() const
+NSURL *KURL::getNSURL() const
 {
+    if (urlString.isNull())
+        return nil;
+
+    // CFURL can't hold an empty URL, unlike NSURL
+    if (isEmpty())
+        return [NSURL URLWithString:@""];
+
     return HardAutorelease(createCFURL());
 }
-
-// We use the toll-free bridge between NSURL and CFURL to
-// create a CFURLRef supporting both empty and null values.
-CFURLRef KURL::createCFURL() const
-{
-    if (isNull())
-        return 0;
-
-    if (isEmpty())
-        return reinterpret_cast<CFURLRef>([[NSURL alloc] initWithString:@""]);
-
-    CharBuffer buffer;
-    copyToBuffer(buffer);
-    return createCFURLFromBuffer(buffer);
-}
-
-#else
-
-KURL::KURL(NSURL *)
-{
-    // FIXME: Add WTFURL Implementation.
-    invalidate();
-}
-
-KURL::operator NSURL *() const
-{
-    // FIXME: Add WTFURL Implementation.
-    return nil;
-}
-
-#endif
 
 }

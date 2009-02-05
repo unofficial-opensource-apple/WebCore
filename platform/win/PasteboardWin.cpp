@@ -26,13 +26,13 @@
 #include "config.h"
 #include "Pasteboard.h"
 
-#include "BitmapInfo.h"
 #include "ClipboardUtilitiesWin.h"
-#include "Document.h"
+#include "CString.h"
+#include "DeprecatedString.h"
 #include "DocumentFragment.h"
+#include "Document.h"
 #include "Element.h"
 #include "Frame.h"
-#include "HWndDC.h"
 #include "HitTestResult.h"
 #include "Image.h"
 #include "KURL.h"
@@ -41,10 +41,7 @@
 #include "Range.h"
 #include "RenderImage.h"
 #include "TextEncoding.h"
-#include "WebCoreInstanceHandle.h"
-#include "WindowsExtras.h"
 #include "markup.h"
-#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -55,8 +52,9 @@ static UINT WebSmartPasteFormat = 0;
 static LRESULT CALLBACK PasteboardOwnerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     LRESULT lresult = 0;
+    LONG_PTR longPtr = GetWindowLongPtr(hWnd, 0);
 
-    switch (message) {
+    switch(message) {
     case WM_RENDERFORMAT:
         // This message comes when SetClipboardData was sent a null data handle 
         // and now it's come time to put the data on the clipboard.
@@ -66,14 +64,12 @@ static LRESULT CALLBACK PasteboardOwnerWndProc(HWND hWnd, UINT message, WPARAM w
         // and now this application is about to quit, so it must put data on 
         // the clipboard before it exits.
         break;
-    case WM_DESTROY:
-        break;
-#if !OS(WINCE)
     case WM_DRAWCLIPBOARD:
+        break;
+    case WM_DESTROY:
         break;
     case WM_CHANGECBCHAIN:
         break;
-#endif
     default:
         lresult = DefWindowProc(hWnd, message, wParam, lParam);
         break;
@@ -88,13 +84,14 @@ Pasteboard* Pasteboard::generalPasteboard()
 }
 
 Pasteboard::Pasteboard()
-{
-    WNDCLASS wc;
-    memset(&wc, 0, sizeof(WNDCLASS));
-    wc.lpfnWndProc    = PasteboardOwnerWndProc;
-    wc.hInstance      = WebCore::instanceHandle();
-    wc.lpszClassName  = L"PasteboardOwnerWindowClass";
-    RegisterClass(&wc);
+{ 
+    // make a dummy HWND to be the Windows clipboard's owner
+    WNDCLASSEX wcex = {0};
+    wcex.cbSize = sizeof(WNDCLASSEX);
+    wcex.lpfnWndProc    = PasteboardOwnerWndProc;
+    wcex.hInstance      = Page::instanceHandle();
+    wcex.lpszClassName  = L"PasteboardOwnerWindowClass";
+    ::RegisterClassEx(&wcex);
 
     m_owner = ::CreateWindow(L"PasteboardOwnerWindowClass", L"PasteboardOwnerWindow", 0, 0, 0, 0, 0,
         HWND_MESSAGE, 0, 0, 0);
@@ -115,21 +112,18 @@ void Pasteboard::clear()
 void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
     clear();
-
+    
     // Put CF_HTML format on the pasteboard 
     if (::OpenClipboard(m_owner)) {
         ExceptionCode ec = 0;
-        Vector<char> data;
-        markupToCFHTML(createMarkup(selectedRange, 0, AnnotateForInterchange),
-            selectedRange->startContainer(ec)->document()->url().string(), data);
-        HGLOBAL cbData = createGlobalData(data);
+        HGLOBAL cbData = createGlobalData(markupToCF_HTML(createMarkup(selectedRange, 0, AnnotateForInterchange), selectedRange->startContainer(ec)->document()->URL()));
         if (!::SetClipboardData(HTMLClipboardFormat, cbData))
             ::GlobalFree(cbData);
         ::CloseClipboard();
     }
     
     // Put plain string on the pasteboard. CF_UNICODETEXT covers CF_TEXT as well
-    String str = frame->editor()->selectedText();
+    String str = frame->selectedText();
     replaceNewlinesWithWindowsStyleNewlines(str);
     replaceNBSPWithSpace(str);
     if (::OpenClipboard(m_owner)) {
@@ -142,25 +136,10 @@ void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete,
     // enable smart-replacing later on by putting dummy data on the pasteboard
     if (canSmartCopyOrDelete) {
         if (::OpenClipboard(m_owner)) {
-            ::SetClipboardData(WebSmartPasteFormat, 0);
+            ::SetClipboardData(WebSmartPasteFormat, NULL);
             ::CloseClipboard();
         }
         
-    }
-}
-
-void Pasteboard::writePlainText(const String& text)
-{
-    clear();
-
-    // Put plain string on the pasteboard. CF_UNICODETEXT covers CF_TEXT as well
-    String str = text;
-    replaceNewlinesWithWindowsStyleNewlines(str);
-    if (::OpenClipboard(m_owner)) {
-        HGLOBAL cbData = createGlobalData(str);
-        if (!::SetClipboardData(CF_UNICODETEXT, cbData))
-            ::GlobalFree(cbData);
-        ::CloseClipboard();
     }
 }
 
@@ -187,9 +166,7 @@ void Pasteboard::writeURL(const KURL& url, const String& titleStr, Frame* frame)
 
     // write to clipboard in format CF_HTML to be able to paste into contenteditable areas as a link
     if (::OpenClipboard(m_owner)) {
-        Vector<char> data;
-        markupToCFHTML(urlToMarkup(url, title), "", data);
-        HGLOBAL cbData = createGlobalData(data);
+        HGLOBAL cbData = createGlobalData(markupToCF_HTML(urlToMarkup(url, title), ""));
         if (!::SetClipboardData(HTMLClipboardFormat, cbData))
             ::GlobalFree(cbData);
         ::CloseClipboard();
@@ -197,7 +174,7 @@ void Pasteboard::writeURL(const KURL& url, const String& titleStr, Frame* frame)
 
     // bare-bones CF_UNICODETEXT support
     if (::OpenClipboard(m_owner)) {
-        HGLOBAL cbData = createGlobalData(url.string());
+        HGLOBAL cbData = createGlobalData(url.url());
         if (!::SetClipboardData(CF_UNICODETEXT, cbData))
             ::GlobalFree(cbData);
         ::CloseClipboard();
@@ -206,50 +183,50 @@ void Pasteboard::writeURL(const KURL& url, const String& titleStr, Frame* frame)
 
 void Pasteboard::writeImage(Node* node, const KURL&, const String&)
 {
-    ASSERT(node);
-
-    if (!(node->renderer() && node->renderer()->isImage()))
-        return;
-
-    RenderImage* renderer = toRenderImage(node->renderer());
-    CachedImage* cachedImage = renderer->cachedImage();
-    if (!cachedImage || cachedImage->errorOccurred())
-        return;
-    Image* image = cachedImage->imageForRenderer(renderer);
+    ASSERT(node && node->renderer() && node->renderer()->isImage());
+    RenderImage* renderer = static_cast<RenderImage*>(node->renderer());
+    CachedImage* cachedImage = static_cast<CachedImage*>(renderer->cachedImage());
+    ASSERT(cachedImage);
+    Image* image = cachedImage->image();
     ASSERT(image);
 
     clear();
 
-    HWndDC dc(0);
+    HDC dc = GetDC(0);
     HDC compatibleDC = CreateCompatibleDC(0);
     HDC sourceDC = CreateCompatibleDC(0);
-    OwnPtr<HBITMAP> resultBitmap = adoptPtr(CreateCompatibleBitmap(dc, image->width(), image->height()));
-    HGDIOBJ oldBitmap = SelectObject(compatibleDC, resultBitmap.get());
+    HBITMAP resultBitmap = CreateCompatibleBitmap(dc, image->width(), image->height());
+    HBITMAP oldBitmap = (HBITMAP)SelectObject(compatibleDC, resultBitmap);
 
-    BitmapInfo bmInfo = BitmapInfo::create(image->size());
-
+    BITMAPINFO bmInfo = {0};
+    bmInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmInfo.bmiHeader.biWidth = image->width();
+    bmInfo.bmiHeader.biHeight = image->height();
+    bmInfo.bmiHeader.biPlanes = 1;
+    bmInfo.bmiHeader.biBitCount = 32;
+    bmInfo.bmiHeader.biCompression = BI_RGB;
     HBITMAP coreBitmap = CreateDIBSection(dc, &bmInfo, DIB_RGB_COLORS, 0, 0, 0);
-    HGDIOBJ oldSource = SelectObject(sourceDC, coreBitmap);
+    HBITMAP oldSource = (HBITMAP)SelectObject(sourceDC, coreBitmap);
     image->getHBITMAP(coreBitmap);
 
-    BitBlt(compatibleDC, 0, 0, image->width(), image->height(), sourceDC, 0, 0, SRCCOPY);
-
-    SelectObject(sourceDC, oldSource);
-    DeleteObject(coreBitmap);
+    BLENDFUNCTION bf = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    AlphaBlend(compatibleDC, 0, 0, image->width(), image->height(),
+        sourceDC, 0, 0, image->width(), image->height(), bf);
 
     SelectObject(compatibleDC, oldBitmap);
-    DeleteDC(sourceDC);
+    SelectObject(sourceDC, oldSource);
+
+    DeleteObject(oldBitmap);
+    DeleteObject(oldSource);
+    DeleteObject(coreBitmap);
+    ReleaseDC(0, dc);
     DeleteDC(compatibleDC);
+    DeleteDC(sourceDC);
 
     if (::OpenClipboard(m_owner)) {
-        ::SetClipboardData(CF_BITMAP, resultBitmap.leakPtr());
+        ::SetClipboardData(CF_BITMAP, resultBitmap);
         ::CloseClipboard();
     }
-}
-
-void Pasteboard::writeClipboard(Clipboard*)
-{
-    notImplemented();
 }
 
 bool Pasteboard::canSmartReplace()
@@ -262,25 +239,25 @@ String Pasteboard::plainText(Frame* frame)
     if (::IsClipboardFormatAvailable(CF_UNICODETEXT) && ::OpenClipboard(m_owner)) {
         HANDLE cbData = ::GetClipboardData(CF_UNICODETEXT);
         if (cbData) {
-            UChar* buffer = static_cast<UChar*>(GlobalLock(cbData));
+            UChar* buffer = (UChar*)::GlobalLock(cbData);
             String fromClipboard(buffer);
-            GlobalUnlock(cbData);
+            ::GlobalUnlock(cbData);
             ::CloseClipboard();
             return fromClipboard;
-        }
-        ::CloseClipboard();
+        } else
+            ::CloseClipboard();
     }
 
     if (::IsClipboardFormatAvailable(CF_TEXT) && ::OpenClipboard(m_owner)) {
         HANDLE cbData = ::GetClipboardData(CF_TEXT);
         if (cbData) {
-            char* buffer = static_cast<char*>(GlobalLock(cbData));
+            char* buffer = (char*)::GlobalLock(cbData);
             String fromClipboard(buffer);
-            GlobalUnlock(cbData);
+            ::GlobalUnlock(cbData);
             ::CloseClipboard();
             return fromClipboard;
-        }
-        ::CloseClipboard();
+        } else
+            ::CloseClipboard();
     }
 
     return String();
@@ -295,11 +272,11 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
         HANDLE cbData = ::GetClipboardData(HTMLClipboardFormat);
         if (cbData) {
             SIZE_T dataSize = ::GlobalSize(cbData);
-            String cfhtml(UTF8Encoding().decode(static_cast<char*>(GlobalLock(cbData)), dataSize));
-            GlobalUnlock(cbData);
+            String cf_html(UTF8Encoding().decode((char*)::GlobalLock(cbData), dataSize));
+            ::GlobalUnlock(cbData);
             ::CloseClipboard();
 
-            PassRefPtr<DocumentFragment> fragment = fragmentFromCFHTML(frame->document(), cfhtml);
+            PassRefPtr<DocumentFragment> fragment = fragmentFromCF_HTML(frame->document(), cf_html);
             if (fragment)
                 return fragment;
         } else 
@@ -311,9 +288,9 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
         if (::OpenClipboard(m_owner)) {
             HANDLE cbData = ::GetClipboardData(CF_UNICODETEXT);
             if (cbData) {
-                UChar* buffer = static_cast<UChar*>(GlobalLock(cbData));
+                UChar* buffer = (UChar*)GlobalLock(cbData);
                 String str(buffer);
-                GlobalUnlock(cbData);
+                ::GlobalUnlock( cbData );
                 ::CloseClipboard();
                 RefPtr<DocumentFragment> fragment = createFragmentFromText(context.get(), str);
                 if (fragment)
@@ -328,9 +305,9 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
         if (::OpenClipboard(m_owner)) {
             HANDLE cbData = ::GetClipboardData(CF_TEXT);
             if (cbData) {
-                char* buffer = static_cast<char*>(GlobalLock(cbData));
+                char* buffer = (char*)GlobalLock(cbData);
                 String str(buffer);
-                GlobalUnlock(cbData);
+                ::GlobalUnlock( cbData );
                 ::CloseClipboard();
                 RefPtr<DocumentFragment> fragment = createFragmentFromText(context.get(), str);
                 if (fragment)

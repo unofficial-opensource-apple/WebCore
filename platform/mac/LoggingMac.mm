@@ -23,11 +23,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "config.h"
-
 #include "Logging.h"
-
-#if !LOG_DISABLED
 
 namespace WebCore {
 
@@ -45,7 +41,7 @@ static inline void initializeWithUserDefault(WTFLogChannel& channel)
     }
 }
 
-void initializeLoggingChannelsIfNecessary()
+void InitializeLoggingChannelsIfNecessary()
 {
     static bool haveInitializedLoggingChannels = false;
     if (haveInitializedLoggingChannels)
@@ -58,31 +54,16 @@ void initializeLoggingChannelsIfNecessary()
     initializeWithUserDefault(LogPopupBlocking);
     initializeWithUserDefault(LogEvents);
     initializeWithUserDefault(LogEditing);
-    initializeWithUserDefault(LogLiveConnect);
+    initializeWithUserDefault(LogTextConversion);
     initializeWithUserDefault(LogIconDatabase);
     initializeWithUserDefault(LogSQLDatabase);
     initializeWithUserDefault(LogSpellingAndGrammar);
     initializeWithUserDefault(LogBackForward);
     initializeWithUserDefault(LogHistory);
     initializeWithUserDefault(LogPageCache);
-    initializeWithUserDefault(LogPlatformLeaks);
-    initializeWithUserDefault(LogResourceLoading);
     initializeWithUserDefault(LogNetwork);
     initializeWithUserDefault(LogFTP);
     initializeWithUserDefault(LogThreading);
-    initializeWithUserDefault(LogStorageAPI);
-    initializeWithUserDefault(LogMedia);
-    initializeWithUserDefault(LogPlugins);
-    initializeWithUserDefault(LogArchives);
-    initializeWithUserDefault(LogWebAudio);
-    initializeWithUserDefault(LogCompositing);
-
-#if ENABLE(DISK_IMAGE_CACHE)
-    initializeWithUserDefault(LogDiskImageCache);
-#endif
-    initializeWithUserDefault(LogMemoryPressure);
 }
 
 }
-
-#endif // !LOG_DISABLED

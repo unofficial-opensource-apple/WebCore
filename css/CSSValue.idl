@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,13 +20,7 @@
 
 module css {
 
-    interface [
-        CustomToJSObject,
-        JSCustomIsReachable,
-        JSCustomFinalize,
-        ObjCPolymorphic,
-        V8DependentLifetime
-    ] CSSValue {
+    interface [GenerateConstructor, ObjCCustomInternalImpl] CSSValue {
 
         // UnitTypes
         const unsigned short CSS_INHERIT         = 0;
@@ -34,7 +28,7 @@ module css {
         const unsigned short CSS_VALUE_LIST      = 2;
         const unsigned short CSS_CUSTOM          = 3;
 
-                 attribute [TreatReturnedNullStringAs=Null, TreatNullAs=NullString] DOMString cssText
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString cssText
                      setter raises(DOMException);
 
         readonly attribute unsigned short cssValueType;

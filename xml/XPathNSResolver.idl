@@ -20,11 +20,8 @@
 
 module xpath {
 
-    interface [
-        ObjCProtocol,
-        OmitConstructor
-    ] XPathNSResolver {
-        [TreatReturnedNullStringAs=Null] DOMString lookupNamespaceURI(in [Optional=DefaultIsUndefined] DOMString prefix);
+    interface [ObjCProtocol, Conditional=XPATH] XPathNSResolver {
+        [ConvertNullStringTo=Null] DOMString lookupNamespaceURI(in DOMString prefix);
     };
 
 }

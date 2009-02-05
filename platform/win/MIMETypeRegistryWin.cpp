@@ -27,12 +27,20 @@
 #include "MIMETypeRegistry.h"
 
 #include <shlwapi.h>
-#include <wtf/Assertions.h>
 #include <wtf/HashMap.h>
-#include <wtf/MainThread.h>
 
 namespace WebCore 
 {
+
+String getMIMETypeForUTI(const String & uti)
+{
+    String mimeType;
+    // FIXME: This is an ugly hack: public.type -> image/type mimetype
+    if (int dotLocation = uti.reverseFind('.')) {
+        mimeType = String("image/")+uti.substring(dotLocation + 1);
+    }
+    return mimeType;
+}
 
 static String mimeTypeForExtension(const String& extension)
 {
@@ -51,6 +59,14 @@ static String mimeTypeForExtension(const String& extension)
    
 String MIMETypeRegistry::getPreferredExtensionForMIMEType(const String& type)
 {
+    String mimeType;
+    
+    int semiColonPos = type.find(';');
+    if (semiColonPos < 0)
+        mimeType = type;
+    else
+        mimeType = type.substring(0, semiColonPos);
+
     String path = "MIME\\Database\\Content Type\\" + type;
     WCHAR extStr[MAX_PATH];
     DWORD extStrLen = sizeof(extStr);
@@ -66,8 +82,6 @@ String MIMETypeRegistry::getPreferredExtensionForMIMEType(const String& type)
 
 String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
 {
-    ASSERT(isMainThread());
-
     if (ext.isEmpty())
         return String();
 
@@ -95,9 +109,6 @@ String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
         mimetypeMap.add("ico", "image/ico");
         mimetypeMap.add("cur", "image/ico");
         mimetypeMap.add("bmp", "image/bmp");
-        mimetypeMap.add("wml", "text/vnd.wap.wml");
-        mimetypeMap.add("wmlc", "application/vnd.wap.wmlc");
-        mimetypeMap.add("m4a", "audio/x-m4a");
     }
     String result = mimetypeMap.get(ext);
     if (result.isEmpty()) {
@@ -106,11 +117,6 @@ String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
             mimetypeMap.add(ext, result);
     }
     return result;
-}
-
-bool MIMETypeRegistry::isApplicationPluginMIMEType(const String&)
-{
-    return false;
 }
 
 }

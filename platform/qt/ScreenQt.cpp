@@ -23,18 +23,18 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
 #include "config.h"
 #include "Screen.h"
 
-#include "FloatRect.h"
+#include "Page.h"
 #include "Frame.h"
 #include "FrameView.h"
-#include "IntRect.h"
-#include "Page.h"
 #include "Widget.h"
+#include "IntRect.h"
+#include "FloatRect.h"
 
 #include <QApplication>
 #include <QDesktopWidget>
@@ -51,14 +51,14 @@ static QWidget* qwidgetForPage(const Page* page)
 
     return frameView->qwidget();
 }
-
+    
 FloatRect screenRect(const Page* page)
 {
     QWidget* qw = qwidgetForPage(page);
     if (!qw)
         return FloatRect();
 
-    // Taken from KGlobalSettings::desktopGeometry
+    // Taken from KGlobalSettings::desktopGeometry    
     QDesktopWidget* dw = QApplication::desktop();
     if (!dw)
         return FloatRect();
@@ -81,7 +81,7 @@ FloatRect usableScreenRect(const Page* page)
     if (!qw)
         return FloatRect();
 
-    // Taken from KGlobalSettings::desktopGeometry
+    // Taken from KGlobalSettings::desktopGeometry    
     QDesktopWidget* dw = QApplication::desktop();
     if (!dw)
         return FloatRect();

@@ -1,5 +1,6 @@
+// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2007, 2008 Apple, Inc.  All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,104 +26,43 @@
 
 #import "config.h"
 #import "ResourceRequest.h"
+#import "WebCoreSystemInterface.h"
 
 #import "FormDataStreamMac.h"
-#import "ResourceRequestCFNet.h"
-#import "RuntimeApplicationChecks.h"
-#import "WebCoreSystemInterface.h"
 
 #import <Foundation/Foundation.h>
 
-
-@interface NSURLRequest (WebNSURLRequestDetails)
-- (NSArray *)contentDispositionEncodingFallbackArray;
-+ (void)setDefaultTimeoutInterval:(NSTimeInterval)seconds;
-- (CFURLRequestRef)_CFURLRequest;
-- (id)_initWithCFURLRequest:(CFURLRequestRef)request;
-@end
-
-@interface NSMutableURLRequest (WebMutableNSURLRequestDetails)
-- (void)setContentDispositionEncodingFallbackArray:(NSArray *)theEncodingFallbackArray;
-@end
-
 namespace WebCore {
 
-NSURLRequest *ResourceRequest::nsURLRequest() const
+NSURLRequest* ResourceRequest::nsURLRequest() const
 { 
     updatePlatformRequest();
     
     return [[m_nsRequest.get() retain] autorelease]; 
 }
 
-#if USE(CFNETWORK)
-
-ResourceRequest::ResourceRequest(NSURLRequest *nsRequest)
-    : ResourceRequestBase()
-    , m_mainResourceRequest(false)
-    , m_cfRequest([nsRequest _CFURLRequest])
-    , m_nsRequest(nsRequest)
-{
-}
-
-void ResourceRequest::updateNSURLRequest()
-{
-    // There is client code that extends NSURLRequest and expects to get back, in the delegate
-    // callbacks, an object of the same type that they passed into WebKit. To keep then running, we
-    // create an object of the same type and return that. See <rdar://9843582>.
-    // Also, developers really really want an NSMutableURLRequest so try to create an
-    // NSMutableURLRequest instead of NSURLRequest.
-    static Class nsURLRequestClass = [NSURLRequest class];
-    static Class nsMutableURLRequestClass = [NSMutableURLRequest class];
-    Class requestClass = [m_nsRequest.get() class];
-
-    if (!requestClass || requestClass == nsURLRequestClass)
-        requestClass = nsMutableURLRequestClass;
-
-    if (m_cfRequest)
-        m_nsRequest.adoptNS([[requestClass alloc] _initWithCFURLRequest:m_cfRequest.get()]);
-}
-
-#else
-
 void ResourceRequest::doUpdateResourceRequest()
 {
     m_url = [m_nsRequest.get() URL];
     m_cachePolicy = (ResourceRequestCachePolicy)[m_nsRequest.get() cachePolicy];
     m_timeoutInterval = [m_nsRequest.get() timeoutInterval];
-    m_firstPartyForCookies = [m_nsRequest.get() mainDocumentURL];
+    m_mainDocumentURL = [m_nsRequest.get() mainDocumentURL];
     
     if (NSString* method = [m_nsRequest.get() HTTPMethod])
         m_httpMethod = method;
-    m_allowCookies = [m_nsRequest.get() HTTPShouldHandleCookies];
-
-    if (ResourceRequest::httpPipeliningEnabled())
-        m_priority = toResourceLoadPriority(wkGetHTTPPipeliningPriority([m_nsRequest.get() _CFURLRequest]));
-
+    m_allowHTTPCookies = [m_nsRequest.get() HTTPShouldHandleCookies];
+    
     NSDictionary *headers = [m_nsRequest.get() allHTTPHeaderFields];
     NSEnumerator *e = [headers keyEnumerator];
     NSString *name;
-    m_httpHeaderFields.clear();
     while ((name = [e nextObject]))
         m_httpHeaderFields.set(name, [headers objectForKey:name]);
-
-    // The below check can be removed once we require a version of Foundation with -[NSURLRequest contentDispositionEncodingFallbackArray] method.
-    static bool supportsContentDispositionEncodingFallbackArray = [NSURLRequest instancesRespondToSelector:@selector(contentDispositionEncodingFallbackArray)];
-    if (supportsContentDispositionEncodingFallbackArray) {
-        m_responseContentDispositionEncodingFallbackArray.clear();
-        NSArray *encodingFallbacks = [m_nsRequest.get() contentDispositionEncodingFallbackArray];
-        NSUInteger count = [encodingFallbacks count];
-        for (NSUInteger i = 0; i < count; ++i) {
-            CFStringEncoding encoding = CFStringConvertNSStringEncodingToEncoding([(NSNumber *)[encodingFallbacks objectAtIndex:i] unsignedLongValue]);
-            if (encoding != kCFStringEncodingInvalidId)
-                m_responseContentDispositionEncodingFallbackArray.append(CFStringConvertEncodingToIANACharSetName(encoding));
-        }
-    }
-
+    
     if (NSData* bodyData = [m_nsRequest.get() HTTPBody])
-        m_httpBody = FormData::create([bodyData bytes], [bodyData length]);
+        m_httpBody = new FormData([bodyData bytes], [bodyData length]);
     else if (NSInputStream* bodyStream = [m_nsRequest.get() HTTPBodyStream])
         if (FormData* formData = httpBodyFromStream(bodyStream))
-            m_httpBody = formData;
+            m_httpBody = formData;    
 }
 
 void ResourceRequest::doUpdatePlatformRequest()
@@ -135,52 +75,23 @@ void ResourceRequest::doUpdatePlatformRequest()
     NSMutableURLRequest* nsRequest = [m_nsRequest.get() mutableCopy];
 
     if (nsRequest)
-        [nsRequest setURL:url()];
+        [nsRequest setURL:url().getNSURL()];
     else
-        nsRequest = [[NSMutableURLRequest alloc] initWithURL:url()];
-
-
-    if (ResourceRequest::httpPipeliningEnabled())
-        wkSetHTTPPipeliningPriority([nsRequest _CFURLRequest], toHTTPPipeliningPriority(m_priority));
+        nsRequest = [[NSMutableURLRequest alloc] initWithURL:url().getNSURL()];
+    
+    wkSupportsMultipartXMixedReplace(nsRequest);
 
     [nsRequest setCachePolicy:(NSURLRequestCachePolicy)cachePolicy()];
-#if !defined(BUILDING_ON_SNOW_LEOPARD)
-    wkCFURLRequestAllowAllPostCaching([nsRequest _CFURLRequest]);
-#endif
-
-    double timeoutInterval = ResourceRequestBase::timeoutInterval();
-    if (timeoutInterval)
-        [nsRequest setTimeoutInterval:timeoutInterval];
-    // Otherwise, respect NSURLRequest default timeout.
-
-    [nsRequest setMainDocumentURL:firstPartyForCookies()];
+    [nsRequest setTimeoutInterval:timeoutInterval()];
+    [nsRequest setMainDocumentURL:mainDocumentURL().getNSURL()];
     if (!httpMethod().isEmpty())
         [nsRequest setHTTPMethod:httpMethod()];
-    [nsRequest setHTTPShouldHandleCookies:allowCookies()];
-
-    // Cannot just use setAllHTTPHeaderFields here, because it does not remove headers.
-    NSArray *oldHeaderFieldNames = [[nsRequest allHTTPHeaderFields] allKeys];
-    for (unsigned i = [oldHeaderFieldNames count]; i != 0; --i)
-        [nsRequest setValue:nil forHTTPHeaderField:[oldHeaderFieldNames objectAtIndex:i - 1]];
+    [nsRequest setHTTPShouldHandleCookies:allowHTTPCookies()];
+    
     HTTPHeaderMap::const_iterator end = httpHeaderFields().end();
     for (HTTPHeaderMap::const_iterator it = httpHeaderFields().begin(); it != end; ++it)
         [nsRequest setValue:it->second forHTTPHeaderField:it->first];
-
-    // The below check can be removed once we require a version of Foundation with -[NSMutableURLRequest setContentDispositionEncodingFallbackArray:] method.
-    static bool supportsContentDispositionEncodingFallbackArray = [NSMutableURLRequest instancesRespondToSelector:@selector(setContentDispositionEncodingFallbackArray:)];
-    if (supportsContentDispositionEncodingFallbackArray) {
-        NSMutableArray *encodingFallbacks = [NSMutableArray array];
-        unsigned count = m_responseContentDispositionEncodingFallbackArray.size();
-        for (unsigned i = 0; i != count; ++i) {
-            CFStringRef encodingName = m_responseContentDispositionEncodingFallbackArray[i].createCFString();
-            unsigned long nsEncoding = CFStringConvertEncodingToNSStringEncoding(CFStringConvertIANACharSetNameToEncoding(encodingName));
-            CFRelease(encodingName);
-            if (nsEncoding != kCFStringEncodingInvalidId)
-                [encodingFallbacks addObject:[NSNumber numberWithUnsignedLong:nsEncoding]];
-        }
-        [nsRequest setContentDispositionEncodingFallbackArray:encodingFallbacks];
-    }
-
+    
     RefPtr<FormData> formData = httpBody();
     if (formData && !formData->isEmpty())
         WebCore::setHTTPBody(nsRequest, formData);
@@ -188,26 +99,4 @@ void ResourceRequest::doUpdatePlatformRequest()
     m_nsRequest.adoptNS(nsRequest);
 }
 
-void ResourceRequest::applyWebArchiveHackForMail()
-{
 }
-
-#if USE(CFURLSTORAGESESSIONS)
-
-void ResourceRequest::setStorageSession(CFURLStorageSessionRef storageSession)
-{
-    m_nsRequest.adoptNS(wkCopyRequestWithStorageSession(storageSession, m_nsRequest.get()));
-}
-
-#endif
-    
-#endif // USE(CFNETWORK)
-
-
-bool ResourceRequest::useQuickLookResourceCachingQuirks()
-{
-    return false;
-}
-
-} // namespace WebCore
-

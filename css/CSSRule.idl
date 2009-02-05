@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -21,13 +21,7 @@
 module css {
 
     // Introduced in DOM Level 2:
-    interface [
-        JSCustomMarkFunction,
-        JSGenerateIsReachable,
-        CustomToJSObject,
-        ObjCPolymorphic,
-        V8DependentLifetime
-    ] CSSRule {
+    interface [GenerateConstructor, ObjCCustomInternalImpl] CSSRule {
 
         // RuleType
         const unsigned short UNKNOWN_RULE = 0;
@@ -37,15 +31,10 @@ module css {
         const unsigned short MEDIA_RULE = 4;
         const unsigned short FONT_FACE_RULE = 5;
         const unsigned short PAGE_RULE = 6;
-        const unsigned short WEBKIT_KEYFRAMES_RULE = 7;
-        const unsigned short WEBKIT_KEYFRAME_RULE = 8;
-#if defined(ENABLE_CSS_REGIONS) && ENABLE_CSS_REGIONS
-        const unsigned short WEBKIT_REGION_RULE = 10;
-#endif
 
         readonly attribute unsigned short   type;
 
-                 attribute [TreatReturnedNullStringAs=Null, TreatNullAs=NullString] DOMString        cssText
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString        cssText
                      setter raises (DOMException);
 
         readonly attribute CSSStyleSheet    parentStyleSheet;

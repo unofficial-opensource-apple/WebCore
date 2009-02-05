@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,20 +26,18 @@
 #include "config.h"
 #include "Clipboard.h"
 
-#include "CachedImage.h"
-#include "FileList.h"
+#include "DOMImplementation.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "Image.h"
+#include "PlugInInfoStore.h"
 
 namespace WebCore {
 
-Clipboard::Clipboard(ClipboardAccessPolicy policy, ClipboardType clipboardType) 
-    : m_policy(policy)
-    , m_dropEffect("uninitialized")
-    , m_effectAllowed("uninitialized")
+Clipboard::Clipboard(ClipboardAccessPolicy policy, bool isForDragging) 
+    : m_policy(policy) 
     , m_dragStarted(false)
-    , m_clipboardType(clipboardType)
+    , m_forDragging(isForDragging)
     , m_dragImage(0)
 {
 }
@@ -57,8 +55,6 @@ void Clipboard::setAccessPolicy(ClipboardAccessPolicy policy)
 static DragOperation dragOpFromIEOp(const String& op)
 {
     // yep, it's really just this fixed set
-    if (op == "uninitialized")
-        return DragOperationEvery;
     if (op == "none")
         return DragOperationNone;
     if (op == "copy")
@@ -66,7 +62,7 @@ static DragOperation dragOpFromIEOp(const String& op)
     if (op == "link")
         return DragOperationLink;
     if (op == "move")
-        return (DragOperation)(DragOperationGeneric | DragOperationMove);
+        return DragOperationGeneric;
     if (op == "copyLink")
         return (DragOperation)(DragOperationCopy | DragOperationLink);
     if (op == "copyMove")
@@ -100,123 +96,43 @@ static String IEOpFromDragOp(DragOperation op)
     return "none";
 }
 
-DragOperation Clipboard::sourceOperation() const
+bool Clipboard::sourceOperation(DragOperation& op) const
 {
-    DragOperation op = dragOpFromIEOp(m_effectAllowed);
-    ASSERT(op != DragOperationPrivate);
-    return op;
+    if (m_effectAllowed.isNull())
+        return false;
+    op = dragOpFromIEOp(m_effectAllowed);
+    return true;
 }
 
-DragOperation Clipboard::destinationOperation() const
+bool Clipboard::destinationOperation(DragOperation& op) const
 {
-    DragOperation op = dragOpFromIEOp(m_dropEffect);
-    ASSERT(op == DragOperationCopy || op == DragOperationNone || op == DragOperationLink || op == (DragOperation)(DragOperationGeneric | DragOperationMove) || op == DragOperationEvery);
-    return op;
+    if (m_dropEffect.isNull())
+        return false;
+    op = dragOpFromIEOp(m_dropEffect);
+    return true;
 }
 
 void Clipboard::setSourceOperation(DragOperation op)
 {
-    ASSERT_ARG(op, op != DragOperationPrivate);
     m_effectAllowed = IEOpFromDragOp(op);
 }
 
 void Clipboard::setDestinationOperation(DragOperation op)
 {
-    ASSERT_ARG(op, op == DragOperationCopy || op == DragOperationNone || op == DragOperationLink || op == DragOperationGeneric || op == DragOperationMove || op == (DragOperation)(DragOperationGeneric | DragOperationMove));
     m_dropEffect = IEOpFromDragOp(op);
 }
 
-bool Clipboard::hasFileOfType(const String& type) const
-{
-    if (m_policy != ClipboardReadable && m_policy != ClipboardTypesReadable)
-        return false;
-    
-    RefPtr<FileList> fileList = files();
-    if (fileList->isEmpty())
-        return false;
-    
-    for (unsigned int f = 0; f < fileList->length(); f++) {
-        if (equalIgnoringCase(fileList->item(f)->type(), type))
-            return true;
-    }
-    return false;
-}
-
-bool Clipboard::hasStringOfType(const String& type) const
-{
-    if (m_policy != ClipboardReadable && m_policy != ClipboardTypesReadable)
-        return false;
-    
-    return types().contains(type); 
-}
-    
 void Clipboard::setDropEffect(const String &effect)
 {
-    if (!isForDragAndDrop())
-        return;
-
-    // The attribute must ignore any attempts to set it to a value other than none, copy, link, and move. 
-    if (effect != "none" && effect != "copy"  && effect != "link" && effect != "move")
-        return;
-
-    if (m_policy == ClipboardReadable || m_policy == ClipboardTypesReadable)
+    if (m_policy == ClipboardReadable || m_policy == ClipboardTypesReadable) {
         m_dropEffect = effect;
+    }
 }
 
 void Clipboard::setEffectAllowed(const String &effect)
 {
-    if (!isForDragAndDrop())
-        return;
-
-    if (dragOpFromIEOp(effect) == DragOperationPrivate) {
-        // This means that there was no conversion, and the effectAllowed that
-        // we are passed isn't a valid effectAllowed, so we should ignore it,
-        // and not set m_effectAllowed.
-
-        // The attribute must ignore any attempts to set it to a value other than 
-        // none, copy, copyLink, copyMove, link, linkMove, move, all, and uninitialized.
-        return;
-    }
-
-
     if (m_policy == ClipboardWritable)
         m_effectAllowed = effect;
 }
-    
-DragOperation convertDropZoneOperationToDragOperation(const String& dragOperation)
-{
-    if (dragOperation == "copy")
-        return DragOperationCopy;
-    if (dragOperation == "move")
-        return DragOperationMove;
-    if (dragOperation == "link")
-        return DragOperationLink;
-    return DragOperationNone;
+
 }
-
-String convertDragOperationToDropZoneOperation(DragOperation operation)
-{
-    switch (operation) {
-    case DragOperationCopy:
-        return String("copy");
-    case DragOperationMove:
-        return String("move");
-    case DragOperationLink:
-        return String("link");
-    default:
-        return String("copy");
-    }
-}
-
-bool Clipboard::hasDropZoneType(const String& keyword)
-{
-    if (keyword.startsWith("file:"))
-        return hasFileOfType(keyword.substring(5));
-
-    if (keyword.startsWith("string:"))
-        return hasStringOfType(keyword.substring(7));
-
-    return false;
-}
-
-} // namespace WebCore

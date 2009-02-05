@@ -1,7 +1,8 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,11 +20,9 @@
  * Boston, MA 02110-1301, USA.
  *
  */
-
 #include "config.h"
 #include "HTMLOListElement.h"
 
-#include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "HTMLNames.h"
@@ -33,70 +32,55 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLOListElement::HTMLOListElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
-    , m_start(0xBADBEEF)
-    , m_itemCount(0)
-    , m_hasExplicitStart(false)
-    , m_isReversed(false)
-    , m_shouldRecalculateItemCount(false)
+HTMLOListElement::HTMLOListElement(Document* doc)
+    : HTMLElement(HTMLNames::olTag, doc)
+    , m_start(1)
 {
-    ASSERT(hasTagName(olTag));
 }
 
-PassRefPtr<HTMLOListElement> HTMLOListElement::create(Document* document)
+bool HTMLOListElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
 {
-    return adoptRef(new HTMLOListElement(olTag, document));
+    if (attrName == typeAttr) {
+        result = eListItem; // Share with <li>
+        return false;
+    }
+    
+    return HTMLElement::mapToEntry(attrName, result);
 }
 
-PassRefPtr<HTMLOListElement> HTMLOListElement::create(const QualifiedName& tagName, Document* document)
-{
-    return adoptRef(new HTMLOListElement(tagName, document));
-}
-
-bool HTMLOListElement::isPresentationAttribute(const QualifiedName& name) const
-{
-    if (name == typeAttr)
-        return true;
-    return HTMLElement::isPresentationAttribute(name);
-}
-
-void HTMLOListElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
+void HTMLOListElement::parseMappedAttribute(MappedAttribute* attr)
 {
     if (attr->name() == typeAttr) {
         if (attr->value() == "a")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueLowerAlpha);
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_LOWER_ALPHA);
         else if (attr->value() == "A")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueUpperAlpha);
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_UPPER_ALPHA);
         else if (attr->value() == "i")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueLowerRoman);
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_LOWER_ROMAN);
         else if (attr->value() == "I")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueUpperRoman);
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_UPPER_ROMAN);
         else if (attr->value() == "1")
-            addPropertyToAttributeStyle(style, CSSPropertyListStyleType, CSSValueDecimal);
+            addCSSProperty(attr, CSS_PROP_LIST_STYLE_TYPE, CSS_VAL_DECIMAL);
+    } else if (attr->name() == startAttr) {
+        int s = !attr->isNull() ? attr->value().toInt() : 1;
+        if (s != m_start) {
+            m_start = s;
+            for (RenderObject* r = renderer(); r; r = r->nextInPreOrder(renderer()))
+                if (r->isListItem())
+                    static_cast<RenderListItem*>(r)->updateValue();
+        }
     } else
-        HTMLElement::collectStyleForAttribute(attr, style);
+        HTMLElement::parseMappedAttribute(attr);
 }
 
-void HTMLOListElement::parseAttribute(Attribute* attr)
+bool HTMLOListElement::compact() const
 {
-    if (attr->name() == startAttr) {
-        int oldStart = start();
-        bool canParse;
-        int parsedStart = attr->value().toInt(&canParse);
-        m_hasExplicitStart = canParse;
-        m_start = canParse ? parsedStart : 0xBADBEEF;
-        if (oldStart == start())
-            return;
-        updateItemValues();
-    } else if (attr->name() == reversedAttr) {
-        bool reversed = !attr->isNull();
-        if (reversed == m_isReversed)
-            return;
-        m_isReversed = reversed;
-        updateItemValues();
-    } else
-        HTMLElement::parseAttribute(attr);
+    return !getAttribute(compactAttr).isNull();
+}
+
+void HTMLOListElement::setCompact(bool b)
+{
+    setAttribute(compactAttr, b ? "" : 0);
 }
 
 void HTMLOListElement::setStart(int start)
@@ -104,20 +88,13 @@ void HTMLOListElement::setStart(int start)
     setAttribute(startAttr, String::number(start));
 }
 
-void HTMLOListElement::updateItemValues()
+String HTMLOListElement::type() const
 {
-    for (RenderListItem* listItem = RenderListItem::nextListItem(renderer()); listItem; listItem = RenderListItem::nextListItem(renderer(), listItem))
-        listItem->updateValue();
+    return getAttribute(typeAttr);
 }
 
-void HTMLOListElement::recalculateItemCount()
+void HTMLOListElement::setType(const String& value)
 {
-    m_itemCount = 0;
-
-    for (RenderListItem* listItem = RenderListItem::nextListItem(renderer()); listItem; listItem = RenderListItem::nextListItem(renderer(), listItem))
-        m_itemCount++;
-
-    m_shouldRecalculateItemCount = false;
+    setAttribute(typeAttr, value);
 }
-
 }

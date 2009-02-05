@@ -3,7 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2006 Allan Sandfeld Jensen (kde@carewolf.com) 
  *           (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2004, 2005, 2006, 2007, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,12 +25,11 @@
 #ifndef RenderImage_h
 #define RenderImage_h
 
-#include "RenderImageResource.h"
+#include "CachedImage.h"
 #include "RenderReplaced.h"
 
 namespace WebCore {
 
-class HTMLAreaElement;
 class HTMLMapElement;
 
 class RenderImage : public RenderReplaced {
@@ -38,91 +37,60 @@ public:
     RenderImage(Node*);
     virtual ~RenderImage();
 
-    void setImageResource(PassOwnPtr<RenderImageResource>);
+    virtual const char* renderName() const { return "RenderImage"; }
 
-    RenderImageResource* imageResource() { return m_imageResource.get(); }
-    const RenderImageResource* imageResource() const { return m_imageResource.get(); }
-    CachedImage* cachedImage() const { return m_imageResource ? m_imageResource->cachedImage() : 0; }
+    virtual bool isImage() const { return true; }
+    
+    virtual void paint(PaintInfo&, int tx, int ty);
 
+    virtual void layout();
+
+    virtual void imageChanged(CachedImage*);
+    
     bool setImageSizeForAltText(CachedImage* newImage = 0);
 
     void updateAltText();
 
-    HTMLMapElement* imageMap() const;
-    void areaElementFocusChanged(HTMLAreaElement*);
+    void setIsAnonymousImage(bool anon) { m_isAnonymousImage = anon; }
+    bool isAnonymousImage() { return m_isAnonymousImage; }
 
-    void highQualityRepaintTimerFired(Timer<RenderImage>*);
-    
-    virtual void collectSelectionRects(Vector<SelectionRect>&, unsigned, unsigned) OVERRIDE;
+    void setCachedImage(CachedImage*);
+    CachedImage* cachedImage() const { return m_cachedImage; }
 
-    void setIsGeneratedContent(bool generated = true) { m_isGeneratedContent = generated; }
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
 
-    bool isGeneratedContent() const { return m_isGeneratedContent; }
+    virtual int calcReplacedWidth() const;
+    virtual int calcReplacedHeight() const;
+
+    virtual void calcPrefWidths();
+
+    HTMLMapElement* imageMap();
+
+    void resetAnimation();
 
 protected:
-    virtual bool needsPreferredWidthsRecalculation() const;
-    virtual RenderBox* embeddedContentBox() const;
-    virtual void computeIntrinsicRatioInformation(FloatSize& intrinsicSize, double& intrinsicRatio, bool& isPercentageIntrinsicSize) const;
-
-    virtual void styleDidChange(StyleDifference, const RenderStyle*);
-
-    virtual void imageChanged(WrappedImagePtr, const IntRect* = 0);
-
-    virtual void paintIntoRect(GraphicsContext*, const LayoutRect&);
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-    virtual void layout();
-
-    virtual void intrinsicSizeChanged()
-    {
-        if (m_imageResource)
-            imageChanged(m_imageResource->imagePtr());
-    }
+    Image* image() { return m_cachedImage ? m_cachedImage->image() : nullImage(); }
 
 private:
-    virtual const char* renderName() const { return "RenderImage"; }
+    int calcAspectRatioWidth() const;
+    int calcAspectRatioHeight() const;
 
-    virtual bool isImage() const { return true; }
-    virtual bool isRenderImage() const { return true; }
+    bool isWidthSpecified() const;
+    bool isHeightSpecified() const;
 
-    virtual void paintReplaced(PaintInfo&, const LayoutPoint&);
+    bool errorOccurred() const { return m_cachedImage && m_cachedImage->errorOccurred(); }
 
-    virtual bool backgroundIsObscured() const;
+    // The image we are rendering.
+    CachedImage* m_cachedImage;
 
-    virtual int minimumReplacedHeight() const;
-
-    virtual void notifyFinished(CachedResource*);
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
-
-    IntSize imageSizeForError(CachedImage*) const;
-    void imageDimensionsChanged(bool imageSizeChanged, const IntRect* = 0);
-    bool updateIntrinsicSizeIfNeeded(const IntSize&, bool imageSizeChanged);
-
-    void paintAreaElementFocusRing(PaintInfo&);
+    // True if the image is set through the content: property
+    bool m_isAnonymousImage;
 
     // Text to display as long as the image isn't available.
     String m_altText;
-    OwnPtr<RenderImageResource> m_imageResource;
-    bool m_needsToSetSizeForAltText;
-    bool m_didIncrementVisuallyNonEmptyPixelCount;
-    bool m_isGeneratedContent;
 
-    friend class RenderImageScaleObserver;
+    static Image* nullImage();
 };
-
-inline RenderImage* toRenderImage(RenderObject* object)
-{
-    ASSERT(!object || object->isRenderImage());
-    return static_cast<RenderImage*>(object);
-}
-
-inline const RenderImage* toRenderImage(const RenderObject* object)
-{
-    ASSERT(!object || object->isRenderImage());
-    return static_cast<const RenderImage*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderImage(const RenderImage*);
 
 } // namespace WebCore
 

@@ -27,9 +27,9 @@
 #include "config.h"
 #include "FloatPoint.h"
 
-#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM)
+#if PLATFORM(CG)
 
-#include <CoreGraphics/CoreGraphics.h>
+#include <ApplicationServices/ApplicationServices.h>
 
 namespace WebCore {
 
@@ -44,4 +44,4 @@ FloatPoint::operator CGPoint() const
 
 }
 
-#endif // USE(CG)
+#endif // PLATFORM(CG)

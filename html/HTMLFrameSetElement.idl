@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009, 2010 Apple Inc. All rights reserve
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserve
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,38 +20,11 @@
 
 module html {
 
-    interface [
-        CustomNamedGetter
-    ] HTMLFrameSetElement : HTMLElement {
-        attribute [Reflect] DOMString cols;
-        attribute [Reflect] DOMString rows;
+    interface [GenerateConstructor, HasOverridingNameGetter] HTMLFrameSetElement : HTMLElement {
 
-#if !defined(LANGUAGE_OBJECTIVE_C) || !LANGUAGE_OBJECTIVE_C
-        // Event handler attributes
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onbeforeunload;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onhashchange;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onmessage;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onoffline;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener ononline;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onpopstate;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onresize;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onstorage;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onunload;
+        attribute [ConvertNullToNullString] DOMString cols;
+        attribute [ConvertNullToNullString] DOMString rows;
 
-        attribute [Conditional=ORIENTATION_EVENTS, NotEnumerable, JSWindowEventListener] EventListener onorientationchange;
-
-        // Overrides of Element attributes (with different implementation in bindings).
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onblur;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onerror;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onfocus;
-        attribute [NotEnumerable, JSWindowEventListener] EventListener onload;
-
-        // Not implemented yet.
-        // attribute [NotEnumerable, JSWindowEventListener] EventListener onafterprint;
-        // attribute [NotEnumerable, JSWindowEventListener] EventListener onbeforeprint;
-        // attribute [NotEnumerable, JSWindowEventListener] EventListener onredo;
-        // attribute [NotEnumerable, JSWindowEventListener] EventListener onundo;
-#endif
     };
 
 }

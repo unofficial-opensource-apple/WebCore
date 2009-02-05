@@ -1,8 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2008, 2010 Apple Inc. All rights reserved.
- * Copyright (C) 2010 Google Inc. All rights reserved.
+ * Copyright (C) 2004 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,46 +25,88 @@
 #ifndef HTMLImageElement_h
 #define HTMLImageElement_h
 
-#include "GraphicsTypes.h"
 #include "HTMLElement.h"
+#include "GraphicsTypes.h"
 #include "HTMLImageLoader.h"
 
 namespace WebCore {
-
-class HTMLFormElement;
+    class HTMLFormElement;
 
 class HTMLImageElement : public HTMLElement {
     friend class HTMLFormElement;
 public:
-    static PassRefPtr<HTMLImageElement> create(Document*);
-    static PassRefPtr<HTMLImageElement> create(const QualifiedName&, Document*, HTMLFormElement*);
-    static PassRefPtr<HTMLImageElement> createForJSConstructor(Document*, const int* optionalWidth, const int* optionalHeight);
+    HTMLImageElement(Document*, HTMLFormElement* = 0);
+    HTMLImageElement(const QualifiedName&, Document*);
+    ~HTMLImageElement();
 
-    virtual ~HTMLImageElement();
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
+    virtual int tagPriority() const { return 0; }
 
-    int width(bool ignorePendingStylesheets = false);
-    int height(bool ignorePendingStylesheets = false);
+    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
+
+    virtual void attach();
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
+    virtual void insertedIntoDocument();
+    virtual void removedFromDocument();
+
+    virtual bool canStartSelection() const { return false; }
+
+    int width(bool ignorePendingStylesheets = false) const;
+    int height(bool ignorePendingStylesheets = false) const;
 
     int naturalWidth() const;
     int naturalHeight() const;
-
-    bool isServerMap() const;
+    
+    bool isServerMap() const { return ismap && usemap.isEmpty(); }
 
     String altText() const;
+
+    String imageMap() const { return usemap; }
+    
+    virtual bool isURLAttribute(Attribute*) const;
 
     CompositeOperator compositeOperator() const { return m_compositeOperator; }
 
     CachedImage* cachedImage() const { return m_imageLoader.image(); }
     void setCachedImage(CachedImage* i) { m_imageLoader.setImage(i); };
 
-    void setLoadManually(bool loadManually) { m_imageLoader.setLoadManually(loadManually); }
+    void setLoadManually (bool loadManually) { m_imageLoader.setLoadManually(loadManually); }
 
-    const AtomicString& alt() const;
+    String name() const;
+    void setName(const String&);
+
+    String align() const;
+    void setAlign(const String&);
+
+    String alt() const;
+    void setAlt(const String&);
+
+    String border() const;
+    void setBorder(const String&);
 
     void setHeight(int);
 
-    KURL src() const;
+    int hspace() const;
+    void setHspace(int);
+
+    bool isMap() const;
+    void setIsMap(bool);
+
+    String longDesc() const;
+    void setLongDesc(const String&);
+
+    String lowsrc() const;
+    void setLowsrc(const String&);
+
+    String src() const;
     void setSrc(const String&);
+
+    String useMap() const;
+    void setUseMap(const String&);
+
+    int vspace() const;
+    void setVspace(int);
 
     void setWidth(int);
 
@@ -72,46 +115,13 @@ public:
 
     bool complete() const;
 
-    virtual bool willRespondToMouseClickEvents() OVERRIDE;
-    // FIXME: Why do we have two names for the same thing?
-    bool hasPendingLoadEvent() const { return m_imageLoader.hasPendingLoadEvent(); }
-    bool hasPendingActivity() const { return m_imageLoader.hasPendingLoadEvent(); }
-
-    virtual bool canContainRangeEndPoint() const { return false; }
-
 protected:
-    HTMLImageElement(const QualifiedName&, Document*, HTMLFormElement* = 0);
-
-    virtual void didMoveToNewDocument(Document* oldDocument) OVERRIDE;
-
-private:
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
-
-    virtual void attach();
-    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-
-    virtual bool canStartSelection() const { return false; }
-
-    virtual bool isURLAttribute(Attribute*) const;
-
-    virtual bool draggable() const;
-
-    virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
-
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
-    virtual bool shouldRegisterAsNamedItem() const OVERRIDE { return true; }
-    virtual bool shouldRegisterAsExtraNamedItem() const OVERRIDE { return true; }
-
-#if ENABLE(MICRODATA)
-    virtual String itemValueText() const OVERRIDE;
-    virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;
-#endif
-
     HTMLImageLoader m_imageLoader;
+    String usemap;
+    bool ismap;
     HTMLFormElement* m_form;
+    String oldNameAttr;
+    String oldIdAttr;
     CompositeOperator m_compositeOperator;
 };
 

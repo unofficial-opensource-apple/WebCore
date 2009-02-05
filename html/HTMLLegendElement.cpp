@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -25,43 +27,78 @@
 #include "config.h"
 #include "HTMLLegendElement.h"
 
-#include "HTMLFormControlElement.h"
 #include "HTMLNames.h"
-#include <wtf/StdLibExtras.h>
+#include "RenderLegend.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-
-inline HTMLLegendElement::HTMLLegendElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLLegendElement::HTMLLegendElement(Document *doc, HTMLFormElement *f)
+: HTMLGenericFormElement(legendTag, doc, f)
 {
-    ASSERT(hasTagName(legendTag));
 }
 
-PassRefPtr<HTMLLegendElement> HTMLLegendElement::create(const QualifiedName& tagName, Document* document)
+HTMLLegendElement::~HTMLLegendElement()
 {
-    return adoptRef(new HTMLLegendElement(tagName, document));
 }
 
-HTMLFormControlElement* HTMLLegendElement::associatedControl()
+bool HTMLLegendElement::isFocusable() const
+{
+    return false;
+}
+
+RenderObject* HTMLLegendElement::createRenderer(RenderArena* arena, RenderStyle* style)
+{
+    if (style->contentData())
+        return RenderObject::createObject(this, style);
+    
+    return new (arena) RenderLegend(this);
+}
+
+const AtomicString& HTMLLegendElement::type() const
+{
+    static const AtomicString legend("legend");
+    return legend;
+}
+
+String HTMLLegendElement::accessKey() const
+{
+    return getAttribute(accesskeyAttr);
+}
+
+void HTMLLegendElement::setAccessKey(const String &value)
+{
+    setAttribute(accesskeyAttr, value);
+}
+
+String HTMLLegendElement::align() const
+{
+    return getAttribute(alignAttr);
+}
+
+void HTMLLegendElement::setAlign(const String &value)
+{
+    setAttribute(alignAttr, value);
+}
+
+Element *HTMLLegendElement::formElement()
 {
     // Check if there's a fieldset belonging to this legend.
-    ContainerNode* fieldset = parentNode();
+    Node *fieldset = parentNode();
     while (fieldset && !fieldset->hasTagName(fieldsetTag))
         fieldset = fieldset->parentNode();
     if (!fieldset)
         return 0;
 
-    // Find first form element inside the fieldset that is not a legend element.
-    // FIXME: Should we consider tabindex?
-    Node* node = fieldset;
+    // Find first form element inside the fieldset.
+    // FIXME: Should we care about tabindex?
+    Node *node = fieldset;
     while ((node = node->traverseNextNode(fieldset))) {
-        if (node->isElementNode()) {
-            Element* element = static_cast<Element*>(node);
-            if (element->isFormControlElement())
-                return static_cast<HTMLFormControlElement*>(element);
+        if (node->isHTMLElement()) {
+            HTMLElement *element = static_cast<HTMLElement *>(node);
+            if (!element->hasLocalName(legendTag) && element->isGenericFormElement())
+                return element;
         }
     }
 
@@ -70,18 +107,15 @@ HTMLFormControlElement* HTMLLegendElement::associatedControl()
 
 void HTMLLegendElement::focus(bool)
 {
-    if (isFocusable())
-        Element::focus();
-        
-    // To match other browsers' behavior, never restore previous selection.
-    if (HTMLFormControlElement* control = associatedControl())
-        control->focus(false);
+    // to match other browsers, never restore previous selection
+    if (Element *element = formElement())
+        element->focus(false);
 }
 
-void HTMLLegendElement::accessKeyAction(bool sendMouseEvents)
+void HTMLLegendElement::accessKeyAction(bool sendToAnyElement)
 {
-    if (HTMLFormControlElement* control = associatedControl())
-        control->accessKeyAction(sendMouseEvents);
+    if (Element *element = formElement())
+        element->accessKeyAction(sendToAnyElement);
 }
     
 } // namespace

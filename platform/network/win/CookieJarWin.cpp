@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,81 +24,99 @@
  */
 
 #include "config.h"
-#include "CookieJar.h"
-
-#include "Cookie.h"
 #include "KURL.h"
 #include "PlatformString.h"
-#include "Document.h"
+#include "DeprecatedString.h"
 #include "ResourceHandle.h"
 #include <windows.h>
+#if USE(CFNETWORK)
+#include <CoreFoundation/CoreFoundation.h>
+#include <CFNetwork/CFHTTPCookiesPriv.h>
+#include <WebKitSystemInterface/WebKitSystemInterface.h>
+#else
 #include <Wininet.h>
+#endif
 
-namespace WebCore {
-
-void setCookies(Document* /*document*/, const KURL& url, const String& value)
+namespace WebCore
 {
-    // FIXME: Deal with document->firstPartyForCookies().
-    String str = url.string();
-    String val = value;
-    InternetSetCookie(str.charactersWithNullTermination(), 0, val.charactersWithNullTermination());
+
+#if USE(CFNETWORK)
+    static const CFStringRef s_setCookieKeyCF = CFSTR("Set-Cookie");
+    static const CFStringRef s_cookieCF = CFSTR("Cookie");
+#endif
+
+
+void setCookies(const KURL& url, const KURL& policyURL, const String& value)
+{
+#if USE(CFNETWORK)
+    CFHTTPCookieStorageRef defaultCookieStorage = wkGetDefaultHTTPCookieStorage();
+    if (!defaultCookieStorage)
+        return;
+
+    RetainPtr<CFURLRef> urlCF(AdoptCF, url.createCFURL());
+    RetainPtr<CFURLRef> policyURLCF(AdoptCF, policyURL.createCFURL());
+
+    // <http://bugzilla.opendarwin.org/show_bug.cgi?id=6531>, <rdar://4409034>
+    // cookiesWithResponseHeaderFields doesn't parse cookies without a value
+    String cookieString = value.contains('=') ? value : value + "=";
+
+    RetainPtr<CFStringRef> cookieStringCF(AdoptCF, cookieString.createCFString());
+    RetainPtr<CFDictionaryRef> headerFieldsCF(AdoptCF, CFDictionaryCreate(kCFAllocatorDefault, (const void**)&s_setCookieKeyCF, 
+        (const void**)&cookieStringCF, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks));
+
+    RetainPtr<CFArrayRef> cookiesCF(AdoptCF, CFHTTPCookieCreateWithResponseHeaderFields(kCFAllocatorDefault,
+        headerFieldsCF.get(), urlCF.get()));
+
+    CFHTTPCookieStorageSetCookies(defaultCookieStorage, cookiesCF.get(), urlCF.get(), policyURLCF.get());
+#else
+    // FIXME: Deal with the policy URL.
+    DeprecatedString str = url.url();
+    str.append((UChar)'\0');
+    DeprecatedString val = value.deprecatedString();
+    val.append((UChar)'\0');
+    InternetSetCookie((UChar*)str.unicode(), 0, (UChar*)val.unicode());
+#endif
 }
 
-String cookies(const Document* /*document*/, const KURL& url)
+String cookies(const KURL& url)
 {
-    String str = url.string();
-
-    DWORD count = 0;
-    if (!InternetGetCookie(str.charactersWithNullTermination(), 0, 0, &count))
+#if USE(CFNETWORK)
+    CFHTTPCookieStorageRef defaultCookieStorage = wkGetDefaultHTTPCookieStorage();
+    if (!defaultCookieStorage)
         return String();
 
+    String cookieString;
+    RetainPtr<CFURLRef> urlCF(AdoptCF, url.createCFURL());
+
+    bool secure = equalIgnoringCase(url.protocol(), "https");
+
+    RetainPtr<CFArrayRef> cookiesCF(AdoptCF, CFHTTPCookieStorageCopyCookiesForURL(defaultCookieStorage, urlCF.get(), secure));
+    RetainPtr<CFDictionaryRef> headerCF(AdoptCF, CFHTTPCookieCopyRequestHeaderFields(kCFAllocatorDefault, cookiesCF.get()));
+
+    return (CFStringRef)CFDictionaryGetValue(headerCF.get(), s_cookieCF);
+#else
+    DeprecatedString str = url.url();
+    str.append((UChar)'\0');
+
+    DWORD count = str.length();
+    InternetGetCookie((UChar*)str.unicode(), 0, 0, &count);
     if (count <= 1) // Null terminator counts as 1.
         return String();
 
-    Vector<UChar> buffer(count);
-    if (!InternetGetCookie(str.charactersWithNullTermination(), 0, buffer.data(), &count))
-        return String();
-
-    buffer.shrink(count - 1); // Ignore the null terminator.
-    return String::adopt(buffer);
+    UChar* buffer = new UChar[count];
+    InternetGetCookie((UChar*)str.unicode(), 0, buffer, &count);
+    String& result = String(buffer, count-1); // Ignore the null terminator.
+    delete[] buffer;
+    return result;
+#endif
 }
 
-String cookieRequestHeaderFieldValue(const Document* document, const KURL& url)
+bool cookiesEnabled()
 {
-    // FIXME: include HttpOnly cookie
-    return cookies(document, url);
-}
-
-bool cookiesEnabled(const Document* /*document*/)
-{
-    return true;
-}
-
-bool getRawCookies(const Document*, const KURL&, Vector<Cookie>& rawCookies)
-{
-    // FIXME: Not yet implemented
-    rawCookies.clear();
-    return false; // return true when implemented
-}
-
-void deleteCookie(const Document*, const KURL&, const String&)
-{
-    // FIXME: Not yet implemented
-}
-
-void getHostnamesWithCookies(HashSet<String>& hostnames)
-{
-    // FIXME: Not yet implemented
-}
-
-void deleteCookiesForHostname(const String& hostname)
-{
-    // FIXME: Not yet implemented
-}
-
-void deleteAllCookies()
-{
-    // FIXME: Not yet implemented
+    CFHTTPCookieStorageAcceptPolicy policy = CFHTTPCookieStorageAcceptPolicyOnlyFromMainDocumentDomain;
+    if (CFHTTPCookieStorageRef defaultCookieStorage = wkGetDefaultHTTPCookieStorage())
+        policy = CFHTTPCookieStorageGetCookieAcceptPolicy(defaultCookieStorage);
+    return policy == CFHTTPCookieStorageAcceptPolicyOnlyFromMainDocumentDomain || policy == CFHTTPCookieStorageAcceptPolicyAlways;
 }
 
 }

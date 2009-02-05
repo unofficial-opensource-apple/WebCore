@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +30,8 @@
 #include "ClipboardWin.h"
 #include "Document.h"
 #include "Element.h"
-#include "Frame.h"
 #include "htmlediting.h"
+#include "NotImplemented.h"
 #include "TextIterator.h"
 #include "visible_units.h"
 
@@ -39,15 +39,13 @@
 
 namespace WebCore {
 
-PassRefPtr<Clipboard> Editor::newGeneralClipboard(ClipboardAccessPolicy policy, Frame* frame)
+PassRefPtr<Clipboard> Editor::newGeneralClipboard(ClipboardAccessPolicy policy)
 {
     COMPtr<IDataObject> clipboardData;
-#if !OS(WINCE)
     if (!SUCCEEDED(OleGetClipboard(&clipboardData)))
         clipboardData = 0;
-#endif
 
-    return ClipboardWin::create(Clipboard::CopyAndPaste, clipboardData.get(), policy, frame);
+    return new ClipboardWin(false, clipboardData.get(), policy);
 }
 
 } // namespace WebCore

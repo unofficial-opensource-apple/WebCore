@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -24,74 +26,42 @@
 
 #include "config.h"
 #include "HTMLFieldSetElement.h"
-#include "HTMLLegendElement.h"
 
 #include "HTMLNames.h"
 #include "RenderFieldset.h"
-#include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-inline HTMLFieldSetElement::HTMLFieldSetElement(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
-    : HTMLFormControlElement(tagName, document, form)
+HTMLFieldSetElement::HTMLFieldSetElement(Document *doc, HTMLFormElement *f)
+   : HTMLGenericFormElement(fieldsetTag, doc, f)
 {
-    ASSERT(hasTagName(fieldsetTag));
 }
 
-PassRefPtr<HTMLFieldSetElement> HTMLFieldSetElement::create(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
+HTMLFieldSetElement::~HTMLFieldSetElement()
 {
-    return adoptRef(new HTMLFieldSetElement(tagName, document, form));
 }
 
-void HTMLFieldSetElement::invalidateDisabledStateUnder(Element* base)
+bool HTMLFieldSetElement::checkDTD(const Node* newChild)
 {
-    for (Node* currentNode = base->traverseNextNode(base); currentNode; currentNode = currentNode->traverseNextNode(base)) {
-        if (currentNode && currentNode->isElementNode() && toElement(currentNode)->isFormControlElement())
-            static_cast<HTMLFormControlElement*>(currentNode)->ancestorDisabledStateWasChanged();
-    }
+    return newChild->hasTagName(legendTag) || HTMLElement::checkDTD(newChild);
 }
 
-void HTMLFieldSetElement::disabledAttributeChanged()
+bool HTMLFieldSetElement::isFocusable() const
 {
-    // This element must be updated before the style of nodes in its subtree gets recalculated.
-    HTMLFormControlElement::disabledAttributeChanged();
-    invalidateDisabledStateUnder(this);
+    return false;
 }
 
-void HTMLFieldSetElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
+const AtomicString& HTMLFieldSetElement::type() const
 {
-    HTMLFormControlElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
-    for (Element* element = firstElementChild(); element; element = element->nextElementSibling()) {
-        if (element->hasTagName(legendTag))
-            invalidateDisabledStateUnder(element);
-    }
-}
-
-bool HTMLFieldSetElement::supportsFocus() const
-{
-    return HTMLElement::supportsFocus();
-}
-
-const AtomicString& HTMLFieldSetElement::formControlType() const
-{
-    DEFINE_STATIC_LOCAL(const AtomicString, fieldset, ("fieldset"));
+    static const AtomicString fieldset("fieldset");
     return fieldset;
 }
 
-RenderObject* HTMLFieldSetElement::createRenderer(RenderArena* arena, RenderStyle*)
+RenderObject* HTMLFieldSetElement::createRenderer(RenderArena* arena, RenderStyle* style)
 {
     return new (arena) RenderFieldset(this);
-}
-
-HTMLLegendElement* HTMLFieldSetElement::legend() const
-{
-    for (Element* node = firstElementChild(); node; node = node->nextElementSibling()) {
-        if (node->hasTagName(legendTag))
-            return static_cast<HTMLLegendElement*>(node);
-    }
-    return 0;
 }
 
 } // namespace

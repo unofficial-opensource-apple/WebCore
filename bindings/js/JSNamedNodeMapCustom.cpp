@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,42 +26,22 @@
 #include "config.h"
 #include "JSNamedNodeMap.h"
 
-#include "JSNode.h"
-
-#include "Element.h"
 #include "NamedNodeMap.h"
-
-using namespace JSC;
+#include "PlatformString.h"
+#include "kjs_binding.h"
+#include "kjs_dom.h"
 
 namespace WebCore {
 
-bool JSNamedNodeMap::canGetItemsForName(ExecState*, NamedNodeMap* impl, const Identifier& propertyName)
+bool JSNamedNodeMap::canGetItemsForName(KJS::ExecState*, NamedNodeMap* impl, const KJS::Identifier& propertyName)
 {
-    return impl->getNamedItem(identifierToString(propertyName));
+    return impl->getNamedItem(propertyName);
 }
 
-JSValue JSNamedNodeMap::nameGetter(ExecState* exec, JSValue slotBase, const Identifier& propertyName)
+KJS::JSValue* JSNamedNodeMap::nameGetter(KJS::ExecState* exec, KJS::JSObject* originalObject, const KJS::Identifier& propertyName, const KJS::PropertySlot& slot)
 {
-    JSNamedNodeMap* thisObj = jsCast<JSNamedNodeMap*>(asObject(slotBase));
-    return toJS(exec, thisObj->globalObject(), thisObj->impl()->getNamedItem(identifierToString(propertyName)));
-}
-
-void JSNamedNodeMap::visitChildren(JSCell* cell, SlotVisitor& visitor)
-{
-    JSNamedNodeMap* thisObject = jsCast<JSNamedNodeMap*>(cell);
-    ASSERT_GC_OBJECT_INHERITS(thisObject, &s_info);
-    COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
-    ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
-    Base::visitChildren(thisObject, visitor);
-
-    // We need to keep the wrapper for our underlying NamedNodeMap's element
-    // alive because NamedNodeMap and Attr rely on the element for data, and
-    // don't know how to keep it alive correctly.
-    // FIXME: Fix this lifetime issue in the DOM, and remove this.
-    Element* element = thisObject->impl()->element();
-    if (!element)
-        return;
-    visitor.addOpaqueRoot(root(element));
+    JSNamedNodeMap* thisObj = static_cast<JSNamedNodeMap*>(slot.slotBase());
+    return KJS::toJS(exec, thisObj->impl()->getNamedItem(propertyName));
 }
 
 } // namespace WebCore

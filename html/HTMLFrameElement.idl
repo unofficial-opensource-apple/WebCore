@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,34 +20,26 @@
 
 module html {
 
-    interface HTMLFrameElement : HTMLElement {
+    interface [GenerateConstructor] HTMLFrameElement : HTMLElement {
 
-        attribute [Reflect] DOMString frameBorder;
-        attribute [Reflect] DOMString longDesc;
-        attribute [Reflect] DOMString marginHeight;
-        attribute [Reflect] DOMString marginWidth;
-        attribute [Reflect] DOMString name;
-        attribute [Reflect] boolean noResize;
-        attribute [Reflect] DOMString scrolling;
-        attribute [Reflect, URL] DOMString src;
+                 attribute [ConvertNullToNullString] DOMString       frameBorder;
+                 attribute [ConvertNullToNullString] DOMString       longDesc;
+                 attribute [ConvertNullToNullString] DOMString       marginHeight;
+                 attribute [ConvertNullToNullString] DOMString       marginWidth;
+                 attribute [ConvertNullToNullString] DOMString       name;
+                 attribute boolean         noResize;
+                 attribute [ConvertNullToNullString] DOMString       scrolling;
+                 attribute [ConvertNullToNullString, CustomSetter] DOMString       src;
 
         // Introduced in DOM Level 2:
-        readonly attribute [CheckSecurityForNode] Document contentDocument;
+        readonly attribute [CheckFrameSecurity] Document        contentDocument;
 
         // Extensions
         readonly attribute DOMWindow contentWindow;
 
-#if defined(ENABLE_SVG) && ENABLE_SVG
-#if !defined(LANGUAGE_OBJECTIVE_C) || !LANGUAGE_OBJECTIVE_C || defined(ENABLE_SVG_DOM_OBJC_BINDINGS) && ENABLE_SVG_DOM_OBJC_BINDINGS
-        [CheckSecurityForNode] SVGDocument getSVGDocument()
-            raises(DOMException);
-#endif
-#endif
-
-        attribute [TreatNullAs=NullString, CustomSetter] DOMString location;
-
-        readonly attribute long width;
-        readonly attribute long height;
+                 attribute [ConvertNullToNullString, CustomSetter] DOMString       location;
+        readonly attribute long            width;
+        readonly attribute long            height;
 
     };
 

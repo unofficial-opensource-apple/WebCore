@@ -25,8 +25,6 @@
 
 #include "config.h"
 #include "DragImage.h"
-
-#if ENABLE(DRAG_SUPPORT)
 #include "DragController.h"
 
 #include "Frame.h"
@@ -69,17 +67,8 @@ DragImageRef createDragImageForSelection(Frame* frame)
 {
     DragImageRef image = frame->dragImageForSelection();
     if (image)
-        image = dissolveDragImageToFraction(image, DragController::DragImageAlpha);
+        dissolveDragImageToFraction(image, DragController::DragImageAlpha);
     return image;
 }
 
-#if !PLATFORM(MAC) && (!PLATFORM(WIN) || OS(WINCE))
-DragImageRef createDragImageForLink(KURL&, const String&, Frame*)
-{
-    return 0;
 }
-#endif
-
-} // namespace WebCore
-
-#endif // ENABLE(DRAG_SUPPORT)

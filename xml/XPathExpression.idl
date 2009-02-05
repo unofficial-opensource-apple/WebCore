@@ -20,10 +20,11 @@
 
 module xpath {
 
-    interface XPathExpression {
-        [ObjCLegacyUnnamedParameters] XPathResult evaluate(in [Optional=DefaultIsUndefined] Node contextNode, 
-                                            in [Optional=DefaultIsUndefined] unsigned short type, 
-                                            in [Optional=DefaultIsUndefined] XPathResult inResult)
+
+    interface [Conditional=XPATH] XPathExpression {
+        [OldStyleObjC] XPathResult evaluate(in Node contextNode, 
+                                            in unsigned short type, 
+                                            in XPathResult inResult)
             raises(DOMException);
     };
 

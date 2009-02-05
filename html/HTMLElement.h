@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -31,145 +31,84 @@ class DocumentFragment;
 class HTMLCollection;
 class HTMLFormElement;
 
-#if ENABLE(MICRODATA)
-class MicroDataItemValue;
-#endif
-
-enum TranslateAttributeMode {
-    TranslateAttributeYes,
-    TranslateAttributeNo,
-    TranslateAttributeInherit
-};
-
+enum HTMLTagStatus { TagStatusOptional, TagStatusRequired, TagStatusForbidden };
+                       
 class HTMLElement : public StyledElement {
 public:
-    static PassRefPtr<HTMLElement> create(const QualifiedName& tagName, Document*);
+    HTMLElement(const QualifiedName& tagName, Document*);
+    virtual ~HTMLElement();
 
-    HTMLCollection* children();
+    virtual bool isHTMLElement() const { return true; }
 
+    virtual String nodeName() const;
+
+    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
+
+    virtual PassRefPtr<Node> cloneNode(bool deep);
+
+    PassRefPtr<HTMLCollection> children();
+    
+    String id() const;
+    void setId(const String&);
     virtual String title() const;
-
-    virtual short tabIndex() const;
-    void setTabIndex(int);
+    void setTitle(const String&);
+    String lang() const;
+    void setLang(const String&);
+    String dir() const;
+    void setDir(const String&);
+    String className() const;
+    void setClassName(const String&);
 
     String innerHTML() const;
     String outerHTML() const;
+    PassRefPtr<DocumentFragment> createContextualFragment(const String&);
     void setInnerHTML(const String&, ExceptionCode&);
     void setOuterHTML(const String&, ExceptionCode&);
     void setInnerText(const String&, ExceptionCode&);
     void setOuterText(const String&, ExceptionCode&);
-
-    Element* insertAdjacentElement(const String& where, Element* newChild, ExceptionCode&);
-    void insertAdjacentHTML(const String& where, const String& html, ExceptionCode&);
-    void insertAdjacentText(const String& where, const String& text, ExceptionCode&);
-
-    virtual bool supportsFocus() const;
-
-    String contentEditable() const;
-    void setContentEditable(const String&, ExceptionCode&);
-
-    virtual bool draggable() const;
-    void setDraggable(bool);
-
-    bool spellcheck() const;
-    void setSpellcheck(bool);
-
-    bool translate() const;
-    void setTranslate(bool);
+    
+    virtual bool isFocusable() const;
+    virtual bool isContentEditable() const;
+    virtual bool isContentRichlyEditable() const;
+    virtual String contentEditable() const;
+    virtual void setContentEditable(MappedAttribute*);
+    virtual void setContentEditable(const String&);
 
     void click();
 
-    virtual void accessKeyAction(bool sendMouseEvents);
+    virtual void accessKeyAction(bool sendToAnyElement);
 
-    bool ieForbidsInsertHTML() const;
+    virtual bool isGenericFormElement() const { return false; }
 
-    virtual bool rendererIsNeeded(const NodeRenderingContext&);
+    virtual String toString() const;
+
+    virtual HTMLTagStatus endTagRequirement() const;
+    virtual int tagPriority() const;
+    virtual bool childAllowed(Node* newChild); // Error-checking during parsing that checks the DTD
+
+    // Helper function to check the DTD for a given child node.
+    virtual bool checkDTD(const Node*);
+    static bool inEitherTagList(const Node*);
+    static bool inInlineTagList(const Node*);
+    static bool inBlockTagList(const Node*);
+    static bool isRecognizedTagName(const QualifiedName&);
+
+    void setHTMLEventListener(const AtomicString& eventType, Attribute*);
+
+    virtual bool rendererIsNeeded(RenderStyle*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
     HTMLFormElement* form() const { return virtualForm(); }
-
     HTMLFormElement* findFormAncestor() const;
 
-    bool hasDirectionAuto() const;
-    TextDirection directionalityIfhasDirAutoAttribute(bool& isAuto) const;
-
-#if ENABLE(MICRODATA)
-    void setItemValue(const String&, ExceptionCode&);
-    PassRefPtr<MicroDataItemValue> itemValue() const;
-#endif
-
-#ifndef NDEBUG
-    virtual bool isHTMLUnknownElement() const { return false; }
-#endif
-
-    virtual bool willRespondToMouseMoveEvents() OVERRIDE;
-    virtual bool willRespondToMouseWheelEvents() OVERRIDE;
-    virtual bool willRespondToMouseClickEvents() OVERRIDE;
-    virtual bool isInsertionPoint() const { return false; }
-    virtual bool isLabelable() const { return false; }
-
 protected:
-    HTMLElement(const QualifiedName& tagName, Document*, ConstructionType);
-
-    void addHTMLLengthToStyle(StylePropertySet*, CSSPropertyID, const String& value);
-    void addHTMLColorToStyle(StylePropertySet*, CSSPropertyID, const String& color);
-
-    void applyAlignmentAttributeToStyle(Attribute*, StylePropertySet*);
-    void applyBorderAttributeToStyle(Attribute*, StylePropertySet*);
-
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
-
-    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
-    void calculateAndAdjustDirectionality();
-
-    virtual bool isURLAttribute(Attribute*) const;
+    void addHTMLAlignment(MappedAttribute*);
 
 private:
-    virtual String nodeName() const;
-
-    void mapLanguageAttributeToLocale(Attribute*, StylePropertySet*);
-
     virtual HTMLFormElement* virtualForm() const;
-
-    Node* insertAdjacent(const String& where, Node* newChild, ExceptionCode&);
-    PassRefPtr<DocumentFragment> textToFragment(const String&, ExceptionCode&);
-
-    void dirAttributeChanged(Attribute*);
-    void adjustDirectionalityIfNeededAfterChildAttributeChanged(Element* child);
-    void adjustDirectionalityIfNeededAfterChildrenChanged(Node* beforeChange, int childCountDelta);
-    TextDirection directionality(Node** strongDirectionalityTextNode= 0) const;
-
-    TranslateAttributeMode translateAttributeMode() const;
-
-#if ENABLE(MICRODATA)
-    virtual String itemValueText() const;
-    virtual void setItemValueText(const String&, ExceptionCode&);
-#endif
 };
 
-inline HTMLElement* toHTMLElement(Node* node)
-{
-    ASSERT(!node || node->isHTMLElement());
-    return static_cast<HTMLElement*>(node);
-}
+} //namespace
 
-inline const HTMLElement* toHTMLElement(const Node* node)
-{
-    ASSERT(!node || node->isHTMLElement());
-    return static_cast<const HTMLElement*>(node);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toHTMLElement(const HTMLElement*);
-
-inline HTMLElement::HTMLElement(const QualifiedName& tagName, Document* document, ConstructionType type = CreateHTMLElement)
-    : StyledElement(tagName, document, type)
-{
-    ASSERT(tagName.localName().impl());
-}
-
-} // namespace WebCore
-
-#endif // HTMLElement_h
+#endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2011, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,380 +26,114 @@
 #ifndef KURL_h
 #define KURL_h
 
-#include "KURLWTFURLImpl.h"
-#include "PlatformString.h"
-#include <wtf/HashMap.h>
+#include "DeprecatedString.h"
+#include <wtf/Platform.h>
 
-#if USE(CF)
-typedef const struct __CFURL* CFURLRef;
+#if PLATFORM(CF)
+typedef const struct __CFURL * CFURLRef;
 #endif
 
-#if PLATFORM(MAC) || (PLATFORM(QT) && USE(QTKIT))
-OBJC_CLASS NSURL;
+#if PLATFORM(MAC)
+#ifdef __OBJC__
+@class NSURL;
+#else
+class NSURL;
 #endif
-
-#if PLATFORM(QT)
-QT_BEGIN_NAMESPACE
-class QUrl;
-QT_END_NAMESPACE
-#endif
-
-#if USE(GOOGLEURL)
-#include "KURLGooglePrivate.h"
-#endif
-
-#if USE(JSC)
-#include <runtime/UString.h>
 #endif
 
 namespace WebCore {
 
-class TextEncoding;
-struct KURLHash;
+    class KURL;
+    class String;
+    class TextEncoding;
 
-enum ParsedURLStringTag { ParsedURLString };
+    bool operator==(const KURL&, const KURL&);
+    inline bool operator!=(const KURL &a, const KURL &b) { return !(a == b); }
+
+    bool equalIgnoringRef(const KURL&, const KURL&);
 
 class KURL {
 public:
-    // Generates a URL which contains a null string.
-    KURL() { invalidate(); }
-
-    // The argument is an absolute URL string. The string is assumed to be output of KURL::string() called on a valid
-    // KURL object, or indiscernible from such.
-    // It is usually best to avoid repeatedly parsing a string, unless memory saving outweigh the possible slow-downs.
-    KURL(ParsedURLStringTag, const String&);
-#if USE(GOOGLEURL)
-    KURL(WTF::HashTableDeletedValueType) : m_url(WTF::HashTableDeletedValue) { }
-#elif USE(WTFURL)
-    KURL(WTF::HashTableDeletedValueType) : m_urlImpl(WTF::HashTableDeletedValue) { }
-#else
-    KURL(WTF::HashTableDeletedValueType) : m_string(WTF::HashTableDeletedValue) { }
+    KURL();
+    KURL(const char*);
+    KURL(const KURL&, const DeprecatedString&);
+    KURL(const KURL&, const DeprecatedString&, const TextEncoding&);
+    KURL(const DeprecatedString&);
+#if PLATFORM(MAC)
+    KURL(NSURL*);
 #endif
-#if !USE(WTFURL)
-    bool isHashTableDeletedValue() const { return string().isHashTableDeletedValue(); }
-#else
-    bool isHashTableDeletedValue() const { return m_urlImpl.isHashTableDeletedValue(); }
+#if PLATFORM(CF)
+    KURL(CFURLRef);
 #endif
-
-    // Resolves the relative URL with the given base URL. If provided, the
-    // TextEncoding is used to encode non-ASCII characers. The base URL can be
-    // null or empty, in which case the relative URL will be interpreted as
-    // absolute.
-    // FIXME: If the base URL is invalid, this always creates an invalid
-    // URL. Instead I think it would be better to treat all invalid base URLs
-    // the same way we treate null and empty base URLs.
-    KURL(const KURL& base, const String& relative);
-    KURL(const KURL& base, const String& relative, const TextEncoding&);
-
-#if USE(GOOGLEURL)
-    // For conversions from other structures that have already parsed and
-    // canonicalized the URL. The input must be exactly what KURL would have
-    // done with the same input.
-    KURL(const CString& canonicalSpec, const url_parse::Parsed&, bool isValid);
-#endif
-
-    String strippedForUseAsReferrer() const;
-
-    // FIXME: The above functions should be harmonized so that passing a
-    // base of null or the empty string gives the same result as the
-    // standard String constructor.
-
-    // Makes a deep copy. Helpful only if you need to use a KURL on another
-    // thread.  Since the underlying StringImpl objects are immutable, there's
-    // no other reason to ever prefer copy() over plain old assignment.
-    KURL copy() const;
-
-    bool isNull() const;
-    bool isEmpty() const;
-    bool isValid() const;
-
-    // Returns true if this URL has a path. Note that "http://foo.com/" has a
-    // path of "/", so this function will return true. Only invalid or
-    // non-hierarchical (like "javascript:") URLs will have no path.
+    bool isEmpty() const { return urlString.isEmpty(); } 
     bool hasPath() const;
 
-    // Returns true if you can set the host and port for the URL.
-    // Non-hierarchical URLs don't have a host and port.
-    bool canSetHostOrPort() const { return isHierarchical(); }
+    DeprecatedString url() const { return urlString; }
 
-    bool canSetPathname() const { return isHierarchical(); }
+    DeprecatedString protocol() const;
+    DeprecatedString host() const;
+    unsigned short int port() const;
+    DeprecatedString user() const;
+    DeprecatedString pass() const;
+    DeprecatedString path() const;
+    DeprecatedString lastPathComponent() const;
+    DeprecatedString query() const;
+    DeprecatedString ref() const;
+    bool hasRef() const;
 
-#if USE(GOOGLEURL)
-    const String& string() const { return m_url.string(); }
-#elif USE(WTFURL)
-    // FIXME: Split this in URLString and InvalidURLString, get rid of the implicit conversions.
-    const String& string() const;
-#else
-    const String& string() const { return m_string; }
-#endif
+    DeprecatedString encodedHtmlRef() const { return ref(); }
 
-    String protocol() const;
-    String host() const;
-    unsigned short port() const;
-    bool hasPort() const;
-    String user() const;
-    String pass() const;
-    String path() const;
-    String lastPathComponent() const;
-    String query() const;
-    String fragmentIdentifier() const;
-    bool hasFragmentIdentifier() const;
+    void setProtocol(const DeprecatedString &);
+    void setHost(const DeprecatedString &);
+    void setPort(unsigned short int);
+    void setHostAndPort(const DeprecatedString&);
+    void setUser(const DeprecatedString &);
+    void setPass(const DeprecatedString &);
+    void setPath(const DeprecatedString &);
+    void setQuery(const DeprecatedString &);
+    void setRef(const DeprecatedString &);
 
-    String baseAsString() const;
+    DeprecatedString prettyURL() const;
 
-    String fileSystemPath() const;
-
-    // Returns true if the current URL's protocol is the same as the null-
-    // terminated ASCII argument. The argument must be lower-case.
-    bool protocolIs(const char*) const;
-    bool protocolIsData() const { return protocolIs("data"); }
-    bool protocolIsInHTTPFamily() const;
-    bool isLocalFile() const;
-
-    bool setProtocol(const String&);
-    void setHost(const String&);
-
-    void removePort();
-    void setPort(unsigned short);
-
-    // Input is like "foo.com" or "foo.com:8000".
-    void setHostAndPort(const String&);
-
-    void setUser(const String&);
-    void setPass(const String&);
-
-    // If you pass an empty path for HTTP or HTTPS URLs, the resulting path
-    // will be "/".
-    void setPath(const String&);
-
-    // The query may begin with a question mark, or, if not, one will be added
-    // for you. Setting the query to the empty string will leave a "?" in the
-    // URL (with nothing after it). To clear the query, pass a null string.
-    void setQuery(const String&);
-
-    void setFragmentIdentifier(const String&);
-    void removeFragmentIdentifier();
-
-    friend bool equalIgnoringFragmentIdentifier(const KURL&, const KURL&);
-
-    friend bool protocolHostAndPortAreEqual(const KURL&, const KURL&);
-
-    unsigned hostStart() const;
-    unsigned hostEnd() const;
-
-    unsigned pathStart() const;
-    unsigned pathEnd() const;
-    unsigned pathAfterLastSlash() const;
-
-    operator const String&() const { return string(); }
-
-#if USE(CF)
-    KURL(CFURLRef);
+#if PLATFORM(CF)
     CFURLRef createCFURL() const;
 #endif
-
-#if PLATFORM(MAC) || (PLATFORM(QT) && USE(QTKIT))
-    KURL(NSURL*);
-    operator NSURL*() const;
-#endif
-#ifdef __OBJC__
-    operator NSString*() const { return string(); }
+#if PLATFORM(MAC)
+    NSURL *getNSURL() const;
 #endif
 
-#if PLATFORM(QT)
-    KURL(const QUrl&);
-    operator QUrl() const;
-#endif
+    bool isLocalFile() const;
 
-#if USE(GOOGLEURL)
-    // Getters for the parsed structure and its corresponding 8-bit string.
-    const url_parse::Parsed& parsed() const { return m_url.m_parsed; }
-    const CString& utf8String() const { return m_url.utf8String(); }
-#endif
-
-
-#if USE(GOOGLEURL)
-    const KURL* innerURL() const { return m_url.innerURL(); }
-#else
-    const KURL* innerURL() const { return 0; }
-#endif
+    static DeprecatedString decode_string(const DeprecatedString&);
+    static DeprecatedString decode_string(const DeprecatedString&, const TextEncoding&);
+    static DeprecatedString encode_string(const DeprecatedString&);
+    
+    friend bool operator==(const KURL &, const KURL &);
 
 #ifndef NDEBUG
     void print() const;
 #endif
 
 private:
-    void invalidate();
     bool isHierarchical() const;
-    static bool protocolIs(const String&, const char*);
-#if USE(GOOGLEURL)
-    friend class KURLGooglePrivate;
-    KURLGooglePrivate m_url;
-#elif USE(WTFURL)
-    RefPtr<KURLWTFURLImpl> m_urlImpl;
-#else  // !USE(GOOGLEURL)
-    void init(const KURL&, const String&, const TextEncoding&);
-    void copyToBuffer(Vector<char, 512>& buffer) const;
+    void init(const KURL&, const DeprecatedString&, const TextEncoding&);
+    void parse(const char *url, const DeprecatedString *originalString);
 
-    // Parses the given URL. The originalString parameter allows for an
-    // optimization: When the source is the same as the fixed-up string,
-    // it will use the passed-in string instead of allocating a new one.
-    void parse(const String&);
-    void parse(const char* url, const String* originalString = 0);
-
-    String m_string;
-    bool m_isValid : 1;
-    bool m_protocolIsInHTTPFamily : 1;
-
-    int m_schemeEnd;
-    int m_userStart;
-    int m_userEnd;
-    int m_passwordEnd;
-    int m_hostEnd;
-    int m_portEnd;
-    int m_pathAfterLastSlash;
-    int m_pathEnd;
-    int m_queryEnd;
-    int m_fragmentEnd;
-#endif
+    DeprecatedString urlString;
+    bool m_isValid;
+    int schemeEndPos;
+    int userStartPos;
+    int userEndPos;
+    int passwordEndPos;
+    int hostEndPos;
+    int portEndPos;
+    int pathEndPos;
+    int queryEndPos;
+    int fragmentEndPos;
+    
+    friend bool equalIgnoringRef(const KURL& a, const KURL& b);
 };
 
-bool operator==(const KURL&, const KURL&);
-bool operator==(const KURL&, const String&);
-bool operator==(const String&, const KURL&);
-bool operator!=(const KURL&, const KURL&);
-bool operator!=(const KURL&, const String&);
-bool operator!=(const String&, const KURL&);
-
-bool equalIgnoringFragmentIdentifier(const KURL&, const KURL&);
-bool protocolHostAndPortAreEqual(const KURL&, const KURL&);
-    
-const KURL& blankURL();
-
-// Functions to do URL operations on strings.
-// These are operations that aren't faster on a parsed URL.
-// These are also different from the KURL functions in that they don't require the string to be a valid and parsable URL.
-// This is especially important because valid javascript URLs are not necessarily considered valid by KURL.
-
-bool protocolIs(const String& url, const char* protocol);
-bool protocolIsJavaScript(const String& url);
-
-bool isDefaultPortForProtocol(unsigned short port, const String& protocol);
-bool portAllowed(const KURL&); // Blacklist ports that should never be used for Web resources.
-
-bool isValidProtocol(const String&);
-
-String mimeTypeFromDataURL(const String& url);
-
-// Unescapes the given string using URL escaping rules, given an optional
-// encoding (defaulting to UTF-8 otherwise). DANGER: If the URL has "%00"
-// in it, the resulting string will have embedded null characters!
-String decodeURLEscapeSequences(const String&);
-String decodeURLEscapeSequences(const String&, const TextEncoding&);
-
-String encodeWithURLEscapeSequences(const String&);
-
-// Inlines.
-
-inline bool operator==(const KURL& a, const KURL& b)
-{
-    return a.string() == b.string();
 }
-
-inline bool operator==(const KURL& a, const String& b)
-{
-    return a.string() == b;
-}
-
-inline bool operator==(const String& a, const KURL& b)
-{
-    return a == b.string();
-}
-
-inline bool operator!=(const KURL& a, const KURL& b)
-{
-    return a.string() != b.string();
-}
-
-inline bool operator!=(const KURL& a, const String& b)
-{
-    return a.string() != b;
-}
-
-inline bool operator!=(const String& a, const KURL& b)
-{
-    return a != b.string();
-}
-
-#if !USE(GOOGLEURL) && !USE(WTFURL)
-
-// Inline versions of some non-GoogleURL functions so we can get inlining
-// without having to have a lot of ugly ifdefs in the class definition.
-
-inline bool KURL::isNull() const
-{
-    return m_string.isNull();
-}
-
-inline bool KURL::isEmpty() const
-{
-    return m_string.isEmpty();
-}
-
-inline bool KURL::isValid() const
-{
-    return m_isValid;
-}
-
-inline bool KURL::hasPort() const
-{
-    return m_hostEnd < m_portEnd;
-}
-
-inline bool KURL::protocolIsInHTTPFamily() const
-{
-    return m_protocolIsInHTTPFamily;
-}
-
-inline unsigned KURL::hostStart() const
-{
-    return (m_passwordEnd == m_userStart) ? m_passwordEnd : m_passwordEnd + 1;
-}
-
-inline unsigned KURL::hostEnd() const
-{
-    return m_hostEnd;
-}
-
-inline unsigned KURL::pathStart() const
-{
-    return m_portEnd;
-}
-
-inline unsigned KURL::pathEnd() const
-{
-    return m_pathEnd;
-}
-
-inline unsigned KURL::pathAfterLastSlash() const
-{
-    return m_pathAfterLastSlash;
-}
-
-#endif // !USE(GOOGLEURL) && !USE(WTFURL)
-
-void enableKURLSchemeCanonicalization(bool linkedOnOrAfterIOS5);
-
-} // namespace WebCore
-
-namespace WTF {
-
-    // KURLHash is the default hash for String
-    template<typename T> struct DefaultHash;
-    template<> struct DefaultHash<WebCore::KURL> {
-        typedef WebCore::KURLHash Hash;
-    };
-
-} // namespace WTF
 
 #endif // KURL_h

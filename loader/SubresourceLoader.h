@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,79 +28,47 @@
 
 #ifndef SubresourceLoader_h
 #define SubresourceLoader_h
-
-#include "FrameLoaderTypes.h"
+ 
+#include "ResourceHandleClient.h"
 #include "ResourceLoader.h"
-
-#include <wtf/text/WTFString.h>
+#include <wtf/PassRefPtr.h>
+ 
+#ifndef __OBJC__
+class NSArray;
+class NSDictionary;
+class NSMutableURLRequest;
+#endif
  
 namespace WebCore {
 
-class CachedResource;
-class CachedResourceLoader;
-class Document;
-class ResourceRequest;
-
-class SubresourceLoader : public ResourceLoader {
-public:
-    static PassRefPtr<SubresourceLoader> create(Frame*, CachedResource*, const ResourceRequest&, const ResourceLoaderOptions&);
-
-    void cancelIfNotFinishing();
-
-    virtual void clearCachedResourceAfterSynchronousCancel() OVERRIDE;
-    virtual bool startLoading() OVERRIDE;
-    virtual const ResourceRequest& iOSOriginalRequest() const OVERRIDE { return m_iOSOriginalRequest; }
-
-private:
-    SubresourceLoader(Frame*, CachedResource*, const ResourceLoaderOptions&);
-    virtual ~SubresourceLoader();
-
-    virtual bool init(const ResourceRequest&);
-
-    virtual void willSendRequest(ResourceRequest&, const ResourceResponse& redirectResponse);
-    virtual void didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent);
-    virtual void didReceiveResponse(const ResourceResponse&);
-    virtual void didReceiveData(const char*, int, long long encodedDataLength, bool allAtOnce);
-    virtual void didReceiveCachedMetadata(const char*, int);
-    virtual void didFinishLoading(double finishTime);
-    virtual void didFail(const ResourceError&);
-    virtual void willCancel(const ResourceError&);
-    virtual void didCancel(const ResourceError&) { }
-
-#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
-    virtual bool supportsDataArray() { return true; }
-    virtual void didReceiveDataArray(CFArrayRef);
-#endif
-#if PLATFORM(CHROMIUM)
-    virtual void didDownloadData(int);
-#endif
-    virtual void releaseResources();
-
-    bool errorLoadingResource();
-    void sendDataToResource(const char*, int);
-
-    enum SubresourceLoaderState {
-        Uninitialized,
-        Initialized,
-        Finishing
-    };
-
-    class RequestCountTracker {
+    class FormData;
+    class String;
+    class ResourceHandle;
+    class ResourceRequest;
+    class SubresourceLoaderClient;
+    
+    class SubresourceLoader : public ResourceLoader {
     public:
-        RequestCountTracker(CachedResourceLoader*, CachedResource*);
-        ~RequestCountTracker();
-    private:
-        CachedResourceLoader* m_cachedResourceLoader;
-        CachedResource* m_resource;
-    };
+        static PassRefPtr<SubresourceLoader> create(Frame*, SubresourceLoaderClient*, const ResourceRequest&, bool skipCanLoadCheck = false, bool sendResourceLoadCallbacks = true, bool shouldContentSniff = true);
+        
+        virtual ~SubresourceLoader();
 
-    ResourceRequest m_iOSOriginalRequest;
-    CachedResource* m_resource;
-    RefPtr<Document> m_document;
-    bool m_loadingMultipartContent;
-    SubresourceLoaderState m_state;
-    OwnPtr<RequestCountTracker> m_requestCountTracker;
-};
+        virtual bool load(const ResourceRequest&);
+        
+        virtual void willSendRequest(ResourceRequest&, const ResourceResponse& redirectResponse);
+        virtual void didReceiveResponse(const ResourceResponse&);
+        virtual void didReceiveData(const char*, int, long long lengthReceived, bool allAtOnce);
+        virtual void didFinishLoading();
+        virtual void didFail(const ResourceError&);
+        virtual void receivedCancellation(const AuthenticationChallenge&);
+
+    private:
+        SubresourceLoader(Frame*, SubresourceLoaderClient*, bool sendResourceLoadCallbacks, bool shouldContentSniff);
+
+        virtual void didCancel(const ResourceError&);
+        SubresourceLoaderClient* m_client;
+        bool m_loadingMultipartContent;
+    };
 
 }
 

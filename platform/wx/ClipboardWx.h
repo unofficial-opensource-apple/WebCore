@@ -35,19 +35,16 @@ namespace WebCore {
     // State available during IE's events for drag and drop and copy/paste
     class ClipboardWx : public Clipboard {
     public:
-        static PassRefPtr<ClipboardWx> create(ClipboardAccessPolicy policy, ClipboardType clipboardType)
-        {
-            return adoptRef(new ClipboardWx(policy, clipboardType));
-        }
-
+        ClipboardWx(ClipboardAccessPolicy policy, bool forDragging);
+        ~ClipboardWx() { }
+    
         void clearData(const String& type);
         void clearAllData();
-        String getData(const String& type) const;
+        String getData(const String& type, bool& success) const;
         bool setData(const String& type, const String& data);
     
         // extensions beyond IE's API
-        virtual HashSet<String> types() const;
-        virtual PassRefPtr<FileList> files() const;
+        HashSet<String> types() const;
     
         IntPoint dragLocation() const;
         CachedImage* dragImage() const;
@@ -59,13 +56,8 @@ namespace WebCore {
         virtual void declareAndWriteDragImage(Element*, const KURL&, const String& title, Frame*);
         virtual void writeURL(const KURL&, const String&, Frame*);
         virtual void writeRange(Range*, Frame*);
-        virtual void writePlainText(const WTF::String&);
-
 
         virtual bool hasData();
-
-    private:
-        ClipboardWx(ClipboardAccessPolicy, ClipboardType);
     };
 } 
 

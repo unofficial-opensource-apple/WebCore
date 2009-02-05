@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2006 Zack Rusin <zack@kde.org>
  * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
+ * Copyright (C) 2007 Trolltech ASA
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,12 +26,10 @@
  */
 
 #include "config.h"
-#include "MIMETypeRegistry.h"
+#include "MimeTypeRegistry.h"
 
-#include <wtf/Assertions.h>
-#include <wtf/MainThread.h>
-
-namespace WebCore {
+namespace WebCore 
+{
 
 struct ExtensionMap {
     const char* extension;
@@ -39,9 +37,7 @@ struct ExtensionMap {
 };
 static const ExtensionMap extensionMap [] = {
     { "bmp", "image/bmp" },
-    { "css", "text/css" },
     { "gif", "image/gif" },
-    { "htm", "text/html" },
     { "html", "text/html" },
     { "ico", "image/x-icon" },   
     { "jpeg", "image/jpeg" },
@@ -60,10 +56,8 @@ static const ExtensionMap extensionMap [] = {
     { 0, 0 }
 };
     
-String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
+String MimeTypeRegistry::getMIMETypeForExtension(const String &ext)
 {
-    ASSERT(isMainThread());
-
     String s = ext.lower();
     const ExtensionMap *e = extensionMap;
     while (e->extension) {
@@ -73,11 +67,6 @@ String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
     }
     // unknown, let's just assume plain text
     return "text/plain";
-}
-
-bool MIMETypeRegistry::isApplicationPluginMIMEType(const String&)
-{
-    return false;
 }
 
 }

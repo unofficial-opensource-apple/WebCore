@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,25 +30,18 @@
 
 namespace WebCore {
 
-class RemoveNodeCommand : public SimpleEditCommand {
+class RemoveNodeCommand : public EditCommand {
 public:
-    static PassRefPtr<RemoveNodeCommand> create(PassRefPtr<Node> node)
-    {
-        return adoptRef(new RemoveNodeCommand(node));
-    }
+    RemoveNodeCommand(Node*);
+
+    virtual void doApply();
+    virtual void doUnapply();
+
+    Node* node() const { return m_removeChild.get(); }
 
 private:
-    RemoveNodeCommand(PassRefPtr<Node>);
-
-    virtual void doApply() OVERRIDE;
-    virtual void doUnapply() OVERRIDE;
-
-#ifndef NDEBUG
-    void getNodesInCommand(HashSet<Node*>&) OVERRIDE;
-#endif
-
-    RefPtr<Node> m_node;
-    RefPtr<ContainerNode> m_parent;
+    RefPtr<Node> m_removeChild;
+    RefPtr<Node> m_parent;
     RefPtr<Node> m_refChild;    
 };
 

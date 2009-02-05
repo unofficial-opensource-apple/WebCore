@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2008-2009 Torch Mobile, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,46 +23,50 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef JPEGImageDecoder_h
-#define JPEGImageDecoder_h
+#ifndef JPEG_DECODER_H_
+#define JPEG_DECODER_H_
 
 #include "ImageDecoder.h"
-#include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
-    class JPEGImageReader;
+class JPEGImageReader;
 
-    // This class decodes the JPEG image format.
-    class JPEGImageDecoder : public ImageDecoder {
-    public:
-        JPEGImageDecoder(ImageSource::AlphaOption, ImageSource::GammaAndColorProfileOption);
-        virtual ~JPEGImageDecoder();
+// This class decodes the JPEG image format.
+class JPEGImageDecoder : public ImageDecoder
+{
+public:
+    JPEGImageDecoder();
+    ~JPEGImageDecoder();
 
-        // ImageDecoder
-        virtual String filenameExtension() const { return "jpg"; }
-        virtual bool isSizeAvailable();
-        virtual bool setSize(unsigned width, unsigned height);
-        virtual ImageFrame* frameBufferAtIndex(size_t index);
-        // CAUTION: setFailed() deletes |m_reader|.  Be careful to avoid
-        // accessing deleted memory, especially when calling this from inside
-        // JPEGImageReader!
-        virtual bool setFailed();
+    // Take the data and store it.
+    virtual void setData(SharedBuffer* data, bool allDataReceived);
 
-        bool outputScanlines();
-        void jpegComplete();
+    // Whether or not the size information has been decoded yet.
+    virtual bool isSizeAvailable() const;
 
-        void setColorProfile(const ColorProfile& colorProfile) { m_colorProfile = colorProfile; }
+    virtual RGBA32Buffer* frameBufferAtIndex(size_t index);
+    
+    virtual bool supportsAlpha() const { return false; }
 
-    private:
-        // Decodes the image.  If |onlySize| is true, stops decoding after
-        // calculating the image size.  If decoding fails but there is no more
-        // data coming, sets the "decode failure" flag.
-        void decode(bool onlySize);
+    void decode(bool sizeOnly = false) const;
 
-        OwnPtr<JPEGImageReader> m_reader;
-    };
+    JPEGImageReader* reader() { return m_reader; }
 
-} // namespace WebCore
+    void setSize(int width, int height) {
+        if (!m_sizeAvailable) {
+            m_sizeAvailable = true;
+            m_size = IntSize(width, height);
+        }
+    }
+
+    bool outputScanlines();
+    void jpegComplete();
+
+private:
+    mutable JPEGImageReader* m_reader;
+};
+
+}
 
 #endif

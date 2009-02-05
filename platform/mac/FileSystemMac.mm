@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,48 +25,51 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
 #import "config.h"
 #import "FileSystem.h"
 
 #import "PlatformString.h"
-//#import "WebCoreNSStringExtras.h"
-#import "WebCoreNSURLExtras.h"
-#import "WebCoreSystemInterface.h"
-#import <wtf/RetainPtr.h>
-#import <wtf/text/CString.h>
 
 namespace WebCore {
 
-String homeDirectoryPath()
+bool fileExists(const String& path) 
 {
-    return NSHomeDirectory();
+    const char* fsRep = [(NSString *)path fileSystemRepresentation];
+        
+    if (!fsRep || fsRep[0] == '\0')
+        return false;
+        
+    struct stat fileInfo;
+
+    // stat(...) returns 0 on successful stat'ing of the file, and non-zero in any case where the file doesn't exist or cannot be accessed
+    return !stat(fsRep, &fileInfo);
 }
 
-String openTemporaryFile(const String& prefix, PlatformFileHandle& platformFileHandle)
+bool deleteFile(const String& path) 
 {
-    platformFileHandle = invalidPlatformFileHandle;
+    const char* fsRep = [(NSString *)path fileSystemRepresentation];
+        
+    if (!fsRep || fsRep[0] == '\0')
+        return false;
+        
+    // unlink(...) returns 0 on successful deletion of the path and non-zero in any other case (including invalid permissions or non-existent file)
+    return !unlink(fsRep);
+}
+
+bool fileSize(const String& path, long long& result)
+{
+    const char* fsRep = [(NSString *)path fileSystemRepresentation];
     
-    Vector<char> temporaryFilePath(PATH_MAX);
-    if (!confstr(_CS_DARWIN_USER_TEMP_DIR, temporaryFilePath.data(), temporaryFilePath.size()))
-        return String();
-
-    // Shrink the vector.   
-    temporaryFilePath.shrink(strlen(temporaryFilePath.data()));
-    ASSERT(temporaryFilePath.last() == '/');
-
-    // Append the file name.
-    CString prefixUtf8 = prefix.utf8();
-    temporaryFilePath.append(prefixUtf8.data(), prefixUtf8.length());
-    temporaryFilePath.append("XXXXXX", 6);
-    temporaryFilePath.append('\0');
-
-    platformFileHandle = mkstemp(temporaryFilePath.data());
-    if (platformFileHandle == invalidPlatformFileHandle)
-        return String();
-
-    return String::fromUTF8(temporaryFilePath.data());
+    if (!fsRep || fsRep[0] == '\0')
+        return false;
+    
+    struct stat fileInfo;
+    
+    if (!stat(fsRep, &fileInfo))
+        return false;
+    
+    result = fileInfo.st_size;
+    return true;
 }
 
-
-} // namespace WebCore
+} //namespace WebCore

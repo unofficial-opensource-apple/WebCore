@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -21,12 +21,8 @@
 module traversal {
 
     // Introduced in DOM Level 2:
-    interface [
-        JSCustomMarkFunction,
-        JSCustomToNativeObject,
-        ObjCProtocol,
-        CPPPureInterface
-    ] NodeFilter {
+    interface [GenerateConstructor, CustomMarkFunction, CustomNativeConverter, ObjCProtocol] NodeFilter {
+
         // Constants returned by acceptNode
         const short               FILTER_ACCEPT                  = 1;
         const short               FILTER_REJECT                  = 2;
@@ -47,7 +43,7 @@ module traversal {
         const unsigned long       SHOW_DOCUMENT_FRAGMENT         = 0x00000400;
         const unsigned long       SHOW_NOTATION                  = 0x00000800;
 
-        [CallWith=ScriptState] short acceptNode(in [Optional=DefaultIsUndefined] Node n);
+        short acceptNode(in Node n);
 
     };
 

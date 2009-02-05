@@ -1,7 +1,5 @@
 /*
  * Copyright (C) 2006 Alexey Proskuryakov (ap@webkit.org)
- * Copyright (C) 2009 Google Inc. All rights reserved.
- * Copyright (C) 2011 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,47 +29,14 @@
 #ifndef HTTPParsers_h
 #define HTTPParsers_h
 
-#include <wtf/Forward.h>
-#include <wtf/Vector.h>
-
 namespace WebCore {
 
-class HTTPHeaderMap;
-class ResourceResponseBase;
+    class String;
 
-enum XSSProtectionDisposition {
-    XSSProtectionDisabled,
-    XSSProtectionEnabled,
-    XSSProtectionBlockEnabled
-};
-
-typedef enum {
-    ContentDispositionNone,
-    ContentDispositionInline,
-    ContentDispositionAttachment,
-    ContentDispositionOther
-} ContentDispositionType;
-
-ContentDispositionType contentDispositionType(const String&);
-bool isRFC2616Token(const String&);
-bool parseHTTPRefresh(const String& refresh, bool fromHttpEquivMeta, double& delay, String& url);
-double parseDate(const String&);
-String filenameFromHTTPContentDisposition(const String&); 
-String extractMIMETypeFromMediaType(const String&);
-String extractCharsetFromMediaType(const String&); 
-void findCharsetInMediaType(const String& mediaType, unsigned int& charsetPos, unsigned int& charsetLen, unsigned int start = 0);
-XSSProtectionDisposition parseXSSProtectionHeader(const String&);
-String extractReasonPhraseFromHTTPStatusLine(const String&);
-
-// -1 could be set to one of the return parameters to indicate the value is not specified.
-bool parseRange(const String&, long long& rangeOffset, long long& rangeEnd, long long& rangeSuffixLength);
-
-// Parsing Complete HTTP Messages.
-enum HTTPVersion { Unknown, HTTP_1_0, HTTP_1_1 };
-size_t parseHTTPRequestLine(const char* data, size_t length, String& failureReason, String& method, String& url, HTTPVersion&);
-size_t parseHTTPHeader(const char* data, size_t length, String& failureReason, AtomicString& nameStr, String& valueStr);
-size_t parseHTTPRequestBody(const char* data, size_t length, Vector<unsigned char>& body);
-
+    bool parseHTTPRefresh(const String& refresh, bool fromHttpEquivMeta, double& delay, String& url);
+    String filenameFromHTTPContentDisposition(const String&); 
+    String extractMIMETypeFromMediaType(const String&);
+    String extractCharsetFromMediaType(const String&); 
 }
 
 #endif

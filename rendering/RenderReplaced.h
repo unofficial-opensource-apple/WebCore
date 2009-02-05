@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -32,54 +32,46 @@ public:
     RenderReplaced(Node*, const IntSize& intrinsicSize);
     virtual ~RenderReplaced();
 
-    virtual LayoutUnit computeReplacedLogicalWidth(bool includeMaxWidth = true) const;
-    virtual LayoutUnit computeReplacedLogicalHeight() const;
+    virtual const char* renderName() const { return "RenderReplaced"; }
 
-    bool hasReplacedLogicalWidth() const;
-    bool hasReplacedLogicalHeight() const;
+    virtual short lineHeight(bool firstLine, bool isRootLineBox = false) const;
+    virtual short baselinePosition(bool firstLine, bool isRootLineBox = false) const;
 
-protected:
-    virtual void willBeDestroyed();
+    virtual void calcPrefWidths();
 
-    virtual void layout();
+    virtual void paint(PaintInfo&, int tx, int ty) = 0;
 
-    virtual IntSize intrinsicSize() const { return m_intrinsicSize; }
-    virtual void computeIntrinsicRatioInformation(FloatSize& intrinsicSize, double& intrinsicRatio, bool& isPercentageIntrinsicSize) const;
+    virtual IntSize intrinsicSize() const;
 
-    virtual int minimumReplacedHeight() const { return 0; }
+    virtual int overflowHeight(bool includeInterior = true) const;
+    virtual int overflowWidth(bool includeInterior = true) const;
+    virtual int overflowLeft(bool includeInterior = true) const;
+    virtual int overflowTop(bool includeInterior = true) const;
+    virtual IntRect overflowRect(bool includeInterior = true) const;
 
+    virtual int caretMinOffset() const;
+    virtual int caretMaxOffset() const;
+    virtual unsigned caretMaxRenderedOffset() const;
+    virtual VisiblePosition positionForCoordinates(int x, int y);
+    
+    virtual bool canBeSelectionLeaf() const { return true; }
+    virtual SelectionState selectionState() const { return static_cast<SelectionState>(m_selectionState); }
     virtual void setSelectionState(SelectionState);
+    virtual IntRect selectionRect(bool clipToVisibleContent = true);
 
     bool isSelected() const;
 
-    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
+protected:
+    void setIntrinsicSize(const IntSize&);
 
-    void setIntrinsicSize(const IntSize& intrinsicSize) { m_intrinsicSize = intrinsicSize; }
-    virtual void intrinsicSizeChanged();
-
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-    bool shouldPaint(PaintInfo&, const LayoutPoint&);
-    LayoutRect localSelectionRect(bool checkWhetherSelected = true) const; // This is in local coordinates, but it's a physical rect (so the top left corner is physical top left).
+    bool shouldPaint(PaintInfo&, int& tx, int& ty);
+    void adjustOverflowForBoxShadow();
 
 private:
-    virtual RenderBox* embeddedContentBox() const { return 0; }
-    virtual const char* renderName() const { return "RenderReplaced"; }
-
-    virtual bool canHaveChildren() const { return false; }
-
-    virtual void computePreferredLogicalWidths();
-    virtual void paintReplaced(PaintInfo&, const LayoutPoint&) { }
-
-    virtual LayoutRect clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const;
-
-    virtual VisiblePosition positionForPoint(const LayoutPoint&);
+    IntSize m_intrinsicSize;
     
-    virtual bool canBeSelectionLeaf() const { return true; }
-
-    virtual LayoutRect selectionRectForRepaint(RenderBoxModelObject* repaintContainer, bool clipToVisibleContent = true);
-    void computeAspectRatioInformationForRenderBox(RenderBox*, FloatSize& constrainedSize, double& intrinsicRatio, bool& isPercentageIntrinsicSize) const;
-
-    mutable IntSize m_intrinsicSize;
+    unsigned m_selectionState : 3; // SelectionState
+    bool m_hasOverflow : 1;
 };
 
 }

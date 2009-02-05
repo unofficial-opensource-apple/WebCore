@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,46 +23,29 @@
 #define RenderApplet_h
 
 #include "RenderWidget.h"
-#include <wtf/text/StringHash.h>
+#include "StringHash.h"
 
 namespace WebCore {
 
-class HTMLAppletElement;
+    class HTMLAppletElement;
 
-class RenderApplet : public RenderWidget {
-public:
-    RenderApplet(HTMLAppletElement*, const HashMap<String, String>& args);
-    virtual ~RenderApplet();
+    class RenderApplet : public RenderWidget {
+    public:
+        RenderApplet(HTMLAppletElement*, const HashMap<String, String>& args);
+        virtual ~RenderApplet();
 
-    void createWidgetIfNecessary();
+        virtual const char* renderName() const { return "RenderApplet"; }
 
-#if USE(ACCELERATED_COMPOSITING)
-    virtual bool allowsAcceleratedCompositing() const;
-#endif
+        virtual bool isApplet() const { return true; }
 
-private:
-    virtual const char* renderName() const { return "RenderApplet"; }
+        virtual void layout();
+        virtual IntSize intrinsicSize() const;
 
-    virtual bool isApplet() const { return true; }
+        void createWidgetIfNecessary();
 
-    virtual void layout();
-    virtual IntSize intrinsicSize() const;
-
-#if USE(ACCELERATED_COMPOSITING)
-    virtual bool requiresLayer() const;
-#endif
-
-    HashMap<String, String> m_args;
-};
-
-inline RenderApplet* toRenderApplet(RenderObject* object)
-{
-    ASSERT(!object || object->isApplet());
-    return static_cast<RenderApplet*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderApplet(const RenderApplet*);
+    private:
+        HashMap<String, String> m_args;
+    };
 
 } // namespace WebCore
 

@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003, 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,73 +26,41 @@
 #ifndef UIEvent_h
 #define UIEvent_h
 
-#include "DOMWindow.h"
 #include "Event.h"
-#include "EventDispatchMediator.h"
 
 namespace WebCore {
+
+    class DOMWindow;
 
     typedef DOMWindow AbstractView;
 
     class UIEvent : public Event {
     public:
-        static PassRefPtr<UIEvent> create()
-        {
-            return adoptRef(new UIEvent);
-        }
-        static PassRefPtr<UIEvent> create(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<AbstractView> view, int detail)
-        {
-            return adoptRef(new UIEvent(type, canBubble, cancelable, view, detail));
-        }
+        UIEvent();
+        UIEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view, int detail);
         virtual ~UIEvent();
 
-        void initUIEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<AbstractView>, int detail);
+        void initUIEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view, int detail);
 
         AbstractView* view() const { return m_view.get(); }
         int detail() const { return m_detail; }
-
-        virtual const AtomicString& interfaceName() const;
+        
         virtual bool isUIEvent() const;
 
         virtual int keyCode() const;
         virtual int charCode() const;
 
-        virtual int layerX();
-        virtual int layerY();
+        virtual int layerX() const;
+        virtual int layerY() const;
 
         virtual int pageX() const;
         virtual int pageY() const;
 
         virtual int which() const;
 
-    protected:
-        UIEvent();
-        UIEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<AbstractView>, int detail);
-
-        // layerX and layerY are deprecated. This reports a message to the console until we remove them.
-        void warnDeprecatedLayerXYUsage();
-
     private:
         RefPtr<AbstractView> m_view;
         int m_detail;
-    };
-
-    class FocusInEventDispatchMediator : public EventDispatchMediator {
-    public:
-        static PassRefPtr<FocusInEventDispatchMediator> create(PassRefPtr<Event>, PassRefPtr<Node> oldFocusedNode);
-    private:
-        explicit FocusInEventDispatchMediator(PassRefPtr<Event>, PassRefPtr<Node> oldFocusedNode);
-        virtual bool dispatchEvent(EventDispatcher*) const;
-        RefPtr<Node> m_oldFocusedNode;
-    };
-
-    class FocusOutEventDispatchMediator : public EventDispatchMediator {
-    public:
-        static PassRefPtr<FocusOutEventDispatchMediator> create(PassRefPtr<Event>, PassRefPtr<Node> newFocusedNode);
-    private:
-        explicit FocusOutEventDispatchMediator(PassRefPtr<Event>, PassRefPtr<Node> newFocusedNode);
-        virtual bool dispatchEvent(EventDispatcher*) const;
-        RefPtr<Node> m_newFocusedNode;
     };
 
 } // namespace WebCore

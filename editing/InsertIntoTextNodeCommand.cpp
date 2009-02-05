@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,63 +26,40 @@
 #include "config.h"
 #include "InsertIntoTextNodeCommand.h"
 
-#include "AXObjectCache.h"
-#include "Document.h"
-#include "RenderText.h"
-#include "Settings.h"
 #include "Text.h"
-#include "RenderText.h"
 
 namespace WebCore {
 
-InsertIntoTextNodeCommand::InsertIntoTextNodeCommand(PassRefPtr<Text> node, unsigned offset, const String& text)
-    : SimpleEditCommand(node->document())
-    , m_node(node)
-    , m_offset(offset)
-    , m_text(text)
+InsertIntoTextNodeCommand::InsertIntoTextNodeCommand(Text *node, int offset, const String &text)
+    : EditCommand(node->document()), m_node(node), m_offset(offset)
 {
     ASSERT(m_node);
-    ASSERT(m_offset <= m_node->length());
-    ASSERT(!m_text.isEmpty());
+    ASSERT(m_offset >= 0);
+    ASSERT(!text.isEmpty());
+    
+    m_text = text.copy(); // make a copy to ensure that the string never changes
 }
 
 void InsertIntoTextNodeCommand::doApply()
 {
-    if (!m_node->rendererIsEditable())
-        return;
+    ASSERT(m_node);
+    ASSERT(m_offset >= 0);
+    ASSERT(!m_text.isEmpty());
 
-
-    ExceptionCode ec;
+    ExceptionCode ec = 0;
     m_node->insertData(m_offset, m_text, ec);
-
-    if (AXObjectCache::accessibilityEnabled())
-        document()->axObjectCache()->nodeTextChangeNotification(m_node->renderer(), AXObjectCache::AXTextInserted, m_offset, m_text);
+    ASSERT(ec == 0);
 }
 
-void InsertIntoTextNodeCommand::doReapply()
-{
-    ExceptionCode ec;
-    m_node->insertData(m_offset, m_text, ec, false);
-}
-    
 void InsertIntoTextNodeCommand::doUnapply()
 {
-    if (!m_node->rendererIsEditable())
-        return;
-        
-    // Need to notify this before actually deleting the text
-    if (AXObjectCache::accessibilityEnabled())
-        document()->axObjectCache()->nodeTextChangeNotification(m_node->renderer(), AXObjectCache::AXTextDeleted, m_offset, m_text);
+    ASSERT(m_node);
+    ASSERT(m_offset >= 0);
+    ASSERT(!m_text.isEmpty());
 
-    ExceptionCode ec;
+    ExceptionCode ec = 0;
     m_node->deleteData(m_offset, m_text.length(), ec);
+    ASSERT(ec == 0);
 }
-
-#ifndef NDEBUG
-void InsertIntoTextNodeCommand::getNodesInCommand(HashSet<Node*>& nodes)
-{
-    addNodeAndDescendants(m_node.get(), nodes);
-}
-#endif
 
 } // namespace WebCore

@@ -1,7 +1,6 @@
 /*
  * Copyright (C) 2007 Apple Inc.  All rights reserved.
- * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
- * Copyright (C) 2008 Holger Hans Peter Freyther
+ * Copyright (C) 2007 Trolltech ASA
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,112 +33,38 @@
 #include "FloatRect.h"
 #include "Frame.h"
 #include "FrameView.h"
-#include "HostWindow.h"
-#include "NotImplemented.h"
 #include "Widget.h"
-#include "QWebPageClient.h"
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-#include <QGuiApplication>
-#include <QScreen>
-#else
 #include <QApplication>
 #include <QDesktopWidget>
-#endif
 
 namespace WebCore {
-
-int screenHorizontalDPI(Widget* widget)
-{
-    notImplemented();
-    return 0;
-}
-
-int screenVerticalDPI(Widget* widget)
-{
-    notImplemented();
-    return 0;
-}
-
-static int screenNumber(Widget* w)
-{
-    if (!w)
-        return 0;
-
-    QWebPageClient* client = w->root()->hostWindow()->platformPageClient();
-    return client ? client->screenNumber() : 0;
-}
-
+    
 int screenDepth(Widget* w)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-    return QGuiApplication::screens().value(screenNumber(w))->depth();
-#else
-    return QApplication::desktop()->screen(screenNumber(w))->depth();
-#endif
+    QDesktopWidget* d = QApplication::desktop();
+    return d->screen(d->screenNumber(w->qwidget()))->depth();
 }
 
 int screenDepthPerComponent(Widget* w)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-    int depth = QGuiApplication::primaryScreen()->depth();
-    // FIXME: Use widget's screen
-    Q_UNUSED(w);
-#else
-    int depth = QApplication::desktop()->screen(0)->depth();
-    if (w) {
-        QWebPageClient* client = w->root()->hostWindow()->platformPageClient();
-
-        if (client) {
-            QWidget* view = client->ownerWidget();
-            if (view)
-                depth = view->depth();
-        }
-    }
-#endif
-    // An interface to establish the actual number of bits per color
-    // doesn't exist in Qt, or probably at all, so use common-sense
-    // values for each screen depth and assume RGB/RGBA where appropriate.
-    // Per http://www.w3.org/TR/css3-mediaqueries/#color, 'If different color
-    // components are represented by different number of bits, the smallest
-    // number is used.'
-    switch (depth) {
-    case 8:
-        return 2;
-    case 32:
-        return 8;
-    default:
-        return depth / 3;
-    }
+    return w->qwidget()->depth();
 }
 
 bool screenIsMonochrome(Widget* w)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-    Q_UNUSED(w);
-    // FIXME: In Qt 5 colorCount() isn't even implemented beyond returning 256 :)
-    return false;
-#else
-    return QApplication::desktop()->screen(screenNumber(w))->colorCount() == 2;
-#endif
+    QDesktopWidget* d = QApplication::desktop();
+    return d->screen(d->screenNumber(w->qwidget()))->numColors() < 2;
 }
 
-FloatRect screenRect(Widget* widget)
+FloatRect screenRect(Widget* w)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-    QRect r = QGuiApplication::screens().value(screenNumber(widget))->geometry();
-#else
-    QRect r = QApplication::desktop()->screenGeometry(screenNumber(widget));
-#endif
+    QRect r = QApplication::desktop()->screenGeometry(w->qwidget());
     return FloatRect(r.x(), r.y(), r.width(), r.height());
 }
 
-FloatRect screenAvailableRect(Widget* widget)
+FloatRect screenAvailableRect(Widget* w)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-    QRect r = QGuiApplication::screens().value(screenNumber(widget))->availableGeometry();
-#else
-    QRect r = QApplication::desktop()->availableGeometry(screenNumber(widget));
-#endif
+    QRect r = QApplication::desktop()->availableGeometry(w->qwidget());
     return FloatRect(r.x(), r.y(), r.width(), r.height());
 }
 

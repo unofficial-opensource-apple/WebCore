@@ -26,7 +26,19 @@
 #ifndef ThreadCheck_h
 #define ThreadCheck_h
 
-#define WebCoreThreadViolationCheckRoundOne() do {} while (0)
-#define WebCoreThreadViolationCheckRoundTwo() do {} while (0)
+namespace WebCore {
+    enum ThreadViolationBehavior {
+        NoThreadCheck,
+        LogOnFirstThreadViolation,
+        LogOnThreadViolation,
+        RaiseExceptionOnThreadViolation
+    };
+    void setDefaultThreadViolationBehavior(ThreadViolationBehavior);
+    void reportThreadViolation(const char* function);
+}
+
+extern "C" void WebCoreReportThreadViolation(const char* function);
+
+#define WebCoreThreadViolationCheck() ::WebCore::reportThreadViolation(WTF_PRETTY_FUNCTION)
 
 #endif

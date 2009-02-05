@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,45 +31,33 @@
 
 namespace WebCore {
 
-RemoveNodeCommand::RemoveNodeCommand(PassRefPtr<Node> node)
-    : SimpleEditCommand(node->document())
-    , m_node(node)
+RemoveNodeCommand::RemoveNodeCommand(Node* removeChild)
+    : EditCommand(removeChild->document())
+    , m_removeChild(removeChild)
+    , m_parent(m_removeChild->parentNode())
+    , m_refChild(m_removeChild->nextSibling())
 {
-    ASSERT(m_node);
-    ASSERT(m_node->parentNode());
+    ASSERT(m_parent);
 }
 
 void RemoveNodeCommand::doApply()
 {
-    ContainerNode* parent = m_node->parentNode();
-    if (!parent || !parent->rendererIsEditable())
-        return;
+    ASSERT(m_parent);
+    ASSERT(m_removeChild);
 
-    m_parent = parent;
-    m_refChild = m_node->nextSibling();
-
-    ExceptionCode ec;
-    m_node->remove(ec);
+    ExceptionCode ec = 0;
+    m_parent->removeChild(m_removeChild.get(), ec);
+    ASSERT(ec == 0);
 }
 
 void RemoveNodeCommand::doUnapply()
 {
-    RefPtr<ContainerNode> parent = m_parent.release();
-    RefPtr<Node> refChild = m_refChild.release();
-    if (!parent || !parent->rendererIsEditable())
-        return;
+    ASSERT(m_parent);
+    ASSERT(m_removeChild);
 
-    ExceptionCode ec;
-    parent->insertBefore(m_node.get(), refChild.get(), ec);
+    ExceptionCode ec = 0;
+    m_parent->insertBefore(m_removeChild.get(), m_refChild.get(), ec);
+    ASSERT(ec == 0);
 }
-
-#ifndef NDEBUG
-void RemoveNodeCommand::getNodesInCommand(HashSet<Node*>& nodes)
-{
-    addNodeAndDescendants(m_parent.get(), nodes);
-    addNodeAndDescendants(m_refChild.get(), nodes);
-    addNodeAndDescendants(m_node.get(), nodes);
-}
-#endif
 
 }

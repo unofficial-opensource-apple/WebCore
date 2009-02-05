@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,38 +21,52 @@
 #ifndef Icon_h
 #define Icon_h
 
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefCounted.h>
+#include "Shared.h"
 #include <wtf/Forward.h>
-#include <wtf/Vector.h>
 
-#include "ImageSource.h"
-#include <CoreGraphics/CoreGraphics.h>
+#if PLATFORM(MAC)
 #include <wtf/RetainPtr.h>
+#ifdef __OBJC__
+@class NSImage;
+#else
+class NSImage;
+#endif
+#elif PLATFORM(WIN)
+typedef struct HICON__* HICON;
+#elif PLATFORM(QT)
+#include <QIcon>
+#endif
 
 namespace WebCore {
 
 class GraphicsContext;
 class IntRect;
+class String;
     
-class Icon : public RefCounted<Icon> {
+class Icon : public Shared<Icon> {
 public:
-    static PassRefPtr<Icon> createIconForFiles(const Vector<String>& filenames);
-    static PassRefPtr<Icon> createIconForImage(NativeImagePtr);
-
+    Icon();
     ~Icon();
+    
+    static PassRefPtr<Icon> newIconForFile(const String& filename);
 
     void paint(GraphicsContext*, const IntRect&);
 
 #if PLATFORM(WIN)
-    static PassRefPtr<Icon> create(HICON hIcon) { return adoptRef(new Icon(hIcon)); }
-#elif PLATFORM(CHROMIUM)
-    static PassRefPtr<Icon> create(PassRefPtr<PlatformIcon> icon) { return adoptRef(new Icon(icon)); }
+    Icon(HICON);
 #endif
 
 private:
-    Icon(CGImageRef);
-    RetainPtr<CGImageRef> m_cgImage;
+#if PLATFORM(MAC)
+    Icon(NSImage*);
+#endif
+#if PLATFORM(MAC)
+    RetainPtr<NSImage> m_nsImage;
+#elif PLATFORM(WIN)
+    HICON m_hIcon;
+#elif PLATFORM(QT)
+    QIcon m_icon;
+#endif
 };
 
 }

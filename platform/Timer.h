@@ -27,9 +27,7 @@
 #define Timer_h
 
 #include <wtf/Noncopyable.h>
-#include <wtf/Threading.h>
-
-#include "WebCoreThread.h"
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
@@ -37,8 +35,7 @@ namespace WebCore {
 
 class TimerHeapElement;
 
-class TimerBase {
-    WTF_MAKE_NONCOPYABLE(TimerBase); WTF_MAKE_FAST_ALLOCATED;
+class TimerBase : Noncopyable {
 public:
     TimerBase();
     virtual ~TimerBase();
@@ -54,8 +51,7 @@ public:
     double nextFireInterval() const;
     double repeatInterval() const { return m_repeatInterval; }
 
-    void augmentFireInterval(double delta) { setNextFireTime(m_nextFireTime + delta); }
-    void augmentRepeatInterval(double delta) { augmentFireInterval(delta); m_repeatInterval += delta; }
+    void augmentRepeatInterval(double delta) { setNextFireTime(m_nextFireTime + delta); m_repeatInterval += delta; }
 
     static void fireTimersInNestedEventLoop();
 
@@ -77,18 +73,18 @@ private:
     void heapPop();
     void heapPopMin();
 
+    static void collectFiringTimers(double fireTime, Vector<TimerBase*>&);
+    static void fireTimers(double fireTime, const Vector<TimerBase*>&);
+    static void sharedTimerFired();
+
     double m_nextFireTime; // 0 if inactive
     double m_repeatInterval; // 0 if not repeating
     int m_heapIndex; // -1 if not in heap
-    unsigned m_heapInsertionOrder; // Used to keep order among equal-fire-time timers
 
-#ifndef NDEBUG
-    ThreadIdentifier m_thread;
-#endif
-
-    friend class ThreadTimers;
-    friend class TimerHeapLessThanFunction;
-    friend class TimerHeapReference;
+    friend void updateSharedTimer();
+    friend void setDeferringTimers(bool);
+    friend class TimerHeapElement;
+    friend bool operator<(const TimerHeapElement&, const TimerHeapElement&);
 };
 
 template <typename TimerFiredClass> class Timer : public TimerBase {
@@ -105,17 +101,10 @@ private:
     TimerFiredFunction m_function;
 };
 
-inline bool TimerBase::isActive() const
-{
-    // For iPhone timers are always run on the main thread or the Web Thread.
-    // Unless we have workers enabled in which case timers can run on other threads.
-#if ENABLE(WORKERS)
-    ASSERT(WebThreadIsCurrent() || pthread_main_np() || m_thread == currentThread());
-#else
-    ASSERT(WebThreadIsCurrent() || pthread_main_np());
-#endif
-    return m_nextFireTime;
-}
+// Set to true to prevent any timers from firing.
+// When set back to false, timers that were deferred will fire.
+bool isDeferringTimers();
+void setDeferringTimers(bool);
 
 }
 

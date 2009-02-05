@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -20,36 +20,33 @@
 
 module core {
 
-    interface [
-        JSGenerateIsReachable=ImplDocument,
-        V8DependentLifetime
-    ] DOMImplementation {
+    interface [GenerateConstructor] DOMImplementation {
 
         // DOM Level 1
 
-        [ObjCLegacyUnnamedParameters] boolean hasFeature(in [Optional=DefaultIsUndefined] DOMString feature, 
-                                          in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString version);
+        [OldStyleObjC] boolean hasFeature(in DOMString feature, 
+                                          in [ConvertNullToNullString] DOMString version);
 
         // DOM Level 2
 
-        [ObjCLegacyUnnamedParameters] DocumentType createDocumentType(in [TreatNullAs=NullString, TreatUndefinedAs=NullString,Optional=DefaultIsUndefined] DOMString qualifiedName,
-                                                       in [TreatNullAs=NullString, TreatUndefinedAs=NullString,Optional=DefaultIsUndefined] DOMString publicId,
-                                                       in [TreatNullAs=NullString, TreatUndefinedAs=NullString,Optional=DefaultIsUndefined] DOMString systemId)
+        [OldStyleObjC] DocumentType createDocumentType(in DOMString qualifiedName,
+                                                       in DOMString publicId,
+                                                       in DOMString systemId)
             raises(DOMException);
-        [ObjCLegacyUnnamedParameters] Document createDocument(in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString namespaceURI, 
-                                               in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DOMString qualifiedName, 
-                                               in [TreatNullAs=NullString,Optional=DefaultIsUndefined] DocumentType doctype)
+        [OldStyleObjC] Document createDocument(in [ConvertNullToNullString] DOMString namespaceURI, 
+                                               in [ConvertNullToNullString] DOMString qualifiedName, 
+                                               in [ConvertNullToNullString] DocumentType doctype)
             raises(DOMException);
 
         // DOMImplementationCSS interface from DOM Level 2 CSS
 
-        [ObjCLegacyUnnamedParameters] CSSStyleSheet createCSSStyleSheet(in [Optional=DefaultIsUndefined] DOMString title,
-                                                         in [Optional=DefaultIsUndefined] DOMString media)
+        [OldStyleObjC] CSSStyleSheet createCSSStyleSheet(in DOMString title,
+                                                         in DOMString media)
             raises(DOMException);
 
         // HTMLDOMImplementation interface from DOM Level 2 HTML
 
-        HTMLDocument createHTMLDocument(in [Optional=DefaultIsUndefined] DOMString title);
+        HTMLDocument createHTMLDocument(in DOMString title);
     };
 
 }

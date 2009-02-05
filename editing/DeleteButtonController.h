@@ -34,10 +34,9 @@ class DeleteButton;
 class Frame;
 class HTMLElement;
 class RenderObject;
-class VisibleSelection;
+class Selection;
 
 class DeleteButtonController {
-    WTF_MAKE_NONCOPYABLE(DeleteButtonController); WTF_MAKE_FAST_ALLOCATED;
 public:
     DeleteButtonController(Frame*);
 
@@ -46,9 +45,7 @@ public:
     HTMLElement* target() const { return m_target.get(); }
     HTMLElement* containerElement() const { return m_containerElement.get(); }
 
-    void respondToChangedSelection(const VisibleSelection& oldSelection);
-
-    void deviceScaleFactorChanged();
+    void respondToChangedSelection(const Selection& oldSelection);
 
     void show(HTMLElement*);
     void hide();

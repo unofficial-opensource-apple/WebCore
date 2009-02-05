@@ -25,8 +25,8 @@
 
 #include "config.h"
 #include "DragImage.h"
+
 #include "CachedImage.h"
-#include "FloatSize.h"
 #include "Image.h"
 
 namespace WebCore {
@@ -40,7 +40,7 @@ void deleteDragImage(DragImageRef)
 {
 }
 
-DragImageRef scaleDragImage(DragImageRef image, FloatSize)
+DragImageRef scaleDragImage(DragImageRef image, float)
 {
     return image;
 }
@@ -50,7 +50,7 @@ DragImageRef dissolveDragImageToFraction(DragImageRef image, float)
     return image;
 }
         
-DragImageRef createDragImageFromImage(Image*, RespectImageOrientationEnum)
+DragImageRef createDragImageFromImage(Image*)
 {
     return 0;
 }

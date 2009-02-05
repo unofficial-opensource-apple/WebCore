@@ -1,4 +1,6 @@
 /**
+* This file is part of the html renderer for KDE.
+ *
  * Copyright (C) 2003, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -23,135 +25,60 @@
 #include "Document.h"
 #include "GraphicsContext.h"
 #include "HitTestResult.h"
-#include "PaintInfo.h"
-#include "RenderBlock.h"
-#include "RootInlineBox.h"
-#include "TextRun.h"
+#include "TextStyle.h"
 
 namespace WebCore {
 
-void EllipsisBox::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
+void EllipsisBox::paint(RenderObject::PaintInfo& paintInfo, int tx, int ty)
 {
     GraphicsContext* context = paintInfo.context;
-    RenderStyle* style = m_renderer->style(isFirstLineStyle());
-    Color textColor = style->visitedDependentColor(CSSPropertyColor);
+    RenderStyle* style = m_object->style(m_firstLine);
+    if (style->font() != context->font())
+        context->setFont(style->font());
+
+    Color textColor = style->color();
     if (textColor != context->fillColor())
-        context->setFillColor(textColor, style->colorSpace());
+        context->setFillColor(textColor);
     bool setShadow = false;
     if (style->textShadow()) {
-        context->setShadow(LayoutSize(style->textShadow()->x(), style->textShadow()->y()),
-                           style->textShadow()->blur(), style->textShadow()->color(), style->colorSpace());
+        context->setShadow(IntSize(style->textShadow()->x, style->textShadow()->y),
+                           style->textShadow()->blur, style->textShadow()->color);
         setShadow = true;
     }
 
-    const Font& font = style->font();
-    if (selectionState() != RenderObject::SelectionNone) {
-        paintSelection(context, paintOffset, style, font);
-
-        // Select the correct color for painting the text.
-        Color foreground = paintInfo.forceBlackText ? Color::black : renderer()->selectionForegroundColor();
-        if (foreground.isValid() && foreground != textColor)
-            context->setFillColor(foreground, style->colorSpace());
-    }
-
-    // FIXME: Why is this always LTR? Fix by passing correct text run flags below.
-    context->drawText(font, RenderBlock::constructTextRun(renderer(), font, m_str, style, TextRun::AllowTrailingExpansion), LayoutPoint(x() + paintOffset.x(), y() + paintOffset.y() + style->fontMetrics().ascent()));
-
-    // Restore the regular fill color.
-    if (textColor != context->fillColor())
-        context->setFillColor(textColor, style->colorSpace());
+    const String& str = m_str;
+    TextStyle textStyle(0, 0, 0, false, style->visuallyOrdered());
+    context->drawText(TextRun(str.characters(), str.length()), IntPoint(m_x + tx, m_y + ty + m_baseline), textStyle);
 
     if (setShadow)
         context->clearShadow();
 
-    paintMarkupBox(paintInfo, paintOffset, lineTop, lineBottom, style);
+    if (m_markupBox) {
+        // Paint the markup box
+        tx += m_x + m_width - m_markupBox->xPos();
+        ty += m_y + m_baseline - (m_markupBox->yPos() + m_markupBox->baseline());
+        m_markupBox->paint(paintInfo, tx, ty);
+    }
 }
 
-void EllipsisBox::paintMarkupBox(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom, RenderStyle* style)
+bool EllipsisBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, int x, int y, int tx, int ty)
 {
-    if (!m_shouldPaintMarkupBox || !m_renderer->isRenderBlock())
-        return;
-
-    RenderBlock* block = toRenderBlock(m_renderer);
-    RootInlineBox* lastLine = block->lineAtIndex(block->lineCount() - 1);
-    if (!lastLine)
-        return;
-
-    // If the last line-box on the last line of a block is a link, -webkit-line-clamp paints that box after the ellipsis.
-    // It does not actually move the link.
-    InlineBox* anchorBox = lastLine->lastChild();
-    if (!anchorBox || !anchorBox->renderer()->style()->isLink())
-        return;
-
-    LayoutPoint adjustedPaintOffset = paintOffset;
-    adjustedPaintOffset.move(x() + m_logicalWidth - anchorBox->x(),
-        y() + style->fontMetrics().ascent() - (anchorBox->y() + anchorBox->renderer()->style(isFirstLineStyle())->fontMetrics().ascent()));
-    anchorBox->paint(paintInfo, adjustedPaintOffset, lineTop, lineBottom);
-}
-
-IntRect EllipsisBox::selectionRect()
-{
-    RenderStyle* style = m_renderer->style(isFirstLineStyle());
-    const Font& font = style->font();
-    // FIXME: Why is this always LTR? Fix by passing correct text run flags below.
-    return enclosingIntRect(font.selectionRectForText(RenderBlock::constructTextRun(renderer(), font, m_str, style, TextRun::AllowTrailingExpansion), IntPoint(x(), y() + root()->selectionTopAdjustedForPrecedingBlock()), root()->selectionHeightAdjustedForPrecedingBlock()));
-}
-
-void EllipsisBox::paintSelection(GraphicsContext* context, const LayoutPoint& paintOffset, RenderStyle* style, const Font& font)
-{
-    Color textColor = style->visitedDependentColor(CSSPropertyColor);
-    Color c = m_renderer->selectionBackgroundColor();
-    if (!c.isValid() || !c.alpha())
-        return;
-
-    // If the text color ends up being the same as the selection background, invert the selection
-    // background.
-    if (textColor == c)
-        c = Color(0xff - c.red(), 0xff - c.green(), 0xff - c.blue());
-
-    GraphicsContextStateSaver stateSaver(*context);
-    LayoutUnit top = root()->selectionTop();
-    LayoutUnit h = root()->selectionHeight();
-    // FIXME: We'll need to apply the correct clip rounding here: https://bugs.webkit.org/show_bug.cgi?id=63656
-    context->clip(IntRect(x() + paintOffset.x(), top + paintOffset.y(), m_logicalWidth, h));
-    // FIXME: Why is this always LTR? Fix by passing correct text run flags below.
-    context->drawHighlightForText(font, RenderBlock::constructTextRun(renderer(), font, m_str, style, TextRun::AllowTrailingExpansion), IntPoint(x() + paintOffset.x(), y() + paintOffset.y() + top), h, c, style->colorSpace());
-}
-
-bool EllipsisBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
-{
-    if (!m_shouldPaintMarkupBox || !m_renderer->isRenderBlock())
-        return false;
-
-    RenderBlock* block = toRenderBlock(m_renderer);
-    RootInlineBox* lastLine = block->lineAtIndex(block->lineCount() - 1);
-    if (!lastLine)
-        return false;
-
-    // If the last line-box on the last line of a block is a link, -webkit-line-clamp paints that box after the ellipsis.
-    // It does not actually move the link.
-    InlineBox* anchorBox = lastLine->lastChild();
-    if (!anchorBox || !anchorBox->renderer()->style()->isLink())
-        return false;
-
-    LayoutPoint adjustedLocation = accumulatedOffset + roundedLayoutPoint(topLeft());
+    tx += m_x;
+    ty += m_y;
 
     // Hit test the markup box.
-    if (anchorBox) {
-        RenderStyle* style = m_renderer->style(isFirstLineStyle());
-        LayoutUnit mtx = adjustedLocation.x() + m_logicalWidth - anchorBox->x();
-        LayoutUnit mty = adjustedLocation.y() + style->fontMetrics().ascent() - (anchorBox->y() + anchorBox->renderer()->style(isFirstLineStyle())->fontMetrics().ascent());
-        if (anchorBox->nodeAtPoint(request, result, pointInContainer, LayoutPoint(mtx, mty), lineTop, lineBottom)) {
-            renderer()->updateHitTestResult(result, pointInContainer - LayoutSize(mtx, mty));
+    if (m_markupBox) {
+        int mtx = tx + m_width - m_markupBox->xPos();
+        int mty = ty + m_baseline - (m_markupBox->yPos() + m_markupBox->baseline());
+        if (m_markupBox->nodeAtPoint(request, result, x, y, mtx, mty)) {
+            object()->updateHitTestResult(result, IntPoint(x - mtx, y - mty));
             return true;
         }
     }
 
-    LayoutRect boundsRect(adjustedLocation, LayoutSize(m_logicalWidth, m_height));
-    if (visibleToHitTesting() && boundsRect.intersects(result.rectForPoint(pointInContainer))) {
-        renderer()->updateHitTestResult(result, pointInContainer - toLayoutSize(adjustedLocation));
-        if (!result.addNodeToRectBasedTestResult(renderer()->node(), pointInContainer, boundsRect))
-            return true;
+    if (object()->style()->visibility() == VISIBLE && IntRect(tx, ty, m_width, m_height).contains(x, y)) {
+        object()->updateHitTestResult(result, IntPoint(x - tx, y - ty));
+        return true;
     }
 
     return false;

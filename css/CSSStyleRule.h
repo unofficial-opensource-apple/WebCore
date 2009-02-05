@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -28,36 +30,40 @@
 
 namespace WebCore {
 
-class CSSStyleDeclaration;
-class StyleRuleCSSStyleDeclaration;
-class StyleRule;
+class CSSMutableStyleDeclaration;
+class CSSSelector;
+
+typedef int ExceptionCode;
 
 class CSSStyleRule : public CSSRule {
 public:
-    static PassRefPtr<CSSStyleRule> create(StyleRule* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSStyleRule(rule, sheet)); }
+    CSSStyleRule(StyleBase* parent);
+    virtual ~CSSStyleRule();
 
-    ~CSSStyleRule();
+    virtual bool isStyleRule() { return true; }
 
     String selectorText() const;
-    void setSelectorText(const String&);
+    void setSelectorText(const String&, ExceptionCode&);
 
-    CSSStyleDeclaration* style() const;
+    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
 
-    String cssText() const;
-    
-    // FIXME: Not CSSOM. Remove.
-    StyleRule* styleRule() const { return m_styleRule.get(); }
+    // Inherited from CSSRule
+    virtual unsigned short type() const { return STYLE_RULE; }
 
-    void reattach(StyleRule*);
+    virtual String cssText() const;
 
-private:
-    CSSStyleRule(StyleRule*, CSSStyleSheet*);
+    // Not part of the CSSOM
+    virtual bool parseString(const String&, bool = false);
 
-    String generateSelectorText() const;
+    void setSelector(CSSSelector* selector) { m_selector = selector; }
+    void setDeclaration(PassRefPtr<CSSMutableStyleDeclaration>);
 
-    RefPtr<StyleRule> m_styleRule;    
-
-    mutable RefPtr<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;
+    CSSSelector* selector() { return m_selector; }
+    CSSMutableStyleDeclaration* declaration() { return m_style.get(); }
+ 
+protected:
+    RefPtr<CSSMutableStyleDeclaration> m_style;
+    CSSSelector* m_selector;
 };
 
 } // namespace WebCore

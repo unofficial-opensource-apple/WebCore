@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,31 +27,25 @@
 #define HTMLOptionsCollection_h
 
 #include "HTMLCollection.h"
+#include "HTMLOptionElement.h"
 
 namespace WebCore {
 
-class HTMLOptionElement;
-class HTMLSelectElement;
-
 typedef int ExceptionCode;
+
+class HTMLSelectElement;
 
 class HTMLOptionsCollection : public HTMLCollection {
 public:
-    static PassOwnPtr<HTMLOptionsCollection> create(HTMLSelectElement*);
+    HTMLOptionsCollection(HTMLSelectElement*);
 
     void add(PassRefPtr<HTMLOptionElement>, ExceptionCode&);
     void add(PassRefPtr<HTMLOptionElement>, int index, ExceptionCode&);
-    void remove(int index);
 
     int selectedIndex() const;
     void setSelectedIndex(int);
 
     void setLength(unsigned, ExceptionCode&);
-
-    using HTMLCollection::invalidateCacheIfNeeded;
-
-private:
-    HTMLOptionsCollection(HTMLSelectElement*);
 };
 
 } //namespace

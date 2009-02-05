@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2003, 2006 Apple Computer, Inc.  All rights reserved.
- *                     2006, 2008 Rob Buis <buis@kde.org>
+ *                     2006 Rob Buis <buis@kde.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,52 +27,17 @@
 #include "config.h"
 #include "Path.h"
 
-#if USE(CG)
+#if PLATFORM(CG)
 
 #include "AffineTransform.h"
+#include <ApplicationServices/ApplicationServices.h>
 #include "FloatRect.h"
-#include "GraphicsContext.h"
 #include "IntRect.h"
 #include "PlatformString.h"
-#include "StrokeStyleApplier.h"
-#include <CoreGraphics/CoreGraphics.h>
-#include <CoreGraphics/CGPathPrivate.h>
+
 #include <wtf/MathExtras.h>
-#include <wtf/RetainPtr.h>
-
-#if PLATFORM(MAC) || PLATFORM(CHROMIUM)
-#include "WebCoreSystemInterface.h"
-#endif
-
-#if PLATFORM(WIN)
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
-#endif
 
 namespace WebCore {
-
-static size_t putBytesNowhere(void*, const void*, size_t count)
-{
-    return count;
-}
-
-static CGContextRef createScratchContext()
-{
-    CGDataConsumerCallbacks callbacks = { putBytesNowhere, 0 };
-    RetainPtr<CGDataConsumerRef> consumer(AdoptCF, CGDataConsumerCreate(0, &callbacks));
-    CGContextRef context = CGPDFContextCreate(consumer.get(), 0, 0);
-
-    CGFloat black[4] = { 0, 0, 0, 1 };
-    CGContextSetFillColor(context, black);
-    CGContextSetStrokeColor(context, black);
-
-    return context;
-}
-
-static inline CGContextRef scratchContext()
-{
-    static CGContextRef context = createScratchContext();
-    return context;
-}
 
 Path::Path()
     : m_path(CGPathCreateMutable())
@@ -97,68 +62,17 @@ Path& Path::operator=(const Path& other)
     return *this;
 }
 
-static void copyClosingSubpathsApplierFunction(void* info, const CGPathElement* element)
-{
-    CGMutablePathRef path = static_cast<CGMutablePathRef>(info);
-    CGPoint* points = element->points;
-    
-    switch (element->type) {
-    case kCGPathElementMoveToPoint:
-        if (!CGPathIsEmpty(path)) // to silence a warning when trying to close an empty path
-            CGPathCloseSubpath(path); // This is the only change from CGPathCreateMutableCopy
-        CGPathMoveToPoint(path, 0, points[0].x, points[0].y);
-        break;
-    case kCGPathElementAddLineToPoint:
-        CGPathAddLineToPoint(path, 0, points[0].x, points[0].y);
-        break;
-    case kCGPathElementAddQuadCurveToPoint:
-        CGPathAddQuadCurveToPoint(path, 0, points[0].x, points[0].y, points[1].x, points[1].y);
-        break;
-    case kCGPathElementAddCurveToPoint:
-        CGPathAddCurveToPoint(path, 0, points[0].x, points[0].y, points[1].x, points[1].y, points[2].x, points[2].y);
-        break;
-    case kCGPathElementCloseSubpath:
-        CGPathCloseSubpath(path);
-        break;
-    }
-}
-
-static CGMutablePathRef copyCGPathClosingSubpaths(CGPathRef originalPath)
-{
-    CGMutablePathRef path = CGPathCreateMutable();
-    CGPathApply(originalPath, path, copyClosingSubpathsApplierFunction);
-    CGPathCloseSubpath(path);
-    return path;
-}
-
 bool Path::contains(const FloatPoint &point, WindRule rule) const
 {
-    if (!fastBoundingRect().contains(point))
+    // CGPathContainsPoint returns false for non-closed paths, as a work-around, we copy and close the path first.  Radar 4758998 asks for a better CG API to use
+    if (!boundingRect().contains(point))
         return false;
 
-    // CGPathContainsPoint returns false for non-closed paths, as a work-around, we copy and close the path first.  Radar 4758998 asks for a better CG API to use
-    RetainPtr<CGMutablePathRef> path(AdoptCF, copyCGPathClosingSubpaths(m_path));
-    bool ret = CGPathContainsPoint(path.get(), 0, point, rule == RULE_EVENODD ? true : false);
+    CGMutablePathRef path = CGPathCreateMutableCopy(m_path);
+    CGPathCloseSubpath(path);
+    bool ret = CGPathContainsPoint(path, 0, point, rule == RULE_EVENODD ? true : false);
+    CGPathRelease(path);
     return ret;
-}
-
-bool Path::strokeContains(StrokeStyleApplier* applier, const FloatPoint& point) const
-{
-    ASSERT(applier);
-
-    CGContextRef context = scratchContext();
-
-    CGContextSaveGState(context);
-    CGContextBeginPath(context);
-    CGContextAddPath(context, platformPath());
-
-    GraphicsContext gc(context);
-    applier->strokeStyle(&gc);
-
-    bool hitSuccess = CGContextPathContainsPoint(context, point, kCGPathStroke);
-    CGContextRestoreGState(context);
-    
-    return hitSuccess;
 }
 
 void Path::translate(const FloatSize& size)
@@ -172,42 +86,7 @@ void Path::translate(const FloatSize& size)
 
 FloatRect Path::boundingRect() const
 {
-    // CGPathGetBoundingBox includes the path's control points, CGPathGetPathBoundingBox
-    // does not, but only exists on 10.6 and above.
-
-    CGRect bound = CGRectZero;
-#if !defined(BUILDING_ON_LEOPARD)
-    bound = CGPathGetPathBoundingBox(m_path);
-#else
-    bound = CGPathGetBoundingBox(m_path);
-#endif
-    return CGRectIsNull(bound) ? CGRectZero : bound;
-}
-
-FloatRect Path::fastBoundingRect() const
-{
-    CGRect bound = CGPathGetBoundingBox(m_path);
-    return CGRectIsNull(bound) ? CGRectZero : bound;
-}
-
-FloatRect Path::strokeBoundingRect(StrokeStyleApplier* applier) const
-{
-    CGContextRef context = scratchContext();
-
-    CGContextSaveGState(context);
-    CGContextBeginPath(context);
-    CGContextAddPath(context, platformPath());
-
-    if (applier) {
-        GraphicsContext graphicsContext(context);
-        applier->strokeStyle(&graphicsContext);
-    }
-
-    CGContextReplacePathWithStrokedPath(context);
-    CGRect box = CGContextIsPathEmpty(context) ? CGRectZero : CGContextGetPathBoundingBox(context);
-    CGContextRestoreGState(context);
-
-    return CGRectIsNull(box) ? CGRectZero : box;
+    return CGPathGetBoundingBox(m_path);
 }
 
 void Path::moveTo(const FloatPoint& point)
@@ -233,21 +112,6 @@ void Path::addBezierCurveTo(const FloatPoint& cp1, const FloatPoint& cp2, const 
 void Path::addArcTo(const FloatPoint& p1, const FloatPoint& p2, float radius)
 {
     CGPathAddArcToPoint(m_path, 0, p1.x(), p1.y(), p2.x(), p2.y(), radius);
-}
-
-void Path::platformAddPathForRoundedRect(const FloatRect& rect, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius)
-{
-#if PLATFORM(MAC) && (!defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD))
-    bool equalWidths = (topLeftRadius.width() == topRightRadius.width() && topRightRadius.width() == bottomLeftRadius.width() && bottomLeftRadius.width() == bottomRightRadius.width());
-    bool equalHeights = (topLeftRadius.height() == bottomLeftRadius.height() && bottomLeftRadius.height() == topRightRadius.height() && topRightRadius.height() == bottomRightRadius.height());
-
-    if (equalWidths && equalHeights) {
-        wkCGPathAddRoundedRect(m_path, 0, rect, topLeftRadius.width(), topLeftRadius.height());
-        return;
-    }
-#endif
-
-    addBeziersForRoundedRect(rect, topLeftRadius, topRightRadius, bottomLeftRadius, bottomRightRadius);
 }
 
 void Path::closeSubpath()
@@ -281,27 +145,66 @@ void Path::clear()
 bool Path::isEmpty() const
 {
     return CGPathIsEmpty(m_path);
+ }
+
+static void CGPathToCFStringApplierFunction(void* info, const CGPathElement *element)
+{
+    CFMutableStringRef string = (CFMutableStringRef)info;
+    CFStringRef typeString = CFSTR("");
+    CGPoint* points = element->points;
+    switch (element->type) {
+    case kCGPathElementMoveToPoint:
+        CFStringAppendFormat(string, 0, CFSTR("M%.2f,%.2f"), points[0].x, points[0].y);
+        break;
+    case kCGPathElementAddLineToPoint:
+        CFStringAppendFormat(string, 0, CFSTR("L%.2f,%.2f"), points[0].x, points[0].y);
+        break;
+    case kCGPathElementAddQuadCurveToPoint:
+        CFStringAppendFormat(string, 0, CFSTR("Q%.2f,%.2f,%.2f,%.2f"),
+                points[0].x, points[0].y, points[1].x, points[1].y);
+        break;
+    case kCGPathElementAddCurveToPoint:
+        CFStringAppendFormat(string, 0, CFSTR("C%.2f,%.2f,%.2f,%.2f,%.2f,%.2f"),
+                points[0].x, points[0].y, points[1].x, points[1].y,
+                points[2].x, points[2].y);
+        break;
+    case kCGPathElementCloseSubpath:
+        typeString = CFSTR("X"); break;
+    }
 }
 
-bool Path::hasCurrentPoint() const
+static CFStringRef CFStringFromCGPath(CGPathRef path)
 {
-    return !isEmpty();
-}
-    
-FloatPoint Path::currentPoint() const 
-{
-    return CGPathGetCurrentPoint(m_path);
+    if (!path)
+        return 0;
+
+    CFMutableStringRef string = CFStringCreateMutable(NULL, 0);
+    CGPathApply(path, string, CGPathToCFStringApplierFunction);
+
+    return string;
 }
 
-// MARK: -
-// MARK: Path Management
+
+#pragma mark -
+#pragma mark Path Management
+
+String Path::debugString() const
+{
+    String result;
+    if (!isEmpty()) {
+        CFStringRef pathString = CFStringFromCGPath(m_path);
+        result = String(pathString);
+        CFRelease(pathString);
+    }
+    return result;
+}
 
 struct PathApplierInfo {
     void* info;
     PathApplierFunction function;
 };
 
-static void CGPathApplierToPathApplier(void *info, const CGPathElement *element)
+void CGPathApplierToPathApplier(void *info, const CGPathElement *element)
 {
     PathApplierInfo* pinfo = (PathApplierInfo*)info;
     FloatPoint points[3];
@@ -339,9 +242,6 @@ void Path::apply(void* info, PathApplierFunction function) const
 
 void Path::transform(const AffineTransform& transform)
 {
-    if (transform.isIdentity() || isEmpty())
-        return;
-
     CGMutablePathRef path = CGPathCreateMutable();
     CGAffineTransform transformCG = transform;
     CGPathAddPath(path, &transformCG, m_path);
@@ -349,42 +249,6 @@ void Path::transform(const AffineTransform& transform)
     m_path = path;
 }
 
-// Approximation of control point positions on a bezier to simulate a quarter of a circle.
-// This is 1-kappa, where kappa = 4 * (sqrt(2) - 1) / 3
-static const float gCircleControlPoint = 0.447715f;
-
-void Path::addBeziersForRoundedRect(const FloatRect& rect, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius)
-{
-    bool equalWidths = (topLeftRadius.width() == topRightRadius.width() && topRightRadius.width() == bottomLeftRadius.width() && bottomLeftRadius.width() == bottomRightRadius.width());
-    bool equalHeights = (topLeftRadius.height() == bottomLeftRadius.height() && bottomLeftRadius.height() == topRightRadius.height() && topRightRadius.height() == bottomRightRadius.height());
-
-    if (equalWidths && equalHeights) {
-        CGPathAddRoundedRect(m_path, 0, rect, topLeftRadius.width(), topLeftRadius.height());
-        return;
-    }
-    
-    moveTo(FloatPoint(rect.x() + topLeftRadius.width(), rect.y()));
-
-    addLineTo(FloatPoint(rect.maxX() - topRightRadius.width(), rect.y()));
-    addBezierCurveTo(FloatPoint(rect.maxX() - topRightRadius.width() * gCircleControlPoint, rect.y()),
-                     FloatPoint(rect.maxX(), rect.y() + topRightRadius.height() * gCircleControlPoint),
-                     FloatPoint(rect.maxX(), rect.y() + topRightRadius.height()));
-    addLineTo(FloatPoint(rect.maxX(), rect.maxY() - bottomRightRadius.height()));
-    addBezierCurveTo(FloatPoint(rect.maxX(), rect.maxY() - bottomRightRadius.height() * gCircleControlPoint),
-                     FloatPoint(rect.maxX() - bottomRightRadius.width() * gCircleControlPoint, rect.maxY()),
-                     FloatPoint(rect.maxX() - bottomRightRadius.width(), rect.maxY()));
-    addLineTo(FloatPoint(rect.x() + bottomLeftRadius.width(), rect.maxY()));
-    addBezierCurveTo(FloatPoint(rect.x() + bottomLeftRadius.width() * gCircleControlPoint, rect.maxY()),
-                     FloatPoint(rect.x(), rect.maxY() - bottomLeftRadius.height() * gCircleControlPoint),
-                     FloatPoint(rect.x(), rect.maxY() - bottomLeftRadius.height()));
-    addLineTo(FloatPoint(rect.x(), rect.y() + topLeftRadius.height()));
-    addBezierCurveTo(FloatPoint(rect.x(), rect.y() + topLeftRadius.height() * gCircleControlPoint),
-                     FloatPoint(rect.x() + topLeftRadius.width() * gCircleControlPoint, rect.y()),
-                     FloatPoint(rect.x() + topLeftRadius.width(), rect.y()));
-
-    closeSubpath();
 }
 
-}
-
-#endif // USE(CG)
+#endif // PLATFORM(CG)
