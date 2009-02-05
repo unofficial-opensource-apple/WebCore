@@ -17,40 +17,39 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSRuleList_H
-#define CSSRuleList_H
+#ifndef CSSRuleList_h
+#define CSSRuleList_h
 
-#include "Shared.h"
 #include "DeprecatedPtrList.h"
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
 class CSSRule;
 class StyleList;
 
-class CSSRuleList : public Shared<CSSRuleList>
-{
+class CSSRuleList : public RefCounted<CSSRuleList> {
 public:
     CSSRuleList();
-    CSSRuleList(StyleList*);
+    CSSRuleList(StyleList*, bool omitCharsetRules = false);
     ~CSSRuleList();
 
     unsigned length() const { return m_lstCSSRules.count(); }
-    CSSRule* item (unsigned index) { return m_lstCSSRules.at(index); }
+    CSSRule* item(unsigned index) { return m_lstCSSRules.at(index); }
 
     /* not part of the DOM */
-    unsigned insertRule (CSSRule* rule, unsigned index);
-    void deleteRule (unsigned index);
-    void append(CSSRule* rule);
+    unsigned insertRule(CSSRule*, unsigned index);
+    void deleteRule(unsigned index);
+    void append(CSSRule*);
 
 protected:
     DeprecatedPtrList<CSSRule> m_lstCSSRules;
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSRuleList_h

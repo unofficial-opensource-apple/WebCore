@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2006, 2007 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,134 +28,62 @@
 
 #import "Document.h"
 #import "Event.h"
-#import "FrameMac.h"
+#import "Frame.h"
+#import "JSNode.h"
+#import "Node.h"
+#import "PlatformString.h"
 #import "Range.h"
-#import "kjs_dom.h"
-#import "kjs_proxy.h"
+#import "RangeException.h"
+#import "SVGException.h"
 #import "WebScriptObjectPrivate.h"
 #import "XPathEvaluator.h"
+#import "kjs_proxy.h"
 
 #import "WebCoreThread.h"
 #import "ThreadSafeWrapper.h"
 
-using namespace WebCore;
-
-using KJS::ExecState;
-using KJS::Interpreter;
-using KJS::JSObject;
-
-using KJS::Bindings::RootObject;
-
 //------------------------------------------------------------------------------------------
-// Wrapping khtml implementation objects
+// Wrapping WebCore implementation objects
 
+namespace WebCore {
+
+typedef HashMap<DOMObjectInternal*, NSObject*> DOMWrapperMap;
 NSObject* getDOMWrapper(DOMObjectInternal* impl)
 {
-    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
+    ASSERT_WITH_MESSAGE(WebThreadIsLockedOrDisabled(), "DOM wrapper cache accessed without web lock");
     WebThreadContext *threadContext = WebThreadCurrentContext();
     if (!threadContext->DOMWrapperCache)
         return nil;
-    return ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->get(impl);
+    return ((DOMWrapperMap*)threadContext->DOMWrapperCache)->get(impl);
 }
 
 void addDOMWrapper(NSObject* wrapper, DOMObjectInternal* impl)
 {
-    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
+    ASSERT_WITH_MESSAGE(WebThreadIsLockedOrDisabled(), "DOM wrapper cache accessed without web lock");
     WebThreadContext *threadContext = WebThreadCurrentContext();
     if (!threadContext->DOMWrapperCache)
-         threadContext->DOMWrapperCache = new HashMap<DOMObjectInternal*, NSObject*>;
-    ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->set(impl, wrapper);
+         threadContext->DOMWrapperCache = new DOMWrapperMap;
+    ((DOMWrapperMap*)threadContext->DOMWrapperCache)->set(impl, wrapper);
 }
 
 void removeDOMWrapper(DOMObjectInternal* impl)
 {
-    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
+    ASSERT_WITH_MESSAGE(WebThreadIsLockedOrDisabled(), "DOM wrapper cache accessed without web lock");
     WebThreadContext *threadContext = WebThreadCurrentContext();
     if (!threadContext->DOMWrapperCache)
         return;
-    ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->remove(impl);
+    ((DOMWrapperMap*)threadContext->DOMWrapperCache)->remove(impl);
 }
 
-//------------------------------------------------------------------------------------------
-// Exceptions
+} // namespace WebCore
 
-NSString * const DOMException = @"DOMException";
-NSString * const DOMRangeException = @"DOMRangeException";
-NSString * const DOMEventException = @"DOMEventException";
-#if XPATH_SUPPORT
-NSString * const DOMXPathException = @"DOMXPathException";
-#endif // XPATH_SUPPORT
-
-void raiseDOMException(ExceptionCode ec)
-{
-    ASSERT(ec);
-
-    NSString *name = ::DOMException;
-
-    int code = ec;
-    if (ec >= RangeExceptionOffset && ec <= RangeExceptionMax) {
-        name = DOMRangeException;
-        code -= RangeExceptionOffset;
-    } else if (ec >= EventExceptionOffset && ec <= EventExceptionMax) {
-        name = DOMEventException;
-        code -= EventExceptionOffset;
-#if XPATH_SUPPORT
-    } else if (ec >= XPathExceptionOffset && ec <= XPathExceptionMax) {
-        name = DOMXPathException;
-        code -= XPathExceptionOffset;
-#endif // XPATH_SUPPORT
-    }
-
-    NSString *reason = [NSString stringWithFormat:@"*** Exception received from DOM API: %d", code];
-    NSException *exception = [NSException exceptionWithName:name reason:reason
-        userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithInt:code] forKey:name]];
-    [exception raise];
-}
-
-//------------------------------------------------------------------------------------------
-// String/NSString bridging
-
-StringImpl::operator NSString *() const
-{
-    return [NSString stringWithCharacters:m_data length:m_length];
-}
-
-String::String(NSString* str)
-{
-    if (!str)
-        return;
-
-    CFIndex size = CFStringGetLength(reinterpret_cast<CFStringRef>(str));
-    if (size == 0)
-        m_impl = StringImpl::empty();
-    else {
-        Vector<UChar, 1024> buffer(size);
-        CFStringGetCharacters(reinterpret_cast<CFStringRef>(str), CFRangeMake(0, size), buffer.data());
-        m_impl = new StringImpl(buffer.data(), size);
-    }
-}
-
-String::String(CFStringRef str)
-{
-    if (!str)
-        return;
-
-    CFIndex size = CFStringGetLength(str);
-    if (size == 0)
-        m_impl = StringImpl::empty();
-    else {
-        Vector<UChar, 1024> buffer(size);
-        CFStringGetCharacters(str, CFRangeMake(0, size), buffer.data());
-        m_impl = new StringImpl(buffer.data(), size);
-    }
-}
 
 //------------------------------------------------------------------------------------------
 
 @implementation WebScriptObject (WebScriptObjectInternal)
 
 // Only called by DOMObject subclass.
-- _init
+- (id)_init
 {
     self = [super init];
 
@@ -183,19 +111,23 @@ String::String(CFStringRef str)
     
     // Extract the WebCore::Node from the ObjectiveC wrapper.
     DOMNode *n = (DOMNode *)self;
-    Node *nodeImpl = [n _node];
+    WebCore::Node *nodeImpl = [n _node];
 
     // Dig up Interpreter and ExecState.
-    Frame *frame = nodeImpl->document()->frame();
-    Interpreter *interpreter = frame->jScript()->interpreter();
-    ExecState *exec = interpreter->globalExec();
+    WebCore::Frame *frame = 0;
+    if (WebCore::Document* document = nodeImpl->document())
+        frame = document->frame();
+    if (!frame)
+        return;
+        
+    KJS::ExecState *exec = frame->scriptProxy()->globalObject()->globalExec();
     
     // Get (or create) a cached JS object for the DOM node.
-    JSObject *scriptImp = static_cast<JSObject *>(toJS(exec, nodeImpl));
+    KJS::JSObject *scriptImp = static_cast<KJS::JSObject*>(WebCore::toJS(exec, nodeImpl));
 
-    const RootObject *executionContext = Mac(frame)->bindingRootObject();
+    KJS::Bindings::RootObject* rootObject = frame->bindingRootObject();
 
-    [self _initializeWithObjectImp:scriptImp originExecutionContext:executionContext executionContext:executionContext];
+    [self _setImp:scriptImp originRootObject:rootObject rootObject:rootObject];
 }
 
 @end

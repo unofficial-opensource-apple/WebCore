@@ -14,86 +14,158 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef PAGE_H
-#define PAGE_H
+#ifndef Page_h
+#define Page_h
 
+#include "BackForwardList.h"
+#include "Chrome.h"
+#include "ContextMenuController.h"
+#include "FrameLoaderTypes.h"
 #include "PlatformString.h"
-#include "SelectionController.h"
 #include <wtf/HashSet.h>
+#include <wtf/OwnPtr.h>
 
-#include "Document.h"
+#if PLATFORM(WIN) || (PLATFORM(WX) && PLATFORM(WIN_OS)) 
+typedef struct HINSTANCE__* HINSTANCE;
+#endif
 
-#if __APPLE__
-#ifdef __OBJC__
-@class WebCorePageBridge;
-#else
-class WebCorePageBridge;
-#endif
-#endif
+typedef enum TextCaseSensitivity {
+    TextCaseSensitive,
+    TextCaseInsensitive
+};
+
+typedef enum FindDirection {
+    FindDirectionForward,
+    FindDirectionBackward
+};
 
 namespace WebCore {
 
+    class Chrome;
+    class ChromeClient;
+    class ContextMenuClient;
+    class ContextMenuController;
+    class DragClient;
+    class DragController;
+    class EditorClient;
+    class FocusController;
     class Frame;
-    class FrameNamespace;
-    class FloatRect;
+    class InspectorClient;
+    class InspectorController;
+    class Node;
+    class ProgressTracker;
+    class Selection;
+    class SelectionController;
     class Settings;
-    class Widget;
-    
+
     class Page : Noncopyable {
     public:
+        static void setNeedsReapplyStyles();
+        static const HashSet<Page*>* frameNamespace(const String&);
+
+        Page(ChromeClient*, ContextMenuClient*, EditorClient*, DragClient*, InspectorClient*);
         ~Page();
+        
+        EditorClient* editorClient() const { return m_editorClient; }
 
         void setMainFrame(PassRefPtr<Frame>);
         Frame* mainFrame() const { return m_mainFrame.get(); }
 
-        FloatRect windowRect() const;
-        void setWindowRect(const FloatRect&);
+        BackForwardList* backForwardList();
 
+        // FIXME: The following three methods don't fall under the responsibilities of the Page object
+        // They seem to fit a hypothetical Page-controller object that would be akin to the 
+        // Frame-FrameLoader relationship.  They have to live here now, but should move somewhere that
+        // makes more sense when that class exists.
+        bool goBack();
+        bool goForward();
+        void goToItem(HistoryItem*, FrameLoadType);
+        
         void setGroupName(const String&);
         String groupName() const { return m_groupName; }
+
         const HashSet<Page*>* frameNamespace() const;
-        static const HashSet<Page*>* frameNamespace(const String&);
 
         void incrementFrameCount() { ++m_frameCount; }
         void decrementFrameCount() { --m_frameCount; }
         int frameCount() const { return m_frameCount; }
+
+        Chrome* chrome() const { return m_chrome.get(); }
+        SelectionController* dragCaretController() const { return m_dragCaretController.get(); }
+        FocusController* focusController() const { return m_focusController.get(); }
+        ContextMenuController* contextMenuController() const { return m_contextMenuController.get(); }
+        InspectorController* inspectorController() const { return m_inspectorController.get(); }
+        Settings* settings() const { return m_settings.get(); }
+        ProgressTracker* progress() const { return m_progress.get(); }
+
+        void setParentInspectorController(InspectorController* controller) { m_parentInspectorController = controller; }
+        InspectorController* parentInspectorController() const { return m_parentInspectorController; }
         
-        Widget* widget() const;
+        void setTabKeyCyclesThroughElements(bool b) { m_tabKeyCyclesThroughElements = b; }
+        bool tabKeyCyclesThroughElements() const { return m_tabKeyCyclesThroughElements; }
 
-        static void setNeedsReapplyStyles();
-        static void setNeedsReapplyStylesForSettingsChange(Settings*);
+        bool findString(const String&, TextCaseSensitivity, FindDirection, bool shouldWrap);
+        unsigned int markAllMatchesForText(const String&, TextCaseSensitivity, bool shouldHighlight, unsigned);
+        void unmarkAllTextMatches();
+
+        const Selection& selection() const;
+
+        void setDefersLoading(bool);
+        bool defersLoading() const { return m_defersLoading; }
         
-        // FIXME: Replace this with a function on the selection controller or change it to Selection instead?
-        void setDragCaret(const SelectionController&);
-        SelectionController& dragCaret() const; // FIXME: Change to pointer?
+        void clearUndoRedoOperations();
 
-#if PLATFORM(MAC)
-        Page(WebCorePageBridge*);
-        WebCorePageBridge* bridge() const { return m_bridge; }
-#endif
+        bool inLowQualityImageInterpolationMode() const;
+        void setInLowQualityImageInterpolationMode(bool = true);
 
-#if PLATFORM(WIN_OS)
-        Page();
+        void userStyleSheetLocationChanged();
+        const String& userStyleSheet() const;
+
+#if PLATFORM(WIN) || (PLATFORM(WX) && PLATFORM(WIN_OS))
+        // The global DLL or application instance used for all windows.
+        static void setInstanceHandle(HINSTANCE instanceHandle) { s_instanceHandle = instanceHandle; }
+        static HINSTANCE instanceHandle() { return s_instanceHandle; }
 #endif
 
     private:
-        void init();
-
+        OwnPtr<Chrome> m_chrome;
+        OwnPtr<SelectionController> m_dragCaretController;
+        OwnPtr<FocusController> m_focusController;
+        OwnPtr<ContextMenuController> m_contextMenuController;
+        OwnPtr<InspectorController> m_inspectorController;
+        OwnPtr<Settings> m_settings;
+        OwnPtr<ProgressTracker> m_progress;
+        
+        RefPtr<BackForwardList> m_backForwardList;
         RefPtr<Frame> m_mainFrame;
-        int m_frameCount;
-        mutable Widget* m_widget;
-        String m_groupName;
-        mutable SelectionController m_dragCaret;
+        RefPtr<Node> m_focusedNode;
 
-#if __APPLE__
-        WebCorePageBridge* m_bridge;
+        EditorClient* m_editorClient;
+
+        int m_frameCount;
+        String m_groupName;
+
+        bool m_tabKeyCyclesThroughElements;
+        bool m_defersLoading;
+
+        bool m_inLowQualityInterpolationMode;
+    
+        InspectorController* m_parentInspectorController;
+
+        String m_userStyleSheetPath;
+        mutable String m_userStyleSheet;
+        mutable bool m_didLoadUserStyleSheet;
+        mutable time_t m_userStyleSheetModificationTime;
+
+#if PLATFORM(WIN) || (PLATFORM(WX) && defined(__WXMSW__))
+        static HINSTANCE s_instanceHandle;
 #endif
     };
 
 } // namespace WebCore
     
-#endif // PAGE_H
+#endif // Page_h

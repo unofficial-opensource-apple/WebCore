@@ -26,7 +26,9 @@
 #include "config.h"
 #include "HTMLInterchange.h"
 
+#include "CharacterNames.h"
 #include "Document.h"
+#include "Text.h"
 #include "TextIterator.h"
 
 namespace WebCore {
@@ -40,7 +42,7 @@ DeprecatedString convertedSpaceString()
         convertedSpaceString = "<span class=\"";
         convertedSpaceString += AppleConvertedSpace;
         convertedSpaceString += "\">";
-        convertedSpaceString += DeprecatedChar(0xa0);
+        convertedSpaceString += DeprecatedChar(noBreakSpace);
         convertedSpaceString += "</span>";
     }
     return convertedSpaceString;
@@ -48,12 +50,12 @@ DeprecatedString convertedSpaceString()
 
 } // end anonymous namespace
 
-// FIXME: Can't really do this work without taking whitespace mode into account.
-// This means that eventually this function needs to be eliminated or at least have
-// its parameters changed because it can't do its work on the string without knowing
-// what parts are in what whitespace mode.
-DeprecatedString convertHTMLTextToInterchangeFormat(const DeprecatedString &in)
+DeprecatedString convertHTMLTextToInterchangeFormat(const DeprecatedString& in, const Text* node)
 {
+    // Assume all the text comes from node.
+    if (node->renderer() && node->renderer()->style()->preserveNewline())
+        return in;
+        
     DeprecatedString s;
 
     unsigned int i = 0;

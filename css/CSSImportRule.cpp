@@ -17,15 +17,17 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "CSSImportRule.h"
 
 #include "CachedCSSStyleSheet.h"
 #include "CSSStyleSheet.h"
 #include "DocLoader.h"
+#include "Document.h"
 #include "KURL.h"
 #include "MediaList.h"
 
@@ -38,8 +40,6 @@ CSSImportRule::CSSImportRule(StyleBase* parent, const String& href, MediaList* m
     , m_cachedSheet(0)
     , m_loading(false)
 {
-    m_type = IMPORT_RULE;
-
     if (m_lstMedia)
         m_lstMedia->setParent(this);
     else
@@ -56,13 +56,13 @@ CSSImportRule::~CSSImportRule()
         m_cachedSheet->deref(this);
 }
 
-void CSSImportRule::setStyleSheet(const String &url, const String &sheet)
+void CSSImportRule::setCSSStyleSheet(const String& url, const String& charset, const String& sheet)
 {
     if (m_styleSheet)
         m_styleSheet->setParent(0);
-    m_styleSheet = new CSSStyleSheet(this, url);
+    m_styleSheet = new CSSStyleSheet(this, url, charset);
 
-    CSSStyleSheet *parent = parentStyleSheet();
+    CSSStyleSheet* parent = parentStyleSheet();
     m_styleSheet->parseString(sheet, !parent || parent->useStrictParsing());
     m_loading = false;
 
@@ -90,17 +90,22 @@ void CSSImportRule::insertedIntoParent()
     CSSStyleSheet* parentSheet = parentStyleSheet();
     if (!parentSheet->href().isNull())
         // use parent styleheet's URL as the base URL
-        absHref = KURL(parentSheet->href().deprecatedString(), m_strHref.deprecatedString()).url();
+        absHref = KURL(parentSheet->href().deprecatedString(), m_strHref.deprecatedString()).string();
 
     // Check for a cycle in our import chain.  If we encounter a stylesheet
     // in our parent chain with the same URL, then just bail.
-    for (parent = static_cast<StyleBase*>(this)->parent(); parent; parent = parent->parent())
+    for (parent = static_cast<StyleBase*>(this)->parent(); parent; parent = parent->parent()) {
         if (absHref == parent->baseURL())
             return;
-    
-    // ### pass correct charset here!!
-    m_cachedSheet = docLoader->requestStyleSheet(absHref, DeprecatedString::null);
+    }
+
+    m_cachedSheet = docLoader->requestCSSStyleSheet(absHref, parentSheet->charset());
     if (m_cachedSheet) {
+        // if the import rule is issued dynamically, the sheet may be
+        // removed from the pending sheet count, so let the doc know
+        // the sheet being imported is pending.
+        if (parentSheet && parentSheet->loadCompleted() && parentSheet->doc())
+            parentSheet->doc()->addPendingSheet();
         m_loading = true;
         m_cachedSheet->ref(this);
     }
@@ -121,4 +126,4 @@ String CSSImportRule::cssText() const
     return result;
 }
 
-}
+} // namespace WebCore

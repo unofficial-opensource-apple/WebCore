@@ -5,6 +5,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
+ *           (C) 2007 David Smith (catfish.man@gmail.com)
  * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -19,17 +20,17 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #ifndef NamedMappedAttrMap_h
 #define NamedMappedAttrMap_h
 
-#include "NamedAttrMap.h"
-#include "AtomicStringList.h"
+#include "ClassNames.h"
 #include "MappedAttribute.h"
+#include "NamedAttrMap.h"
 
 namespace WebCore {
 
@@ -42,8 +43,9 @@ public:
     
     virtual bool isMappedAttributeMap() const;
     
-    virtual void parseClassAttribute(const String& classAttr);
-    const AtomicStringList* getClassList() const { return &m_classList; }
+    void parseClassAttribute(const String&);
+
+    const ClassNames* getClassNames() const { return &m_classNames; }
     
     virtual bool hasMappedAttributes() const { return m_mappedAttributeCount > 0; }
     void declRemoved() { m_mappedAttributeCount--; }
@@ -52,15 +54,8 @@ public:
     bool mapsEquivalent(const NamedMappedAttrMap* otherMap) const;
     int declCount() const;
 
-    MappedAttribute* attributeItem(unsigned index) const
-        { return static_cast<MappedAttribute*>(NamedAttrMap::attributeItem(index)); }
-    MappedAttribute* getAttributeItem(const QualifiedName& name) const
-        { return static_cast<MappedAttribute*>(NamedAttrMap::getAttributeItem(name)); }
-    MappedAttribute* getAttributeItem(const String& name) const
-        { return static_cast<MappedAttribute*>(NamedAttrMap::getAttributeItem(name)); }
-    
 private:
-    AtomicStringList m_classList;
+    ClassNames m_classNames;
     int m_mappedAttributeCount;
 };
 

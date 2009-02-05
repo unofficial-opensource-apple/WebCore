@@ -17,35 +17,38 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLPlugInElement_H
-#define HTMLPlugInElement_H
+#ifndef HTMLPlugInElement_h
+#define HTMLPlugInElement_h
 
-#include "HTMLElement.h"
-#if PLATFORM(MAC)
-#include <JavaScriptCore/runtime.h>
-#include <JavaScriptCore/npruntime.h>
+#include "HTMLFrameOwnerElement.h"
+
+#if USE(JAVASCRIPTCORE_BINDINGS)
+#include <bindings/runtime.h>
+#endif
+
+#if USE(NPOBJECT)
+#include <bindings/npruntime_internal.h>
 #endif
 
 namespace WebCore {
 
-class HTMLPlugInElement : public HTMLElement
-{
+class HTMLPlugInElement : public HTMLFrameOwnerElement {
 public:
     HTMLPlugInElement(const QualifiedName& tagName, Document*);
-    HTMLPlugInElement::~HTMLPlugInElement();
+    virtual ~HTMLPlugInElement();
 
     virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
     virtual void parseMappedAttribute(MappedAttribute*);
 
-    virtual void detach();
-    
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
     virtual bool checkDTD(const Node* newChild);
+
+    virtual void updateWidget() { }
 
     String align() const;
     void setAlign(const String&);
@@ -60,27 +63,33 @@ public:
     void setWidth(const String&);
 
     virtual bool willRespondToMouseMoveEvents() { return false; }
-    virtual bool willRespondToMouseDragEvents() { return false; }
     virtual bool willRespondToMouseClickEvents() { return true; }
-    
-#if PLATFORM(MAC)
+
+#if USE(JAVASCRIPTCORE_BINDINGS)
     virtual KJS::Bindings::Instance* getInstance() const = 0;
 #endif
+#if USE(NPOBJECT)
+    virtual NPObject* getNPObject();
+#endif
 
-    void setFrameName(const AtomicString& frameName) { m_frameName = frameName; }
+    virtual void defaultEventHandler(Event*);
 private:
-#if PLATFORM(MAC)
+#if USE(NPOBJECT)
+    NPObject* createNPObject();
 #endif
 
 protected:
+    static void updateWidgetCallback(Node*);
+
     String oldNameAttr;
-#if PLATFORM(MAC)
+#if USE(JAVASCRIPTCORE_BINDINGS)
     mutable RefPtr<KJS::Bindings::Instance> m_instance;
 #endif
-private:
-    AtomicString m_frameName;
+#if USE(NPOBJECT)
+    NPObject* m_NPObject;
+#endif
 };
 
-}
+} // namespace WebCore
 
-#endif
+#endif // HTMLPlugInElement_h

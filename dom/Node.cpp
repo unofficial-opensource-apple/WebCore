@@ -1,10 +1,9 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2007 Trolltech ASA
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,25 +17,44 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
 #include "Node.h"
 
+#include "CSSParser.h"
+#include "CSSRule.h"
+#include "CSSRuleList.h"
+#include "CSSSelector.h"
+#include "CSSStyleRule.h"
+#include "CSSStyleSelector.h"
+#include "CSSStyleSheet.h"
+#include "CString.h"
 #include "ChildNodeList.h"
+#include "ClassNodeList.h"
 #include "DOMImplementation.h"
 #include "Document.h"
+#include "DynamicNodeList.h"
+#include "Element.h"
 #include "ExceptionCode.h"
 #include "Frame.h"
-#include "NamedAttrMap.h"
-#include "Text.h"
-#include "htmlediting.h"
 #include "HTMLNames.h"
-#include "kjs_binding.h"
+#include "HTMLNames.h"
+#include "KURL.h"
+#include "Logging.h"
+#include "NameNodeList.h"
+#include "NamedAttrMap.h"
 #include "RenderObject.h"
+#include "SelectorNodeList.h"
+#include "TagNodeList.h"
+#include "Text.h"
 #include "TextStream.h"
+#include "XMLNames.h"
+#include "WebKitCSSMatrix.h"
+#include "htmlediting.h"
+#include "kjs_binding.h"
 
 #include <GraphicsServices/GSEvent.h>
 #include "HTMLElement.h"
@@ -45,110 +63,129 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-/**
- * NodeList which lists all Nodes in a document with a given tag name
- */
-class TagNodeList : public NodeList
-{
-public:
-    TagNodeList(Node *n, const AtomicString& namespaceURI, const AtomicString& localName);
+struct NodeListsNodeData {
+    typedef HashSet<DynamicNodeList*> NodeListSet;
+    NodeListSet m_listsWithCaches;
 
-    // DOM methods overridden from  parent classes
-    virtual unsigned length() const;
-    virtual Node *item (unsigned index) const;
+    DynamicNodeList::Caches m_childNodeListCaches;
 
-    // Other methods (not part of DOM)
+    typedef HashMap<String, DynamicNodeList::Caches*> CacheMap;
+    CacheMap m_classNodeListCaches;
+    CacheMap m_nameNodeListCaches;
 
-protected:
-    virtual bool nodeMatches(Node *testNode) const;
+    ~NodeListsNodeData()
+    {
+        deleteAllValues(m_classNodeListCaches);
+        deleteAllValues(m_nameNodeListCaches);
+    }
 
-    AtomicString m_namespaceURI;
-    AtomicString m_localName;
+    void invalidateCaches();
+    void invalidateCachesThatDependOnAttributes();
+    bool isEmpty() const;
 };
 
-TagNodeList::TagNodeList(Node *n, const AtomicString& namespaceURI, const AtomicString& localName)
-    : NodeList(n), 
-      m_namespaceURI(namespaceURI), 
-      m_localName(localName)
+// --------
+
+bool Node::isSupported(const String& feature, const String& version)
 {
+    return DOMImplementation::instance()->hasFeature(feature, version);
 }
-
-unsigned TagNodeList::length() const
-{
-    return recursiveLength();
-}
-
-Node *TagNodeList::item(unsigned index) const
-{
-    return recursiveItem(index);
-}
-
-bool TagNodeList::nodeMatches(Node *testNode) const
-{
-    if (!testNode->isElementNode())
-        return false;
-
-    if (m_namespaceURI != starAtom && m_namespaceURI != testNode->namespaceURI())
-        return false;
-    
-    return m_localName == starAtom || m_localName == testNode->localName();
-}
-
 
 #ifndef NDEBUG
-struct NodeImplCounter { 
-    static int count; 
-    ~NodeImplCounter() { if (count != 0) fprintf(stderr, "LEAK: %d Node\n", count); }
+WTFLogChannel LogWebCoreNodeLeaks =  { 0x00000000, "", WTFLogChannelOn };
+
+struct NodeCounter {
+    static unsigned count; 
+
+    ~NodeCounter() 
+    { 
+        if (count) 
+            LOG(WebCoreNodeLeaks, "LEAK: %u Node\n", count); 
+    }
 };
-int NodeImplCounter::count = 0;
-static NodeImplCounter nodeImplCounter;
+unsigned NodeCounter::count = 0;
+static NodeCounter nodeCounter;
+
+static bool shouldIgnoreLeaks = false;
+static HashSet<Node*> ignoreSet;
 #endif
+
+void Node::startIgnoringLeaks()
+{
+#ifndef NDEBUG
+    shouldIgnoreLeaks = true;
+#endif
+}
+
+void Node::stopIgnoringLeaks()
+{
+#ifndef NDEBUG
+    shouldIgnoreLeaks = false;
+#endif
+}
 
 Node::Node(Document *doc)
     : m_document(doc),
       m_previous(0),
       m_next(0),
       m_renderer(0),
-      m_nodeLists(0),
       m_tabIndex(0),
       m_hasId(false),
       m_hasClass(false),
-      m_hasStyle(false),
       m_attached(false),
-      m_changed(false),
+      m_styleChange(NoStyleChange),
       m_hasChangedChild(false),
       m_inDocument(false),
       m_isLink(false),
-      m_specified(false),
+      m_attrWasSpecifiedOrElementHasRareData(false),
       m_focused(false),
       m_active(false),
       m_hovered(false),
       m_inActiveChain(false),
-      m_styleElement(false),
-      m_implicit(false),
-      m_inDetach(false)
+      m_inDetach(false),
+      m_dispatchingSimulatedEvent(false),
+      m_inSubtreeMark(false)
 {
 #ifndef NDEBUG
-    ++NodeImplCounter::count;
+    if (shouldIgnoreLeaks)
+        ignoreSet.add(this);
+    else
+        ++NodeCounter::count;
 #endif
 }
 
-void Node::setDocument(Document *doc)
+void Node::setDocument(Document* doc)
 {
-    if (inDocument())
+    if (inDocument() || m_document == doc)
         return;
-    
+
+    willMoveToNewOwnerDocument();
+
+    {
+        KJS::JSLock lock;
+        KJS::ScriptInterpreter::updateDOMNodeDocument(this, m_document.get(), doc);
+    }    
     m_document = doc;
+
+    didMoveToNewOwnerDocument();
 }
 
 Node::~Node()
 {
 #ifndef NDEBUG
-    --NodeImplCounter::count;
+    HashSet<Node*>::iterator it = ignoreSet.find(this);
+    if (it != ignoreSet.end())
+        ignoreSet.remove(it);
+    else
+        --NodeCounter::count;
 #endif
+
+    if (m_nodeLists && m_document)
+        document()->removeNodeListCache();
+
     if (renderer())
         detach();
-    delete m_nodeLists;
+
     if (m_previous)
         m_previous->setNextSibling(0);
     if (m_next)
@@ -160,7 +197,7 @@ String Node::nodeValue() const
   return String();
 }
 
-void Node::setNodeValue( const String &/*_nodeValue*/, ExceptionCode& ec)
+void Node::setNodeValue(const String& /*nodeValue*/, ExceptionCode& ec)
 {
     // NO_MODIFICATION_ALLOWED_ERR: Raised when the node is readonly
     if (isReadOnlyNode()) {
@@ -168,22 +205,32 @@ void Node::setNodeValue( const String &/*_nodeValue*/, ExceptionCode& ec)
         return;
     }
 
-    // be default nodeValue is null, so setting it has no effect
+    // by default nodeValue is null, so setting it has no effect
 }
 
 PassRefPtr<NodeList> Node::childNodes()
 {
-    return new ChildNodeList(this);
+    if (!m_nodeLists) {
+        m_nodeLists.set(new NodeListsNodeData);
+        document()->addNodeListCache();
+    }
+
+    return new ChildNodeList(this, &m_nodeLists->m_childNodeListCaches);
 }
 
-Node *Node::firstChild() const
+Node* Node::virtualFirstChild() const
 {
-  return 0;
+    return 0;
 }
 
-Node *Node::lastChild() const
+Node* Node::virtualLastChild() const
 {
-  return 0;
+    return 0;
+}
+
+bool Node::virtualHasTagName(const QualifiedName&) const
+{
+    return false;
 }
 
 Node *Node::lastDescendant() const
@@ -303,17 +350,17 @@ const AtomicString& Node::prefix() const
     return nullAtom;
 }
 
-void Node::setPrefix(const AtomicString &/*_prefix*/, ExceptionCode& ec)
+void Node::setPrefix(const AtomicString& /*prefix*/, ExceptionCode& ec)
 {
     // The spec says that for nodes other than elements and attributes, prefix is always null.
     // It does not say what to do when the user tries to set the prefix on another type of
-    // node, however mozilla throws a NAMESPACE_ERR exception
+    // node, however Mozilla throws a NAMESPACE_ERR exception.
     ec = NAMESPACE_ERR;
 }
 
 const AtomicString& Node::localName() const
 {
-    return emptyAtom;
+    return nullAtom;
 }
 
 const AtomicString& Node::namespaceURI() const
@@ -333,8 +380,12 @@ bool Node::isContentEditable() const
 
 bool Node::isContentRichlyEditable() const
 {
-    Node* root = rootEditableElement();
-    return root && root->renderer() && root->renderer()->style()->userModify() != READ_WRITE_PLAINTEXT_ONLY;
+    return parent() && parent()->isContentRichlyEditable();
+}
+
+bool Node::shouldUseInputMethod() const
+{
+    return isContentEditable();
 }
 
 IntRect Node::getRect() const
@@ -346,18 +397,17 @@ IntRect Node::getRect() const
     return IntRect();
 }
 
-void Node::setChanged(bool b)
+void Node::setChanged(StyleChangeType changeType)
 {
-    if (b && !attached()) // changed compared to what?
+    if ((changeType != NoStyleChange) && !attached()) // changed compared to what?
         return;
 
-    m_changed = b;
-    if ( b ) {
-        Node *p = parentNode();
-        while ( p ) {
-            p->setHasChangedChild( true );
-            p = p->parentNode();
-        }
+    if (!(changeType == InlineStyleChange && (m_styleChange == FullStyleChange || m_styleChange == AnimationStyleChange)))
+        m_styleChange = changeType;
+
+    if (m_styleChange != NoStyleChange) {
+        for (Node* p = parentNode(); p; p = p->parentNode())
+            p->setHasChangedChild(true);
         document()->setDocumentChanged(true);
     }
 }
@@ -367,7 +417,7 @@ bool Node::isFocusable() const
     return false;
 }
 
-bool Node::isKeyboardFocusable() const
+bool Node::isKeyboardFocusable(KeyboardEvent*) const
 {
     return isFocusable();
 }
@@ -386,18 +436,30 @@ unsigned Node::nodeIndex() const
     return count;
 }
 
-void Node::registerNodeList(NodeList* list)
+void Node::registerDynamicNodeList(DynamicNodeList* list)
 {
-    if (!m_nodeLists)
-        m_nodeLists = new NodeListSet;
-    m_nodeLists->add(list);
+    if (!m_nodeLists) {
+        m_nodeLists.set(new NodeListsNodeData);
+        document()->addNodeListCache();
+    } else if (!m_document->hasNodeListCaches()) {
+        // We haven't been receiving notifications while there were no registered lists, so the cache is invalid now.
+        m_nodeLists->invalidateCaches();
+    }
+
+    if (list->hasOwnCaches())
+        m_nodeLists->m_listsWithCaches.add(list);
 }
 
-void Node::unregisterNodeList(NodeList* list)
+void Node::unregisterDynamicNodeList(DynamicNodeList* list)
 {
-    if (!m_nodeLists)
-        return;
-    m_nodeLists->remove(list);
+    ASSERT(m_nodeLists);
+    if (list->hasOwnCaches()) {
+        m_nodeLists->m_listsWithCaches.remove(list);
+        if (m_nodeLists->isEmpty()) {
+            m_nodeLists.clear();
+            document()->removeNodeListCache();
+        }
+    }
 }
 
 void Node::notifyLocalNodeListsAttributeChanged()
@@ -405,9 +467,12 @@ void Node::notifyLocalNodeListsAttributeChanged()
     if (!m_nodeLists)
         return;
 
-    NodeListSet::iterator end = m_nodeLists->end();
-    for (NodeListSet::iterator i = m_nodeLists->begin(); i != end; ++i)
-        (*i)->rootNodeAttributeChanged();
+    m_nodeLists->invalidateCachesThatDependOnAttributes();
+
+    if (m_nodeLists->isEmpty()) {
+        m_nodeLists.clear();
+        document()->removeNodeListCache();
+    }
 }
 
 void Node::notifyNodeListsAttributeChanged()
@@ -421,14 +486,21 @@ void Node::notifyLocalNodeListsChildrenChanged()
     if (!m_nodeLists)
         return;
 
-    NodeListSet::iterator end = m_nodeLists->end();
-    for (NodeListSet::iterator i = m_nodeLists->begin(); i != end; ++i)
-        (*i)->rootNodeChildrenChanged();
+    m_nodeLists->invalidateCaches();
+
+    NodeListsNodeData::NodeListSet::iterator end = m_nodeLists->m_listsWithCaches.end();
+    for (NodeListsNodeData::NodeListSet::iterator i = m_nodeLists->m_listsWithCaches.begin(); i != end; ++i)
+        (*i)->invalidateCache();
+
+    if (m_nodeLists->isEmpty()) {
+        m_nodeLists.clear();
+        document()->removeNodeListCache();
+    }
 }
 
 void Node::notifyNodeListsChildrenChanged()
 {
-    for (Node *n = this; n; n = n->parentNode())
+    for (Node* n = this; n; n = n->parentNode())
         n->notifyLocalNodeListsChildrenChanged();
 }
 
@@ -445,20 +517,20 @@ Node *Node::childNode(unsigned /*index*/) const
 Node *Node::traverseNextNode(const Node *stayWithin) const
 {
     if (firstChild()) {
-        assert(!stayWithin || firstChild()->isAncestor(stayWithin));
+        ASSERT(!stayWithin || firstChild()->isDescendantOf(stayWithin));
         return firstChild();
     }
     if (this == stayWithin)
         return 0;
     if (nextSibling()) {
-        assert(!stayWithin || nextSibling()->isAncestor(stayWithin));
+        ASSERT(!stayWithin || nextSibling()->isDescendantOf(stayWithin));
         return nextSibling();
     }
     const Node *n = this;
     while (n && !n->nextSibling() && (!stayWithin || n->parentNode() != stayWithin))
         n = n->parentNode();
     if (n) {
-        assert(!stayWithin || !n->nextSibling() || n->nextSibling()->isAncestor(stayWithin));
+        ASSERT(!stayWithin || !n->nextSibling() || n->nextSibling()->isDescendantOf(stayWithin));
         return n->nextSibling();
     }
     return 0;
@@ -469,14 +541,14 @@ Node *Node::traverseNextSibling(const Node *stayWithin) const
     if (this == stayWithin)
         return 0;
     if (nextSibling()) {
-        assert(!stayWithin || nextSibling()->isAncestor(stayWithin));
+        ASSERT(!stayWithin || nextSibling()->isDescendantOf(stayWithin));
         return nextSibling();
     }
     const Node *n = this;
     while (n && !n->nextSibling() && (!stayWithin || n->parentNode() != stayWithin))
         n = n->parentNode();
     if (n) {
-        assert(!stayWithin || !n->nextSibling() || n->nextSibling()->isAncestor(stayWithin));
+        ASSERT(!stayWithin || !n->nextSibling() || n->nextSibling()->isDescendantOf(stayWithin));
         return n->nextSibling();
     }
     return 0;
@@ -498,20 +570,20 @@ Node *Node::traversePreviousNode(const Node *stayWithin) const
 Node *Node::traversePreviousNodePostOrder(const Node *stayWithin) const
 {
     if (lastChild()) {
-        assert(!stayWithin || lastChild()->isAncestor(stayWithin));
+        ASSERT(!stayWithin || lastChild()->isDescendantOf(stayWithin));
         return lastChild();
     }
     if (this == stayWithin)
         return 0;
     if (previousSibling()) {
-        assert(!stayWithin || previousSibling()->isAncestor(stayWithin));
+        ASSERT(!stayWithin || previousSibling()->isDescendantOf(stayWithin));
         return previousSibling();
     }
     const Node *n = this;
     while (n && !n->previousSibling() && (!stayWithin || n->parentNode() != stayWithin))
         n = n->parentNode();
     if (n) {
-        assert(!stayWithin || !n->previousSibling() || n->previousSibling()->isAncestor(stayWithin));
+        ASSERT(!stayWithin || !n->previousSibling() || n->previousSibling()->isDescendantOf(stayWithin));
         return n->previousSibling();
     }
     return 0;
@@ -545,6 +617,78 @@ void Node::checkSetPrefix(const AtomicString &_prefix, ExceptionCode& ec)
         ec = NAMESPACE_ERR;
         return;
     }*/
+}
+
+bool Node::canReplaceChild(Node* newChild, Node* oldChild)
+{
+    if (newChild->nodeType() != DOCUMENT_FRAGMENT_NODE) {
+        if (!childTypeAllowed(newChild->nodeType()))
+            return false;
+    }
+    else {
+        for (Node *n = newChild->firstChild(); n; n = n->nextSibling()) {
+            if (!childTypeAllowed(n->nodeType())) 
+                return false;
+        }
+    }
+    
+    return true;
+}
+
+void Node::checkReplaceChild(Node* newChild, Node* oldChild, ExceptionCode& ec)
+{
+    // Perform error checking as required by spec for adding a new child. Used by
+    // appendChild(), replaceChild() and insertBefore()
+    
+    // Not mentioned in spec: throw NOT_FOUND_ERR if newChild is null
+    if (!newChild) {
+        ec = NOT_FOUND_ERR;
+        return;
+    }
+    
+    // NO_MODIFICATION_ALLOWED_ERR: Raised if this node is readonly
+    if (isReadOnlyNode()) {
+        ec = NO_MODIFICATION_ALLOWED_ERR;
+        return;
+    }
+    
+    bool shouldAdoptChild = false;
+    
+    // WRONG_DOCUMENT_ERR: Raised if newChild was created from a different document than the one that
+    // created this node.
+    // We assume that if newChild is a DocumentFragment, all children are created from the same document
+    // as the fragment itself (otherwise they could not have been added as children)
+    if (newChild->document() != document()) {
+        // but if the child is not in a document yet then loosen the
+        // restriction, so that e.g. creating an element with the Option()
+        // constructor and then adding it to a different document works,
+        // as it does in Mozilla and Mac IE.
+        if (!newChild->inDocument()) {
+            shouldAdoptChild = true;
+        } else {
+            ec = WRONG_DOCUMENT_ERR;
+            return;
+        }
+    }
+    
+    // HIERARCHY_REQUEST_ERR: Raised if this node is of a type that does not allow children of the type of the
+    // newChild node, or if the node to append is one of this node's ancestors.
+    
+    // check for ancestor/same node
+    if (newChild == this || isDescendantOf(newChild)) {
+        ec = HIERARCHY_REQUEST_ERR;
+        return;
+    }
+    
+    if (!canReplaceChild(newChild, oldChild)) {
+        ec = HIERARCHY_REQUEST_ERR;
+        return;
+    }
+       
+    // change the document pointer of newChild and all of its children to be the new document
+    if (shouldAdoptChild)
+        for (Node* node = newChild; node; node = node->traverseNextNode(newChild))
+            node->setDocument(document());
 }
 
 void Node::checkAddChild(Node *newChild, ExceptionCode& ec)
@@ -587,7 +731,7 @@ void Node::checkAddChild(Node *newChild, ExceptionCode& ec)
     // newChild node, or if the node to append is one of this node's ancestors.
 
     // check for ancestor/same node
-    if (newChild == this || isAncestor(newChild)) {
+    if (newChild == this || isDescendantOf(newChild)) {
         ec = HIERARCHY_REQUEST_ERR;
         return;
     }
@@ -608,15 +752,30 @@ void Node::checkAddChild(Node *newChild, ExceptionCode& ec)
     }
     
     // change the document pointer of newChild and all of its children to be the new document
-    if (shouldAdoptChild) {
-        for (Node* node = newChild; node; node = node->traverseNextNode(newChild)) {
-            KJS::ScriptInterpreter::updateDOMNodeDocument(node, node->document(), document());
+    if (shouldAdoptChild)
+        for (Node* node = newChild; node; node = node->traverseNextNode(newChild))
             node->setDocument(document());
-        }
-    }
 }
 
-bool Node::isAncestor(const Node *other) const
+bool Node::isDescendantOrShadowDescendantOf(const Node* otherNode)
+{
+    if (!otherNode) 
+        return false;
+    
+    if (isDescendantOf(otherNode))
+        return true;
+    
+    const Node* outOfTheShadows = shadowAncestorNode();
+    if (outOfTheShadows) {
+        if (outOfTheShadows == otherNode || outOfTheShadows->isDescendantOf(otherNode))
+            return true;
+    }
+    
+    return false;
+    
+}
+
+bool Node::isDescendantOf(const Node *other) const
 {
     // Return true if other is an ancestor of this, otherwise false
     if (!other)
@@ -644,7 +803,7 @@ Node::StyleChange Node::diff( RenderStyle *s1, RenderStyle *s2 ) const
     EDisplay display2 = s2 ? s2->display() : NONE;
     bool fl2 = s2 && s2->hasPseudoStyle(RenderStyle::FIRST_LETTER);
         
-    if (display1 != display2 || fl1 != fl2)
+    if (display1 != display2 || fl1 != fl2 || (s1 && s2 && !s1->contentDataEquivalent(s2)))
         ch = Detach;
     else if (!s1 || !s2)
         ch = Inherit;
@@ -678,36 +837,41 @@ Node::StyleChange Node::diff( RenderStyle *s1, RenderStyle *s2 ) const
 }
 
 #ifndef NDEBUG
-void Node::dump(TextStream *stream, DeprecatedString ind) const
+void Node::dump(TextStream* stream, DeprecatedString ind) const
 {
-    // ### implement dump() for all appropriate subclasses
-
     if (m_hasId) { *stream << " hasId"; }
     if (m_hasClass) { *stream << " hasClass"; }
-    if (m_hasStyle) { *stream << " hasStyle"; }
-    if (m_specified) { *stream << " specified"; }
     if (m_focused) { *stream << " focused"; }
     if (m_active) { *stream << " active"; }
-    if (m_styleElement) { *stream << " styleElement"; }
-    if (m_implicit) { *stream << " implicit"; }
 
     *stream << " tabIndex=" << m_tabIndex;
     *stream << endl;
 
-    Node *child = firstChild();
-    while(child) {
-        *stream << ind << child->nodeName().deprecatedString().ascii() << ": ";
-        child->dump(stream,ind+"  ");
-        child = child->nextSibling();
+    for (Node* child = firstChild(); child; child = child->nextSibling()) {
+        *stream << ind << child->nodeName() << ": ";
+        child->dump(stream, ind + "  ");
     }
 }
 #endif
 
 void Node::attach()
 {
-    assert(!attached());
-    assert(!renderer() || (renderer()->style() && renderer()->parent()));
-    document()->incDOMTreeVersion();
+    ASSERT(!attached());
+    ASSERT(!renderer() || (renderer()->style() && renderer()->parent()));
+
+    // If this node got a renderer it may be the previousRenderer() of sibling text nodes and thus affect the
+    // result of Text::rendererIsNeeded() for those nodes.
+    if (renderer()) {
+        for (Node* next = nextSibling(); next; next = next->nextSibling()) {
+            if (next->renderer())
+                break;
+            if (!next->attached())
+                break;  // Assume this means none of the following siblings are attached.
+            if (next->isTextNode())
+                next->createRendererIfNeeded();
+        }
+    }
+
     m_attached = true;
 }
 
@@ -718,7 +882,6 @@ void Node::willRemove()
 void Node::detach()
 {
     m_inDetach = true;
-//    assert(m_attached);
 
     if (renderer())
         renderer()->destroy();
@@ -729,7 +892,6 @@ void Node::detach()
         doc->hoveredNodeDetached(this);
     if (m_inActiveChain)
         doc->activeChainNodeDetached(this);
-    doc->incDOMTreeVersion();
 
     m_active = false;
     m_hovered = false;
@@ -746,12 +908,11 @@ void Node::insertedIntoDocument()
 
 void Node::removedFromDocument()
 {
+    if (m_document && m_document->getCSSTarget() == this)
+        m_document->setCSSTarget(0);
+
     setInDocument(false);
     removedFromTree(false);
-}
-
-void Node::childrenChanged()
-{
 }
 
 bool Node::isReadOnlyNode()
@@ -781,7 +942,7 @@ Node *Node::previousEditable() const
 // the last child, it specifies to start at next sibling.
 Node *Node::nextEditable(int offset) const
 {
-    assert(offset>=0);
+    ASSERT(offset>=0);
     Node *node;
     if (hasChildNodes())
         node = (offset >= (int)childNodeCount()) ? nextSibling() : childNode(offset)->nextLeafNode();
@@ -886,41 +1047,30 @@ void Node::createRendererIfNeeded()
 {
     if (!document()->shouldCreateRenderers())
         return;
-    
-    assert(!attached());
-    assert(!renderer());
+
+    ASSERT(!renderer());
     
     Node *parent = parentNode();    
-    assert(parent);
+    ASSERT(parent);
     
     RenderObject *parentRenderer = parent->renderer();
     if (parentRenderer && parentRenderer->canHaveChildren()
-#if SVG_SUPPORT
+#if ENABLE(SVG)
         && parent->childShouldCreateRenderer(this)
 #endif
         ) {
         RenderStyle* style = styleForRenderer(parentRenderer);
-#ifndef KHTML_NO_XBL
-        bool resolveStyle = false;
-        if (document()->bindingManager()->loadBindings(this, style->bindingURIs(), true, &resolveStyle) && 
-            rendererIsNeeded(style)) {
-            if (resolveStyle) {
-                style->deref(document()->renderArena());
-                style = styleForRenderer(parentRenderer);
-            }
-#else
         if (rendererIsNeeded(style)) {
-#endif
-            setRenderer(createRenderer(document()->renderArena(), style));
-            if (renderer()) {
-                renderer()->setStyle(style);
-                parentRenderer->addChild(renderer(), nextRenderer());
+            if (RenderObject* r = createRenderer(document()->renderArena(), style)) {
+                if (!parentRenderer->isChildAllowed(r, style))
+                    r->destroy();
+                else {
+                    setRenderer(r);
+                    renderer()->setAnimatableStyle(style);
+                    parentRenderer->addChild(renderer(), nextRenderer());
+                }
             }
-#ifndef KHTML_NO_XBL
-        } // avoid confusing the change log code parser by having two close braces to match the two open braces above
-#else
         }
-#endif
         style->deref(document()->renderArena());
     }
 }
@@ -939,7 +1089,7 @@ bool Node::rendererIsNeeded(RenderStyle *style)
 
 RenderObject *Node::createRenderer(RenderArena *arena, RenderStyle *style)
 {
-    assert(false);
+    ASSERT(false);
     return 0;
 }
 
@@ -951,43 +1101,40 @@ RenderStyle* Node::renderStyle() const
 void Node::setRenderStyle(RenderStyle* s)
 {
     if (m_renderer)
-        m_renderer->setStyle(s); 
+        m_renderer->setAnimatableStyle(s); 
 }
 
-int Node::maxOffset() const
+RenderStyle* Node::computedStyle()
 {
-    return 1;
+    return parent() ? parent()->computedStyle() : 0;
+}
+
+int Node::maxCharacterOffset() const
+{
+    ASSERT_NOT_REACHED();
+    return 0;
 }
 
 // FIXME: Shouldn't these functions be in the editing code?  Code that asks questions about HTML in the core DOM class
 // is obviously misplaced.
-int Node::caretMinOffset() const
+bool Node::canStartSelection() const
 {
-    return renderer() ? renderer()->caretMinOffset() : 0;
-}
-
-int Node::caretMaxOffset() const
-{
-    return renderer() ? renderer()->caretMaxOffset() : 1;
-}
-
-unsigned Node::caretMaxRenderedOffset() const
-{
-    return renderer() ? renderer()->caretMaxRenderedOffset() : 1;
-}
-
-int Node::previousOffset (int current) const
-{
-    return renderer() ? renderer()->previousOffset(current) : current - 1;
-}
-
-int Node::nextOffset (int current) const
-{
-    return renderer() ? renderer()->nextOffset(current) : current + 1;
+    if (isContentEditable())
+        return true;
+    return parent() ? parent()->canStartSelection() : true;
 }
 
 Node* Node::shadowAncestorNode()
 {
+#if ENABLE(SVG)
+    // SVG elements living in a shadow tree only occour when <use> created them.
+    // For these cases we do NOT want to return the shadowParentNode() here
+    // but the actual shadow tree element - as main difference to the HTML forms
+    // shadow tree concept. (This function _could_ be made virtual - opinions?)
+    if (isSVGElement())
+        return this;
+#endif
+
     Node *n = this;    
     while (n) {
         if (n->isShadowNode())
@@ -1076,11 +1223,6 @@ Element* Node::rootEditableElement() const
     return result;
 }
 
-bool Node::inSameRootEditableElement(Node *n)
-{
-    return n ? rootEditableElement() == n->rootEditableElement() : false;
-}
-
 bool Node::inSameContainingBlockFlowElement(Node *n)
 {
     return n ? enclosingBlockFlowElement() == n->enclosingBlockFlowElement() : false;
@@ -1093,15 +1235,15 @@ PassRefPtr<NodeList> Node::getElementsByTagName(const String& name)
     return getElementsByTagNameNS("*", name);
 }
  
-PassRefPtr<NodeList> Node::getElementsByTagNameNS(const String &namespaceURI, const String &localName)
+PassRefPtr<NodeList> Node::getElementsByTagNameNS(const String& namespaceURI, const String& localName)
 {
-    if (namespaceURI.isNull() || localName.isNull())
-        return 0; // FIXME: Who relies on getting 0 instead of a node list in this case?
-    
+    if (localName.isNull())
+        return 0;
+
     String name = localName;
     if (document()->isHTMLDocument())
         name = localName.lower();
-    return new TagNodeList(this, AtomicString(namespaceURI), AtomicString(name));
+    return new TagNodeList(this, namespaceURI.isEmpty() ? nullAtom : AtomicString(namespaceURI), name);
 }
 
 
@@ -1121,9 +1263,84 @@ bool Node::willRespondToMouseClickEvents()
 }
 
 
-bool Node::isSupported(const String &feature, const String &version)
+PassRefPtr<NodeList> Node::getElementsByName(const String& elementName)
 {
-    return DOMImplementation::instance()->hasFeature(feature, version);
+    if (!m_nodeLists) {
+        m_nodeLists.set(new NodeListsNodeData);
+        document()->addNodeListCache();
+    }
+
+    pair<NodeListsNodeData::CacheMap::iterator, bool> result = m_nodeLists->m_nameNodeListCaches.add(elementName, 0);
+    if (result.second)
+        result.first->second = new DynamicNodeList::Caches;
+    
+    return new NameNodeList(this, elementName, result.first->second);
+}
+
+PassRefPtr<NodeList> Node::getElementsByClassName(const String& classNames)
+{
+    if (!m_nodeLists) {
+        m_nodeLists.set(new NodeListsNodeData);
+        document()->addNodeListCache();
+    }
+
+    pair<NodeListsNodeData::CacheMap::iterator, bool> result = m_nodeLists->m_classNodeListCaches.add(classNames, 0);
+    if (result.second)
+        result.first->second = new DynamicNodeList::Caches;
+    
+    return new ClassNodeList(this, classNames, result.first->second);
+}
+
+PassRefPtr<Element> Node::querySelector(const String& selectors, ExceptionCode& ec)
+{
+    if (selectors.isNull() || selectors.isEmpty()) {
+        ec = SYNTAX_ERR;
+        return 0;
+    }
+    CSSStyleSheet tempStyleSheet(document());
+    CSSParser p(true);
+    RefPtr<CSSRule> rule = p.parseRule(&tempStyleSheet, selectors + "{}");
+    if (!rule || !rule->isStyleRule()) {
+        ec = SYNTAX_ERR;
+        return 0;
+    }
+
+    CSSStyleSelector* styleSelector = document()->styleSelector();
+    CSSSelector* querySelector = static_cast<CSSStyleRule*>(rule.get())->selector();
+    
+    // FIXME: We can speed this up by implementing caching similar to the one use by getElementById
+    for (Node* n = firstChild(); n; n = n->traverseNextNode(this)) {
+        if (n->isElementNode()) {
+            Element* element = static_cast<Element*>(n);
+            styleSelector->initElementAndPseudoState(element);
+            styleSelector->initForStyleResolve(element, 0);
+            for (CSSSelector* selector = querySelector; selector; selector = selector->next()) {
+                if (styleSelector->checkSelector(selector))
+                    return element;
+            }
+        }
+    }
+    
+    return 0;
+}
+
+PassRefPtr<NodeList> Node::querySelectorAll(const String& selectors, ExceptionCode& ec)
+{
+    if (selectors.isNull() || selectors.isEmpty()) {
+        ec = SYNTAX_ERR;
+        return 0;
+    }
+    CSSStyleSheet tempStyleSheet(document());
+    CSSParser p(true);
+    RefPtr<CSSRule> rule = p.parseRule(&tempStyleSheet, selectors + "{}");
+    if (!rule || !rule->isStyleRule()) {
+        ec = SYNTAX_ERR;
+        return 0;
+    }
+    
+    SelectorNodeList* resultList = new SelectorNodeList(this, static_cast<CSSStyleRule*>(rule.get())->selector());
+
+    return resultList;
 }
 
 Document *Node::ownerDocument() const
@@ -1140,6 +1357,15 @@ bool Node::hasAttributes() const
 NamedAttrMap *Node::attributes() const
 {
     return 0;
+}
+
+String Node::baseURI() const
+{
+    Node* parent = parentNode();
+    if (parent)
+        return parent->baseURI();
+
+    return String();
 }
 
 bool Node::isEqualNode(Node *other) const
@@ -1442,12 +1668,60 @@ bool Node::offsetInCharacters() const
     return false;
 }
 
+FloatPoint Node::convertToPage(const FloatPoint& p) const
+{
+    // if there is a renderer, just ask it to do the conversion
+    if (renderer())
+        return renderer()->convertToPage(p);
+    
+    // otherwise go up the tree looking for a renderer
+    Element *parent = ancestorElement();
+    if (parent)
+        return parent->convertToPage(p);
+
+    // no parent - no conversion needed
+    return p;
+}
+
+FloatPoint Node::convertFromPage(const FloatPoint& p) const
+{
+    // if there is a renderer, just ask it to do the conversion
+    if (renderer())
+        return renderer()->convertFromPage(p);
+
+    // otherwise go up the tree looking for a renderer
+    Element *parent = ancestorElement();
+    if (parent)
+        return parent->convertFromPage(p);
+
+    // no parent - no conversion needed
+    return p;
+}
+
+FloatQuad Node::convertRectToPageQuad(const FloatRect& inRect) const
+{
+    // if there is a renderer, just ask it to do the conversion
+    if (renderer()) {
+        int x, y;
+        renderer()->absolutePosition(x, y);
+        return renderer()->convertRectToPageQuad(inRect, x, y);
+    }
+
+    // otherwise go up the tree looking for a renderer
+    Element *parent = ancestorElement();
+    if (parent)
+        return parent->convertRectToPageQuad(inRect);
+
+    // no parent - no conversion needed
+    return FloatQuad(inRect);
+}
+
 #ifndef NDEBUG
 
-static void appendAttributeDesc(const Node *node, String &string, const QualifiedName& name, DeprecatedString attrDesc)
+static void appendAttributeDesc(const Node* node, String& string, const QualifiedName& name, const char* attrDesc)
 {
     if (node->isElementNode()) {
-        String attr = static_cast<const Element *>(node)->getAttribute(name);
+        String attr = static_cast<const Element*>(node)->getAttribute(name);
         if (!attr.isEmpty()) {
             string += attrDesc;
             string += attr;
@@ -1460,15 +1734,15 @@ void Node::showNode(const char* prefix) const
     if (!prefix)
         prefix = "";
     if (isTextNode()) {
-        DeprecatedString value = nodeValue().deprecatedString();
+        String value = nodeValue();
         value.replace('\\', "\\\\");
         value.replace('\n', "\\n");
-        fprintf(stderr, "%s%s\t%p \"%s\"\n", prefix, nodeName().deprecatedString().utf8().data(), this, value.utf8().data());
+        fprintf(stderr, "%s%s\t%p \"%s\"\n", prefix, nodeName().utf8().data(), this, value.utf8().data());
     } else {
         String attrs = "";
         appendAttributeDesc(this, attrs, classAttr, " CLASS=");
         appendAttributeDesc(this, attrs, styleAttr, " STYLE=");
-        fprintf(stderr, "%s%s\t%p%s\n", prefix, nodeName().deprecatedString().utf8().data(), this, attrs.deprecatedString().ascii());
+        fprintf(stderr, "%s%s\t%p%s\n", prefix, nodeName().utf8().data(), this, attrs.utf8().data());
     }
 }
 
@@ -1497,7 +1771,7 @@ void Node::showTreeAndMark(const Node* markedNode1, const char* markedLabel1, co
     }
 }
 
-void Node::formatForDebugger(char *buffer, unsigned length) const
+void Node::formatForDebugger(char* buffer, unsigned length) const
 {
     String result;
     String s;
@@ -1508,12 +1782,56 @@ void Node::formatForDebugger(char *buffer, unsigned length) const
     else
         result += s;
           
-    strncpy(buffer, result.deprecatedString().latin1(), length - 1);
+    strncpy(buffer, result.utf8().data(), length - 1);
 }
 
 #endif
 
+// --------
+
+void NodeListsNodeData::invalidateCaches()
+{
+    m_childNodeListCaches.reset();
+    invalidateCachesThatDependOnAttributes();
 }
+
+void NodeListsNodeData::invalidateCachesThatDependOnAttributes()
+{
+    CacheMap::iterator classCachesEnd = m_classNodeListCaches.end();
+    for (CacheMap::iterator it = m_classNodeListCaches.begin(); it != classCachesEnd; ++it)
+        it->second->reset();
+
+    CacheMap::iterator nameCachesEnd = m_nameNodeListCaches.end();
+    for (CacheMap::iterator it = m_nameNodeListCaches.begin(); it != nameCachesEnd; ++it)
+        it->second->reset();
+}
+
+bool NodeListsNodeData::isEmpty() const
+{
+    if (!m_listsWithCaches.isEmpty())
+        return false;
+
+    if (m_childNodeListCaches.refCount)
+        return false;
+
+    CacheMap::const_iterator classCachesEnd = m_classNodeListCaches.end();
+    for (CacheMap::const_iterator it = m_classNodeListCaches.begin(); it != classCachesEnd; ++it) {
+        if (it->second->refCount)
+            return false;
+    }
+
+    CacheMap::const_iterator nameCachesEnd = m_nameNodeListCaches.end();
+    for (CacheMap::const_iterator it = m_nameNodeListCaches.begin(); it != nameCachesEnd; ++it) {
+        if (it->second->refCount)
+            return false;
+    }
+
+    return true;
+}
+
+// --------
+
+} // namespace WebCore
 
 #ifndef NDEBUG
 

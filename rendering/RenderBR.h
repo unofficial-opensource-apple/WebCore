@@ -15,18 +15,15 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef RENDER_BR_H
-#define RENDER_BR_H
+
+#ifndef RenderBR_h
+#define RenderBR_h
 
 #include "RenderText.h"
-
-namespace WebCore {
-    class Position;
-};
 
 /*
  * The whole class here is a hack to get <br> working, as long as we don't have support for
@@ -34,22 +31,23 @@ namespace WebCore {
  */
 namespace WebCore {
 
-class RenderBR : public RenderText
-{
+class Position;
+
+class RenderBR : public RenderText {
 public:
     RenderBR(Node*);
     virtual ~RenderBR();
 
-    virtual const char *renderName() const { return "RenderBR"; }
+    virtual const char* renderName() const { return "RenderBR"; }
  
-    virtual IntRect selectionRect() { return IntRect(); }
+    virtual IntRect selectionRect(bool) { return IntRect(); }
 
-    virtual unsigned int width(unsigned int from, unsigned int len, const Font *f, int xpos) const { return 0; }
-    virtual unsigned int width(unsigned int from, unsigned int len, int xpos, bool firstLine = false) const { return 0; }
+    virtual unsigned width(unsigned /*from*/, unsigned /*len*/, const Font&, int /*xpos*/) const { return 0; }
+    virtual unsigned width(unsigned /*from*/, unsigned /*len*/, int /*xpos*/, bool /*firstLine = false*/) const { return 0; }
 
-    virtual short lineHeight(bool firstLine, bool isRootLineBox=false) const;
-    virtual short baselinePosition( bool firstLine, bool isRootLineBox=false) const;
-    virtual void setStyle(RenderStyle* _style);
+    virtual short lineHeight(bool firstLine, bool isRootLineBox = false) const;
+    virtual short baselinePosition(bool firstLine, bool isRootLineBox = false) const;
+    virtual void setStyle(RenderStyle*);
 
     // overrides
     virtual InlineBox* createInlineBox(bool, bool, bool isOnlyRun = false);
@@ -59,16 +57,15 @@ public:
     virtual int caretMinOffset() const;
     virtual int caretMaxOffset() const;
     virtual unsigned caretMaxRenderedOffset() const;
-    
+
     virtual VisiblePosition positionForCoordinates(int x, int y);
 
-    virtual InlineBox *inlineBox(int offset, EAffinity affinity = UPSTREAM);
-    
+    virtual InlineBox* inlineBox(int offset, EAffinity = UPSTREAM);
+
 private:
     mutable short m_lineHeight;
-
 };
 
-}
+} // namespace WebCore
 
-#endif
+#endif // RenderBR_h

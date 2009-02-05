@@ -3,7 +3,7 @@
  *
  * Copyright (C) 1999-2003 Lars Knoll (knoll@kde.org)
  *               1999 Waldo Bastian (bastian@kde.org)
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,60 +17,62 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSSelector_H
-#define CSSSelector_H
+#ifndef CSSSelector_h
+#define CSSSelector_h
 
 #include "QualifiedName.h"
 
 namespace WebCore {
 
-// this class represents a selector for a StyleRule
-    class CSSSelector
-    {
+    // this class represents a selector for a StyleRule
+    class CSSSelector {
     public:
         CSSSelector()
-            : tagHistory(0)
-            , simpleSelector(0)
-            , nextSelector(0)
-            , argument(nullAtom)
-            , attr(anyQName())
-            , tag(anyQName())
+            : m_tagHistory(0)
+            , m_simpleSelector(0)
+            , m_nextSelector(0)
+            , m_argument(nullAtom)
+            , m_attr(anyQName())
+            , m_tag(anyQName())
             , m_relation(Descendant)
-            , match(None)
-            , pseudoId(0)
-            , _pseudoType(PseudoNotParsed)
-        {}
-        
+            , m_match(None)
+            , m_pseudoType(PseudoNotParsed)
+        {
+        }
+
         CSSSelector(const QualifiedName& qName)
-            : tagHistory(0)
-            , simpleSelector(0)
-            , nextSelector(0)
-            , argument(nullAtom)
-            , attr(anyQName())
-            , tag(qName)
+            : m_tagHistory(0)
+            , m_simpleSelector(0)
+            , m_nextSelector(0)
+            , m_argument(nullAtom)
+            , m_attr(anyQName())
+            , m_tag(qName)
             , m_relation(Descendant)
-            , match(None)
-            , pseudoId(0)
-            , _pseudoType(PseudoNotParsed)
-        {}
-
-        ~CSSSelector() {
-            delete tagHistory;
-            delete simpleSelector;
-            delete nextSelector;
+            , m_match(None)
+            , m_pseudoType(PseudoNotParsed)
+        {
         }
 
-        void append(CSSSelector* n) {
+        ~CSSSelector()
+        {
+            delete m_tagHistory;
+            delete m_simpleSelector;
+            delete m_nextSelector;
+        }
+
+        void append(CSSSelector* n)
+        {
             CSSSelector* end = this;
-            while (end->nextSelector)
-                end = end->nextSelector;
-            end->nextSelector = n;
+            while (end->m_nextSelector)
+                end = end->m_nextSelector;
+            end->m_nextSelector = n;
         }
-        CSSSelector* next() { return nextSelector; }
+
+        CSSSelector* next() { return m_nextSelector; }
 
         /**
          * Print debug output for this selector
@@ -83,7 +85,7 @@ namespace WebCore {
         String selectorText() const;
 
         // checks if the 2 selectors (including sub selectors) agree.
-        bool operator ==(const CSSSelector&);
+        bool operator==(const CSSSelector&);
 
         // tag == -1 means apply to all elements (Selector = *)
 
@@ -125,6 +127,10 @@ namespace WebCore {
             PseudoOnlyOfType,
             PseudoFirstLine,
             PseudoFirstLetter,
+            PseudoNthChild,
+            PseudoNthOfType,
+            PseudoNthLastChild,
+            PseudoNthLastOfType,
             PseudoLink,
             PseudoVisited,
             PseudoAnyLink,
@@ -149,38 +155,46 @@ namespace WebCore {
             PseudoSearchCancelButton,
             PseudoSearchDecoration,
             PseudoSearchResultsDecoration,
-            PseudoSearchResultsButton
+            PseudoSearchResultsButton,
+            PseudoMediaControlsPanel,
+            PseudoMediaControlsMuteButton,
+            PseudoMediaControlsPlayButton,
+            PseudoMediaControlsTimeDisplay,
+            PseudoMediaControlsTimeline,
+            PseudoMediaControlsSeekBackButton,
+            PseudoMediaControlsSeekForwardButton,
+            PseudoMediaControlsFullscreenButton
         };
 
         PseudoType pseudoType() const
         {
-            if (_pseudoType == PseudoNotParsed)
+            if (m_pseudoType == PseudoNotParsed)
                 extractPseudoType();
-            return static_cast<PseudoType>(_pseudoType);
+            return static_cast<PseudoType>(m_pseudoType);
         }
 
-        bool hasTag() const { return tag != anyQName(); }
-        bool hasAttribute() const { return attr != anyQName(); }
+        bool hasTag() const { return m_tag != anyQName(); }
+        bool hasAttribute() const { return m_attr != anyQName(); }
 
-        mutable AtomicString value;
-        CSSSelector* tagHistory;
-        CSSSelector* simpleSelector; // Used for :not.
-        CSSSelector* nextSelector; // used for ,-chained selectors
-        AtomicString argument; // Used for :contains, :lang and :nth-*
-        
-        QualifiedName attr;
-        QualifiedName tag;
-        
         Relation relation() const { return static_cast<Relation>(m_relation); }
 
-        unsigned m_relation          : 3; // enum Relation
-        mutable unsigned match       : 4; // enum Match
-        unsigned pseudoId            : 3;
-        mutable unsigned _pseudoType : 5; // PseudoType
+        mutable AtomicString m_value;
+        CSSSelector* m_tagHistory;
+        CSSSelector* m_simpleSelector; // Used for :not.
+        CSSSelector* m_nextSelector; // used for ,-chained selectors
+        AtomicString m_argument; // Used for :contains, :lang and :nth-*
+
+        QualifiedName m_attr;
+        QualifiedName m_tag;
+
+        unsigned m_relation           : 3; // enum Relation
+        mutable unsigned m_match      : 4; // enum Match
+        mutable unsigned m_pseudoType : 8; // PseudoType
 
     private:
         void extractPseudoType() const;
     };
-}
 
-#endif
+} // namespace WebCore
+
+#endif // CSSSelector_h

@@ -15,14 +15,14 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
 #include "XSLImportRule.h"
 
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
 
 #include "CachedXSLStyleSheet.h"
 #include "DocLoader.h"
@@ -52,7 +52,7 @@ XSLStyleSheet* XSLImportRule::parentStyleSheet() const
     return (parent() && parent()->isXSLStyleSheet()) ? static_cast<XSLStyleSheet*>(parent()) : 0;
 }
 
-void XSLImportRule::setStyleSheet(const String& url, const String& sheet)
+void XSLImportRule::setXSLStyleSheet(const String& url, const String& sheet)
 {
     if (m_styleSheet)
         m_styleSheet->setParent(0);
@@ -88,7 +88,7 @@ void XSLImportRule::loadSheet()
     XSLStyleSheet* parentSheet = parentStyleSheet();
     if (!parentSheet->href().isNull())
         // use parent styleheet's URL as the base URL
-        absHref = KURL(parentSheet->href().deprecatedString(),m_strHref.deprecatedString()).url();
+        absHref = KURL(parentSheet->href().deprecatedString(), m_strHref.deprecatedString()).string();
     
     // Check for a cycle in our import chain.  If we encounter a stylesheet
     // in our parent chain with the same URL, then just bail.
@@ -102,7 +102,7 @@ void XSLImportRule::loadSheet()
     if (m_cachedSheet) {
         m_cachedSheet->ref(this);
         
-        // If the imported sheet is in the cache, then setStyleSheet gets called,
+        // If the imported sheet is in the cache, then setXSLStyleSheet gets called,
         // and the sheet even gets parsed (via parseString).  In this case we have
         // loaded (even if our subresources haven't), so if we have a stylesheet after
         // checking the cache, then we've clearly loaded.
@@ -113,4 +113,4 @@ void XSLImportRule::loadSheet()
 
 } // namespace WebCore
 
-#endif // KHTML_XSLT
+#endif // ENABLE(XSLT)

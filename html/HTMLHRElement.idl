@@ -13,15 +13,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 module html {
-    interface [LegacyParent=KJS::JSHTMLElement] HTMLHRElement : HTMLElement {
-        attribute DOMString align;
+
+    interface [
+        GenerateConstructor,
+        InterfaceUUID=20477b34-ab22-47e3-b9aa-80c388d32975,
+        ImplementationUUID=6cfc8977-172d-48f6-8f08-c7671f02354c
+    ] HTMLHRElement : HTMLElement {
+        attribute [ConvertNullToNullString] DOMString align;
         attribute boolean noShade;
-        attribute DOMString size;
-        attribute DOMString width;
+        attribute [ConvertNullToNullString] DOMString size;
+        attribute [ConvertNullToNullString] DOMString width;
     };
+
 }

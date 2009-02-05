@@ -27,38 +27,34 @@
 #import "WebCoreTextRenderer.h"
 
 #import "Font.h"
-#import "FontData.h"
-#import "WebFontCache.h"
-#import "IntPoint.h"
+#import "SimpleFontData.h"
 #import "GraphicsContext.h"
+#import "IntPoint.h"
+#import "WebFontCache.h"
 
 #import "WKGraphics.h"
 
 using namespace WebCore;
 
-using WebCore::GraphicsContext;
-
 void WebCoreDrawTextAtPoint(const UniChar* buffer, unsigned length, NSPoint point, GSFontRef font, CGColorRef textColor)
 {
     FontPlatformData f(font);
-    Font renderer(f);
+    Font renderer(f, false);
     TextRun run(buffer, length);
-    TextStyle style;
-    style.disableRoundingHacks();
-
+    run.disableRoundingHacks();
+    
     GraphicsContext graphicsContext(static_cast<PlatformGraphicsContext*>(WKGetCurrentGraphicsContext()));
     graphicsContext.setPenFromCGColor (textColor);
-    renderer.drawText(&graphicsContext, run, style, FloatPoint(point.x, point.y));
+    renderer.drawText(&graphicsContext, run, FloatPoint(point.x, point.y));
 }
 
 float WebCoreTextFloatWidth(const UniChar* buffer, unsigned length , GSFontRef font)
 {
     FontPlatformData f(font);
-    Font renderer(f);
+    Font renderer(f, false);    
     TextRun run(buffer, length);
-    TextStyle style;
-    style.disableRoundingHacks();
-    return renderer.floatWidth(run, style);
+    run.disableRoundingHacks();
+    return renderer.floatWidth(run);
 }
 
 static bool gShouldUseFontSmoothing = true;
@@ -99,11 +95,10 @@ CGFontAntialiasingStyle WebCoreFontAntialiasingStyle()
 
 void WebCoreSetAlwaysUseATSU(bool useATSU)
 {
-    Font::setAlwaysUseComplexPath(useATSU);
+    Font::setCodePath(useATSU ? Font::Complex : Font::Auto);
 }
 
 GSFontRef WebCoreFindFont(NSString* familyName, GSFontTraitMask traits, int size)
 {
-	return 0;
-//    return [WebFontCache fontWithFamily:familyName traits:traits size:size];
+    return 0;
 }

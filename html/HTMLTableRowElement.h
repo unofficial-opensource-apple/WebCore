@@ -1,12 +1,10 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,37 +18,35 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLTableRowElement_H
-#define HTMLTableRowElement_H
+#ifndef HTMLTableRowElement_h
+#define HTMLTableRowElement_h
 
 #include "HTMLTablePartElement.h"
 
 namespace WebCore {
 
-class HTMLTableRowElement : public HTMLTablePartElement
-{
+class HTMLTableRowElement : public HTMLTablePartElement {
 public:
-    HTMLTableRowElement(Document* doc);
+    HTMLTableRowElement(Document*);
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusOptional; }
     virtual int tagPriority() const { return 7; }
     virtual bool checkDTD(const Node*);
     virtual ContainerNode* addChild(PassRefPtr<Node>);
-    
+
     int rowIndex() const;
-    int sectionRowIndex() const;
-
-    HTMLElement* insertCell(int index, ExceptionCode&);
-    void deleteCell(int index, ExceptionCode&);
-
     void setRowIndex(int);
 
+    int sectionRowIndex() const;
     void setSectionRowIndex(int);
+
+    PassRefPtr<HTMLElement> insertCell(int index, ExceptionCode&);
+    void deleteCell(int index, ExceptionCode&);
 
     PassRefPtr<HTMLCollection> cells();
     void setCells(HTMLCollection *, ExceptionCode&);
@@ -69,11 +65,8 @@ public:
 
     String vAlign() const;
     void setVAlign(const String&);
-
-protected:
-    int ncols;
 };
 
-} //namespace
+} // namespace
 
 #endif

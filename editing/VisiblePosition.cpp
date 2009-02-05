@@ -32,6 +32,7 @@
 #include "InlineTextBox.h"
 #include "Logging.h"
 #include "Range.h"
+#include "Text.h"
 #include "htmlediting.h"
 #include "visible_units.h"
 
@@ -46,6 +47,7 @@ VisiblePosition::VisiblePosition(const Position &pos, EAffinity affinity)
 
 VisiblePosition::VisiblePosition(Node *node, int offset, EAffinity affinity)
 {
+    ASSERT(offset >= 0);
     init(Position(node, offset), affinity);
 }
 
@@ -62,26 +64,18 @@ void VisiblePosition::init(const Position& position, EAffinity affinity)
 
 VisiblePosition VisiblePosition::next(bool stayInEditableContent) const
 {
-    VisiblePosition next(nextVisiblePosition(m_deepPosition), m_affinity);
+    VisiblePosition next(nextVisuallyDistinctCandidate(m_deepPosition), m_affinity);
     
-    if (!stayInEditableContent || next.isNull())
+    if (!stayInEditableContent)
         return next;
     
-    Node* highestRoot = highestEditableRoot(deepEquivalent());
-    
-    if (!next.deepEquivalent().node()->isAncestor(highestRoot))
-        return VisiblePosition();
-
-    if (highestEditableRoot(next.deepEquivalent()) == highestRoot)
-        return next;
-    
-    return firstEditablePositionAfterPositionInRoot(next.deepEquivalent(), highestRoot);
+    return honorEditableBoundaryAtOrAfter(next);
 }
 
 VisiblePosition VisiblePosition::previous(bool stayInEditableContent) const
 {
     // find first previous DOM position that is visible
-    Position pos = previousVisiblePosition(m_deepPosition);
+    Position pos = previousVisuallyDistinctCandidate(m_deepPosition);
     
     // return null visible position if there is no previous visible position
     if (pos.atStart())
@@ -100,62 +94,73 @@ VisiblePosition VisiblePosition::previous(bool stayInEditableContent) const
     }
 #endif
 
-    if (!stayInEditableContent || prev.isNull())
+    if (!stayInEditableContent)
         return prev;
+    
+    return honorEditableBoundaryAtOrBefore(prev);
+}
+
+VisiblePosition VisiblePosition::honorEditableBoundaryAtOrBefore(const VisiblePosition &pos) const
+{
+    if (pos.isNull())
+        return pos;
     
     Node* highestRoot = highestEditableRoot(deepEquivalent());
     
-    if (!prev.deepEquivalent().node()->isAncestor(highestRoot))
+    // Return empty position if pos is not somewhere inside the editable region containing this position
+    if (highestRoot && !pos.deepEquivalent().node()->isDescendantOf(highestRoot))
         return VisiblePosition();
         
-    if (highestEditableRoot(prev.deepEquivalent()) == highestRoot)
-        return prev;
+    // Return pos itself if the two are from the very same editable region, or both are non-editable
+    // FIXME: In the non-editable case, just because the new position is non-editable doesn't mean movement
+    // to it is allowed.  Selection::adjustForEditableContent has this problem too.
+    if (highestEditableRoot(pos.deepEquivalent()) == highestRoot)
+        return pos;
+  
+    // Return empty position if this position is non-editable, but pos is editable
+    // FIXME: Move to the previous non-editable region.
+    if (!highestRoot)
+        return VisiblePosition();
 
-    return lastEditablePositionBeforePositionInRoot(prev.deepEquivalent(), highestRoot);
+    // Return the last position before pos that is in the same editable region as this position
+    return lastEditablePositionBeforePositionInRoot(pos.deepEquivalent(), highestRoot);
 }
 
-Position VisiblePosition::previousVisiblePosition(const Position& pos)
+VisiblePosition VisiblePosition::honorEditableBoundaryAtOrAfter(const VisiblePosition &pos) const
 {
-    if (!pos.inRenderedContent()) {
-        Position current = pos;
-        while (!current.atStart()) {
-            current = current.previous(UsingComposedCharacters);
-            if (current.inRenderedContent())
-                return current;
-        }
-        return Position();
-    }
+    if (pos.isNull())
+        return pos;
+    
+    Node* highestRoot = highestEditableRoot(deepEquivalent());
+    
+    // Return empty position if pos is not somewhere inside the editable region containing this position
+    if (highestRoot && !pos.deepEquivalent().node()->isDescendantOf(highestRoot))
+        return VisiblePosition();
+    
+    // Return pos itself if the two are from the very same editable region, or both are non-editable
+    // FIXME: In the non-editable case, just because the new position is non-editable doesn't mean movement
+    // to it is allowed.  Selection::adjustForEditableContent has this problem too.
+    if (highestEditableRoot(pos.deepEquivalent()) == highestRoot)
+        return pos;
 
-    Position downstreamStart = pos.downstream();
-    Position current = pos;
-    while (!current.atStart()) {
-        current = current.previous(UsingComposedCharacters);
-        if (current.inRenderedContent() && downstreamStart != current.downstream())
-            return current;
-    }
-    return Position();
+    // Return empty position if this position is non-editable, but pos is editable
+    // FIXME: Move to the next non-editable region.
+    if (!highestRoot)
+        return VisiblePosition();
+
+    // Return the next position after pos that is in the same editable region as this position
+    return firstEditablePositionAfterPositionInRoot(pos.deepEquivalent(), highestRoot);
 }
 
-Position VisiblePosition::nextVisiblePosition(const Position& pos)
+Position canonicalizeCandidate(const Position& candidate)
 {
-    if (!pos.inRenderedContent()) {
-        Position current = pos;
-        while (!current.atEnd()) {
-            current = current.next(UsingComposedCharacters);
-            if (current.inRenderedContent())
-                return current;
-        }
+    if (candidate.isNull())
         return Position();
-    }
-
-    Position downstreamStart = pos.downstream();
-    Position current = pos;
-    while (!current.atEnd()) {
-        current = current.next(UsingComposedCharacters);
-        if (current.inRenderedContent() && downstreamStart != current.downstream())
-            return current;
-    }
-    return Position();
+    ASSERT(candidate.isCandidate());
+    Position upstream = candidate.upstream();
+    if (upstream.isCandidate())
+        return upstream;
+    return candidate;
 }
 
 Position VisiblePosition::canonicalPosition(const Position& position)
@@ -172,29 +177,33 @@ Position VisiblePosition::canonicalPosition(const Position& position)
     node->document()->updateLayoutIgnorePendingStylesheets();
 
     Position candidate = position.upstream();
-    if (candidate.inRenderedContent())
+    if (candidate.isCandidate())
         return candidate;
     candidate = position.downstream();
-    if (candidate.inRenderedContent())
+    if (candidate.isCandidate())
         return candidate;
 
     // When neither upstream or downstream gets us to a candidate (upstream/downstream won't leave 
     // blocks or enter new ones), we search forward and backward until we find one.
-    Position next = nextVisiblePosition(position);
-    Position prev = previousVisiblePosition(position);
+    Position next = canonicalizeCandidate(nextCandidate(position));
+    Position prev = canonicalizeCandidate(previousCandidate(position));
     Node* nextNode = next.node();
     Node* prevNode = prev.node();
 
     // The new position must be in the same editable element. Enforce that first.
-    Node* editingRoot = node->rootEditableElement();
+    // Unless the descent is from a non-editable html element to an editable body.
+    if (node->hasTagName(htmlTag) && !node->isContentEditable())
+        return next.isNotNull() ? next : prev;
+
+    Node* editingRoot = editableRootForPosition(position);
+        
     // If the html element is editable, descending into its body will look like a descent 
-    // from non-editable to editable content since rootEditableElement stops at the body 
-    // even if the html element is editable.
-    if (editingRoot && editingRoot->hasTagName(htmlTag))
+    // from non-editable to editable content since rootEditableElement() always stops at the body.
+    if (editingRoot && editingRoot->hasTagName(htmlTag) || position.node()->isDocumentNode())
         return next.isNotNull() ? next : prev;
         
-    bool prevIsInSameEditableElement = prevNode && prevNode->rootEditableElement() == editingRoot;
-    bool nextIsInSameEditableElement = nextNode && nextNode->rootEditableElement() == editingRoot;
+    bool prevIsInSameEditableElement = prevNode && editableRootForPosition(prev) == editingRoot;
+    bool nextIsInSameEditableElement = nextNode && editableRootForPosition(next) == editingRoot;
     if (prevIsInSameEditableElement && !nextIsInSameEditableElement)
         return prev;
         
@@ -206,17 +215,12 @@ Position VisiblePosition::canonicalPosition(const Position& position)
 
     // The new position should be in the same block flow element. Favor that.
     Node *originalBlock = node->enclosingBlockFlowElement();
-    bool nextIsOutsideOriginalBlock = !nextNode->isAncestor(originalBlock) && nextNode != originalBlock;
-    bool prevIsOutsideOriginalBlock = !prevNode->isAncestor(originalBlock) && prevNode != originalBlock;
+    bool nextIsOutsideOriginalBlock = !nextNode->isDescendantOf(originalBlock) && nextNode != originalBlock;
+    bool prevIsOutsideOriginalBlock = !prevNode->isDescendantOf(originalBlock) && prevNode != originalBlock;
     if (nextIsOutsideOriginalBlock && !prevIsOutsideOriginalBlock)
         return prev;
         
     return next;
-}
-
-int VisiblePosition::maxOffset(const Node *node)
-{
-    return node->offsetInCharacters() ? (int)static_cast<const CharacterData *>(node)->length() : (int)node->childNodeCount();
 }
 
 UChar VisiblePosition::characterAfter() const
@@ -232,6 +236,14 @@ UChar VisiblePosition::characterAfter() const
     if ((unsigned)offset >= textNode->length())
         return 0;
     return textNode->data()[offset];
+}
+
+IntRect VisiblePosition::caretRect() const
+{
+    if (!m_deepPosition.node() || !m_deepPosition.node()->renderer())
+        return IntRect();
+
+    return m_deepPosition.node()->renderer()->caretRect(m_deepPosition.offset(), m_affinity);
 }
 
 void VisiblePosition::debugPosition(const char *msg) const
@@ -308,11 +320,11 @@ bool isFirstVisiblePositionInNode(const VisiblePosition &visiblePosition, const 
     if (visiblePosition.isNull())
         return false;
     
-    if (!visiblePosition.deepEquivalent().node()->isAncestor(node))
+    if (!visiblePosition.deepEquivalent().node()->isDescendantOf(node))
         return false;
         
     VisiblePosition previous = visiblePosition.previous();
-    return previous.isNull() || !previous.deepEquivalent().node()->isAncestor(node);
+    return previous.isNull() || !previous.deepEquivalent().node()->isDescendantOf(node);
 }
 
 bool isLastVisiblePositionInNode(const VisiblePosition &visiblePosition, const Node *node)
@@ -320,11 +332,11 @@ bool isLastVisiblePositionInNode(const VisiblePosition &visiblePosition, const N
     if (visiblePosition.isNull())
         return false;
     
-    if (!visiblePosition.deepEquivalent().node()->isAncestor(node))
+    if (!visiblePosition.deepEquivalent().node()->isDescendantOf(node))
         return false;
                 
     VisiblePosition next = visiblePosition.next();
-    return next.isNull() || !next.deepEquivalent().node()->isAncestor(node);
+    return next.isNull() || !next.deepEquivalent().node()->isDescendantOf(node);
 }
 
 }  // namespace WebCore

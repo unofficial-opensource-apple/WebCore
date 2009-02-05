@@ -23,10 +23,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ARRAY_H_
-#define ARRAY_H_
+#ifndef DeprecatedArray_h
+#define DeprecatedArray_h
 
 #include "ArrayImpl.h"
+#include <wtf/Platform.h>
 
 namespace WebCore {
 
@@ -51,7 +52,7 @@ public:
 
     T &operator[](int i) { return *(T *)impl.at(i); }
     const T &operator[](int i) const { return *(T *)impl.at(i); }
-#if WIN32
+#if PLATFORM(WIN_OS)
     // FIXME: Look into this strange compile error on Win32.
     T &operator[](unsigned i) { return *(T *)impl.at(i); }
     const T &operator[](unsigned i) const { return *(T *)impl.at(i); }
@@ -66,6 +67,6 @@ public:
 
 typedef DeprecatedArray<char> DeprecatedByteArray;
 
-}
+} // namespace WebCore
 
-#endif
+#endif // DeprecatedArray_h

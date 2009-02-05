@@ -18,14 +18,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "Event.h"
 
 #include "AtomicString.h"
-#include "Node.h"
 #include "SystemTime.h"
 
 namespace WebCore {
@@ -91,6 +90,11 @@ bool Event::isKeyboardEvent() const
     return false;
 }
 
+bool Event::isTextEvent() const
+{
+    return false;
+}
+
 bool Event::isDragEvent() const
 {
     return false;
@@ -106,6 +110,13 @@ bool Event::isWheelEvent() const
     return false;
 }
 
+#if ENABLE(CROSS_DOCUMENT_MESSAGING)
+bool Event::isMessageEvent() const
+{
+    return false;
+}
+#endif
+
 bool Event::isBeforeTextInsertedEvent() const
 {
     return false;
@@ -116,6 +127,40 @@ bool Event::isOverflowEvent() const
     return false;
 }
 
+bool Event::isProgressEvent() const
+{
+    return false;
+}
+
+#if ENABLE(SVG)
+bool Event::isSVGZoomEvent() const
+{
+    return false;
+}
+#endif
+
+bool Event::isWebKitAnimationEvent() const
+{
+    return false;
+}    
+
+bool Event::isWebKitTransitionEvent() const
+{
+    return false;
+}
+
+#if ENABLE(TOUCH_EVENTS)
+bool Event::isTouchEvent() const
+{
+    return false;
+}
+
+bool Event::isGestureEvent() const
+{
+    return false;
+}
+#endif
+
 bool Event::storesResultAsString() const
 {
     return false;
@@ -125,15 +170,24 @@ void Event::storeResult(const String&)
 {
 }
 
-void Event::setTarget(Node* target)
+void Event::setTarget(PassRefPtr<EventTarget> target)
 {
     m_target = target;
-    if (target)
+    if (m_target)
         receivedTarget();
 }
 
 void Event::receivedTarget()
 {
+}
+
+void Event::setUnderlyingEvent(PassRefPtr<Event> ue)
+{
+    // Prohibit creation of a cycle -- just do nothing in that case.
+    for (Event* e = ue.get(); e; e = e->underlyingEvent())
+        if (e == this)
+            return;
+    m_underlyingEvent = ue;
 }
 
 } // namespace WebCore

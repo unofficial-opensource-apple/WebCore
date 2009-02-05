@@ -17,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "HTMLAreaElement.h"
@@ -26,7 +26,8 @@
 #include "Document.h"
 #include "HTMLNames.h"
 #include "FloatRect.h"
-#include "IntSize.h"
+#include "HitTestResult.h"
+#include "RenderObject.h"
 
 using namespace std;
 
@@ -62,15 +63,13 @@ void HTMLAreaElement::parseMappedAttribute(MappedAttribute *attr)
     } else if (attr->name() == coordsAttr) {
         delete [] m_coords;
         m_coords = attr->value().toCoordsArray(m_coordsLen);
-    } else if (attr->name() == targetAttr) {
-        m_hasTarget = !attr->isNull();
     } else if (attr->name() == altAttr || attr->name() == accesskeyAttr) {
         // Do nothing.
     } else
         HTMLAnchorElement::parseMappedAttribute(attr);
 }
 
-bool HTMLAreaElement::mapMouseEvent(int x, int y, const IntSize& size, RenderObject::NodeInfo& info)
+bool HTMLAreaElement::mapMouseEvent(int x, int y, const IntSize& size, HitTestResult& result)
 {
     if (m_lastSize != size) {
         region = getRegion(size);
@@ -80,8 +79,8 @@ bool HTMLAreaElement::mapMouseEvent(int x, int y, const IntSize& size, RenderObj
     if (!region.contains(IntPoint(x, y)))
         return false;
     
-    info.setInnerNode(this);
-    info.setURLElement(this);
+    result.setInnerNode(this);
+    result.setURLElement(this);
     return true;
 }
 
@@ -94,11 +93,20 @@ IntRect HTMLAreaElement::getRect(RenderObject* obj) const
     return enclosingIntRect(p.boundingRect());
 }
 
+FloatQuad HTMLAreaElement::getAbsoluteQuad(RenderObject* obj) const
+{
+    int dx, dy;
+    obj->absolutePosition(dx, dy);
+    Path p = getRegion(m_lastSize);
+    p.translate(IntSize(dx, dy));
+    return obj->convertRectToPageQuad(p.boundingRect(), dx, dy);
+}
+
 Path HTMLAreaElement::getRegion(const IntSize& size) const
 {
-    if (!m_coords)
+    if (!m_coords && m_shape != Default)
         return Path();
-        
+
     int width = size.width();
     int height = size.height();
 
@@ -208,11 +216,6 @@ String HTMLAreaElement::shape() const
 void HTMLAreaElement::setShape(const String& value)
 {
     setAttribute(shapeAttr, value);
-}
-
-int HTMLAreaElement::tabIndex() const
-{
-    return getAttribute(tabindexAttr).toInt();
 }
 
 void HTMLAreaElement::setTabIndex(int tabIndex)

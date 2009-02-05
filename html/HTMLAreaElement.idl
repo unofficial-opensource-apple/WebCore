@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,22 +14,26 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 module html {
 
-    interface [LegacyParent=KJS::JSHTMLElement] HTMLAreaElement : HTMLElement {
-        attribute DOMString accessKey;
-        attribute DOMString alt;
-        attribute DOMString coords;
-        attribute DOMString href;
+    interface [
+        GenerateConstructor,
+        InterfaceUUID=aac98729-47d3-4623-8c5b-004783af5bd6,
+        ImplementationUUID=f0631a41-5f55-40e5-a879-c09e663c26ba
+    ] HTMLAreaElement : HTMLElement {
+        attribute [ConvertNullToNullString] DOMString accessKey;
+        attribute [ConvertNullToNullString] DOMString alt;
+        attribute [ConvertNullToNullString] DOMString coords;
+        attribute [ConvertNullToNullString] DOMString href;
         attribute boolean noHref;
-        attribute DOMString shape;
+        attribute [ConvertNullToNullString] DOMString shape;
         attribute long tabIndex;
-        attribute DOMString target;
-        
+        attribute [ConvertNullToNullString] DOMString target;
+
         // IE Extensions
         readonly attribute DOMString hash;
         readonly attribute DOMString host;
@@ -37,6 +42,11 @@ module html {
         readonly attribute DOMString port;
         readonly attribute DOMString protocol;
         readonly attribute DOMString search;
+
+#if defined(LANGUAGE_OBJECTIVE_C)
+        // Objective-C extension:
+        readonly attribute URL absoluteLinkURL;
+#endif
     };
 
 }

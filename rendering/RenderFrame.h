@@ -17,33 +17,35 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef RenderFrame_H
-#define RenderFrame_H
+#ifndef RenderFrame_h
+#define RenderFrame_h
 
-#include "RenderPart.h"
 #include "HTMLFrameElement.h"
+#include "RenderPart.h"
+#include "RenderFrameSet.h"
 
 namespace WebCore {
 
-class RenderFrame : public RenderPart
-{
+class RenderFrame : public RenderPart {
 public:
     RenderFrame(HTMLFrameElement*);
 
     virtual const char* renderName() const { return "RenderFrame"; }
+    virtual bool isFrame() const { return true; }
 
-    HTMLFrameElement* element() const
-        { return static_cast<HTMLFrameElement*>(RenderPart::element()); }
+    HTMLFrameElement* element() const { return static_cast<HTMLFrameElement*>(RenderPart::element()); }
+
+    FrameEdgeInfo edgeInfo() const;
 
     virtual void viewCleared();
     void layoutWithFlattening(bool flexibleWidth, bool flexibleHeight);
 };
 
-}
+} // namespace WebCore
 
-#endif
+#endif // RenderFrame_h

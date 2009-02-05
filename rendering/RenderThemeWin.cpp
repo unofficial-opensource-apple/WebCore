@@ -15,8 +15,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -26,7 +26,6 @@
 #include <cairo-win32.h>
 #include "Document.h"
 #include "GraphicsContext.h"
-#include "RenderPopupMenuWin.h"
 
 /* 
  * The following constants are used to determine how a widget is drawn using
@@ -51,6 +50,9 @@
 // Textfield constants
 #define TFP_TEXTFIELD 1
 #define TFS_READONLY  6
+
+// Combobox constants
+#define CP_DROPDOWNBUTTON 1
 
 typedef HANDLE (WINAPI*openThemeDataPtr)(HWND hwnd, LPCWSTR pszClassList);
 typedef HRESULT (WINAPI*closeThemeDataPtr)(HANDLE hTheme);
@@ -89,7 +91,7 @@ RenderTheme* theme()
 }
 
 RenderThemeWin::RenderThemeWin()
-:m_themeDLL(0), m_buttonTheme(0), m_textFieldTheme(0)
+:m_themeDLL(0), m_buttonTheme(0), m_textFieldTheme(0), m_menuListTheme(0)
 {
     m_themeDLL = ::LoadLibrary(L"uxtheme.dll");
     if (m_themeDLL) {
@@ -121,7 +123,9 @@ void RenderThemeWin::close()
         closeTheme(m_buttonTheme);
     if (m_textFieldTheme)
         closeTheme(m_textFieldTheme);
-    m_buttonTheme = m_textFieldTheme = 0;
+    if (m_menuListTheme)
+        closeTheme(m_menuListTheme);
+    m_buttonTheme = m_textFieldTheme = m_menuListTheme = 0;
 }
 
 Color RenderThemeWin::platformActiveSelectionBackgroundColor() const
@@ -145,31 +149,6 @@ Color RenderThemeWin::platformActiveSelectionForegroundColor() const
 Color RenderThemeWin::platformInactiveSelectionForegroundColor() const
 {
     return Color::white;
-}
-
-void RenderThemeWin::addIntrinsicMargins(RenderStyle* style) const
-{
-    // Cut out the intrinsic margins completely if we end up using a small font size
-    if (style->fontSize() < 11)
-        return;
-    
-    // Intrinsic margin value.
-    const int m = 2;
-    
-    // FIXME: Using width/height alone and not also dealing with min-width/max-width is flawed.
-    if (style->width().isIntrinsicOrAuto()) {
-        if (style->marginLeft().quirk())
-            style->setMarginLeft(Length(m, Fixed));
-        if (style->marginRight().quirk())
-            style->setMarginRight(Length(m, Fixed));
-    }
-
-    if (style->height().isAuto()) {
-        if (style->marginTop().quirk())
-            style->setMarginTop(Length(m, Fixed));
-        if (style->marginBottom().quirk())
-            style->setMarginBottom(Length(m, Fixed));
-    }
 }
 
 bool RenderThemeWin::supportsFocus(EAppearance appearance)
@@ -196,12 +175,26 @@ unsigned RenderThemeWin::determineState(RenderObject* o)
         result = TFS_READONLY; // Readonly is supported on textfields.
     else if (supportsFocus(o->style()->appearance()) && isFocused(o))
         result = TS_FOCUSED;
+    else if (isPressed(o)) // Active overrides hover.
+        result = TS_ACTIVE;
     else if (isHovered(o))
         result = TS_HOVER;
-    else if (isPressed(o))
-        result = TS_ACTIVE;
     if (isChecked(o))
         result += 4; // 4 unchecked states, 4 checked states.
+    return result;
+}
+
+unsigned RenderThemeWin::determineClassicState(RenderObject* o)
+{
+    unsigned result = 0;
+    if (!isEnabled(o) || isReadOnlyControl(o))
+        result = DFCS_INACTIVE;
+    else if (isPressed(o)) // Active supersedes hover
+        result = DFCS_PUSHED;
+    else if (isHovered(o))
+        result = DFCS_HOT;
+    if (isChecked(o))
+        result |= DFCS_CHECKED;
     return result;
 }
 
@@ -212,87 +205,68 @@ ThemeData RenderThemeWin::getThemeData(RenderObject* o)
         case PushButtonAppearance:
         case ButtonAppearance:
             result.m_part = BP_BUTTON;
-            result.m_state = determineState(o);
+            result.m_classicState = DFCS_BUTTONPUSH;
             break;
         case CheckboxAppearance:
             result.m_part = BP_CHECKBOX;
-            result.m_state = determineState(o);
+            result.m_classicState = DFCS_BUTTONCHECK;
             break;
         case RadioAppearance:
             result.m_part = BP_RADIO;
-            result.m_state = determineState(o);
+            result.m_classicState = DFCS_BUTTONRADIO;
             break;
+        case ListboxAppearance:
+        case MenulistAppearance:
         case TextFieldAppearance:
         case TextAreaAppearance:
             result.m_part = TFP_TEXTFIELD;
-            result.m_state = determineState(o);
             break;
     }
+
+    result.m_state = determineState(o);
+    result.m_classicState |= determineClassicState(o);
 
     return result;
 }
 
-void RenderThemeWin::adjustButtonStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
-{
-    addIntrinsicMargins(style);
-}
-
+// May need to add stuff to these later, so keep the graphics context retrieval/release in some helpers.
 static HDC prepareForDrawing(GraphicsContext* g)
 {
-    cairo_surface_t* surface = cairo_get_target(g->platformContext());
-    HDC hdc = cairo_win32_surface_get_dc(surface);
-    SaveDC(hdc);
-    
-    // FIXME: We need to make sure a clip is really set on the HDC.  See what Mozilla does with
-    // UpdateSurfaceClip on its GraphicsContext. (Cairo may not have put its clip into native form yet.)
-
-    // Call SetWorldTransform to honor the current Cairo transform.
-    SetGraphicsMode(hdc, GM_ADVANCED); // We need this call for themes to honor world transforms.
-    cairo_matrix_t mat;
-    cairo_get_matrix(g->platformContext(), &mat);
-    XFORM xform;
-    xform.eM11 = mat.xx;
-    xform.eM12 = mat.xy;
-    xform.eM21 = mat.yx;
-    xform.eM22 = mat.yy;
-    xform.eDx = mat.x0;
-    xform.eDy = mat.y0;
-    SetWorldTransform(hdc, &xform);
-
-    return hdc;
+    return g->getWindowsContext();
 }
-
-static void doneDrawing(GraphicsContext* g)
+ 
+static void doneDrawing(GraphicsContext* g, HDC hdc)
 {
-    cairo_surface_t* surface = cairo_get_target(g->platformContext());
-    HDC hdc = cairo_win32_surface_get_dc(surface);
-    RestoreDC(hdc, -1);
-
-    // We call this whenever we do drawing outside of cairo.    
-    cairo_surface_mark_dirty(surface);
+    g->releaseWindowsContext(hdc);
 }
 
 bool RenderThemeWin::paintButton(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
 {
-    // FIXME: Need to fall back to painting a Win2k "Classic" look.  We will hit this situation if
-    // a Windows XP user has turned on the Win2k "Classic" appearance or is running Win2k.
-    if (!m_themeDLL)
-        return true;
-
-    if (!m_buttonTheme)
-        m_buttonTheme = openTheme(0, L"Button");
-
-    if (!m_buttonTheme || !drawThemeBG)
-        return true;
-
     // Get the correct theme data for a button
     ThemeData themeData = getThemeData(o);
-    
+
     // Now paint the button.
-    HDC hdc = prepareForDrawing(i.p);  
+    HDC hdc = prepareForDrawing(i.context);  
     RECT widgetRect = r;
-    drawThemeBG(m_buttonTheme, hdc, themeData.m_part, themeData.m_state, &widgetRect, NULL);
-    doneDrawing(i.p);
+    if (m_themeDLL && !m_buttonTheme)
+        m_buttonTheme = openTheme(0, L"Button");
+    if (m_buttonTheme && drawThemeBG) {
+        drawThemeBG(m_buttonTheme, hdc, themeData.m_part, themeData.m_state, &widgetRect, NULL);
+    } else {
+        if ((themeData.m_part == BP_BUTTON) && isFocused(o)) {
+            // Draw black focus rect around button outer edge
+            HBRUSH brush = GetSysColorBrush(COLOR_3DDKSHADOW);
+            if (brush) {
+                FrameRect(hdc, &widgetRect, brush);
+                InflateRect(&widgetRect, -1, -1);
+            }
+        }
+        DrawFrameControl(hdc, &widgetRect, DFC_BUTTON, themeData.m_classicState);
+        if ((themeData.m_part != BP_BUTTON) && isFocused(o)) {
+            DrawFocusRect(hdc, &widgetRect);
+        }
+    }
+    doneDrawing(i.context, hdc);
 
     return false;
 }
@@ -313,55 +287,71 @@ void RenderThemeWin::setCheckboxSize(RenderStyle* style) const
         style->setHeight(Length(13, Fixed));
 }
 
-void RenderThemeWin::setRadioSize(RenderStyle* style) const
-{
-    // This is the same as checkboxes.
-    setCheckboxSize(style);
-}
-
-void RenderThemeWin::adjustTextFieldStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
-{
-    addIntrinsicMargins(style);
-}
-
 bool RenderThemeWin::paintTextField(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
 {
-    // FIXME: Need to fall back to painting a Win2k "Classic" look.  We will hit this situation if
-    // a Windows XP user has turned on the Win2k "Classic" appearance or is running Win2k.
-    if (!m_themeDLL)
-        return true;
-
-    if (!m_textFieldTheme)
-        m_textFieldTheme = openTheme(0, L"Edit");
-
-    if (!m_textFieldTheme || !drawThemeBG)
-        return true;
-
-    // Get the correct theme data for a button
+    // Get the correct theme data for a textfield
     ThemeData themeData = getThemeData(o);
-    
+
     // Now paint the text field.
-    HDC hdc = prepareForDrawing(i.p);
+    HDC hdc = prepareForDrawing(i.context);
     RECT widgetRect = r;
-    drawThemeBG(m_textFieldTheme, hdc, themeData.m_part, themeData.m_state, &widgetRect, NULL);
-    doneDrawing(i.p);
+    if (m_themeDLL && !m_textFieldTheme)
+        m_textFieldTheme = openTheme(0, L"Edit");
+    if (m_textFieldTheme && drawThemeBG) {
+        drawThemeBG(m_textFieldTheme, hdc, themeData.m_part, themeData.m_state, &widgetRect, NULL);
+    } else {
+        DrawEdge(hdc, &widgetRect, EDGE_SUNKEN, BF_RECT | BF_ADJUST);
+        FillRect(hdc, &widgetRect, reinterpret_cast<HBRUSH>(((themeData.m_classicState & DFCS_INACTIVE) ? COLOR_BTNFACE : COLOR_WINDOW) + 1));
+    }
+    doneDrawing(i.context, hdc);
 
     return false;
 }
 
-void RenderThemeWin::adjustTextAreaStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderThemeWin::adjustMenuListStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
 {
-    addIntrinsicMargins(style);
+    // Height is locked to auto.
+    style->setHeight(Length(Auto));
+
+    // White-space is locked to pre
+    style->setWhiteSpace(PRE);
+
+    // Add in the padding that we'd like to use.
+    const int buttonWidth = GetSystemMetrics(SM_CXVSCROLL);
+    style->setPaddingLeft(Length(2, Fixed));
+    style->setPaddingRight(Length(buttonWidth + 2, Fixed));
+    style->setPaddingTop(Length(1, Fixed));
+    style->setPaddingBottom(Length(1, Fixed));
 }
 
-bool RenderThemeWin::paintTextArea(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeWin::paintMenuList(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
 {
-    return paintTextField(o, i, r);
+    // FIXME: All these inflate() calls are bogus, causing painting problems,
+    // as well as sizing wackiness in Classic mode
+    IntRect editRect(r);
+    paintTextField(o, i, editRect);
+
+    const int buttonWidth = GetSystemMetrics(SM_CXVSCROLL);
+    IntRect buttonRect(r.right() - buttonWidth - 1, r.y(), buttonWidth, r.height());
+    buttonRect.inflateY(-1);
+    paintMenuListButton(o, i, buttonRect);
+
+    return false;
 }
 
-RenderPopupMenu* RenderThemeWin::createPopupMenu(RenderArena* arena, Document* doc, RenderMenuList* menuList)
+bool RenderThemeWin::paintMenuListButton(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
 {
-    return new (arena) RenderPopupMenuWin(doc, menuList);
+    HDC hdc = prepareForDrawing(i.context);
+    RECT widgetRect = r;
+    if (m_themeDLL && !m_menuListTheme)
+        m_menuListTheme = openTheme(0, L"Combobox");
+    if (m_menuListTheme && drawThemeBG)
+        drawThemeBG(m_menuListTheme, hdc, CP_DROPDOWNBUTTON, determineState(o), &widgetRect, NULL);
+    else
+        DrawFrameControl(hdc, &widgetRect, DFC_SCROLL, DFCS_SCROLLCOMBOBOX | determineClassicState(o));
+    doneDrawing(i.context, hdc);
+
+    return false;
 }
 
 }

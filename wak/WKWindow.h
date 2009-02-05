@@ -1,15 +1,15 @@
 //
 //  WKWindow.h
 //
-//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, 2008, Apple Inc.  All rights reserved.
 //
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreGraphics/CGSTypes.h>
+#import <GraphicsServices/GSEvent.h>
 
-#import "GraphicsServices/GSEvent.h"
+#import "WebCoreThread.h"
 #import "WKTypes.h"
 #import "WKUtilities.h"
-#import "WebCoreThread.h"
 
 #ifdef __cplusplus
 extern "C" {

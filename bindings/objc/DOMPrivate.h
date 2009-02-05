@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2004 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004-2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,23 +25,66 @@
  */
 
 #import <WebCore/DOMCSS.h>
-#import <WebCore/DOMHTML.h>
-#import <WebCore/DOMRange.h>
+#import <WebCore/DOMCSSStyleDeclaration.h>
+#import <WebCore/DOMElement.h>
 #import <WebCore/DOMEvents.h>
+#import <WebCore/DOMHTML.h>
+#import <WebCore/DOMHTMLDocument.h>
+#import <WebCore/DOMHTMLInputElement.h>
+#import <WebCore/DOMHTMLSelectElement.h>
+#import <WebCore/DOMNode.h>
+#import <WebCore/DOMRGBColor.h>
+#import <WebCore/DOMRange.h>
+
+#import <WebCore/DOMDocumentPrivate.h>
+#import <WebCore/DOMElementPrivate.h>
+#import <WebCore/DOMHTMLAnchorElementPrivate.h>
+#import <WebCore/DOMHTMLAreaElementPrivate.h>
+#import <WebCore/DOMHTMLBodyElementPrivate.h>
+#import <WebCore/DOMHTMLButtonElementPrivate.h>
+#import <WebCore/DOMHTMLDocumentPrivate.h>
+#import <WebCore/DOMHTMLFormElementPrivate.h>
+#import <WebCore/DOMHTMLFrameElementPrivate.h>
+#import <WebCore/DOMHTMLImageElementPrivate.h>
+#import <WebCore/DOMHTMLInputElementPrivate.h>
+#import <WebCore/DOMHTMLLabelElementPrivate.h>
+#import <WebCore/DOMHTMLLegendElementPrivate.h>
+#import <WebCore/DOMHTMLLinkElementPrivate.h>
+#import <WebCore/DOMHTMLOptionsCollectionPrivate.h>
+#import <WebCore/DOMHTMLPreElementPrivate.h>
+#import <WebCore/DOMHTMLStyleElementPrivate.h>
+#import <WebCore/DOMHTMLTextAreaElementPrivate.h>
+#import <WebCore/DOMKeyboardEventPrivate.h>
+#import <WebCore/DOMMouseEventPrivate.h>
+#import <WebCore/DOMNodeIteratorPrivate.h>
+#import <WebCore/DOMNodePrivate.h>
+#import <WebCore/DOMProcessingInstructionPrivate.h>
+#import <WebCore/DOMRangePrivate.h>
+#import <WebCore/DOMUIEventPrivate.h>
+#import <WebCore/DOMWheelEventPrivate.h>
 
 #import <GraphicsServices/GSFont.h>
 
+// FIXME: this should be removed as soon as all internal Apple uses of it have been replaced with
+// calls to the public method - (NSColor *)color.
+@interface DOMRGBColor (WebPrivate)
+@end
+
+// FIXME: this should be removed as soon as all internal Apple uses of it have been replaced with
+// calls to the public method - (NSString *)text.
 @interface DOMRange (WebPrivate)
-// uses same algorithm as innerText
 - (NSString *)_text;
 @end
 
-@interface DOMRGBColor (WebPrivate)
+@interface DOMRange (DOMRangeExtensions)
+- (CGRect)boundingBox;
+- (NSArray *)lineBoxRects;
 @end
 
 @interface DOMElement (WebPrivate)
 - (GSFontRef)_font;
 - (NSURL *)_getURLAttribute:(NSString *)name;
+- (CGRect)_windowClipRect; // Clip rect in NSWindow coords (used by plugins)
 - (BOOL)isFocused;
 @end
 
@@ -58,17 +102,26 @@
 // They are stopgap measures until we finish transitioning form controls to not use NSView. Each one should become
 // replaceable by public DOM API, and when that happens Safari will switch to implementations using that public API,
 // and these will be deleted.
-@interface DOMHTMLInputElement(FormsAutoFillTransition)
+@interface DOMHTMLInputElement (FormsAutoFillTransition)
 - (BOOL)_isTextField;
-- (NSRect)_rectOnScreen; // bounding box of the text field, in screen coordinates
 - (void)_replaceCharactersInRange:(NSRange)targetRange withString:(NSString *)replacementString selectingFromIndex:(int)index;
 - (NSRange)_selectedRange;
 - (void)_setAutofilled:(BOOL)filled;
+@end
+
+// These changes are necessary to detect whether a form input was modified by a user
+// or javascript
+@interface DOMHTMLInputElement (FormPromptAdditions)
+- (BOOL)_isEdited;
+@end
+
+@interface DOMHTMLTextAreaElement (FormPromptAdditions)
+- (BOOL)_isEdited;
 @end
 
 // All the methods in this category are used by Safari forms autofill and should not be used for any other purpose.
 // They are stopgap measures until we finish transitioning form controls to not use NSView. Each one should become
 // replaceable by public DOM API, and when that happens Safari will switch to implementations using that public API,
 // and these will be deleted.
-@interface DOMHTMLSelectElement(FormsAutoFillTransition)
+@interface DOMHTMLSelectElement (FormsAutoFillTransition)
 @end

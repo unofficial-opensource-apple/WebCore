@@ -1,10 +1,9 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ *           (C) 2006 Alexey Proskuryakov (ap@webkit.org)
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,30 +17,34 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef DOM_Document_h
-#define DOM_Document_h
+#ifndef Document_h
+#define Document_h
 
 #include "Attr.h"
 #include "Color.h"
 #include "DeprecatedPtrList.h"
-#include "DeprecatedStringList.h"
+#include "DeprecatedValueList.h"
 #include "DocumentMarker.h"
 #include "HTMLCollection.h"
+#include "HTMLFormElement.h"
+#include "RenderStyle.h"
 #include "StringHash.h"
 #include "Timer.h"
 #include <wtf/HashCountedSet.h>
+#include <wtf/ListHashSet.h>
 
-#include "RenderStyle.h"
-
-#ifndef KHTML_NO_XBL
-namespace XBL {
-    class XBLBindingManager;
-}
+// FIXME: We should move Mac off of the old Frame-based user stylesheet loading
+// code and onto the new code in Page. We can't do that until the code in Page
+// supports non-file: URLs, however.
+#if PLATFORM(MAC)
+#define FRAME_LOADS_USER_STYLESHEET 1
+#else
+#define FRAME_LOADS_USER_STYLESHEET 0
 #endif
 
 namespace WebCore {
@@ -53,9 +56,10 @@ namespace WebCore {
     class CSSStyleSelector;
     class CSSStyleSheet;
     class Comment;
+    class Database;
     class DOMImplementation;
     class DOMWindow;
-    class Decoder;
+    class DatabaseThread;
     class DocLoader;
     class DocumentFragment;
     class DocumentType;
@@ -68,44 +72,57 @@ namespace WebCore {
     class FrameView;
     class HTMLDocument;
     class HTMLElement;
+    class HTMLFormControlElementWithState;
     class HTMLFormElement;
-    class HTMLGenericFormElement;
+    class HTMLHeadElement;
     class HTMLImageLoader;
     class HTMLInputElement;
     class HTMLMapElement;
     class IntPoint;
-    class JSEditor;
     class MouseEventWithHitTestResults;
-    class NameNodeList;
     class NodeFilter;
     class NodeIterator;
-    class NodeList;
+    class Page;
     class PlatformMouseEvent;
     class ProcessingInstruction;
     class Range;
     class RegisteredEventListener;
     class RenderArena;
+    class SecurityOrigin;
+    class Settings;
     class StyleSheet;
     class StyleSheetList;
     class Text;
+    class TextResourceDecoder;
     class Tokenizer;
     class TreeWalker;
-#if XPATH_SUPPORT
+#if ENABLE(XBL)
+    class XBLBindingManager;
+#endif
+#if ENABLE(XPATH)
     class XPathEvaluator;
     class XPathExpression;
     class XPathNSResolver;
     class XPathResult;
 #endif
     
-#if __APPLE__
+#if ENABLE(DASHBOARD_SUPPORT)
     struct DashboardRegionValue;
 #endif
+    struct HitTestRequest;
 
-#if SVG_SUPPORT
+#if ENABLE(TOUCH_EVENTS)
+#include "DocumentiPhoneForward.h"
+#endif
+    
+#if ENABLE(SVG)
     class SVGDocumentExtensions;
 #endif
 
     typedef int ExceptionCode;
+
+    class CachedImage;
+    extern const int cLayoutScheduleThreshold;
 
 class FormElementKey {
 public:
@@ -128,6 +145,7 @@ inline bool operator==(const FormElementKey& a, const FormElementKey& b)
 struct FormElementKeyHash {
     static unsigned hash(const FormElementKey&);
     static bool equal(const FormElementKey& a, const FormElementKey& b) { return a == b; }
+    static const bool safeToCompareToEmptyOrDeleted = true;
 };
 
 struct FormElementKeyHashTraits : WTF::GenericHashTraits<FormElementKey> {
@@ -163,6 +181,7 @@ inline bool operator==(const TextAutoSizingKey& a, const TextAutoSizingKey& b)
 struct TextAutoSizingHash {
     static unsigned hash(const TextAutoSizingKey&k) { return k.style()->hashForTextAutosizing(); }
     static bool equal(const TextAutoSizingKey& a, const TextAutoSizingKey& b) { return a == b; }
+    static const bool safeToCompareToEmptyOrDeleted = true;
 };
 
 struct TextAutoSizingTraits : WTF::GenericHashTraits<TextAutoSizingKey> {
@@ -170,13 +189,14 @@ struct TextAutoSizingTraits : WTF::GenericHashTraits<TextAutoSizingKey> {
     static TextAutoSizingKey deletedValue();
 };
 
-class TextAutoSizingValue : public Shared<TextAutoSizingValue>{
+class TextAutoSizingValue : public RefCounted<TextAutoSizingValue>{
 public:
     TextAutoSizingValue() {};
     
     void addNode(Node *node, float size);
     bool adjustNodeSizes ();
     int numNodes () const;
+    void reset();
 
 private:
     HashSet<RefPtr<Node> > m_autoSizedNodes;
@@ -199,8 +219,8 @@ struct ViewportArguments
 
 class Document : public ContainerNode {
 public:
-    Document(DOMImplementation*, FrameView*);
-    ~Document();
+    Document(DOMImplementation*, Frame*, bool isXHTML = false);
+    virtual ~Document();
 
     virtual void removedLastRef();
 
@@ -210,11 +230,21 @@ public:
     // node that outlives its document to still have a valid document
     // pointer without introducing reference cycles
 
-    void selfOnlyRef() { ++m_selfOnlyRefCount; }
-    void selfOnlyDeref() {
+    void selfOnlyRef()
+    {
+        ASSERT(!m_deletionHasBegun);
+        ++m_selfOnlyRefCount;
+    }
+    void selfOnlyDeref()
+    {
+        ASSERT(!m_deletionHasBegun);
         --m_selfOnlyRefCount;
-        if (!m_selfOnlyRefCount && !refCount())
+        if (!m_selfOnlyRefCount && !refCount()) {
+#ifndef NDEBUG
+            m_deletionHasBegun = true;
+#endif
             delete this;
+        }
     }
 
     // DOM methods & attributes for Document
@@ -223,7 +253,7 @@ public:
     DocumentType* realDocType() const { return m_docType.get(); }
 
     DOMImplementation* implementation() const;
-    virtual void childrenChanged();
+    virtual void childrenChanged(bool changedByParser = false);
     Element* documentElement() const;
     virtual PassRefPtr<Element> createElement(const String& tagName, ExceptionCode&);
     PassRefPtr<DocumentFragment> createDocumentFragment ();
@@ -236,6 +266,7 @@ public:
     PassRefPtr<EntityReference> createEntityReference(const String& name, ExceptionCode&);
     PassRefPtr<Node> importNode(Node* importedNode, bool deep, ExceptionCode&);
     virtual PassRefPtr<Element> createElementNS(const String& namespaceURI, const String& qualifiedName, ExceptionCode&);
+    PassRefPtr<Element> createElement(const QualifiedName&, bool createdByParser, ExceptionCode& ec);
     Element* getElementById(const AtomicString&) const;
 
     Element* elementFromPoint(int x, int y) const;
@@ -248,17 +279,27 @@ public:
 
     void setCharset(const String&);
 
-    PassRefPtr<Node> adoptNode(PassRefPtr<Node> source, ExceptionCode&);
-    
-    PassRefPtr<NameNodeList> getElementsByName(const String& elementName);
+    String contentLanguage() const { return m_contentLanguage; }
+    void setContentLanguage(const String& lang) { m_contentLanguage = lang; }
 
-    // Actually part of JSHTMLDocument, but used for giving XML documents a window title as well
-    String title() const { return m_title; }
-    void setTitle(const String&, Node* titleElement = 0);
-    void removeTitle(Node* titleElement);
+    String xmlEncoding() const { return m_xmlEncoding; }
+    String xmlVersion() const { return m_xmlVersion; }
+    bool xmlStandalone() const { return m_xmlStandalone; }
+
+    void setXMLEncoding(const String& encoding) { m_xmlEncoding = encoding; } // read-only property, only to be set from XMLTokenizer
+    void setXMLVersion(const String&, ExceptionCode&);
+    void setXMLStandalone(bool, ExceptionCode&);
+
+    String documentURI() const;
+    void setDocumentURI(const String&);
+
+    virtual String baseURI() const;
+
+    PassRefPtr<Node> adoptNode(PassRefPtr<Node> source, ExceptionCode&);
 
     PassRefPtr<HTMLCollection> images();
     PassRefPtr<HTMLCollection> embeds();
+    PassRefPtr<HTMLCollection> plugins(); // an alias for embeds() required for the JS DOM bindings.
     PassRefPtr<HTMLCollection> applets();
     PassRefPtr<HTMLCollection> links();
     PassRefPtr<HTMLCollection> forms();
@@ -271,12 +312,13 @@ public:
 
     HTMLCollection::CollectionInfo* collectionInfo(HTMLCollection::Type type)
     {
-        if ((int)type < HTMLCollection::UnnamedCollectionTypes) 
-            return m_collectionInfo + type; 
-        return 0;
+        ASSERT(type >= HTMLCollection::FirstUnnamedDocumentCachedType);
+        unsigned index = type - HTMLCollection::FirstUnnamedDocumentCachedType;
+        ASSERT(index < HTMLCollection::NumUnnamedDocumentCachedTypes);
+        return &m_collectionInfo[index]; 
     }
 
-    HTMLCollection::CollectionInfo* nameCollectionInfo(HTMLCollection::Type type, const String& name);
+    HTMLCollection::CollectionInfo* nameCollectionInfo(HTMLCollection::Type, const AtomicString& name);
 
     // DOM methods overridden from  parent classes
 
@@ -286,6 +328,10 @@ public:
     // Other methods (not part of DOM)
     virtual bool isDocumentNode() const { return true; }
     virtual bool isHTMLDocument() const { return false; }
+    virtual bool isImageDocument() const { return false; }
+#if ENABLE(SVG)
+    virtual bool isSVGDocument() const { return false; }
+#endif
     virtual bool isPluginDocument() const { return false; }
     
     CSSStyleSelector* styleSelector() const { return m_styleSelector; }
@@ -295,19 +341,29 @@ public:
     /**
      * Updates the pending sheet count and then calls updateStyleSelector.
      */
-    void stylesheetLoaded();
+    void removePendingSheet();
 
     /**
      * This method returns true if all top-level stylesheets have loaded (including
      * any @imports that they may be loading).
      */
-    bool haveStylesheetsLoaded() const { return m_pendingStylesheets <= 0 || m_ignorePendingStylesheets; }
+    bool haveStylesheetsLoaded() const
+    {
+        return m_pendingStylesheets <= 0 || m_ignorePendingStylesheets
+#if USE(LOW_BANDWIDTH_DISPLAY)
+            || m_inLowBandwidthDisplay
+#endif
+            ;
+    }
 
     /**
      * Increments the number of pending sheets.  The <link> elements
      * invoke this to add themselves to the loading list.
      */
     void addPendingSheet() { m_pendingStylesheets++; }
+
+    bool gotoAnchorNeededAfterStylesheetsLoad() { return m_gotoAnchorNeededAfterStylesheetsLoad; }
+    void setGotoAnchorNeededAfterStylesheetsLoad(bool b) { m_gotoAnchorNeededAfterStylesheetsLoad = b; }
 
     /**
      * Called when one or more stylesheets in the document may have been added, removed or changed.
@@ -326,32 +382,38 @@ public:
     void setUsesDescendantRules(bool b) { m_usesDescendantRules = b; }
     bool usesSiblingRules() const { return m_usesSiblingRules; }
     void setUsesSiblingRules(bool b) { m_usesSiblingRules = b; }
+    bool usesFirstLineRules() const { return m_usesFirstLineRules; }
+    void setUsesFirstLineRules(bool b) { m_usesFirstLineRules = b; }
+    bool usesFirstLetterRules() const { return m_usesFirstLetterRules; }
+    void setUsesFirstLetterRules(bool b) { m_usesFirstLetterRules = b; }
 
     // Machinery for saving and restoring state when you leave and then go back to a page.
-    void registerFormElementWithState(HTMLGenericFormElement* e) { m_formElementsWithState.add(e); }
-    void deregisterFormElementWithState(HTMLGenericFormElement* e) { m_formElementsWithState.remove(e); }
+    void registerFormElementWithState(HTMLFormControlElementWithState* e) { m_formElementsWithState.add(e); }
+    void unregisterFormElementWithState(HTMLFormControlElementWithState* e) { m_formElementsWithState.remove(e); }
     Vector<String> formElementsState() const;
     unsigned formElementsCharacterCount() const;
     void setStateForNewFormElements(const Vector<String>&);
     bool hasStateForNewFormElements() const;
     bool takeStateForFormElement(AtomicStringImpl* name, AtomicStringImpl* type, String& state);
 
-    FrameView* view() const { return m_view; }
-    Frame* frame() const;
+    FrameView* view() const; // can be NULL
+    Frame* frame() const { return m_frame; } // can be NULL
+    Page* page() const; // can be NULL
+    Settings* settings() const; // can be NULL
 
     PassRefPtr<Range> createRange();
 
     PassRefPtr<NodeIterator> createNodeIterator(Node* root, unsigned whatToShow,
-        PassRefPtr<NodeFilter>, bool expandEntityReferences, ExceptionCode&);
+        NodeFilter*, bool expandEntityReferences, ExceptionCode&);
 
     PassRefPtr<TreeWalker> createTreeWalker(Node* root, unsigned whatToShow, 
-        PassRefPtr<NodeFilter>, bool expandEntityReferences, ExceptionCode&);
+        NodeFilter*, bool expandEntityReferences, ExceptionCode&);
 
     // Special support for editing
     PassRefPtr<CSSStyleDeclaration> createCSSStyleDeclaration();
     PassRefPtr<EditingText> createEditingTextNode(const String&);
 
-    virtual void recalcStyle( StyleChange = NoChange );
+   virtual void recalcStyle( StyleChange = NoChange );
     static DeprecatedPtrList<Document>* changedDocuments;
     virtual void updateRendering();
     void updateLayout();
@@ -362,14 +424,14 @@ public:
     virtual void attach();
     virtual void detach();
 
+    void clearFramePointer();
+
     RenderArena* renderArena() { return m_renderArena; }
 
     
     // to get visually ordered hebrew and arabic pages right
     void setVisuallyOrdered();
 
-    void updateSelection();
-    
     void open();
     void implicitOpen();
     void close();
@@ -377,16 +439,17 @@ public:
     void cancelParsing();
 
     void write(const String& text);
-    void write(const DeprecatedString &text);
     void writeln(const String& text);
     void finishParsing();
     void clear();
 
-    DeprecatedString URL() const { return m_url.isEmpty() ? "about:blank" : m_url; }
+    bool wellFormed() const { return m_wellFormed; }
+
+    DeprecatedString url() const { return m_url.isEmpty() ? "about:blank" : m_url; }
     void setURL(const DeprecatedString& url);
 
-    DeprecatedString baseURL() const { return m_baseURL.isEmpty() ? URL() : m_baseURL; }
-    void setBaseURL(const DeprecatedString& baseURL) { m_baseURL = baseURL; }
+    DeprecatedString baseURL() const { return m_baseURL.isEmpty() ? url() : m_baseURL; }
+    void setBaseURL(const DeprecatedString& baseURL);
 
     String baseTarget() const { return m_baseTarget; }
     void setBaseTarget(const String& baseTarget) { m_baseTarget = baseTarget; }
@@ -395,13 +458,16 @@ public:
     String completeURL(const String&);
 
     // from cachedObjectClient
-    virtual void setStyleSheet(const String& url, const String& sheetStr);
+    virtual void setCSSStyleSheet(const String& url, const String& charset, const String& sheetStr);
+
+#if FRAME_LOADS_USER_STYLESHEET
     void setUserStyleSheet(const String& sheet);
-    const String& userStyleSheet() const { return m_usersheet; }
-    void setPrintStyleSheet(const String& sheet) { m_printSheet = sheet; }
-    const String& printStyleSheet() const { return m_printSheet; }
+#endif
+
+    String userStyleSheet() const;
 
     CSSStyleSheet* elementSheet();
+    CSSStyleSheet* mappedElementSheet();
     virtual Tokenizer* createTokenizer();
     Tokenizer* tokenizer() { return m_tokenizer; }
     
@@ -410,7 +476,7 @@ public:
 
     enum ParseMode { Compat, AlmostStrict, Strict };
     
-    virtual void determineParseMode( const DeprecatedString &str );
+    virtual void determineParseMode(const String&);
     void setParseMode(ParseMode m) { pMode = m; }
     ParseMode parseMode() const { return pMode; }
 
@@ -442,11 +508,13 @@ public:
     void resetVisitedLinkColor();
     void resetActiveLinkColor();
     
-    MouseEventWithHitTestResults prepareMouseEvent(bool readonly, bool active, bool mouseMove, const IntPoint& point, const PlatformMouseEvent&);
+    MouseEventWithHitTestResults prepareMouseEvent(const HitTestRequest&, const IntPoint&, const PlatformMouseEvent&);
 
     virtual bool childTypeAllowed(NodeType);
     virtual PassRefPtr<Node> cloneNode(bool deep);
 
+    virtual bool canReplaceChild(Node* newChild, Node* oldChild);
+    
     StyleSheetList* styleSheets();
 
     /* Newly proposed CSS3 mechanism for selecting alternate
@@ -457,19 +525,19 @@ public:
     String selectedStylesheetSet() const;
     void setSelectedStylesheetSet(const String&);
 
-    DeprecatedStringList availableStyleSheets() const;
+    bool setFocusedNode(PassRefPtr<Node>);
+    Node* focusedNode() const { return m_focusedNode.get(); }
 
-    Node* focusNode() const { return m_focusNode.get(); }
-    bool setFocusNode(PassRefPtr<Node>);
-    void clearSelectionIfNeeded(Node*);
-
-    Node* hoverNode() const { return m_hoverNode.get(); }
     void setHoverNode(PassRefPtr<Node>);
+    Node* hoverNode() const { return m_hoverNode.get(); }
+
+    void setActiveNode(PassRefPtr<Node>);
+    Node* activeNode() const { return m_activeNode.get(); }
+
+    void focusedNodeRemoved();
+    void removeFocusedNodeOfSubtree(Node*, bool amongChildrenOnly = false);
     void hoveredNodeDetached(Node*);
     void activeChainNodeDetached(Node*);
-    
-    Node* activeNode() const { return m_activeNode.get(); }
-    void setActiveNode(PassRefPtr<Node>);
 
     // Updates for :target (CSS3 selector).
     void setCSSTarget(Node*);
@@ -494,6 +562,10 @@ public:
         DOMATTRMODIFIED_LISTENER             = 0x20,
         DOMCHARACTERDATAMODIFIED_LISTENER    = 0x40,
         OVERFLOWCHANGED_LISTENER             = 0x80,
+        ANIMATIONEND_LISTENER                = 0x100,
+        ANIMATIONSTART_LISTENER              = 0x200,
+        ANIMATIONITERATION_LISTENER          = 0x400,
+        TRANSITIONEND_LISTENER               = 0x800
     };
 
     bool hasListenerType(ListenerType listenerType) const { return (m_listenerTypes & listenerType); }
@@ -501,7 +573,6 @@ public:
 
     CSSStyleDeclaration* getOverrideStyle(Element*, const String& pseudoElt);
 
-    virtual void defaultEventHandler(Event*);
     void handleWindowEvent(Event*, bool useCapture);
     void setHTMLWindowEventListener(const AtomicString &eventType, PassRefPtr<EventListener>);
     EventListener* getHTMLWindowEventListener(const AtomicString &eventType);
@@ -514,7 +585,7 @@ public:
     bool hasWindowEventListener(const AtomicString& eventType);
 
     PassRefPtr<EventListener> createHTMLEventListener(const String& functionName, const String& code, Node*);
-    
+
     /**
      * Searches through the document, starting from fromNode, for the next selectable element that comes after fromNode.
      * The order followed is as specified in section 17.11.1 of the HTML4 spec, which is elements with tab indexes
@@ -526,7 +597,7 @@ public:
      *
      * See http://www.w3.org/TR/html4/interact/forms.html#h-17.11.1
      */
-    Node* nextFocusNode(Node* fromNode);
+    Node* nextFocusableNode(Node* start, KeyboardEvent*);
 
     /**
      * Searches through the document, starting from fromNode, for the previous selectable element (that comes _before_)
@@ -539,7 +610,7 @@ public:
      *
      * See http://www.w3.org/TR/html4/interact/forms.html#h-17.11.1
      */
-    Node* previousFocusNode(Node* fromNode);
+    Node* previousFocusableNode(Node* start, KeyboardEvent*);
 
     int nodeAbsIndex(Node*);
     Node* nodeWithAbsIndex(int absIndex);
@@ -554,7 +625,9 @@ public:
      * @param content The header value (value of the meta tag's "content" attribute)
      */
     void processHttpEquiv(const String& equiv, const String& content);
+    void processArguments(const String & features, void *userData, void (*argumentsCallback)(const String& keyString, const String& valueString, Document * aDocument, void* userData));
     void processViewport(const String & features);
+    void processFormatDetection(const String & features);
     
     void dispatchImageLoadEventSoon(HTMLImageLoader*);
     void dispatchImageLoadEventsNow();
@@ -563,10 +636,20 @@ public:
     // Returns the owning element in the parent document.
     // Returns 0 if this is the top level document.
     Element* ownerElement() const;
-    
+
+    String title() const { return m_title; }
+    void setTitle(const String&, Element* titleElement = 0);
+    void removeTitle(Element* titleElement);
+
+    String cookie() const;
+    void setCookie(const String&);
+
     String referrer() const;
+
     String domain() const;
-    void setDomain(const String& newDomain, bool force = false); // not part of the DOM
+    void setDomain(const String& newDomain);
+
+    String lastModified() const;
 
     String policyBaseURL() const { return m_policyBaseURL; }
     void setPolicyBaseURL(const String& s) { m_policyBaseURL = s; }
@@ -586,20 +669,23 @@ public:
 
     void addImageMap(HTMLMapElement*);
     void removeImageMap(HTMLMapElement*);
-    HTMLMapElement* getImageMap(const String& URL) const;
+    HTMLMapElement* getImageMap(const String& url) const;
 
     HTMLElement* body();
+    void setBody(PassRefPtr<HTMLElement>, ExceptionCode&);
+
+    HTMLHeadElement* head();
 
     String toString() const;
     
-    bool execCommand(const String& command, bool userInterface, const String& value);
+    bool execCommand(const String& command, bool userInterface = false, const String& value = String());
     bool queryCommandEnabled(const String& command);
     bool queryCommandIndeterm(const String& command);
     bool queryCommandState(const String& command);
     bool queryCommandSupported(const String& command);
     String queryCommandValue(const String& command);
     
-    void addMarker(Range*, DocumentMarker::MarkerType);
+    void addMarker(Range*, DocumentMarker::MarkerType, String description = String());
     void addMarker(Node*, DocumentMarker);
     void copyMarkers(Node *srcNode, unsigned startOffset, int length, Node *dstNode, int delta, DocumentMarker::MarkerType = DocumentMarker::AllMarkers);
     void removeMarkers(Range*, DocumentMarker::MarkerType = DocumentMarker::AllMarkers);
@@ -611,6 +697,7 @@ public:
     void invalidateRenderedRectsForMarkersInRect(const IntRect&);
     void shiftMarkers(Node*, unsigned startOffset, int delta, DocumentMarker::MarkerType = DocumentMarker::AllMarkers);
 
+    DocumentMarker* markerContainingPoint(const IntPoint&, DocumentMarker::MarkerType = DocumentMarker::AllMarkers);
     Vector<DocumentMarker> markersForNode(Node*);
     Vector<IntRect> renderedRectsForMarkers(DocumentMarker::MarkerType = DocumentMarker::AllMarkers);
     
@@ -625,17 +712,17 @@ public:
 
     int docID() const { return m_docID; }
 
-#if KHTML_XSLT
+#if ENABLE(XSLT)
     void applyXSLTransform(ProcessingInstruction* pi);
-    void setTransformSource(void* doc) { m_transformSource = doc; }
+    void setTransformSource(void* doc);
     const void* transformSource() { return m_transformSource; }
     PassRefPtr<Document> transformSourceDocument() { return m_transformSourceDocument; }
-    void setTransformSourceDocument(Document *doc) { m_transformSourceDocument = doc; }
+    void setTransformSourceDocument(Document* doc) { m_transformSourceDocument = doc; }
 #endif
 
-#ifndef KHTML_NO_XBL
+#if ENABLE(XBL)
     // XBL methods
-    XBL::XBLBindingManager* bindingManager() const { return m_bindingManager; }
+    XBLBindingManager* bindingManager() const { return m_bindingManager; }
 #endif
 
     void incDOMTreeVersion() { ++m_domtree_version; }
@@ -645,7 +732,7 @@ public:
 
     void finishedParsing();
 
-#if XPATH_SUPPORT
+#if ENABLE(XPATH)
     // XPathEvaluator methods
     PassRefPtr<XPathExpression> createExpression(const String& expression,
                                                  XPathNSResolver* resolver,
@@ -657,14 +744,50 @@ public:
                                      unsigned short type,
                                      XPathResult* result,
                                      ExceptionCode& ec);
-#endif // XPATH_SUPPORT
+#endif // ENABLE(XPATH)
     
-protected:
-    CSSStyleSelector* m_styleSelector;
-    FrameView* m_view;
+    enum PendingSheetLayout { NoLayoutWithPendingSheets, DidLayoutWithPendingSheets, IgnoreLayoutWithPendingSheets };
 
+    bool didLayoutWithPendingStylesheets() const { return m_pendingSheetLayout == DidLayoutWithPendingSheets; }
+    
+    void setHasNodesWithPlaceholderStyle() { m_hasNodesWithPlaceholderStyle = true; }
+
+    String iconURL();
+    void setIconURL(const String& iconURL, const String& type);
+
+    bool isAllowedToLoadLocalResources() const { return m_isAllowedToLoadLocalResources; }
+
+    void setUseSecureKeyboardEntryWhenActive(bool);
+    bool useSecureKeyboardEntryWhenActive() const;
+    
+#if USE(LOW_BANDWIDTH_DISPLAY)
+    void setDocLoader(DocLoader* loader) { m_docLoader = loader; }
+    bool inLowBandwidthDisplay() const { return m_inLowBandwidthDisplay; }
+    void setLowBandwidthDisplay(bool lowBandWidth) { m_inLowBandwidthDisplay = lowBandWidth; }
+#endif
+    
+    void addNodeListCache() { ++m_numNodeListCaches; }
+    void removeNodeListCache() { ASSERT(m_numNodeListCaches > 0); --m_numNodeListCaches; }
+    bool hasNodeListCaches() const { return m_numNodeListCaches; }
+
+    void updateFocusAppearanceSoon();
+    void cancelFocusAppearanceUpdate();
+
+    // for animations to know whether they can run yet or not
+    bool loadComplete() const { return m_loadComplete; }
+
+#if ENABLE(TOUCH_EVENTS)
+#include "DocumentiPhone.h"
+#endif
+
+private:
+    CSSStyleSelector* m_styleSelector;
+    bool m_didCalculateStyleSelector;
+
+    Frame* m_frame;
     DocLoader* m_docLoader;
     Tokenizer* m_tokenizer;
+    bool m_wellFormed;
     DeprecatedString m_url;
     DeprecatedString m_baseURL;
     String m_baseTarget;
@@ -673,9 +796,9 @@ protected:
     RefPtr<DOMImplementation> m_implementation;
 
     RefPtr<StyleSheet> m_sheet;
+#if FRAME_LOADS_USER_STYLESHEET
     String m_usersheet;
-    String m_printSheet;
-    DeprecatedStringList m_availableSheets;
+#endif
 
     // Track the number of currently loading top-level stylesheets.  Sheets
     // loaded using the @import directive are not included in this count.
@@ -687,7 +810,15 @@ protected:
     // force an immediate layout when requested by JS.
     bool m_ignorePendingStylesheets;
 
+    // If we do ignore the pending stylesheet count, then we need to add a boolean
+    // to track that this happened so that we can do a full repaint when the stylesheets
+    // do eventually load.
+    PendingSheetLayout m_pendingSheetLayout;
+    
+    bool m_hasNodesWithPlaceholderStyle;
+
     RefPtr<CSSStyleSheet> m_elemSheet;
+    RefPtr<CSSStyleSheet> m_mappedElementSheet;
 
     bool m_printing;
 
@@ -696,14 +827,14 @@ protected:
 
     Color m_textColor;
 
-    RefPtr<Node> m_focusNode;
+    RefPtr<Node> m_focusedNode;
     RefPtr<Node> m_hoverNode;
     RefPtr<Node> m_activeNode;
     mutable RefPtr<Element> m_documentElement;
 
     unsigned m_domtree_version;
     
-    DeprecatedPtrList<NodeIterator> m_nodeIterators;
+    HashSet<NodeIterator*> m_nodeIterators;
 
     unsigned short m_listenerTypes;
     RefPtr<StyleSheetList> m_styleSheets;
@@ -712,9 +843,9 @@ protected:
     RegisteredEventListenerList m_windowEventListeners;
 
     typedef HashMap<FormElementKey, Vector<String>, FormElementKeyHash, FormElementKeyHashTraits> FormElementStateMap;
-    HashSet<HTMLGenericFormElement*> m_formElementsWithState;
+    ListHashSet<HTMLFormControlElementWithState*> m_formElementsWithState;
     FormElementStateMap m_stateForNewFormElements;
-
+    
     Color m_linkColor;
     Color m_visitedLinkColor;
     Color m_activeLinkColor;
@@ -725,17 +856,18 @@ protected:
     bool m_loadingSheet;
     bool visuallyOrdered;
     bool m_bParsing;
-    bool m_bAllDataReceived;
     bool m_docChanged;
-    bool m_styleSelectorDirty;
     bool m_inStyleRecalc;
     bool m_closeAfterStyleRecalc;
     bool m_usesDescendantRules;
     bool m_usesSiblingRules;
-    
+    bool m_usesFirstLineRules;
+    bool m_usesFirstLetterRules;
+    bool m_gotoAnchorNeededAfterStylesheetsLoad;
+
     String m_title;
     bool m_titleSetExplicitly;
-    RefPtr<Node> m_titleElement;
+    RefPtr<Element> m_titleElement;
     
     RenderArena* m_renderArena;
 
@@ -748,19 +880,21 @@ protected:
     DeprecatedPtrList<HTMLImageLoader> m_imageLoadEventDispatchingList;
     Timer<Document> m_imageLoadEventTimer;
 
+    Timer<Document> m_updateFocusAppearanceTimer;
+
     Node* m_cssTarget;
     
     bool m_processingLoadEvent;
     double m_startTime;
     bool m_overMinimumLayoutThreshold;
     
-#if KHTML_XSLT
+#if ENABLE(XSLT)
     void* m_transformSource;
     RefPtr<Document> m_transformSourceDocument;
 #endif
 
-#ifndef KHTML_NO_XBL
-    XBL::XBLBindingManager* m_bindingManager; // The access point through which documents and elements communicate with XBL.
+#if ENABLE(XBL)
+    XBLBindingManager* m_bindingManager; // The access point through which documents and elements communicate with XBL.
 #endif
     
     typedef HashMap<AtomicStringImpl*, HTMLMapElement*> ImageMapsByName;
@@ -772,33 +906,38 @@ protected:
 
     int m_docID; // A unique document identifier used for things like document-specific mapped attributes.
 
+    String m_xmlEncoding;
+    String m_xmlVersion;
+    bool m_xmlStandalone;
+
+    String m_contentLanguage;
+
 public:
     bool inPageCache();
     void setInPageCache(bool flag);
-
-    void passwordFieldAdded();
-    void passwordFieldRemoved();
-    bool hasPasswordField() const;
-
-    void secureFormAdded();
-    void secureFormRemoved();
-    bool hasSecureForm() const;
+    
+    // Elements can register themselves for the "willSaveToCache()" and  
+    // "didRestoreFromCache()" callbacks
+    void registerForCacheCallbacks(Element*);
+    void unregisterForCacheCallbacks(Element*);
+    void willSaveToCache();
+    void didRestoreFromCache();
 
     void setShouldCreateRenderers(bool);
     bool shouldCreateRenderers();
     
-    void setDecoder(Decoder*);
-    Decoder* decoder() const { return m_decoder.get(); }
+    void setDecoder(TextResourceDecoder*);
+    TextResourceDecoder* decoder() const { return m_decoder.get(); }
 
     UChar backslashAsCurrencySymbol() const;
 
-#if __APPLE__
+#if ENABLE(DASHBOARD_SUPPORT)
     void setDashboardRegionsDirty(bool f) { m_dashboardRegionsDirty = f; }
     bool dashboardRegionsDirty() const { return m_dashboardRegionsDirty; }
     bool hasDashboardRegions () const { return m_hasDashboardRegions; }
     void setHasDashboardRegions (bool f) { m_hasDashboardRegions = f; }
-    const DeprecatedValueList<DashboardRegionValue> & dashboardRegions() const;
-    void setDashboardRegions (const DeprecatedValueList<DashboardRegionValue>& regions);
+    const Vector<DashboardRegionValue>& dashboardRegions() const;
+    void setDashboardRegions(const Vector<DashboardRegionValue>&);
 #endif
 
     void removeAllEventListenersFromAllNodes();
@@ -806,83 +945,137 @@ public:
     void registerDisconnectedNodeWithEventListeners(Node*);
     void unregisterDisconnectedNodeWithEventListeners(Node*);
     
-    void radioButtonChecked(HTMLInputElement* caller, HTMLFormElement* form);
-    HTMLInputElement* checkedRadioButtonForGroup(AtomicStringImpl* name, HTMLFormElement* form);
-    void removeRadioButtonGroup(AtomicStringImpl* name, HTMLFormElement* form);
+    HTMLFormElement::CheckedRadioButtons& checkedRadioButtons() { return m_checkedRadioButtons; }
     
-#if SVG_SUPPORT
+#if ENABLE(SVG)
     const SVGDocumentExtensions* svgExtensions();
     SVGDocumentExtensions* accessSVGExtensions();
 #endif
 
+    void initSecurityOrigin();
+    SecurityOrigin* securityOrigin() const { return m_securityOrigin.get(); }
+
+    // Explicitly override the security origin for this document.
+    // Note: It is dangerous to change the security origin of a document
+    //       that already contains content.
+    void setSecurityOrigin(SecurityOrigin*);
+
+    bool processingLoadEvent() const { return m_processingLoadEvent; }
+
+#if ENABLE(DATABASE)
+    void addOpenDatabase(Database*);
+    void removeOpenDatabase(Database*);
+    DatabaseThread* databaseThread();   // Creates the thread as needed, but not if it has been already terminated.
+    void setHasOpenDatabases() { m_hasOpenDatabases = true; }
+    bool hasOpenDatabases() { return m_hasOpenDatabases; }
+    void stopDatabases();
+#endif
+protected:
+    void clearXMLVersion() { m_xmlVersion = String(); }
+
 private:
+    bool shouldBeAllowedToLoadLocalResources() const;
+
     void updateTitle();
     void removeAllDisconnectedNodeEventListeners();
     void imageLoadEventTimerFired(Timer<Document>*);
+    void updateFocusAppearanceTimerFired(Timer<Document>*);
 
-    JSEditor* jsEditor();
+    RefPtr<SecurityOrigin> m_securityOrigin;
 
-    JSEditor* m_jsEditor;
-    bool relinquishesEditingFocus(Node*);
-    bool acceptsEditingFocus(Node*);
-    void didBeginEditing();
-    void didEndEditing();
-
-    mutable String m_domain;
     RenderObject* m_savedRenderer;
-    int m_passwordFields;
     int m_secureForms;
     
-    RefPtr<Decoder> m_decoder;
+    RefPtr<TextResourceDecoder> m_decoder;
 
+    // We maintain the invariant that m_duplicateIds is the count of all elements with a given ID
+    // excluding the one referenced in m_elementsById, if any. This means it one less than the total count
+    // when the first node with a given ID is cached, otherwise the same as the total count.
     mutable HashMap<AtomicStringImpl*, Element*> m_elementsById;
     mutable HashCountedSet<AtomicStringImpl*> m_duplicateIds;
     
-    mutable HashMap<StringImpl*, Element*, CaseInsensitiveHash> m_elementsByAccessKey;
-
+    mutable HashMap<StringImpl*, Element*, CaseFoldingHash> m_elementsByAccessKey;
     
     InheritedBool m_designMode;
     
     int m_selfOnlyRefCount;
-    typedef HashMap<AtomicStringImpl*, HTMLInputElement*> NameToInputMap;
-    typedef HashMap<HTMLFormElement*, NameToInputMap*> FormToGroupMap;
-    FormToGroupMap m_selectedRadioButtons;
-    
-    HTMLCollection::CollectionInfo m_collectionInfo[HTMLCollection::UnnamedCollectionTypes];
-    HashMap<AtomicStringImpl*, HTMLCollection::CollectionInfo> m_nameCollectionInfo[HTMLCollection::CollectionTypes - HTMLCollection::UnnamedCollectionTypes];
 
-#if XPATH_SUPPORT
+    HTMLFormElement::CheckedRadioButtons m_checkedRadioButtons;
+
+    typedef HashMap<AtomicStringImpl*, HTMLCollection::CollectionInfo*> NamedCollectionMap;
+    HTMLCollection::CollectionInfo m_collectionInfo[HTMLCollection::NumUnnamedDocumentCachedTypes];
+    NamedCollectionMap m_nameCollectionInfo[HTMLCollection::NumNamedDocumentCachedTypes];
+
+#if ENABLE(XPATH)
     RefPtr<XPathEvaluator> m_xpathEvaluator;
 #endif
     
-#if SVG_SUPPORT
+#if ENABLE(SVG)
     SVGDocumentExtensions* m_svgExtensions;
 #endif
     
-#if __APPLE__
-    DeprecatedValueList<DashboardRegionValue> m_dashboardRegions;
+#if ENABLE(DASHBOARD_SUPPORT)
+    Vector<DashboardRegionValue> m_dashboardRegions;
     bool m_hasDashboardRegions;
     bool m_dashboardRegionsDirty;
 #endif
-
     mutable bool m_accessKeyMapValid;
     bool m_createRenderers;
     bool m_inPageCache;
+    String m_iconURL;
     
+    HashSet<Element*> m_pageCacheCallbackElements;
+
+    bool m_isAllowedToLoadLocalResources;
+
+    bool m_useSecureKeyboardEntryWhenActive;
+
+    bool m_isXHTML;
+
+    unsigned m_numNodeListCaches;
+
+#if ENABLE(DATABASE)
+    RefPtr<DatabaseThread> m_databaseThread;
+    bool m_hasOpenDatabases;    // This never changes back to false, even as the database thread is closed.
+    typedef HashSet<Database*> DatabaseSet;
+    OwnPtr<DatabaseSet> m_openDatabaseSet;
+#endif
+#if USE(LOW_BANDWIDTH_DISPLAY)
+    bool m_inLowBandwidthDisplay;
+#endif
+
+    bool m_loadComplete;    // for animations to know whether or not they can run yet
+
 public:
     void addAutoSizingNode (Node *node, float size);
     void validateAutoSizingNodes ();
+    void resetAutoSizingNodes();
 
-    static void setTelephoneNumberParsingEnabled(bool enabled);
-    static bool isTelephoneNumberParsingEnabled();
-    
+    void setTelephoneNumberParsingEnabled(bool enabled);
+    bool isTelephoneNumberParsingEnabled();
+
+    void incrementScrollEventListenersCount();
+    void decrementScrollEventListenersCount();
+
+    void incrementTotalImageDataSize(CachedImage* image);
+    void decrementTotalImageDataSize(CachedImage* image);
+    unsigned long totalImageDataSize();
+
+    void incrementAnimatedImageDataCount(unsigned count);
+    unsigned long animatedImageDataCount();
 private:
     typedef HashMap<TextAutoSizingKey, RefPtr<TextAutoSizingValue>, TextAutoSizingHash, TextAutoSizingTraits> TextAutoSizingMap;
     TextAutoSizingMap m_textAutoSizedNodes;
 
-    static bool telephoneNumberParsingEnabled;
+    bool m_telephoneNumberParsingEnabled;
+    unsigned m_scrollEventListenerCount;
+    
+    HashCountedSet<CachedImage*> m_documentImages;
+    
+    unsigned long m_totalImageDataSize;
+    unsigned long m_animatedImageDataCount;
 };
 
-} //namespace
+} // namespace WebCore
 
-#endif
+#endif // Document_h

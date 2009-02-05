@@ -16,54 +16,47 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef RenderWidget_H
-#define RenderWidget_H
+#ifndef RenderWidget_h
+#define RenderWidget_h
 
 #include "RenderReplaced.h"
 
 namespace WebCore {
 
-class RenderWidget : public RenderReplaced, public WidgetClient
-{
+class Widget;
+
+class RenderWidget : public RenderReplaced {
 public:
     RenderWidget(Node*);
     virtual ~RenderWidget();
+
+    virtual bool isWidget() const { return true; }
 
     virtual void setStyle(RenderStyle*);
 
     virtual void paint(PaintInfo&, int tx, int ty);
 
-    virtual bool isWidget() const { return true; };
-
     virtual void destroy();
-    virtual void layout( );
+    virtual void layout();
 
     Widget* widget() const { return m_widget; }
+    static RenderWidget* find(const Widget*);
 
     RenderArena* ref() { ++m_refCount; return renderArena(); }
     void deref(RenderArena*);
-    
+
     virtual void setSelectionState(SelectionState);
 
     virtual void updateWidgetPosition();
 
     virtual void setWidget(Widget*);
 
-    using RenderReplaced::element;
-
 private:
-    virtual void focusIn(Widget*);
-    virtual void focusOut(Widget*);
-    virtual void scrollToVisible(Widget*);
-    virtual Element* element(Widget*);
-    virtual bool isVisible(Widget*);
-    virtual void sendConsumedMouseUp(Widget*);
-
     void resizeWidget(Widget*, int w, int h);
 
     virtual void deleteWidget();
@@ -71,10 +64,11 @@ private:
 protected:
     Widget* m_widget;
     FrameView* m_view;
+
 private:
     int m_refCount;
 };
 
-}
+} // namespace WebCore
 
-#endif
+#endif // RenderWidget_h

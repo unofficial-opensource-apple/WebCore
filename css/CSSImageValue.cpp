@@ -16,15 +16,16 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "CSSImageValue.h"
 
+#include "CSSValueKeywords.h"
 #include "Cache.h"
 #include "CachedImage.h"
-#include "CSSValueKeywords.h"
 #include "DocLoader.h"
 
 namespace WebCore {
@@ -58,8 +59,8 @@ CachedImage* CSSImageValue::image(DocLoader* loader)
             m_image = loader->requestImage(getStringValue());
         else
             // FIXME: Should find a way to make these images sit in their own memory partition, since they are user agent images.
-            m_image = static_cast<CachedImage*>(cache()->requestResource(0, CachedResource::ImageResource, KURL(getStringValue().deprecatedString()), 0));
-        
+            m_image = static_cast<CachedImage*>(cache()->requestResource(0, CachedResource::ImageResource, KURL(getStringValue().deprecatedString()), 0, 0));
+
         if (m_image)
             m_image->ref(this);
     }
@@ -67,4 +68,4 @@ CachedImage* CSSImageValue::image(DocLoader* loader)
     return m_image;
 }
 
-}
+} // namespace WebCore

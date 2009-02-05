@@ -18,21 +18,27 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 #include "config.h"
 #include "RenderPartObject.h"
 
 #include "Document.h"
+#include "EventHandler.h"
 #include "Frame.h"
+#include "FrameLoader.h"
+#include "FrameLoaderClient.h"
 #include "FrameTree.h"
-#include "HTMLNames.h"
+#include "FrameView.h"
 #include "HTMLEmbedElement.h"
 #include "HTMLIFrameElement.h"
+#include "HTMLNames.h"
 #include "HTMLObjectElement.h"
 #include "HTMLParamElement.h"
+#include "KURL.h"
+#include "MIMETypeRegistry.h"
 #include "Page.h"
 #include "RenderView.h"
 #include "Settings.h"
@@ -42,12 +48,19 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-RenderPartObject::RenderPartObject(HTMLElement* element)
+RenderPartObject::RenderPartObject(HTMLFrameOwnerElement* element)
     : RenderPart(element)
+    , m_updatingWidget(false)
 {
     // init RenderObject attributes
     setInline(true);
     m_hasFallbackContent = false;
+}
+
+RenderPartObject::~RenderPartObject()
+{
+    if (m_view)
+        m_view->removeWidgetToUpdate(this);
 }
 
 static bool isURLAllowed(Document *doc, const String &url)
@@ -62,7 +75,7 @@ static bool isURLAllowed(Document *doc, const String &url)
     // But we don't allow more than one.
     bool foundSelfReference = false;
     for (Frame *frame = doc->frame(); frame; frame = frame->tree()->parent()) {
-        KURL frameURL = frame->url();
+        KURL frameURL = frame->loader()->url();
         frameURL.setRef(DeprecatedString::null);
         if (frameURL == newURL) {
             if (foundSelfReference)
@@ -97,21 +110,31 @@ static inline void mapClassIdToServiceType(const String& classId, String& servic
     // TODO: add more plugins here
 }
 
-void RenderPartObject::updateWidget()
+void RenderPartObject::updateWidget(bool onlyCreateNonNetscapePlugins)
+{
+  // Disallow reentry into this method.  Creating a plug-in makes WebKit delegate callbacks happen, which can call back into
+  // WebCore to update layout.  If that happens we can create orphan plug-in views that remain in the view hierarchy forever.
+  if (m_updatingWidget)
+    return;
+  m_updatingWidget = true;
+  _updateWidget(onlyCreateNonNetscapePlugins);
+  m_updatingWidget = false;
+}
+
+void RenderPartObject::_updateWidget(bool onlyCreateNonNetscapePlugins)
 {
   String url;
   String serviceType;
   Vector<String> paramNames;
   Vector<String> paramValues;
   Frame* frame = m_view->frame();
-
-  setNeedsLayoutAndMinMaxRecalc();
-
+  
   if (element()->hasTagName(objectTag)) {
 
       HTMLObjectElement* o = static_cast<HTMLObjectElement*>(element());
 
-      if (!o->isComplete())
+      o->setNeedWidgetUpdate(false);
+      if (!o->isFinishedParsingChildren())
         return;
       // Check for a child EMBED tag.
       HTMLEmbedElement* embed = 0;
@@ -129,24 +152,18 @@ void RenderPartObject::updateWidget()
       HTMLElement *embedOrObject;
       if (embed) {
           embedOrObject = (HTMLElement *)embed;
-          String attribute = embedOrObject->getAttribute(widthAttr);
-          if (!attribute.isEmpty())
-              o->setAttribute(widthAttr, attribute);
-          attribute = embedOrObject->getAttribute(heightAttr);
-          if (!attribute.isEmpty())
-              o->setAttribute(heightAttr, attribute);
           url = embed->url;
-          serviceType = embed->serviceType;
+          serviceType = embed->m_serviceType;
       } else
           embedOrObject = (HTMLElement *)o;
       
       // If there was no URL or type defined in EMBED, try the OBJECT tag.
       if (url.isEmpty())
-          url = o->url;
+          url = o->m_url;
       if (serviceType.isEmpty())
-          serviceType = o->serviceType;
+          serviceType = o->m_serviceType;
       
-      HashSet<StringImpl*, CaseInsensitiveHash> uniqueParamNames;
+      HashSet<StringImpl*, CaseFoldingHash> uniqueParamNames;
       
       // Scan the PARAM children.
       // Get the URL and type from the params if we don't already have them.
@@ -179,7 +196,7 @@ void RenderPartObject::updateWidget()
       // we have to explicitly suppress the tag's CODEBASE attribute if there is none in a PARAM,
       // else our Java plugin will misinterpret it. [4004531]
       String codebase;
-      if (!embed && serviceType.lower() == "application/x-java-applet") {
+      if (!embed && MIMETypeRegistry::isJavaAppletMIMEType(serviceType)) {
           codebase = "codebase";
           uniqueParamNames.add(codebase.impl()); // pretend we found it in a PARAM already
       }
@@ -198,12 +215,9 @@ void RenderPartObject::updateWidget()
       }
       
       // If we still don't have a type, try to map from a specific CLASSID to a type.
-      if (serviceType.isEmpty() && !o->classId.isEmpty())
-          mapClassIdToServiceType(o->classId, serviceType);
+      if (serviceType.isEmpty() && !o->m_classId.isEmpty())
+          mapClassIdToServiceType(o->m_classId, serviceType);
       
-      // If no URL and type, abort.
-      if (url.isEmpty() && serviceType.isEmpty())
-          return;
       if (!isURLAllowed(document(), url))
           return;
 
@@ -214,13 +228,24 @@ void RenderPartObject::updateWidget()
               (child->isTextNode() && !static_cast<Text*>(child)->containsOnlyWhitespace()))
               m_hasFallbackContent = true;
       }
-      bool success = frame->requestObject(this, url, AtomicString(o->name()), serviceType, paramNames, paramValues);
+      
+      if (onlyCreateNonNetscapePlugins) {
+          KURL completedURL;
+          if (!url.isEmpty())
+              completedURL = frame->loader()->completeURL(url);
+        
+          if (frame->loader()->client()->objectContentType(completedURL, serviceType) == ObjectContentNetscapePlugin)
+              return;
+      }
+      
+      bool success = frame->loader()->requestObject(this, url, AtomicString(o->name()), serviceType, paramNames, paramValues);
       if (!success && m_hasFallbackContent)
           o->renderFallbackContent();
   } else if (element()->hasTagName(embedTag)) {
       HTMLEmbedElement *o = static_cast<HTMLEmbedElement*>(element());
+      o->setNeedWidgetUpdate(false);
       url = o->url;
-      serviceType = o->serviceType;
+      serviceType = o->m_serviceType;
 
       if (url.isEmpty() && serviceType.isEmpty())
           return;
@@ -236,39 +261,69 @@ void RenderPartObject::updateWidget()
               paramValues.append(it->value().domString());
           }
       }
-      frame->requestObject(this, url, o->getAttribute(nameAttr), serviceType, paramNames, paramValues);
+      
+      if (onlyCreateNonNetscapePlugins) {
+          KURL completedURL;
+          if (!url.isEmpty())
+              completedURL = frame->loader()->completeURL(url);
+          
+          if (frame->loader()->client()->objectContentType(completedURL, serviceType) == ObjectContentNetscapePlugin)
+              return;
+          
+      }
+      
+      frame->loader()->requestObject(this, url, o->getAttribute(nameAttr), serviceType, paramNames, paramValues);
   }
+}
+    
+void RenderPartObject::calcWidth()
+{
+    RenderPart::calcWidth();
+    if (!shouldResizeFrameToContent())
+        return;
+    if (!style()->width().isFixed() || static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollbarAlwaysOff)
+        m_width = max(m_width,  static_cast<FrameView*>(m_widget)->contentsWidth());
+}
+    
+void RenderPartObject::calcHeight()
+{
+    RenderPart::calcHeight();
+    if (!shouldResizeFrameToContent())
+        return;
+    if (!style()->height().isFixed() || static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollbarAlwaysOff)
+        m_height = max(m_height,  static_cast<FrameView*>(m_widget)->contentsHeight());
+}
+  
+bool RenderPartObject::shouldResizeFrameToContent() const
+{
+    Document* document = element() ? element()->document() : 0;
+    return m_widget && m_widget->isFrameView() && document && element()->hasTagName(iframeTag) && document->frame() && 
+        document->frame()->settings() && document->frame()->settings()->flatFrameSetLayoutEnabled() && 
+        (static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollbarAlwaysOff || !style()->width().isFixed() || !style()->height().isFixed());
 }
 
 void RenderPartObject::layout()
 {
     ASSERT(needsLayout());
-    ASSERT(minMaxKnown());
 
-    FrameView* childFrameView = static_cast<FrameView*>(m_widget);
-    RenderView* childRoot = 0;
-    
-    bool flatten = m_widget && element()->hasTagName(iframeTag) && element() && element()->document()->frame() && 
-        element()->document()->frame()->settings()->flatFrameSetLayoutEnabled() && 
-        (static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollBarAlwaysOff || !style()->width().isFixed() || !style()->height().isFixed()) &&
-        (childRoot = childFrameView ? static_cast<RenderView*>(childFrameView->frame()->renderer()) : 0);
-
-    if (flatten) {
+    if (shouldResizeFrameToContent()) {
+        FrameView* childFrameView = static_cast<FrameView*>(m_widget);
+        RenderView* childRoot = childFrameView ? static_cast<RenderView*>(childFrameView->frame()->renderer()) : 0;
+        if (childRoot && childRoot->prefWidthsDirty())
+            childRoot->calcPrefWidths();
         
-        if (!childRoot->minMaxKnown())
-            childRoot->calcMinMaxWidth();
+        RenderPart::calcWidth();
+        RenderPart::calcHeight();
+        // FIXME: PURPLE: Do we need to call this here:  adjustOverflowForBoxShadow();
         
-        calcWidth();
-        calcHeight();
-        
-        bool scrolling = static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollBarAlwaysOff;
-        if (scrolling || !style()->width().isFixed())
-            m_width = max(m_width, childRoot->minWidth());
+        bool scrolling = static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollbarAlwaysOff;
+        if (childRoot && (scrolling || !style()->width().isFixed()))
+            m_width = max(m_width, childRoot->minPrefWidth());
 
         updateWidgetPosition();
         do
             childFrameView->layout();
-        while (childFrameView->layoutPending() || childRoot->needsLayout());     
+        while (childFrameView->layoutPending() || (childRoot && childRoot->needsLayout()));
         
         if (scrolling || !style()->height().isFixed())
             m_height = max(m_height, childFrameView->contentsHeight());
@@ -278,14 +333,19 @@ void RenderPartObject::layout()
         updateWidgetPosition();
         
         ASSERT(!childFrameView->layoutPending());
-        ASSERT(!childRoot->needsLayout());
-        ASSERT(!childRoot->firstChild() || !childRoot->firstChild()->firstChild() || !childRoot->firstChild()->firstChild()->needsLayout());
+        ASSERT(!childRoot || !childRoot->needsLayout());
+        ASSERT(!childRoot || !childRoot->firstChild() || !childRoot->firstChild()->firstChild() || !childRoot->firstChild()->firstChild()->needsLayout());
     } else {
     calcWidth();
     calcHeight();
+    adjustOverflowForBoxShadow();
 
     RenderPart::layout();
     }
+
+    if (!m_widget && m_view)
+        m_view->addWidgetToUpdate(this);
+    
     setNeedsLayout(false);
 }
 
@@ -293,19 +353,13 @@ void RenderPartObject::viewCleared()
 {
     if (element() && m_widget && m_widget->isFrameView()) {
         FrameView* view = static_cast<FrameView*>(m_widget);
-        bool hasBorder = false;
         int marginw = -1;
         int marginh = -1;
         if (element()->hasTagName(iframeTag)) {
             HTMLIFrameElement* frame = static_cast<HTMLIFrameElement*>(element());
-            hasBorder = frame->m_frameBorder;
-            marginw = frame->m_marginWidth;
-            marginh = frame->m_marginHeight;
+            marginw = frame->getMarginWidth();
+            marginh = frame->getMarginHeight();
         }
-
-        view->setHasBorder(hasBorder);
-// FIXME: remove after MERGE:
-        view->setIgnoreWheelEvents(element()->hasTagName(iframeTag));
         if (marginw != -1)
             view->setMarginWidth(marginw);
         if (marginh != -1)

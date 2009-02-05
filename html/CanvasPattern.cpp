@@ -63,10 +63,20 @@ void CanvasPattern::parseRepetitionType(const String& type, bool& repeatX, bool&
     ec = SYNTAX_ERR;
 }
 
-#if __APPLE__
+#if PLATFORM(CG)
 
 CanvasPattern::CanvasPattern(CGImageRef image, bool repeatX, bool repeatY)
     : m_platformImage(image)
+    , m_cachedImage(0)
+    , m_repeatX(repeatX)
+    , m_repeatY(repeatY)
+{
+}
+
+#elif PLATFORM(CAIRO)
+
+CanvasPattern::CanvasPattern(cairo_surface_t* surface, bool repeatX, bool repeatY)
+    : m_platformImage(cairo_surface_reference(surface))
     , m_cachedImage(0)
     , m_repeatX(repeatX)
     , m_repeatY(repeatY)
@@ -77,7 +87,7 @@ CanvasPattern::CanvasPattern(CGImageRef image, bool repeatX, bool repeatY)
 
 CanvasPattern::CanvasPattern(CachedImage* cachedImage, bool repeatX, bool repeatY)
     :
-#if __APPLE__
+#if PLATFORM(CG) || PLATFORM(CAIRO)
       m_platformImage(0)
     ,
 #endif
@@ -91,14 +101,15 @@ CanvasPattern::CanvasPattern(CachedImage* cachedImage, bool repeatX, bool repeat
 
 CanvasPattern::~CanvasPattern()
 {
-#if __APPLE__
-    CGImageRelease(m_platformImage);
+#if PLATFORM(CAIRO)
+    if (m_platformImage)
+        cairo_surface_destroy(m_platformImage);
 #endif
     if (m_cachedImage)
         m_cachedImage->deref(this);
 }
 
-#if __APPLE__
+#if PLATFORM(CG)
 
 static void patternCallback(void* info, CGContextRef context)
 {
@@ -121,6 +132,10 @@ static void patternCallback(void* info, CGContextRef context)
 
     if (image->getCGImageRef()) {
         CGContextDrawImage(context, rect, image->getCGImageRef());
+        // FIXME: We should refactor this code to use the platform-independent 
+        // drawing API in all cases. Then, this didDraw call will happen 
+        // automatically, and we can remove it.
+        cachedImage->didDraw(image);
         return;
     }
 
@@ -138,8 +153,8 @@ CGPatternRef CanvasPattern::createPattern(const CGAffineTransform& transform)
     rect.origin.x = 0;
     rect.origin.y = 0;
     if (m_platformImage) {
-        rect.size.width = CGImageGetWidth(m_platformImage);
-        rect.size.height = CGImageGetHeight(m_platformImage);
+        rect.size.width = CGImageGetWidth(m_platformImage.get());
+        rect.size.height = CGImageGetHeight(m_platformImage.get());
     } else {
         if (!m_cachedImage)
             return 0;
@@ -159,12 +174,38 @@ CGPatternRef CanvasPattern::createPattern(const CGAffineTransform& transform)
     // INT_MAX is almost correct, but there seems to be some number wrapping occuring making the fill
     // pattern is not filled correctly. 
     // So, just pick a really large number that works. 
-    float yStep = m_repeatY ? rect.size.height : (100000000.0);
+    float yStep = m_repeatY ? rect.size.height : (100000000.0f);
 
     const CGPatternCallbacks patternCallbacks = { 0, patternCallback, patternReleaseCallback };
     ref();
     return CGPatternCreate(this, rect, patternTransform, xStep, yStep,
         kCGPatternTilingConstantSpacing, TRUE, &patternCallbacks);
+}
+
+#elif PLATFORM(CAIRO)
+
+cairo_pattern_t* CanvasPattern::createPattern(const cairo_matrix_t& m)
+{
+    cairo_surface_t* surface = 0;
+    if (m_platformImage) {
+        surface = m_platformImage;
+    } else {
+        if (!m_cachedImage)
+            return 0;
+        Image* image = m_cachedImage->image();
+        if (!image)
+            return 0;
+        surface = image->nativeImageForCurrentFrame();
+    }
+
+    if (!surface)
+        return 0;
+
+    cairo_pattern_t* pattern = cairo_pattern_create_for_surface(surface);
+    cairo_pattern_set_matrix(pattern, &m);
+    if (m_repeatX || m_repeatY)
+        cairo_pattern_set_extend(pattern, CAIRO_EXTEND_REPEAT);
+    return pattern;
 }
 
 #endif

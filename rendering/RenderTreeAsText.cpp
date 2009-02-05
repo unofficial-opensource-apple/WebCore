@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -20,47 +20,63 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "config.h"
 #include "RenderTreeAsText.h"
 
+#include "CharacterNames.h"
 #include "Document.h"
 #include "Frame.h"
+#include "FrameView.h"
+#include "HTMLElement.h"
+#include "HTMLNames.h"
 #include "InlineTextBox.h"
-#include "JSEditor.h"
 #include "RenderBR.h"
-#include "RenderView.h"
+#include "RenderListMarker.h"
 #include "RenderTableCell.h"
+#include "RenderView.h"
 #include "RenderWidget.h"
 #include "SelectionController.h"
 #include <wtf/Vector.h>
 
-#if SVG_SUPPORT
-#include "KCanvasTreeDebug.h"
-#include "RenderSVGContainer.h"
+#if ENABLE(HW_COMP)
+#include "LCLayer.h"
+#include "LCRootLayer.h"
 #endif
+
+#if ENABLE(SVG)
+#include "RenderSVGRoot.h"
+#include "RenderSVGContainer.h"
+#include "RenderSVGInlineText.h"
+#include "RenderSVGText.h"
+#include "SVGRenderTreeAsText.h"
+#endif
+
+// Turn on SHOW_LAYER_NESTING to see more detail in the dump, but break tests
+//#define SHOW_LAYER_NESTING 1
 
 namespace WebCore {
 
+using namespace HTMLNames;
+
 static void writeLayers(TextStream&, const RenderLayer* rootLayer, RenderLayer*, const IntRect& paintDirtyRect, int indent = 0);
 
-#if !SVG_SUPPORT
-static TextStream &operator<<(TextStream &ts, const IntRect &r)
+#if !ENABLE(SVG)
+static TextStream &operator<<(TextStream& ts, const IntRect& r)
 {
     return ts << "at (" << r.x() << "," << r.y() << ") size " << r.width() << "x" << r.height();
 }
 #endif
 
-static void writeIndent(TextStream &ts, int indent)
+static void writeIndent(TextStream& ts, int indent)
 {
-    for (int i = 0; i != indent; ++i) {
+    for (int i = 0; i != indent; ++i)
         ts << "  ";
-    }
 }
 
-static void printBorderStyle(TextStream &ts, const RenderObject &o, const EBorderStyle borderStyle)
+static void printBorderStyle(TextStream& ts, const RenderObject& o, const EBorderStyle borderStyle)
 {
     switch (borderStyle) {
         case BNONE:
@@ -94,48 +110,112 @@ static void printBorderStyle(TextStream &ts, const RenderObject &o, const EBorde
             ts << "double";
             break;
     }
-    
+
     ts << " ";
 }
 
-static DeprecatedString getTagName(Node *n)
+static String getTagName(Node* n)
 {
     if (n->isDocumentNode())
         return "";
     if (n->isCommentNode())
         return "COMMENT";
-    return n->nodeName().deprecatedString(); 
+    return n->nodeName();
 }
 
-static TextStream &operator<<(TextStream &ts, const RenderObject &o)
+static bool isEmptyOrUnstyledAppleStyleSpan(const Node* node)
 {
-    ts << o.renderName();
-    
-    if (o.style() && o.style()->zIndex()) {
-        ts << " zI: " << o.style()->zIndex();
-    }
-    
-    if (o.element()) {
-        DeprecatedString tagName = getTagName(o.element());
-        if (!tagName.isEmpty()) {
-            ts << " {" << tagName << "}";
+    if (!node || !node->isHTMLElement() || !node->hasTagName(spanTag))
+        return false;
+
+    const HTMLElement* elem = static_cast<const HTMLElement*>(node);
+    if (elem->getAttribute(classAttr) != "Apple-style-span")
+        return false;
+
+    if (!node->hasChildNodes())
+        return true;
+
+    CSSMutableStyleDeclaration* inlineStyleDecl = elem->inlineStyleDecl();
+    return (!inlineStyleDecl || inlineStyleDecl->length() == 0);
+}
+
+String quoteAndEscapeNonPrintables(const String& s)
+{
+    Vector<UChar> result;
+    result.append('"');
+    for (unsigned i = 0; i != s.length(); ++i) {
+        UChar c = s[i];
+        if (c == '\\') {
+            result.append('\\');
+            result.append('\\');
+        } else if (c == '"') {
+            result.append('\\');
+            result.append('"');
+        } else if (c == '\n' || c == noBreakSpace)
+            result.append(' ');
+        else {
+            if (c >= 0x20 && c < 0x7F)
+                result.append(c);
+            else {
+                unsigned u = c;
+                String hex = String::format("\\x{%X}", u);
+                unsigned len = hex.length();
+                for (unsigned i = 0; i < len; ++i)
+                    result.append(hex[i]);
+            }
         }
     }
-    
+    result.append('"');
+    return String::adopt(result);
+}
+
+static TextStream &operator<<(TextStream& ts, const RenderObject& o)
+{
+    ts << o.renderName();
+
+    if (o.style() && o.style()->zIndex())
+        ts << " zI: " << o.style()->zIndex();
+
+    if (o.element()) {
+        String tagName = getTagName(o.element());
+        if (!tagName.isEmpty()) {
+            ts << " {" << tagName << "}";
+            // flag empty or unstyled AppleStyleSpan because we never
+            // want to leave them in the DOM
+            if (isEmptyOrUnstyledAppleStyleSpan(o.element()))
+                ts << " *empty or unstyled AppleStyleSpan*";
+        }
+    }
+
     IntRect r(o.xPos(), o.yPos(), o.width(), o.height());
     ts << " " << r;
-    
-    if (!o.isText()) {
+
+    if (!(o.isText() && !o.isBR())) {
         if (o.parent() && (o.parent()->style()->color() != o.style()->color()))
             ts << " [color=" << o.style()->color().name() << "]";
+
         if (o.parent() && (o.parent()->style()->backgroundColor() != o.style()->backgroundColor()) &&
             o.style()->backgroundColor().isValid() && o.style()->backgroundColor().rgb())
             // Do not dump invalid or transparent backgrounds, since that is the default.
             ts << " [bgcolor=" << o.style()->backgroundColor().name() << "]";
-    
+        
+        if (o.parent() && (o.parent()->style()->textFillColor() != o.style()->textFillColor()) &&
+            o.style()->textFillColor().isValid() && o.style()->textFillColor() != o.style()->color() &&
+            o.style()->textFillColor().rgb())
+            ts << " [textFillColor=" << o.style()->textFillColor().name() << "]";
+
+        if (o.parent() && (o.parent()->style()->textStrokeColor() != o.style()->textStrokeColor()) &&
+            o.style()->textStrokeColor().isValid() && o.style()->textStrokeColor() != o.style()->color() &&
+            o.style()->textStrokeColor().rgb())
+            ts << " [textStrokeColor=" << o.style()->textStrokeColor().name() << "]";
+
+        if (o.parent() && (o.parent()->style()->textStrokeWidth() != o.style()->textStrokeWidth()) &&
+            o.style()->textStrokeWidth() > 0)
+            ts << " [textStrokeWidth=" << o.style()->textStrokeWidth() << "]";
+
         if (o.borderTop() || o.borderRight() || o.borderBottom() || o.borderLeft()) {
             ts << " [border:";
-            
+
             BorderValue prevBorder;
             if (o.style()->borderTop() != prevBorder) {
                 prevBorder = o.style()->borderTop();
@@ -145,11 +225,12 @@ static TextStream &operator<<(TextStream &ts, const RenderObject &o)
                     ts << " (" << o.borderTop() << "px ";
                     printBorderStyle(ts, o, o.style()->borderTopStyle());
                     Color col = o.style()->borderTopColor();
-                    if (!col.isValid()) col = o.style()->color();
+                    if (!col.isValid())
+                        col = o.style()->color();
                     ts << col.name() << ")";
                 }
             }
-            
+
             if (o.style()->borderRight() != prevBorder) {
                 prevBorder = o.style()->borderRight();
                 if (!o.borderRight())
@@ -158,11 +239,12 @@ static TextStream &operator<<(TextStream &ts, const RenderObject &o)
                     ts << " (" << o.borderRight() << "px ";
                     printBorderStyle(ts, o, o.style()->borderRightStyle());
                     Color col = o.style()->borderRightColor();
-                    if (!col.isValid()) col = o.style()->color();
+                    if (!col.isValid())
+                        col = o.style()->color();
                     ts << col.name() << ")";
                 }
             }
-            
+
             if (o.style()->borderBottom() != prevBorder) {
                 prevBorder = o.style()->borderBottom();
                 if (!o.borderBottom())
@@ -171,61 +253,60 @@ static TextStream &operator<<(TextStream &ts, const RenderObject &o)
                     ts << " (" << o.borderBottom() << "px ";
                     printBorderStyle(ts, o, o.style()->borderBottomStyle());
                     Color col = o.style()->borderBottomColor();
-                    if (!col.isValid()) col = o.style()->color();
+                    if (!col.isValid())
+                        col = o.style()->color();
                     ts << col.name() << ")";
                 }
             }
-            
+
             if (o.style()->borderLeft() != prevBorder) {
                 prevBorder = o.style()->borderLeft();
                 if (!o.borderLeft())
                     ts << " none";
-                else {                    
+                else {
                     ts << " (" << o.borderLeft() << "px ";
                     printBorderStyle(ts, o, o.style()->borderLeftStyle());
                     Color col = o.style()->borderLeftColor();
-                    if (!col.isValid()) col = o.style()->color();
+                    if (!col.isValid())
+                        col = o.style()->color();
                     ts << col.name() << ")";
                 }
             }
-            
+
             ts << "]";
         }
     }
-    
+
     if (o.isTableCell()) {
         const RenderTableCell& c = static_cast<const RenderTableCell&>(o);
         ts << " [r=" << c.row() << " c=" << c.col() << " rs=" << c.rowSpan() << " cs=" << c.colSpan() << "]";
     }
 
-    return ts;
-}
-
-static String quoteAndEscapeNonPrintables(const String& s)
-{
-    DeprecatedString result;
-    result += '"';
-    for (unsigned i = 0; i != s.length(); ++i) {
-        UChar c = s[i];
-        if (c == '\\')
-            result += "\\\\";
-        else if (c == '"')
-            result += "\\\"";
-        else if (c == '\n' || c == 0x00A0)
-            result += ' ';
-        else {
-            if (c >= 0x20 && c < 0x7F)
-                result += c;
+    if (o.isListMarker()) {
+        String text = static_cast<const RenderListMarker&>(o).text();
+        if (!text.isEmpty()) {
+            if (text.length() != 1)
+                text = quoteAndEscapeNonPrintables(text);
             else {
-                DeprecatedString hex;
-                unsigned u = c;
-                hex.sprintf("\\x{%X}", u);
-                result += hex;
+                switch (text[0]) {
+                    case bullet:
+                        text = "bullet";
+                        break;
+                    case blackSquare:
+                        text = "black square";
+                        break;
+                    case whiteBullet:
+                        text = "white bullet";
+                        break;
+                    default:
+                        text = quoteAndEscapeNonPrintables(text);
+                }
             }
+            ts << ": " << text;
         }
     }
-    result += '"';
-    return result;
+
+    return ts;
 }
 
 static void writeTextRun(TextStream& ts, const RenderText& o, const InlineTextBox& run)
@@ -237,41 +318,52 @@ static void writeTextRun(TextStream& ts, const RenderText& o, const InlineTextBo
             ts << " override";
     }
     ts << ": "
-        << quoteAndEscapeNonPrintables(o.data().substring(run.m_start, run.m_len))
-        << "\n"; 
+        << quoteAndEscapeNonPrintables(String(o.text()).substring(run.m_start, run.m_len))
+        << "\n";
 }
 
-void write(TextStream &ts, const RenderObject &o, int indent)
+void write(TextStream& ts, const RenderObject& o, int indent)
 {
-#if SVG_SUPPORT
-    // FIXME:  A hackish way to doing our own "virtual" dispatch
+#if ENABLE(SVG)
     if (o.isRenderPath()) {
         write(ts, static_cast<const RenderPath&>(o), indent);
         return;
     }
-    if (o.isKCanvasContainer()) {
+    if (o.isSVGContainer()) {
         write(ts, static_cast<const RenderSVGContainer&>(o), indent);
         return;
     }
+    if (o.isSVGRoot()) {
+        write(ts, static_cast<const RenderSVGRoot&>(o), indent);
+        return;
+    }
+    if (o.isSVGText()) {
+        if (!o.isText())
+            write(ts, static_cast<const RenderSVGText&>(o), indent);
+        else
+            write(ts, static_cast<const RenderSVGInlineText&>(o), indent);
+        return;
+    }
 #endif
+
     writeIndent(ts, indent);
-    
+
     ts << o << "\n";
-    
+
     if (o.isText() && !o.isBR()) {
         const RenderText& text = static_cast<const RenderText&>(o);
         for (InlineTextBox* box = text.firstTextBox(); box; box = box->nextTextBox()) {
-            writeIndent(ts, indent+1);
+            writeIndent(ts, indent + 1);
             writeTextRun(ts, text, *box);
         }
     }
 
     for (RenderObject* child = o.firstChild(); child; child = child->nextSibling()) {
-        if (child->layer())
+        if (child->hasLayer())
             continue;
         write(ts, *child, indent + 1);
     }
-    
+
     if (o.isWidget()) {
         Widget* widget = static_cast<const RenderWidget&>(o).widget();
         if (widget && widget->isFrameView()) {
@@ -281,20 +373,37 @@ void write(TextStream &ts, const RenderObject &o, int indent)
                 view->layout();
                 RenderLayer* l = root->layer();
                 if (l)
-                    writeLayers(ts, l, l, IntRect(l->xPos(), l->yPos(), l->width(), l->height()), indent+1);
+                    writeLayers(ts, l, l, IntRect(l->xPos(), l->yPos(), l->width(), l->height()), indent + 1);
             }
         }
     }
 }
 
-static void write(TextStream &ts, RenderLayer &l,
+static void write(TextStream& ts, RenderLayer& l,
                   const IntRect& layerBounds, const IntRect& backgroundClipRect, const IntRect& clipRect, const IntRect& outlineClipRect,
                   int layerType = 0, int indent = 0)
 {
     writeIndent(ts, indent);
-    
-    ts << "layer";
-    ts << " " << layerBounds;
+
+#ifdef SHOW_LAYER_NESTING
+    ts << "layer " << (void*)&l << " " << layerBounds << " renderer x=" << l.renderer()->xPos() << ", y=" << l.renderer()->yPos()
+       << (l.isStackingContext() ? " (stacking context)" : "");
+
+#ifdef SHOW_LAYER_NESTING
+    if (l.forcedCompositingLayer())
+        ts << " (forced compositing)";
+    else if (l.requiresCompositingLayer()) 
+        ts << " (compositing)";
+
+    if (l.renderer()->hasOverflowClip() || l.renderer()->hasClip())
+        ts << " (clipping)";
+
+    if (l.hasCompositingLayer())
+        ts << " (LCLayer " << l.compositingLayer() << ")";
+#endif
+#else
+    ts << "layer " << layerBounds;
+#endif
 
     if (!layerBounds.isEmpty()) {
         if (!backgroundClipRect.contains(layerBounds))
@@ -320,32 +429,47 @@ static void write(TextStream &ts, RenderLayer &l,
         ts << " layerType: background only";
     else if (layerType == 1)
         ts << " layerType: foreground only";
+
+#ifdef SHOW_LAYER_NESTING
+    if (l.renderer()) {
+        ts << " " << l.renderer()->renderName();
+    }
+#endif
     
     ts << "\n";
 
     if (layerType != -1)
         write(ts, *l.renderer(), indent + 1);
 }
-    
-static void writeLayers(TextStream &ts, const RenderLayer* rootLayer, RenderLayer* l,
+
+static void writeLayers(TextStream& ts, const RenderLayer* rootLayer, RenderLayer* l,
                         const IntRect& paintDirtyRect, int indent)
 {
     // Calculate the clip rects we should use.
     IntRect layerBounds, damageRect, clipRectToApply, outlineRect;
-    l->calculateRects(rootLayer, paintDirtyRect, layerBounds, damageRect, clipRectToApply, outlineRect);
-    
+    l->calculateRects(rootLayer, rootLayer, paintDirtyRect, layerBounds, damageRect, clipRectToApply, outlineRect);
+
     // Ensure our lists are up-to-date.
     l->updateZOrderLists();
     l->updateOverflowList();
-    
-    bool shouldPaint = l->intersectsDamageRect(layerBounds, damageRect);
+
+    bool shouldPaint = l->intersectsDamageRect(layerBounds, damageRect, rootLayer);
+#ifdef SHOW_LAYER_NESTING
+    shouldPaint = true;
+#endif
     Vector<RenderLayer*>* negList = l->negZOrderList();
     if (shouldPaint && negList && negList->size() > 0)
         write(ts, *l, layerBounds, damageRect, clipRectToApply, outlineRect, -1, indent);
 
     if (negList) {
+        int curIndent = indent;
+#ifdef SHOW_LAYER_NESTING
+        writeIndent(ts, indent);
+        ts << "-ve z-index list(" << negList->size() << ")\n";
+        ++curIndent;
+#endif
         for (unsigned i = 0; i != negList->size(); ++i)
-            writeLayers(ts, rootLayer, negList->at(i), paintDirtyRect, indent);
+            writeLayers(ts, rootLayer, negList->at(i), paintDirtyRect, curIndent);
     }
 
     if (shouldPaint)
@@ -353,30 +477,42 @@ static void writeLayers(TextStream &ts, const RenderLayer* rootLayer, RenderLaye
 
     Vector<RenderLayer*>* overflowList = l->overflowList();
     if (overflowList) {
+        int curIndent = indent;
+#ifdef SHOW_LAYER_NESTING
+        writeIndent(ts, indent);
+        ts << "overflow list(" << overflowList->size() << ")\n";
+        ++curIndent;
+#endif
         for (unsigned i = 0; i != overflowList->size(); ++i)
-            writeLayers(ts, rootLayer, overflowList->at(i), paintDirtyRect, indent);
+            writeLayers(ts, rootLayer, overflowList->at(i), paintDirtyRect, curIndent);
     }
 
     Vector<RenderLayer*>* posList = l->posZOrderList();
     if (posList) {
+        int curIndent = indent;
+#ifdef SHOW_LAYER_NESTING
+        writeIndent(ts, indent);
+        ts << "+ve z-index list (" << posList->size() << ")\n";
+        ++curIndent;
+#endif
         for (unsigned i = 0; i != posList->size(); ++i)
-            writeLayers(ts, rootLayer, posList->at(i), paintDirtyRect, indent);
+            writeLayers(ts, rootLayer, posList->at(i), paintDirtyRect, curIndent);
     }
 }
 
-static DeprecatedString nodePosition(Node *node)
+static String nodePosition(Node* node)
 {
-    DeprecatedString result;
+    String result;
 
-    Node *p;
-    for (Node *n = node; n; n = p) {
-        p = n->parentNode();
-        if (!p)
-            p = n->shadowParentNode();
+    Node* parent;
+    for (Node* n = node; n; n = parent) {
+        parent = n->parentNode();
+        if (!parent)
+            parent = n->shadowParentNode();
         if (n != node)
             result += " of ";
-        if (p)
-            result += "child " + DeprecatedString::number(n->nodeIndex()) + " {" + getTagName(n) + "}";
+        if (parent)
+            result += "child " + String::number(n->nodeIndex()) + " {" + getTagName(n) + "}";
         else
             result += "document";
     }
@@ -384,48 +520,55 @@ static DeprecatedString nodePosition(Node *node)
     return result;
 }
 
-static void writeSelection(TextStream &ts, const RenderObject *o)
+static void writeSelection(TextStream& ts, const RenderObject* o)
 {
-    Node *n = o->element();
+    Node* n = o->element();
     if (!n || !n->isDocumentNode())
         return;
 
-    Document *doc = static_cast<Document*>(n);
-    Frame *frame = doc->frame();
+    Document* doc = static_cast<Document*>(n);
+    Frame* frame = doc->frame();
     if (!frame)
         return;
 
-    SelectionController selection = frame->selection();
+    Selection selection = frame->selectionController()->selection();
     if (selection.isCaret()) {
         ts << "caret: position " << selection.start().offset() << " of " << nodePosition(selection.start().node());
         if (selection.affinity() == UPSTREAM)
             ts << " (upstream affinity)";
-        ts << "\n"; 
-    } else if (selection.isRange()) {
+        ts << "\n";
+    } else if (selection.isRange())
         ts << "selection start: position " << selection.start().offset() << " of " << nodePosition(selection.start().node()) << "\n"
-           << "selection end:   position " << selection.end().offset() << " of " << nodePosition(selection.end().node()) << "\n"; 
-    }
+           << "selection end:   position " << selection.end().offset() << " of " << nodePosition(selection.end().node()) << "\n";
 }
 
 DeprecatedString externalRepresentation(RenderObject* o)
 {
-    JSEditor::setSupportsPasteCommand(true);
-
     DeprecatedString s;
     if (o) {
         TextStream ts(&s);
-#if SVG_SUPPORT
         ts.precision(2);
+#if ENABLE(SVG)
         writeRenderResources(ts, o->document());
 #endif
-        o->view()->frameView()->layout();
+        if (o->view()->frameView())
+            ; // o->view()->frameView()->layout();
         RenderLayer* l = o->layer();
         if (l) {
             writeLayers(ts, l, l, IntRect(l->xPos(), l->yPos(), l->width(), l->height()));
             writeSelection(ts, o);
+#ifdef SHOW_LAYER_NESTING
+            ts << "\n===================\n";
+            RenderView *rv = o->view();
+            LCLayer *rootLayer = rv->rootCompositingLayer();
+    
+            if (rootLayer) {
+                rootLayer->dumpLayer(ts, 0);
+            }
+#endif
         }
     }
     return s;
 }
 
-}
+} // namespace WebCore

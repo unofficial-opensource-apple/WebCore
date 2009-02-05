@@ -14,12 +14,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FRAME_TREE_H
-#define FRAME_TREE_H
+#ifndef FrameTree_h
+#define FrameTree_h
 
 #include "AtomicString.h"
 
@@ -50,8 +50,8 @@ namespace WebCore {
         Frame* lastChild() const { return m_lastChild; }
         unsigned childCount() const { return m_childCount; }
 
-        bool isDescendantOf(Frame* ancestor) const;
-        Frame* traverseNext(Frame* stayWithin = 0) const;
+        bool isDescendantOf(const Frame* ancestor) const;
+        Frame* traverseNext(const Frame* stayWithin = 0) const;
         Frame* traverseNextWithWrap(bool) const;
         Frame* traversePreviousWithWrap(bool) const;
         
@@ -63,6 +63,8 @@ namespace WebCore {
         Frame* find(const AtomicString& name) const;
 
         AtomicString uniqueChildName(const AtomicString& requestedName) const;
+
+        Frame* top() const;
 
     private:
         Frame* deepLastChild() const;
@@ -82,4 +84,4 @@ namespace WebCore {
 
 } // namespace WebCore
 
-#endif // FRAME_TREE_H
+#endif // FrameTree_h

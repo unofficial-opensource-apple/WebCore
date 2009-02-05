@@ -26,10 +26,23 @@
 #include "config.h"
 #include "SharedTimer.h"
 
+#include "Page.h"
 #include "SystemTime.h"
 #include "Widget.h"
 #include <wtf/Assertions.h>
+
+// Note: wx headers set defines that affect the configuration of windows.h
+// so we must include the wx header first to get unicode versions of functions,
+// etc.
+#if PLATFORM(WX)
+#include <wx/wx.h>
+#endif
+
 #include <windows.h>
+
+#if PLATFORM(WIN)
+#include "PluginView.h"
+#endif
 
 namespace WebCore {
 
@@ -39,10 +52,27 @@ static void (*sharedTimerFiredFunction)();
 static HWND timerWindowHandle = 0;
 static UINT timerFiredMessage = 0;
 const LPCWSTR kTimerWindowClassName = L"TimerWindowClass";
+static bool processingCustomTimerMessage = false;
+const int sharedTimerID = 1000;
 
 LRESULT CALLBACK TimerWindowWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    if (message == timerFiredMessage)
+#if PLATFORM(WIN)
+    // Windows Media Player has a modal message loop that will deliver messages
+    // to us at inappropriate times and we will crash if we handle them when
+    // they are delivered. We repost all messages so that we will get to handle
+    // them once the modal loop exits.
+    if (PluginView::isCallingPlugin()) {
+        PostMessage(hWnd, message, wParam, lParam);
+        return 0;
+    }
+#endif
+
+    if (message == timerFiredMessage) {
+        processingCustomTimerMessage = true;
+        sharedTimerFiredFunction();
+        processingCustomTimerMessage = false;
+    } else if (message == WM_TIMER && wParam == sharedTimerID)
         sharedTimerFiredFunction();
     else
         return DefWindowProc(hWnd, message, wParam, lParam);
@@ -58,23 +88,18 @@ static void initializeOffScreenTimerWindow()
     memset(&wcex, 0, sizeof(WNDCLASSEX));
     wcex.cbSize = sizeof(WNDCLASSEX);
     wcex.lpfnWndProc    = TimerWindowWndProc;
-    wcex.hInstance      = Widget::instanceHandle;
+    wcex.hInstance      = Page::instanceHandle();
     wcex.lpszClassName  = kTimerWindowClassName;
     RegisterClassEx(&wcex);
 
     timerWindowHandle = CreateWindow(kTimerWindowClassName, 0, 0,
-       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, HWND_MESSAGE, 0, Widget::instanceHandle, 0);
+       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, HWND_MESSAGE, 0, Page::instanceHandle(), 0);
     timerFiredMessage = RegisterWindowMessage(L"com.apple.WebKit.TimerFired");
 }
 
 void setSharedTimerFiredFunction(void (*f)())
 {
     sharedTimerFiredFunction = f;
-}
-
-static void CALLBACK timerFired(HWND, UINT, UINT_PTR, DWORD)
-{
-    sharedTimerFiredFunction();
 }
 
 void setSharedTimerFireTime(double fireTime)
@@ -93,17 +118,23 @@ void setSharedTimerFireTime(double fireTime)
             intervalInMS = (unsigned)interval;
     }
 
-    if (timerID)
+    if (timerID) {
         KillTimer(0, timerID);
-
-    if (intervalInMS == 0) {
         timerID = 0;
+    }
+
+    // We don't allow nested PostMessages, since the custom messages will effectively starve
+    // painting and user input. (Win32 has a tri-level queue with application messages > 
+    // user input > WM_PAINT/WM_TIMER.)
+    // In addition, if the queue contains input events that have been there since the last call to
+    // GetQueueStatus, PeekMessage or GetMessage we favor timers.
+    initializeOffScreenTimerWindow();
+    if (intervalInMS < USER_TIMER_MINIMUM && !processingCustomTimerMessage && 
+        !LOWORD(::GetQueueStatus(QS_ALLINPUT))) {
         // Windows SetTimer does not allow timeouts smaller than 10ms (USER_TIMER_MINIMUM)
-        initializeOffScreenTimerWindow();
         PostMessage(timerWindowHandle, timerFiredMessage, 0, 0);
     } else
-        // FIXME: 1-9ms timeouts may fire too late.
-        timerID = SetTimer(0, 0, intervalInMS, timerFired);
+        timerID = SetTimer(timerWindowHandle, sharedTimerID, intervalInMS, 0);
 }
 
 void stopSharedTimer()

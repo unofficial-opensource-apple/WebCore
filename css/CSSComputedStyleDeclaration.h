@@ -1,5 +1,4 @@
 /**
- * CSSComputedStyleDeclaration.h
  *
  * Copyright (C)  2004  Zack Rusin <zack@kde.org>
  * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
@@ -16,12 +15,12 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
- * 02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301  USA
  */
 
-#ifndef CSS_COMPUTEDSTYLE_H
-#define CSS_COMPUTEDSTYLE_H
+#ifndef CSSComputedStyleDeclaration_h
+#define CSSComputedStyleDeclaration_h
 
 #include "CSSStyleDeclaration.h"
 #include "Node.h"
@@ -49,23 +48,31 @@ public:
     virtual String getPropertyValue(int propertyID) const;
     virtual bool getPropertyPriority(int propertyID) const;
     virtual int getPropertyShorthand(int propertyID) const { return -1; }
-    virtual bool isPropertyImplicit(int propertyID) const { return true; }
+    virtual bool isPropertyImplicit(int propertyID) const { return false; }
 
     virtual PassRefPtr<CSSMutableStyleDeclaration> copy() const;
     virtual PassRefPtr<CSSMutableStyleDeclaration> makeMutable();
 
     PassRefPtr<CSSValue> getPropertyCSSValue(int propertyID, EUpdateLayout) const;
+#if ENABLE(SVG)
+    PassRefPtr<CSSValue> getSVGPropertyCSSValue(int propertyID, EUpdateLayout) const;
+#endif
 
     PassRefPtr<CSSMutableStyleDeclaration> copyInheritableProperties() const;
 
+    static void removeComputedInheritablePropertiesFrom(CSSMutableStyleDeclaration*);
+
 private:
     virtual void setCssText(const String&, ExceptionCode&);
+
     virtual String removeProperty(int propertyID, ExceptionCode&);
     virtual void setProperty(int propertyId, const String& value, bool important, ExceptionCode&);
 
     RefPtr<Node> m_node;
 };
 
-}
+PassRefPtr<CSSComputedStyleDeclaration> computedStyle(Node*);
 
-#endif
+} // namespace WebCore
+
+#endif // CSSComputedStyleDeclaration_h

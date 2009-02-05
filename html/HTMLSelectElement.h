@@ -1,10 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,18 +16,17 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTML_HTMLSelectElementImpl_H
-#define HTML_HTMLSelectElementImpl_H
+#ifndef HTMLSelectElement_h
+#define HTMLSelectElement_h
 
 #include "Event.h"
-#include "HTMLGenericFormElement.h"
 #include "HTMLCollection.h"
-#include "RenderStyle.h"
+#include "HTMLGenericFormElement.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -38,33 +35,35 @@ class HTMLOptionElement;
 class HTMLOptionsCollection;
 class KeyboardEvent;
 
-class HTMLSelectElement : public HTMLGenericFormElement {
-
+class HTMLSelectElement : public HTMLFormControlElementWithState {
 public:
     HTMLSelectElement(Document*, HTMLFormElement* = 0);
     HTMLSelectElement(const QualifiedName& tagName, Document*, HTMLFormElement* = 0);
-    ~HTMLSelectElement();
 
     virtual int tagPriority() const { return 6; }
     virtual bool checkDTD(const Node* newChild);
 
     virtual const AtomicString& type() const;
-
-    virtual bool isKeyboardFocusable() const;
+    
+    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
     virtual bool isMouseFocusable() const;
+    virtual bool canSelectAll() const;
+    virtual void selectAll();
 
     virtual void recalcStyle(StyleChange);
 
+    virtual void dispatchFocusEvent();
     virtual void dispatchBlurEvent();
+    
+    virtual bool canStartSelection() const { return false; }
 
     int selectedIndex() const;
     void setSelectedIndex(int index, bool deselect = true, bool fireOnChange = false);
-    void notifyOptionSelected(HTMLOptionElement* selectedOption, bool selected);
     int lastSelectedListIndex() const;
 
     virtual bool isEnumeratable() const { return true; }
 
-    int length() const;
+    unsigned length() const;
 
     int minWidth() const { return m_minwidth; }
 
@@ -80,16 +79,15 @@ public:
     
     PassRefPtr<HTMLOptionsCollection> options();
 
-    virtual String stateValue() const;
+    virtual bool saveState(String& value) const;
     virtual void restoreState(const String&);
 
     virtual bool insertBefore(PassRefPtr<Node> newChild, Node* refChild, ExceptionCode&);
     virtual bool replaceChild(PassRefPtr<Node> newChild, Node* oldChild, ExceptionCode&);
     virtual bool removeChild(Node* child, ExceptionCode&);
     virtual bool appendChild(PassRefPtr<Node> newChild, ExceptionCode&);
-    virtual ContainerNode* addChild(PassRefPtr<Node>);
-
-    virtual void childrenChanged();
+    virtual bool removeChildren();
+    virtual void childrenChanged(bool changedByParser = false);
 
     virtual void parseMappedAttribute(MappedAttribute*);
 
@@ -107,6 +105,8 @@ public:
     {
         if (m_recalcListItems)
             recalcListItems();
+        else
+            checkListItems();
         return m_listItems;
     }
     virtual void reset();
@@ -121,7 +121,8 @@ public:
     void setOption(unsigned index, HTMLOptionElement*, ExceptionCode&);
     void setLength(unsigned, ExceptionCode&);
 
-    virtual Node* namedItem(const String& name, bool caseSensitive = true);
+    Node* namedItem(const String& name, bool caseSensitive = true);
+    Node* item(unsigned index);
 
     HTMLCollection::CollectionInfo* collectionInfo() { return &m_collectionInfo; }
     
@@ -129,18 +130,27 @@ public:
     void setActiveSelectionEndIndex(int index) { m_activeSelectionEndIndex = index; }
     void updateListBoxSelection(bool deselectOtherOptions);
     void listBoxOnChange();
+    void menuListOnChange();
+    
+    int activeSelectionStartListIndex() const;
+    int activeSelectionEndListIndex() const;
+    
+    void scrollToSelection();
 
     virtual bool willRespondToMouseClickEvents();
 
 private:
-    void recalcListItems() const;
+    void recalcListItems(bool updateSelectedStates = true) const;
+    void checkListItems() const;
+
     void deselectItems(HTMLOptionElement* excludeElement = 0);
-    bool usesMenuList() const { return true; }
+    bool usesMenuList() const { return !m_multiple; }
     int nextSelectableListIndex(int startIndex);
     int previousSelectableListIndex(int startIndex);
     void menuListDefaultEventHandler(Event*);
     void listBoxDefaultEventHandler(Event*);
     void typeAheadFind(KeyboardEvent*);
+    void saveLastSelection();
 
     mutable Vector<HTMLElement*> m_listItems;
     Vector<bool> m_cachedStateForActiveSelection;
@@ -149,10 +159,10 @@ private:
     int m_size;
     bool m_multiple;
     mutable bool m_recalcListItems;
-    int m_lastOnChangeIndex;
-    
+    mutable int m_lastOnChangeIndex;
+
     int m_activeSelectionAnchorIndex;
-    int m_activeSelectionEndIndex;  
+    int m_activeSelectionEndIndex;
     bool m_activeSelectionState;
 
     // Instance variables for type-ahead find
@@ -162,6 +172,14 @@ private:
 
     HTMLCollection::CollectionInfo m_collectionInfo;
 };
+
+#ifdef NDEBUG
+
+inline void HTMLSelectElement::checkListItems() const
+{
+}
+
+#endif
 
 } // namespace
 

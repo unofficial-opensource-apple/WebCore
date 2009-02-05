@@ -26,16 +26,19 @@
 #include "config.h"
 #include "InsertTextCommand.h"
 
+#include "CharacterNames.h"
 #include "CSSMutableStyleDeclaration.h"
 #include "CSSComputedStyleDeclaration.h"
 #include "Document.h"
 #include "Element.h"
 #include "EditingText.h"
+#include "Editor.h"
 #include "Frame.h"
 #include "Logging.h"
 #include "HTMLInterchange.h"
 #include "htmlediting.h"
 #include "TextIterator.h"
+#include "TypingCommand.h"
 #include "visible_units.h"
 
 namespace WebCore {
@@ -49,27 +52,21 @@ void InsertTextCommand::doApply()
 {
 }
 
-Position InsertTextCommand::prepareForTextInsertion(const Position& pos)
+Position InsertTextCommand::prepareForTextInsertion(const Position& p)
 {
+    Position pos = p;
+    // If an anchor was removed and the selection hasn't changed, we restore it.
+    RefPtr<Node> anchor = document()->frame()->editor()->removedAnchor();
+    if (anchor) {
+        insertNodeAt(anchor.get(), pos);
+        document()->frame()->editor()->setRemovedAnchor(0);
+        pos = Position(anchor.get(), 0);
+    }
     // Prepare for text input by looking at the specified position.
     // It may be necessary to insert a text node to receive characters.
-    // FIXME: What is the rootEditable() check about?  Seems like it
-    // assumes that the content before (or after) pos.node() is editable
-    // (i.e. pos is at an editable/non-editable boundary).  That seems
-    // like a bad assumption.
     if (!pos.node()->isTextNode()) {
         RefPtr<Node> textNode = document()->createEditingTextNode("");
-
-        // Now insert the node in the right place
-        if (pos.node()->rootEditableElement() != NULL) {
-            insertNodeAt(textNode.get(), pos.node(), pos.offset());
-        } else if (pos.node()->caretMinOffset() == pos.offset()) {
-            insertNodeBefore(textNode.get(), pos.node());
-        } else if (pos.node()->caretMaxOffset() == pos.offset()) {
-            insertNodeAfter(textNode.get(), pos.node());
-        } else
-            ASSERT_NOT_REACHED();
-        
+        insertNodeAt(textNode.get(), pos);
         return Position(textNode.get(), 0);
     }
 
@@ -82,36 +79,90 @@ Position InsertTextCommand::prepareForTextInsertion(const Position& pos)
     return pos;
 }
 
-void InsertTextCommand::input(const String &text, bool selectInsertedText)
+// This avoids the expense of a full fledged delete operation, and avoids a layout that typically results
+// from text removal.
+bool InsertTextCommand::performTrivialReplace(const String& text, bool selectInsertedText)
 {
-    assert(text.find('\n') == -1);
+    if (!endingSelection().isRange())
+        return false;
+    
+    if (text.contains('\t') || text.contains(' ') || text.contains('\n'))
+        return false;
+    
+    Position start = endingSelection().start();
+    Position end = endingSelection().end();
+    
+    if (start.node() != end.node() || !start.node()->isTextNode() || isTabSpanTextNode(start.node()))
+        return false;
+        
+    replaceTextInNode(static_cast<Text*>(start.node()), start.offset(), end.offset() - start.offset(), text);
+    
+    Position endPosition(start.node(), start.offset() + text.length());
+    
+    // We could have inserted a part of composed character sequence,
+    // so we are basically treating ending selection as a range to avoid validation.
+    // <http://bugs.webkit.org/show_bug.cgi?id=15781>
+    Selection forcedEndingSelection;
+    forcedEndingSelection.setWithoutValidation(start, endPosition);
+    setEndingSelection(forcedEndingSelection);
+    
+    if (!selectInsertedText)
+        setEndingSelection(Selection(endingSelection().visibleEnd()));
+    
+    return true;
+}
+
+void InsertTextCommand::input(const String& originalText, bool selectInsertedText)
+{
+    String text = originalText;
+    
+    ASSERT(text.find('\n') == -1);
 
     if (endingSelection().isNone())
         return;
+        
+    if (RenderObject* renderer = endingSelection().start().node()->renderer())
+        if (renderer->style()->collapseWhiteSpace())
+            // Turn all spaces into non breaking spaces, to make sure that they are treated
+            // literally, and aren't collapsed after insertion. They will be rebalanced 
+            // (turned into a sequence of regular and non breaking spaces) below.
+            text.replace(' ', noBreakSpace);
     
     // Delete the current selection.
-    if (endingSelection().isRange())
-        deleteSelection(false, true, true);
+    // FIXME: This delete operation blows away the typing style.
+    if (endingSelection().isRange()) {
+        if (performTrivialReplace(text, selectInsertedText))
+            return;
+        deleteSelection(false, true, true, false);
+    }
     
     // Insert the character at the leftmost candidate.
     Position startPosition = endingSelection().start().upstream();
+    // It is possible for the node that contains startPosition to contain only unrendered whitespace,
+    // and so deleteInsignificantText could remove it.  Save the position before the node in case that happens.
+    Position positionBeforeStartNode(positionBeforeNode(startPosition.node()));
     deleteInsignificantText(startPosition.upstream(), startPosition.downstream());
-    if (!startPosition.inRenderedContent())
+    if (!startPosition.node()->inDocument())
+        startPosition = positionBeforeStartNode;
+    if (!startPosition.isCandidate())
         startPosition = startPosition.downstream();
-        
-    startPosition = positionAvoidingSpecialElementBoundary(startPosition);
+    
+    // FIXME: This typing around anchor behavior doesn't exactly match TextEdit.  In TextEdit,
+    // you won't be placed inside a link when typing after it if you've just placed the caret
+    // there with the mouse.
+    startPosition = positionAvoidingSpecialElementBoundary(startPosition, false);
     
     Position endPosition;
     
     if (text == "\t") {
         endPosition = insertTab(startPosition);
         startPosition = endPosition.previous();
-        removeBlockPlaceholder(VisiblePosition(startPosition));
+        removePlaceholderAt(VisiblePosition(startPosition));
         m_charactersAdded += 1;
     } else {
         // Make sure the document is set up to receive text
         startPosition = prepareForTextInsertion(startPosition);
-        removeBlockPlaceholder(VisiblePosition(startPosition));
+        removePlaceholderAt(VisiblePosition(startPosition));
         Text *textNode = static_cast<Text *>(startPosition.node());
         int offset = startPosition.offset();
 
@@ -121,13 +172,18 @@ void InsertTextCommand::input(const String &text, bool selectInsertedText)
         // The insertion may require adjusting adjacent whitespace, if it is present.
         rebalanceWhitespaceAt(endPosition);
         // Rebalancing on both sides isn't necessary if we've inserted a space.
-        if (text != " ") 
+        if (originalText != " ") 
             rebalanceWhitespaceAt(startPosition);
             
         m_charactersAdded += text.length();
     }
 
-    setEndingSelection(Selection(startPosition, endPosition, DOWNSTREAM));
+    // We could have inserted a part of composed character sequence,
+    // so we are basically treating ending selection as a range to avoid validation.
+    // <http://bugs.webkit.org/show_bug.cgi?id=15781>
+    Selection forcedEndingSelection;
+    forcedEndingSelection.setWithoutValidation(startPosition, endPosition);
+    setEndingSelection(forcedEndingSelection);
 
     // Handle the case where there is a typing style.
     // FIXME: Improve typing style.
@@ -139,10 +195,10 @@ void InsertTextCommand::input(const String &text, bool selectInsertedText)
         applyStyle(typingStyle);
 
     if (!selectInsertedText)
-        setEndingSelection(endingSelection().end(), endingSelection().affinity());
+        setEndingSelection(Selection(endingSelection().end(), endingSelection().affinity()));
 }
 
-Position InsertTextCommand::insertTab(Position pos)
+Position InsertTextCommand::insertTab(const Position& pos)
 {
     Position insertPos = VisiblePosition(pos, DOWNSTREAM).deepEquivalent();
         
@@ -160,7 +216,7 @@ Position InsertTextCommand::insertTab(Position pos)
     
     // place it
     if (!node->isTextNode()) {
-        insertNodeAt(spanNode.get(), node, offset);
+        insertNodeAt(spanNode.get(), insertPos);
     } else {
         Text *textNode = static_cast<Text *>(node);
         if (offset >= textNode->length()) {
@@ -177,7 +233,7 @@ Position InsertTextCommand::insertTab(Position pos)
     }
     
     // return the position following the new tab
-    return Position(spanNode->lastChild(), spanNode->lastChild()->caretMaxOffset());
+    return Position(spanNode->lastChild(), caretMaxOffset(spanNode->lastChild()));
 }
 
 bool InsertTextCommand::isInsertTextCommand() const

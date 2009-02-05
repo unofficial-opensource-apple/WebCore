@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,68 +36,37 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-RenderHTMLCanvas::RenderHTMLCanvas(Node* n)
-    : RenderReplaced(n)
+RenderHTMLCanvas::RenderHTMLCanvas(HTMLCanvasElement* element)
+    : RenderReplaced(element, element->size())
 {
 }
 
-const char* RenderHTMLCanvas::renderName() const
+void RenderHTMLCanvas::paintReplaced(PaintInfo& paintInfo, int tx, int ty)
 {
-    return "RenderHTMLCanvas";
+    IntRect rect = contentBox();
+    rect.move(tx, ty);
+    static_cast<HTMLCanvasElement*>(node())->paint(paintInfo.context, rect);
 }
 
-void RenderHTMLCanvas::paint(PaintInfo& i, int tx, int ty)
+void RenderHTMLCanvas::canvasSizeChanged()
 {
-    if (!shouldPaint(i, tx, ty))
+    IntSize size = static_cast<HTMLCanvasElement*>(node())->size();
+    if (size == intrinsicSize())
         return;
 
-    int x = tx + m_x;
-    int y = ty + m_y;
+    setIntrinsicSize(size);
 
-    if (shouldPaintBackgroundOrBorder() && (i.phase == PaintPhaseForeground || i.phase == PaintPhaseSelection)) 
-        paintBoxDecorations(i, x, y);
+    if (!prefWidthsDirty())
+        setPrefWidthsDirty(true);
 
-    if ((i.phase == PaintPhaseOutline || i.phase == PaintPhaseSelfOutline) && style()->outlineWidth() && style()->visibility() == VISIBLE)
-        paintOutline(i.p, x, y, width(), height(), style());
-    
-    if (i.phase != PaintPhaseForeground && i.phase != PaintPhaseSelection)
-        return;
-
-    if (!shouldPaintWithinRoot(i))
-        return;
-
-    bool drawSelectionTint = selectionState() != SelectionNone && !document()->printing();
-    if (i.phase == PaintPhaseSelection) {
-        if (selectionState() == SelectionNone)
-            return;
-        drawSelectionTint = false;
-    }
-
-    if (element() && element()->hasTagName(canvasTag))
-        static_cast<HTMLCanvasElement*>(element())->paint(i.p,
-            IntRect(x + borderLeft() + paddingLeft(), y + borderTop() + paddingTop(), contentWidth(), contentHeight()));
-
-    if (drawSelectionTint)
-        i.p->fillRect(selectionRect(), selectionBackgroundColor());
-}
-
-void RenderHTMLCanvas::layout()
-{
-    ASSERT(needsLayout());
-    ASSERT(minMaxKnown());
-
-    IntRect oldBounds;
-    bool checkForRepaint = checkForRepaintDuringLayout();
-    if (checkForRepaint) {
-        oldBounds = getAbsoluteRepaintRect();
-        oldBounds.move(view()->layoutDelta());
-    }
+    IntSize oldSize = IntSize(m_width, m_height);
     calcWidth();
     calcHeight();
-    if (checkForRepaint)
-        repaintAfterLayoutIfNeeded(oldBounds, oldBounds);
+    if (oldSize == IntSize(m_width, m_height))
+        return;
 
-    setNeedsLayout(false);
+    if (!selfNeedsLayout())
+        setNeedsLayout(true);
 }
 
-}
+} // namespace WebCore

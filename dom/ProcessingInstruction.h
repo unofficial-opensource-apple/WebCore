@@ -16,13 +16,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef ProcessingInstruction_H
-#define ProcessingInstruction_H
+#ifndef ProcessingInstruction_h
+#define ProcessingInstruction_h
 
 #include "CachedResourceClient.h"
 #include "ContainerNode.h"
@@ -30,6 +30,7 @@
 namespace WebCore {
 
 class StyleSheet;
+class CSSStyleSheet;
 
 class ProcessingInstruction : public ContainerNode, private CachedResourceClient
 {
@@ -39,8 +40,8 @@ public:
     virtual ~ProcessingInstruction();
 
     // DOM methods & attributes for Notation
-    String target() const { return m_target.get(); }
-    String data() const { return m_data.get(); }
+    String target() const { return m_target; }
+    String data() const { return m_data; }
     void setData(const String&, ExceptionCode&);
 
     virtual String nodeName() const;
@@ -50,29 +51,35 @@ public:
     virtual PassRefPtr<Node> cloneNode(bool deep);
     virtual bool childTypeAllowed(NodeType);
     virtual bool offsetInCharacters() const;
+    virtual int maxCharacterOffset() const;
 
     // Other methods (not part of DOM)
-    String localHref() const { return m_localHref.get(); }
+    String localHref() const { return m_localHref; }
     StyleSheet* sheet() const { return m_sheet.get(); }
     bool checkStyleSheet();
-    virtual void setStyleSheet(const String& URL, const String& sheet);
-    void setStyleSheet(StyleSheet*);
+    virtual void setCSSStyleSheet(const String& url, const String& charset, const String& sheet);
+#if ENABLE(XSLT)
+    virtual void setXSLStyleSheet(const String& url, const String& sheet);
+#endif
+    void setCSSStyleSheet(CSSStyleSheet*);
     bool isLoading() const;
-    void sheetLoaded();
+    virtual bool sheetLoaded();
     virtual String toString() const;
 
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
     bool isXSL() const { return m_isXSL; }
 #endif
 
 private:
-    RefPtr<StringImpl> m_target;
-    RefPtr<StringImpl> m_data;
-    RefPtr<StringImpl> m_localHref;
+    void parseStyleSheet(const String& sheet);
+
+    String m_target;
+    String m_data;
+    String m_localHref;
     CachedResource* m_cachedSheet;
     RefPtr<StyleSheet> m_sheet;
     bool m_loading;
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
     bool m_isXSL;
 #endif
 };

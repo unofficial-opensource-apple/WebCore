@@ -16,12 +16,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSQuirkPrimitiveValue_H
-#define CSSQuirkPrimitiveValue_H
+#ifndef CSSQuirkPrimitiveValue_h
+#define CSSQuirkPrimitiveValue_h
 
 #include "CSSPrimitiveValue.h"
 
@@ -31,15 +31,16 @@ namespace WebCore {
 // The basic idea is that a stylesheet can use the value __qem (for quirky em) instead of em
 // in a stylesheet.  When the quirky value is used, if you're in quirks mode, the margin will
 // collapse away inside a table cell.
-class CSSQuirkPrimitiveValue : public CSSPrimitiveValue
-{
+class CSSQuirkPrimitiveValue : public CSSPrimitiveValue {
 public:
     CSSQuirkPrimitiveValue(double num, UnitTypes type)
-        : CSSPrimitiveValue(num, type) {}
+        : CSSPrimitiveValue(num, type)
+    {
+    }
 
     virtual bool isQuirkValue() { return true; }
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSQuirkPrimitiveValue_h

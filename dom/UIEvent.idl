@@ -13,19 +13,26 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 module events {
 
     // Introduced in DOM Level 2:
-
-    interface UIEvent : Event {
-
-        readonly attribute DOMWindow  view;
+    interface [
+        GenerateConstructor
+    ] UIEvent : Event {
+        readonly attribute DOMWindow            view;
         readonly attribute long                 detail;
         
+        [OldStyleObjC] void initUIEvent(in AtomicString type, 
+                                        in boolean canBubble, 
+                                        in boolean cancelable, 
+                                        in DOMWindow view, 
+                                        in long detail);
+
+        // extentsions
         readonly attribute long                 keyCode;
         readonly attribute long                 charCode;
         readonly attribute long                 layerX;
@@ -33,12 +40,6 @@ module events {
         readonly attribute long                 pageX;
         readonly attribute long                 pageY;
         readonly attribute long                 which;
-        
-        void               initUIEvent(in AtomicString typeArg, 
-                                       in boolean canBubbleArg, 
-                                       in boolean cancelableArg, 
-                                       in DOMWindow viewArg, 
-                                       in long detailArg);
     };
 
 }

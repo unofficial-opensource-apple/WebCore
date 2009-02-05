@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef insert_paragraph_separator_command_h__
-#define insert_paragraph_separator_command_h__
+#ifndef InsertParagraphSeparatorCommand_h
+#define InsertParagraphSeparatorCommand_h
 
 #include "CompositeEditCommand.h"
 
@@ -32,7 +32,7 @@ namespace WebCore {
 
 class InsertParagraphSeparatorCommand : public CompositeEditCommand {
 public:
-    InsertParagraphSeparatorCommand(Document*);
+    InsertParagraphSeparatorCommand(Document*, bool useDefaultParagraphElement = false);
 
     virtual void doApply();
 
@@ -43,6 +43,8 @@ private:
     virtual bool preservesTypingStyle() const;
 
     RefPtr<CSSMutableStyleDeclaration> m_style;
+    
+    bool m_useDefaultParagraphElement;
 };
 
 }

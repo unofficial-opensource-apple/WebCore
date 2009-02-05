@@ -15,30 +15,42 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
 #include "XSLStyleSheet.h"
 
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
 
+#include "CString.h"
 #include "DocLoader.h"
 #include "Document.h"
-#include "Node.h"
-#include "XSLImportRule.h"
 #include "loader.h"
+#include "Node.h"
+#include "Page.h"
 #include "XMLTokenizer.h"
+#include "XSLImportRule.h"
+#include "XSLTProcessor.h"
+
 #include <libxml/uri.h>
 #include <libxslt/xsltutils.h>
 
+#if PLATFORM(MAC)
+#include "SoftLinking.h"
+#endif
+
+#if PLATFORM(MAC)
+SOFT_LINK_LIBRARY(libxslt)
+SOFT_LINK(libxslt, xsltIsBlank, int, (xmlChar *str), (str))
+SOFT_LINK(libxslt, xsltGetNsProp, xmlChar *, (xmlNodePtr node, const xmlChar *name, const xmlChar *nameSpace), (node, name, nameSpace))
+SOFT_LINK(libxslt, xsltParseStylesheetDoc, xsltStylesheetPtr, (xmlDocPtr doc), (doc))
+SOFT_LINK(libxslt, xsltLoadStylesheetPI, xsltStylesheetPtr, (xmlDocPtr doc), (doc))
+#endif
+
 namespace WebCore {
 
-#define IS_BLANK_NODE(n)                                                \
-    (((n)->type == XML_TEXT_NODE) && (xsltIsBlank((n)->content)))
-
-    
 XSLStyleSheet::XSLStyleSheet(XSLImportRule* parentRule, const String& href)
     : StyleSheet(parentRule, href)
     , m_ownerDocument(0)
@@ -117,20 +129,29 @@ DocLoader* XSLStyleSheet::docLoader()
     return m_ownerDocument->docLoader();
 }
 
-bool XSLStyleSheet::parseString(const String &string, bool strict)
+bool XSLStyleSheet::parseString(const String& string, bool strict)
 {
     // Parse in a single chunk into an xmlDocPtr
-    const UChar BOM(0xFEFF);
+    const UChar BOM = 0xFEFF;
     const unsigned char BOMHighByte = *reinterpret_cast<const unsigned char*>(&BOM);
     setLoaderForLibXMLCallbacks(docLoader());
     if (!m_stylesheetDocTaken)
         xmlFreeDoc(m_stylesheetDoc);
     m_stylesheetDocTaken = false;
+
+    Chrome* chrome = 0;
+    if (Page* page = ownerDocument()->page())
+        chrome = page->chrome();
+    xmlSetStructuredErrorFunc(chrome, XSLTProcessor::parseErrorFunc);
+
     m_stylesheetDoc = xmlReadMemory(reinterpret_cast<const char*>(string.characters()), string.length() * sizeof(UChar),
-        m_ownerDocument->URL().ascii(),
+        href().utf8().data(),
         BOMHighByte == 0xFF ? "UTF-16LE" : "UTF-16BE", 
-        XML_PARSE_NOENT | XML_PARSE_DTDATTR | XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NOCDATA);
+        XML_PARSE_NOENT | XML_PARSE_DTDATTR | XML_PARSE_NOWARNING | XML_PARSE_NOCDATA);
     loadChildSheets();
+
+    xmlSetStructuredErrorFunc(0, 0);
+
     setLoaderForLibXMLCallbacks(0);
     return m_stylesheetDoc;
 }
@@ -149,7 +170,7 @@ void XSLStyleSheet::loadChildSheets()
     if (m_embedded) {
         // We have to locate (by ID) the appropriate embedded stylesheet element, so that we can walk the 
         // import/include list.
-        xmlAttrPtr idNode = xmlGetID(document(), (const xmlChar*)(href().deprecatedString().utf8().data()));
+        xmlAttrPtr idNode = xmlGetID(document(), (const xmlChar*)(href().utf8().data()));
         if (!idNode)
             return;
         stylesheetRoot = idNode->parent;
@@ -163,11 +184,11 @@ void XSLStyleSheet::loadChildSheets()
         // Imports must occur first.
         xmlNodePtr curr = stylesheetRoot->children;
         while (curr) {
-            if (IS_BLANK_NODE(curr)) {
+            if (curr->type != XML_ELEMENT_NODE) {
                 curr = curr->next;
                 continue;
             }
-            if (curr->type == XML_ELEMENT_NODE && IS_XSLT_ELEM(curr) && IS_XSLT_NAME(curr, "import")) {
+            if (IS_XSLT_ELEM(curr) && IS_XSLT_NAME(curr, "import")) {
                 xmlChar* uriRef = xsltGetNsProp(curr, (const xmlChar*)"href", XSLT_NAMESPACE);                
                 loadChildSheet(DeprecatedString::fromUtf8((const char*)uriRef));
                 xmlFree(uriRef);
@@ -229,9 +250,9 @@ xmlDocPtr XSLStyleSheet::locateStylesheetSubResource(xmlDocPtr parentDoc, const 
                 // In order to ensure that libxml canonicalized both URLs, we get the original href
                 // string from the import rule and canonicalize it using libxml before comparing it
                 // with the URI argument.
-                DeprecatedCString importHref = import->href().deprecatedString().utf8();
+                CString importHref = import->href().utf8();
                 xmlChar* base = xmlNodeGetBase(parentDoc, (xmlNodePtr)parentDoc);
-                xmlChar* childURI = xmlBuildURI((const xmlChar*)(const char*)importHref, base);
+                xmlChar* childURI = xmlBuildURI((const xmlChar*)importHref.data(), base);
                 bool equalURIs = xmlStrEqual(uri, childURI);
                 xmlFree(base);
                 xmlFree(childURI);
@@ -260,4 +281,4 @@ void XSLStyleSheet::markAsProcessed()
 
 } // namespace WebCore
 
-#endif // KHTML_XSLT
+#endif // ENABLE(XSLT)

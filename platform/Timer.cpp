@@ -29,6 +29,7 @@
 #include "SharedTimer.h"
 #include "SystemTime.h"
 #include <math.h>
+#include <limits>
 #include <wtf/HashSet.h>
 #include <wtf/Vector.h>
 #import "WebCoreThread.h"
@@ -68,7 +69,9 @@ class TimerHeapElement {
 public:
     explicit TimerHeapElement(int i) : m_index(i) {
         Vector<TimerBase*>* timerHeap = threadSpecificTimers()->timerHeap;
-        m_timer = (*timerHeap)[m_index];
+        // Need to check timerHeap, as it's possible that nothing has been inserted via this thread yet. <rdar://problem/6121215>
+        if (timerHeap)
+            m_timer = (*timerHeap)[m_index];
         checkConsistency(); 
     }
     
@@ -104,6 +107,7 @@ inline TimerHeapElement& TimerHeapElement::operator=(const TimerHeapElement& o)
     m_timer = t;
     if (m_index != -1) {
         checkConsistency();
+        if (timerHeap)
         (*timerHeap)[m_index] = t;
         t->m_heapIndex = m_index;
     }
@@ -112,9 +116,17 @@ inline TimerHeapElement& TimerHeapElement::operator=(const TimerHeapElement& o)
 
 inline bool operator<(const TimerHeapElement& a, const TimerHeapElement& b)
 {
-    // Note, this is "backwards" because the heap puts the largest element first
-    // and we want the lowest time to be the first one in the heap.
-    return b.timer()->m_nextFireTime < a.timer()->m_nextFireTime;
+    // The comparisons below are "backwards" because the heap puts the largest 
+    // element first and we want the lowest time to be the first one in the heap.
+    double aFireTime = a.timer()->m_nextFireTime;
+    double bFireTime = b.timer()->m_nextFireTime;
+    if (bFireTime != aFireTime)
+        return bFireTime < aFireTime;
+    
+    // We need to look at the difference of the insertion orders instead of comparing the two 
+    // outright in case of overflow. 
+    unsigned difference = a.timer()->m_heapInsertionOrder - b.timer()->m_heapInsertionOrder;
+    return difference < UINT_MAX / 2;
 }
 
 // ----------------
@@ -256,6 +268,7 @@ inline void TimerBase::heapDelete()
     Vector<TimerBase*>* timerHeap = threadSpecificTimers()->timerHeap;
     ASSERT(m_nextFireTime == 0);
     heapPop();
+    if (timerHeap)
     timerHeap->removeLast();
     m_heapIndex = -1;
 }
@@ -265,6 +278,7 @@ inline void TimerBase::heapDeleteMin()
     Vector<TimerBase*>* timerHeap = threadSpecificTimers()->timerHeap;
     ASSERT(m_nextFireTime == 0);
     heapPopMin();
+    if (timerHeap)
     timerHeap->removeLast();
     m_heapIndex = -1;
 }
@@ -293,7 +307,7 @@ inline void TimerBase::heapPop()
 {
     // Temporarily force this timer to have the minimum key so we can pop it.
     double fireTime = m_nextFireTime;
-    m_nextFireTime = -HUGE_VAL;
+    m_nextFireTime = -numeric_limits<double>::infinity();
     heapDecreaseKey();
     heapPopMin();
     m_nextFireTime = fireTime;
@@ -304,6 +318,7 @@ void TimerBase::heapPopMin()
     Vector<TimerBase*>* timerHeap = threadSpecificTimers()->timerHeap;
     ASSERT(this == timerHeap->first());
     checkHeapIndex();
+    if (timerHeap)
     pop_heap(TimerHeapIterator(0), TimerHeapIterator(timerHeap->size()));
     checkHeapIndex();
     ASSERT(this == timerHeap->last());
@@ -320,6 +335,8 @@ void TimerBase::setNextFireTime(double newTime)
     double oldTime = m_nextFireTime;
     if (oldTime != newTime) {
         m_nextFireTime = newTime;
+        static unsigned currentHeapInsertionOrder;
+        m_heapInsertionOrder = currentHeapInsertionOrder++;
 
         bool wasFirstTimerInHeap = m_heapIndex == 0;
 
@@ -374,6 +391,10 @@ void TimerBase::fireTimers(double fireTime, const Vector<TimerBase*>& firingTime
 
         // Once the timer has been fired, it may be deleted, so do nothing else with it after this point.
         timer->fired();
+
+        // Catch the case where the timer asked timers to fire in a nested event loop.
+        if (!timersReadyToFire)
+            break;
     }
 }
 
@@ -396,6 +417,13 @@ void TimerBase::sharedTimerFired()
 
     timers->timersReadyToFire = 0;
     
+    updateSharedTimer();
+}
+
+void TimerBase::fireTimersInNestedEventLoop()
+{
+    HashSet<const TimerBase*>* timersReadyToFire = threadSpecificTimers()->timersReadyToFire;
+    timersReadyToFire = 0;
     updateSharedTimer();
 }
 

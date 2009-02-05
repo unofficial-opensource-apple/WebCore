@@ -1,10 +1,11 @@
 //
 //  WKView.h
 //
-//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, 2008, Apple Inc.  All rights reserved.
 //
 
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreGraphics/CGSRegion.h>
 #import <GraphicsServices/GSEvent.h>
 #import "WKUtilities.h"
 
@@ -41,6 +42,7 @@ typedef void (*WKViewLayoutCallback)(WKViewRef view, void *userInfo, bool force)
 typedef bool (*WKViewResponderCallback)(WKViewRef view, WKViewResponderCallbackType type, void *userInfo);
 typedef WKViewRef (*WKViewHitTestCallback)(WKViewRef view, CGPoint point, void *userInfo);
 typedef void (*WKViewWillRemoveSubviewCallback)(WKViewRef view, WKViewRef subview);
+typedef void (*WKViewInvalidateGStateCallback)(WKViewRef view);
 
 typedef struct _WKViewContext {
     WKViewDrawCallback drawCallback;
@@ -56,6 +58,7 @@ typedef struct _WKViewContext {
     WKViewHitTestCallback hitTestCallback;
     void *hitTestUserInfo;
     WKViewWillRemoveSubviewCallback willRemoveSubviewCallback;
+    WKViewInvalidateGStateCallback invalidateGStateCallback;
 } WKViewContext;
 
 struct WKView {
@@ -67,14 +70,16 @@ struct WKView {
 
     WKViewRef superview;
     CFMutableArrayRef subviews;
-    
-    CGRect dirtyRect;
+        
+    CGSBoundingShape *dirtyShape;
+    CGRect unionedDirtyRect;
     CGPoint origin;
     CGRect bounds;
     
     unsigned int isHidden:1;
+    unsigned int visibleSizeOverrideEnabled:1;
+    
     unsigned int autoresizingMask;
-    unsigned int visibleSizeOverrideEnabled;
     
     float scale;
     CGSize visibleSize;
@@ -117,6 +122,7 @@ void WKViewDisplay (WKViewRef view);
 void WKViewDisplayIfNeeded (WKViewRef view);
 void WKViewDisplayRect (WKViewRef view, CGRect rectToDraw);
 CGRect WKViewGetDirtyRect (WKViewRef view);
+void WKViewGetSeparateDirtyRectsInBase (WKViewRef view, CGRect **rects, unsigned *count, unsigned maxCount);
 
 void WKViewLockFocus (WKViewRef view);
 void WKViewUnlockFocus (WKViewRef view);
@@ -145,10 +151,12 @@ bool WKViewAcceptsFirstResponder (WKViewRef view);
 bool WKViewBecomeFirstResponder (WKViewRef view);
 bool WKViewResignFirstResponder (WKViewRef view);
 
+unsigned int WKViewGetAutoresizingMask(WKViewRef view);
 void WKViewSetAutoresizingMask (WKViewRef view, unsigned int mask);
 
 WKViewRef WKViewHitTest(WKViewRef view, CGPoint superviewPoint);
 void WKViewScrollToPoint(WKViewRef view, CGPoint point);
+void WKViewScrollToRect(WKViewRef view, CGRect rect);
 
 void WKViewLayout(WKViewRef view, bool force);
 

@@ -15,54 +15,52 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef RENDER_FLEXIBLE_BOX_H
-#define RENDER_FLEXIBLE_BOX_H
+#ifndef RenderFlexibleBox_h
+#define RenderFlexibleBox_h
 
 #include "RenderBlock.h"
 
 namespace WebCore {
 
-class RenderFlexibleBox : public RenderBlock
-{
+class RenderFlexibleBox : public RenderBlock {
 public:
     RenderFlexibleBox(Node*);
     virtual ~RenderFlexibleBox();
 
-    virtual void calcMinMaxWidth();
-    void calcHorizontalMinMaxWidth();
-    void calcVerticalMinMaxWidth();
+    virtual const char* renderName() const;
+
+    virtual void calcPrefWidths();
+    void calcHorizontalPrefWidths();
+    void calcVerticalPrefWidths();
 
     virtual void layoutBlock(bool relayoutChildren);
     void layoutHorizontalBox(bool relayoutChildren);
     void layoutVerticalBox(bool relayoutChildren);
 
+    virtual bool avoidsFloats() const { return true; }
+
     virtual bool isFlexibleBox() const { return true; }
     virtual bool isFlexingChildren() const { return m_flexingChildren; }
     virtual bool isStretchingChildren() const { return m_stretchingChildren; }
-    
-    virtual const char *renderName() const;
 
     void placeChild(RenderObject* child, int x, int y);
 
 protected:
-    int allowedChildFlex(RenderObject* child, bool expanding, unsigned int group);
+    int allowedChildFlex(RenderObject* child, bool expanding, unsigned group);
 
-    bool hasMultipleLines() { return style()->boxLines() == MULTIPLE; }
-    bool isVertical() { return style()->boxOrient() == VERTICAL; }
-    bool isHorizontal() { return style()->boxOrient() == HORIZONTAL; }
+    bool hasMultipleLines() const { return style()->boxLines() == MULTIPLE; }
+    bool isVertical() const { return style()->boxOrient() == VERTICAL; }
+    bool isHorizontal() const { return style()->boxOrient() == HORIZONTAL; }
 
     bool m_flexingChildren : 1;
     bool m_stretchingChildren : 1;
 };
 
-}; // namespace
+} // namespace WebCore
 
-#endif // RENDER_FLEXIBLE_BOX_H
-
-
-
+#endif // RenderFlexibleBox_h

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,129 +26,122 @@
 #include "config.h"
 #include "FrameWin.h"
 
-#include "BrowserExtensionWin.h"
-#include "Decoder.h"
-#include "Document.h"
-#include "FramePrivate.h"
-#include "Settings.h"
-#include "PlatformKeyboardEvent.h"
-#include "Plugin.h"
-#include "RenderFrame.h"
-#include "TransferJob.h"
+#include <winsock2.h>
 #include <windows.h>
+
+#include "AffineTransform.h"
+#include "FloatRect.h"
+#include "Document.h"
+#include "EditorClient.h"
+#include "FrameLoader.h"
+#include "FrameLoadRequest.h"
+#include "FramePrivate.h"
+#include "FrameView.h"
+#include "HTMLIFrameElement.h"
+#include "HTMLNames.h"
+#include "HTMLTableCellElement.h"
+#include "KeyboardEvent.h"
+#include "NP_jsobject.h"
+#include "NotImplemented.h"
+#include "Page.h"
+#include "Plugin.h"
+#include "PluginDatabase.h"
+#include "PluginView.h"
+#include "RegularExpression.h"
+#include "RenderFrame.h"
+#include "RenderTableCell.h"
+#include "RenderView.h"
+#include "ResourceHandle.h"
+#include "TextResourceDecoder.h"
+#include "kjs_proxy.h"
+#include "kjs_window.h"
+#include "npruntime_impl.h"
+#include "runtime_root.h"
+#include "GraphicsContext.h"
+#include "Settings.h"
+
+using std::min;
+using namespace KJS::Bindings;
 
 namespace WebCore {
 
-FrameWin::FrameWin(Page* page, Element* ownerElement, FrameWinClient* client)
-    : Frame(page, ownerElement)
-{
-    d->m_extension = new BrowserExtensionWin(this);
-    Settings* settings = new Settings();
-    settings->setAutoLoadImages(true);
-    settings->setMediumFixedFontSize(13);
-    settings->setMediumFontSize(16);
-    settings->setSerifFontName("Times New Roman");
-    settings->setFixedFontName("Courier New");
-    settings->setSansSerifFontName("Arial");
-    settings->setStdFontName("Times New Roman");
-    settings->setIsJavaScriptEnabled(true);
+using namespace HTMLNames;
 
-    setSettings(settings);
-    m_client = client;
+void Frame::clearPlatformScriptObjects()
+{
 }
 
-FrameWin::~FrameWin()
+KJS::Bindings::Instance* Frame::createScriptInstanceForWidget(Widget* widget)
 {
-    setView(0);
-    clearRecordedFormValues();    
+    // FIXME: Ideally we'd have an isPluginView() here but we can't add that to the open source tree right now.
+    if (widget->isFrameView())
+        return 0;
+
+    return static_cast<PluginView*>(widget)->bindingInstance();
 }
 
-void FrameWin::urlSelected(const ResourceRequest& request)
+void computePageRectsForFrame(Frame* frame, const IntRect& printRect, float headerHeight, float footerHeight, float userScaleFactor,Vector<IntRect>& pages, int& outPageHeight)
 {
-    if (m_client)
-        m_client->openURL(request.url().url(), request.lockHistory());
-}
+    ASSERT(frame);
 
-void FrameWin::submitForm(const ResourceRequest& request)
-{
-    // FIXME: this is a hack inherited from FrameMac, and should be pushed into Frame
-    if (d->m_submittedFormURL == request.url())
+    pages.clear();
+    outPageHeight = 0;
+
+    if (!frame->document() || !frame->view() || !frame->document()->renderer())
         return;
-    d->m_submittedFormURL = request.url();
+ 
+    RenderView* root = static_cast<RenderView *>(frame->document()->renderer());
 
-    if (m_client)
-        m_client->submitForm(request.doPost() ? "POST" : "GET", request.url(), &request.postData);
+    if (!root) {
+        LOG_ERROR("document to be printed has no renderer");
+        return;
+    }
 
-    clearRecordedFormValues();
-}
-
-String FrameWin::userAgent() const
-{
-    return "Mozilla/5.0 (PC; U; Intel; Windows; en) AppleWebKit/420+ (KHTML, like Gecko)";
-}
-
-void FrameWin::runJavaScriptAlert(String const& message)
-{
-    String text = message;
-    text.replace('\\', backslashAsCurrencySymbol());
-    UChar nullChar = 0;
-    text += String(&nullChar, 1);
-    MessageBox(view()->windowHandle(), text.characters(), L"JavaScript Alert", MB_OK);
-}
-
-bool FrameWin::runJavaScriptConfirm(String const& message)
-{
-    String text = message;
-    text.replace('\\', backslashAsCurrencySymbol());
-    UChar nullChar = 0;
-    text += String(&nullChar, 1);
-    return MessageBox(view()->windowHandle(), text.characters(), L"JavaScript Alert", MB_OKCANCEL) == IDOK;
-}
-
-// FIXME: This needs to be unified with the keyPress method on FrameMac
-bool FrameWin::keyPress(const PlatformKeyboardEvent& keyEvent)
-{
-    bool result;
-    // Check for cases where we are too early for events -- possible unmatched key up
-    // from pressing return in the location bar.
-    Document *doc = document();
-    if (!doc)
-        return false;
-    Node *node = doc->focusNode();
-    if (!node) {
-        if (doc->isHTMLDocument())
-            node = doc->body();
-        else
-            node = doc->documentElement();
-        if (!node)
-            return false;
+    if (userScaleFactor <= 0) {
+        LOG_ERROR("userScaleFactor has bad value %.2f", userScaleFactor);
+        return;
     }
     
-    if (!keyEvent.isKeyUp())
-        prepareForUserAction();
+    float ratio = static_cast<float>(printRect.height()) / static_cast<float>(printRect.width());
+ 
+    float pageWidth  = static_cast<float>(root->docWidth());
+    float pageHeight = pageWidth * ratio;
+    outPageHeight = static_cast<int>(pageHeight);   // this is the height of the page adjusted by margins
+    pageHeight -= (headerHeight + footerHeight);
 
-    result = !EventTargetNodeCast(node)->dispatchKeyEvent(keyEvent);
+    if (pageHeight <= 0) {
+        LOG_ERROR("pageHeight has bad value %.2f", pageHeight);
+        return;
+    }
 
-    // FIXME: FrameMac has a keyDown/keyPress hack here which we are not copying.
+    float currPageHeight = pageHeight / userScaleFactor;
+    float docHeight      = root->layer()->height();
+    float docWidth       = root->layer()->width();
+    float currPageWidth  = pageWidth / userScaleFactor;
 
-    return result;
+    
+    // always return at least one page, since empty files should print a blank page
+    float printedPagesHeight = 0.0f;
+    do {
+        float proposedBottom = min(docHeight, printedPagesHeight + pageHeight);
+        frame->adjustPageHeight(&proposedBottom, printedPagesHeight, proposedBottom, printedPagesHeight);
+        currPageHeight = max(1.0f, proposedBottom - printedPagesHeight);
+       
+        pages.append(IntRect(0, printedPagesHeight, currPageWidth, currPageHeight));
+        printedPagesHeight += currPageHeight;
+    } while (printedPagesHeight < docHeight);
 }
 
-void FrameWin::setTitle(const String &title)
+DragImageRef Frame::dragImageForSelection()
+{    
+    if (selectionController()->isRange())
+        return imageFromSelection(this, false);
+
+    return 0;
+}
+
+void Frame::dashboardRegionsChanged()
 {
-    String text = title;
-    text.replace('\\', backslashAsCurrencySymbol());
-
-    m_client->setTitle(text);
 }
 
-void FrameWin::setStatusBarText(const String& status)
-{
-    String text = status;
-    text.replace('\\', backslashAsCurrencySymbol());
-
-    m_client->setStatusText(text);
-}
-
-
-}
+} // namespace WebCore

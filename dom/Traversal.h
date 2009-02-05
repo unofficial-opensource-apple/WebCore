@@ -19,17 +19,16 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #ifndef Traversal_h
 #define Traversal_h
 
-#include "Shared.h"
+#include <wtf/RefCounted.h>
 #include <wtf/Forward.h>
-#include <wtf/Noncopyable.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
@@ -37,7 +36,7 @@ namespace WebCore {
     class Node;
     class NodeFilter;
 
-    class Traversal : public Shared<Traversal>, Noncopyable {
+    class Traversal : public RefCounted<Traversal> {
     public:
         Traversal(Node*, unsigned whatToShow, PassRefPtr<NodeFilter>, bool expandEntityReferences);
         virtual ~Traversal();

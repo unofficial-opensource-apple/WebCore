@@ -15,15 +15,15 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef XSLStyleSheet_H
-#define XSLStyleSheet_H
+#ifndef XSLStyleSheet_h
+#define XSLStyleSheet_h
 
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
 
 #include "StyleSheet.h"
 #include <libxml/parser.h>
@@ -79,6 +79,6 @@ protected:
 
 } // namespace WebCore
 
-#endif // KHTML_XSLT
+#endif // ENABLE(XSLT)
 
-#endif // XSLStyleSheet_H
+#endif // XSLStyleSheet_h

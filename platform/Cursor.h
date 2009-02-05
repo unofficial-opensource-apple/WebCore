@@ -23,49 +23,79 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef CURSOR_H
-#define CURSOR_H
+#ifndef Cursor_h
+#define Cursor_h
 
-#ifdef WIN32
-#include <windows.h>
-#elif PLATFORM(GDK)
+#include <wtf/Platform.h>
+
+#if PLATFORM(WIN)
+typedef struct HICON__* HICON;
+typedef HICON HCURSOR;
+#include <wtf/RefCounted.h>
+#include <wtf/RefPtr.h>
+#elif PLATFORM(GTK)
 #include <gdk/gdk.h>
+#elif PLATFORM(QT)
+#include <QCursor>
 #endif
 
+
+#if PLATFORM(WX)
+class wxCursor;
+#endif
 
 namespace WebCore {
 
     class Image;
+    class IntPoint;
 
 
     class Cursor {
     public:
-        Cursor() {}
+        Cursor()
+        { }
 
     };
-    inline Cursor pointerCursor() { return Cursor(); }
-    inline Cursor crossCursor() { return Cursor(); }
-    inline Cursor handCursor() { return Cursor(); }
-    inline Cursor moveCursor() { return Cursor(); }
-    inline Cursor iBeamCursor() { return Cursor(); }
-    inline Cursor waitCursor() { return Cursor(); }
-    inline Cursor helpCursor() { return Cursor(); }
-    
-    inline Cursor eastResizeCursor() { return Cursor(); }
-    inline Cursor northResizeCursor() { return Cursor(); }
-    inline Cursor northEastResizeCursor() { return Cursor(); }
-    inline Cursor northWestResizeCursor() { return Cursor(); }
-    inline Cursor southResizeCursor() { return Cursor(); }
-    inline Cursor southEastResizeCursor() { return Cursor(); }
-    inline Cursor southWestResizeCursor() { return Cursor(); }
-    inline Cursor westResizeCursor() { return Cursor(); }
 
-    inline Cursor northSouthResizeCursor() { return Cursor(); }
-    inline Cursor eastWestResizeCursor() { return Cursor(); }
-    inline Cursor northEastSouthWestResizeCursor() { return Cursor(); }
-    inline Cursor northWestSouthEastResizeCursor() { return Cursor(); }
-    inline Cursor columnResizeCursor() { return Cursor(); }
-    inline Cursor rowResizeCursor() { return Cursor(); }
-}
+    static Cursor* _cursor = 0;
+    static const Cursor& cursor() {
+        if (_cursor == 0)
+            _cursor = new Cursor();
+        return *_cursor;
+    }
+    inline const Cursor& pointerCursor() { return cursor(); }
+    inline const Cursor& crossCursor() { return cursor(); }
+    inline const Cursor& handCursor() { return cursor(); }
+    inline const Cursor& moveCursor() { return cursor(); }
+    inline const Cursor& iBeamCursor() { return cursor(); }
+    inline const Cursor& waitCursor() { return cursor(); }
+    inline const Cursor& helpCursor() { return cursor(); }
+    inline const Cursor& eastResizeCursor() { return cursor(); }
+    inline const Cursor& northResizeCursor() { return cursor(); }
+    inline const Cursor& northEastResizeCursor() { return cursor(); }
+    inline const Cursor& northWestResizeCursor() { return cursor(); }
+    inline const Cursor& southResizeCursor() { return cursor(); }
+    inline const Cursor& southEastResizeCursor() { return cursor(); }
+    inline const Cursor& southWestResizeCursor() { return cursor(); }
+    inline const Cursor& westResizeCursor() { return cursor(); }
+    inline const Cursor& northSouthResizeCursor() { return cursor(); }
+    inline const Cursor& eastWestResizeCursor() { return cursor(); }
+    inline const Cursor& northEastSouthWestResizeCursor() { return cursor(); }
+    inline const Cursor& northWestSouthEastResizeCursor() { return cursor(); }
+    inline const Cursor& columnResizeCursor() { return cursor(); }
+    inline const Cursor& rowResizeCursor() { return cursor(); }
+    inline const Cursor& verticalTextCursor() { return cursor(); }
+    inline const Cursor& cellCursor() { return cursor(); }
+    inline const Cursor& contextMenuCursor() { return cursor(); }
+    inline const Cursor& noDropCursor() { return cursor(); }
+    inline const Cursor& notAllowedCursor() { return cursor(); }
+    inline const Cursor& progressCursor() { return cursor(); }
+    inline const Cursor& aliasCursor() { return cursor(); }
+    inline const Cursor& zoomInCursor() { return cursor(); }
+    inline const Cursor& zoomOutCursor() { return cursor(); }
+    inline const Cursor& copyCursor() { return cursor(); }
+    inline const Cursor& noneCursor() { return cursor(); }
 
-#endif
+} // namespace WebCore
+
+#endif // Cursor_h

@@ -19,8 +19,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -34,13 +34,13 @@ FormDataList::FormDataList(const TextEncoding& c)
 {
 }
 
-void FormDataList::appendString(const DeprecatedCString &s)
+void FormDataList::appendString(const CString& s)
 {
     m_list.append(s);
 }
 
 // Change plain CR and plain LF to CRLF pairs.
-static DeprecatedCString fixLineBreaks(const DeprecatedCString &s)
+static CString fixLineBreaks(const CString &s)
 {
     // Compute the length.
     unsigned newLen = 0;
@@ -66,8 +66,8 @@ static DeprecatedCString fixLineBreaks(const DeprecatedCString &s)
     
     // Make a copy of the string.
     p = s.data();
-    DeprecatedCString result(newLen + 1);
-    char *q = result.data();
+    char *q;
+    CString result = CString::newUninitialized(newLen, q);
     while (char c = *p++) {
         if (c == '\r') {
             // Safe to look ahead because of trailing '\0'.
@@ -88,17 +88,16 @@ static DeprecatedCString fixLineBreaks(const DeprecatedCString &s)
     return result;
 }
 
-void FormDataList::appendString(const DeprecatedString &s)
+void FormDataList::appendString(const String& s)
 {
-    DeprecatedCString cstr = fixLineBreaks(m_encoding.fromUnicode(s, true));
-    cstr.truncate(cstr.length());
+    CString cstr = fixLineBreaks(m_encoding.encode(s.characters(), s.length(), true));
     m_list.append(cstr);
 }
 
-void FormDataList::appendFile(const String &key, const String &filename)
+void FormDataList::appendFile(const String& key, const String& filename)
 {
-    appendString(key.deprecatedString());
-    m_list.append(filename.deprecatedString());
+    appendString(key);
+    m_list.append(filename);
 }
 
 } // namespace

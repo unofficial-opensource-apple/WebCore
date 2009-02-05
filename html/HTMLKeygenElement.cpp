@@ -19,8 +19,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -44,11 +44,13 @@ using namespace HTMLNames;
 HTMLKeygenElement::HTMLKeygenElement(Document* doc, HTMLFormElement* f)
     : HTMLSelectElement(keygenTag, doc, f)
 {
-    DeprecatedStringList keys = supportedKeySizes();
-    for (DeprecatedStringList::Iterator i = keys.begin(); i != keys.end(); ++i) {
+    Vector<String> keys = supportedKeySizes();
+        
+    Vector<String>::const_iterator end = keys.end();
+    for (Vector<String>::const_iterator it = keys.begin(); it != end; ++it) {
         HTMLOptionElement* o = new HTMLOptionElement(doc, form());
         addChild(o);
-        o->addChild(new Text(doc, String(*i)));
+        o->addChild(new Text(doc, *it));
     }
 }
 
@@ -74,7 +76,7 @@ bool HTMLKeygenElement::appendFormData(FormDataList& encoded_values, bool)
     // Only RSA is supported at this time.
     if (!m_keyType.isNull() && !equalIgnoringCase(m_keyType, "rsa"))
         return false;
-    DeprecatedString value = signedPublicKeyAndChallengeString(selectedIndex(), m_challenge.deprecatedString(), document()->baseURL());
+    String value = signedPublicKeyAndChallengeString(selectedIndex(), m_challenge, document()->baseURL());
     if (value.isNull())
         return false;
     encoded_values.appendData(name(), value.utf8());

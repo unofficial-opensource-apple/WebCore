@@ -17,13 +17,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLImageElement_H
-#define HTMLImageElement_H
+#ifndef HTMLImageElement_h
+#define HTMLImageElement_h
 
 #include "HTMLElement.h"
 #include "GraphicsTypes.h"
@@ -50,9 +50,14 @@ public:
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
 
+    virtual bool canStartSelection() const { return false; }
+
     int width(bool ignorePendingStylesheets = false) const;
     int height(bool ignorePendingStylesheets = false) const;
 
+    int naturalWidth() const;
+    int naturalHeight() const;
+    
     bool isServerMap() const { return ismap && usemap.isEmpty(); }
 
     String altText() const;
@@ -64,7 +69,8 @@ public:
     CompositeOperator compositeOperator() const { return m_compositeOperator; }
 
     CachedImage* cachedImage() const { return m_imageLoader.image(); }
-    
+    void setCachedImage(CachedImage* i) { m_imageLoader.setImage(i); };
+
     void setLoadManually (bool loadManually) { m_imageLoader.setLoadManually(loadManually); }
 
     String name() const;
@@ -76,8 +82,8 @@ public:
     String alt() const;
     void setAlt(const String&);
 
-    int border() const;
-    void setBorder(int);
+    String border() const;
+    void setBorder(const String&);
 
     void setHeight(int);
 
@@ -89,6 +95,9 @@ public:
 
     String longDesc() const;
     void setLongDesc(const String&);
+
+    String lowsrc() const;
+    void setLowsrc(const String&);
 
     String src() const;
     void setSrc(const String&);
@@ -106,12 +115,17 @@ public:
 
     bool complete() const;
 
+    bool haveFiredLoadEvent() const { return m_imageLoader.haveFiredLoadEvent(); }
+    
+    virtual bool willRespondToMouseClickEvents();
+
 protected:
     HTMLImageLoader m_imageLoader;
     String usemap;
     bool ismap;
     HTMLFormElement* m_form;
     String oldNameAttr;
+    String oldIdAttr;
     CompositeOperator m_compositeOperator;
 };
 

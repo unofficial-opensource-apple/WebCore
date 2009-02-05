@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,18 +23,17 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef __delete_selection_command_h__
-#define __delete_selection_command_h__
+#ifndef DeleteSelectionCommand_h
+#define DeleteSelectionCommand_h
 
 #include "CompositeEditCommand.h"
 
 namespace WebCore {
 
-class DeleteSelectionCommand : public CompositeEditCommand
-{ 
+class DeleteSelectionCommand : public CompositeEditCommand { 
 public:
-    DeleteSelectionCommand(Document *document, bool smartDelete=false, bool mergeBlocksAfterDelete=true, bool replace=false);
-    DeleteSelectionCommand(Document *document, const Selection &selection, bool smartDelete=false, bool mergeBlocksAfterDelete=true, bool replace=false);
+    DeleteSelectionCommand(Document*, bool smartDelete = false, bool mergeBlocksAfterDelete = true, bool replace = false, bool expandForSpecialElements = false);
+    DeleteSelectionCommand(const Selection&, bool smartDelete = false, bool mergeBlocksAfterDelete = true, bool replace = false, bool expandForSpecialElements = false);
 
     virtual void doApply();
     virtual EditAction editingAction() const;
@@ -42,14 +41,16 @@ public:
 private:
     virtual bool preservesTypingStyle() const;
 
-    void initializeStartEnd();
+    void initializeStartEnd(Position&, Position&);
     void initializePositionData();
     void saveTypingStyleState();
+    void saveFullySelectedAnchor();
     void insertPlaceholderForAncestorBlockContent();
     bool handleSpecialCaseBRDelete();
     void handleGeneralDelete();
     void fixupWhitespace();
     void mergeParagraphs();
+    void removePreviouslySelectedEmptyTableRows();
     void calculateEndingPosition();
     void calculateTypingStyleAfterDelete(Node*);
     void clearTransientState();
@@ -61,6 +62,7 @@ private:
     bool m_mergeBlocksAfterDelete;
     bool m_needPlaceholder;
     bool m_replace;
+    bool m_expandForSpecialElements;
 
     // This data is transient and should be cleared at the end of the doApply function.
     Selection m_selectionToDelete;
@@ -75,8 +77,12 @@ private:
     RefPtr<Node> m_endBlock;
     RefPtr<CSSMutableStyleDeclaration> m_typingStyle;
     RefPtr<CSSMutableStyleDeclaration> m_deleteIntoBlockquoteStyle;
+    RefPtr<Node> m_startRoot;
+    RefPtr<Node> m_endRoot;
+    RefPtr<Node> m_startTableRow;
+    RefPtr<Node> m_endTableRow;
 };
 
 } // namespace WebCore
 
-#endif // __delete_selection_command_h__
+#endif // DeleteSelectionCommand_h

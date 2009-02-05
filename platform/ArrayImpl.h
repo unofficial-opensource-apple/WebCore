@@ -23,11 +23,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ARRAY_IMPL_H
-#define ARRAY_IMPL_H
+#ifndef ArrayImpl_h
+#define ArrayImpl_h
 
 #include <wtf/RefPtr.h>
-#include "Shared.h"
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
@@ -52,7 +52,7 @@ class ArrayImpl
     bool operator==(const ArrayImpl &) const;
 
  private:
-    class ArrayPrivate : public Shared<ArrayPrivate>
+    class ArrayPrivate : public RefCounted<ArrayPrivate>
     {
     public:
         ArrayPrivate(size_t pNumItems, size_t pItemSize);

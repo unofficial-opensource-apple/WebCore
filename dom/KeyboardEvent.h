@@ -1,10 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -27,11 +25,22 @@
 #define KeyboardEvent_h
 
 #include "UIEventWithKeyState.h"
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
     class PlatformKeyboardEvent;
 
+#if PLATFORM(MAC)
+    struct KeypressCommand {
+        KeypressCommand(const String& commandName) : commandName(commandName) {}
+        KeypressCommand(const String& commandName, const String& text) : commandName(commandName), text(text) { ASSERT(commandName == "insertText:"); }
+
+        String commandName;
+        String text;
+    };
+#endif
+    
     // Introduced in DOM Level 3
     class KeyboardEvent : public UIEventWithKeyState {
     public:
@@ -39,39 +48,52 @@ namespace WebCore {
             DOM_KEY_LOCATION_STANDARD      = 0x00,
             DOM_KEY_LOCATION_LEFT          = 0x01,
             DOM_KEY_LOCATION_RIGHT         = 0x02,
-            DOM_KEY_LOCATION_NUMPAD        = 0x03,
+            DOM_KEY_LOCATION_NUMPAD        = 0x03
         };
         
         KeyboardEvent();
         KeyboardEvent(const PlatformKeyboardEvent&, AbstractView*);
-        KeyboardEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
+        KeyboardEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView*,
                       const String& keyIdentifier, unsigned keyLocation,
                       bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, bool altGraphKey);
         virtual ~KeyboardEvent();
     
-        void initKeyboardEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
+        void initKeyboardEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView*,
                                const String& keyIdentifier, unsigned keyLocation,
-                               bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, bool altGraphKey);
+                               bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, bool altGraphKey = false);
     
-        String keyIdentifier() const { return m_keyIdentifier.get(); }
+        String keyIdentifier() const { return m_keyIdentifier; }
         unsigned keyLocation() const { return m_keyLocation; }
-    
+
+        bool getModifierState(const String& keyIdentifier) const;
+
         bool altGraphKey() const { return m_altGraphKey; }
     
         const PlatformKeyboardEvent* keyEvent() const { return m_keyEvent; }
 
-        int keyCode() const; // key code for keydown and keyup, character for other events
-        int charCode() const;
+        int keyCode() const; // key code for keydown and keyup, character for keypress
+        int charCode() const; // character code for keypress, 0 for keydown and keyup
     
         virtual bool isKeyboardEvent() const;
         virtual int which() const;
 
+#if PLATFORM(MAC)
+        // We only have this need to store keypress command info on the Mac.
+        Vector<KeypressCommand>& keypressCommands() { return m_keypressCommands; }
+#endif
+
     private:
         PlatformKeyboardEvent* m_keyEvent;
-        RefPtr<StringImpl> m_keyIdentifier;
+        String m_keyIdentifier;
         unsigned m_keyLocation;
         bool m_altGraphKey : 1;
+
+#if PLATFORM(MAC)        
+        Vector<KeypressCommand> m_keypressCommands;
+#endif
     };
+
+    KeyboardEvent* findKeyboardEvent(Event*);
 
 } // namespace WebCore
 

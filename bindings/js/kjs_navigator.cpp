@@ -1,10 +1,9 @@
 // -*- c-basic-offset: 2 -*-
 /*
- *  This file is part of the KDE libraries
  *  Copyright (C) 2000 Harri Porten (porten@kde.org)
  *  Copyright (c) 2000 Daniel Molkentin (molkentin@kde.org)
  *  Copyright (c) 2000 Stefan Schimanski (schimmi@kde.org)
- *  Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ *  Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All Rights Reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -18,7 +17,7 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include "config.h"
@@ -26,21 +25,43 @@
 
 #include "AtomicString.h"
 #include "CookieJar.h"
+#include "DOMWindow.h"
+#include "Document.h"
 #include "Frame.h"
+#include "FrameLoader.h"
 #include "Language.h"
-#include "PlugInInfoStore.h"
+#include "NetworkStateNotifier.h"
+#include "Page.h"
+#include "PluginInfoStore.h"
+#include "Settings.h"
+#include "kjs_window.h"
+#include <kjs/object_object.h>
 
-#if PLATFORM(MAC) && PLATFORM(PPC)
-#define WEBCORE_NAVIGATOR_PLATFORM "MacPPC"
-#elif PLATFORM(MAC) && PLATFORM(X86)
-#define WEBCORE_NAVIGATOR_PLATFORM "MacIntel"
-#elif PLATFORM(WIN_OS)
-#define WEBCORE_NAVIGATOR_PLATFORM "Win32"
-#elif 1
-#define WEBCORE_NAVIGATOR_PLATFORM "iPhone"
-#else
-#define WEBCORE_NAVIGATOR_PLATFORM ""
-#endif
+extern "C" {
+#include <GraphicsServices/GSCapabilities.h>
+}
+
+#ifndef WEBCORE_NAVIGATOR_PLATFORM
+#define WEBCORE_NAVIGATOR_IPHONE "iPhone"
+#define WEBCORE_NAVIGATOR_IPOD "iPod"
+#define WEBCORE_NAVIGATOR_PLATFORM (GSSystemHasTelephonyCapability() ? WEBCORE_NAVIGATOR_IPHONE : WEBCORE_NAVIGATOR_IPOD)
+#endif // ifndef WEBCORE_NAVIGATOR_PLATFORM
+
+#ifndef WEBCORE_NAVIGATOR_PRODUCT
+#define WEBCORE_NAVIGATOR_PRODUCT "Gecko"
+#endif // ifndef WEBCORE_NAVIGATOR_PRODUCT
+
+#ifndef WEBCORE_NAVIGATOR_PRODUCT_SUB
+#define WEBCORE_NAVIGATOR_PRODUCT_SUB "20030107"
+#endif // ifndef WEBCORE_NAVIGATOR_PRODUCT_SUB
+
+#ifndef WEBCORE_NAVIGATOR_VENDOR
+#define WEBCORE_NAVIGATOR_VENDOR "Apple Computer, Inc."
+#endif // ifndef WEBCORE_NAVIGATOR_VENDOR
+
+#ifndef WEBCORE_NAVIGATOR_VENDOR_SUB
+#define WEBCORE_NAVIGATOR_VENDOR_SUB ""
+#endif // ifndef WEBCORE_NAVIGATOR_VENDOR_SUB
 
 using namespace WebCore;
 
@@ -51,7 +72,7 @@ namespace KJS {
         PluginBase(ExecState *exec);
         virtual ~PluginBase();
         
-        void refresh(bool reload);
+        static void refresh(bool reload);
 
     protected:
         static void cachePluginDataIfNecessary();
@@ -70,11 +91,13 @@ namespace KJS {
         JSValue *getValueProperty(ExecState *, int token) const;
         virtual const ClassInfo* classInfo() const { return &info; }
         static const ClassInfo info;
-        enum { Length, Refresh };
+        enum { Length };
     private:
         static JSValue *indexGetter(ExecState *, JSObject *, const Identifier&, const PropertySlot&);
         static JSValue *nameGetter(ExecState *, JSObject *, const Identifier&, const PropertySlot&);
     };
+
+    JSValue* pluginsFunctionRefresh(ExecState*, JSObject*, const List&);
 
     class MimeTypes : public PluginBase {
     public:
@@ -122,78 +145,162 @@ namespace KJS {
 
 namespace KJS {
 
-const ClassInfo Plugins::info = { "PluginArray", 0, &PluginsTable, 0 };
-const ClassInfo MimeTypes::info = { "MimeTypeArray", 0, &MimeTypesTable, 0 };
-const ClassInfo Plugin::info = { "Plugin", 0, &PluginTable, 0 };
-const ClassInfo MimeType::info = { "MimeType", 0, &MimeTypeTable, 0 };
+const ClassInfo Plugins::info = { "PluginArray", 0, &PluginsTable };
+const ClassInfo MimeTypes::info = { "MimeTypeArray", 0, &MimeTypesTable };
+const ClassInfo Plugin::info = { "Plugin", 0, &PluginTable };
+const ClassInfo MimeType::info = { "MimeType", 0, &MimeTypeTable };
 
 Vector<PluginInfo*> *KJS::PluginBase::plugins = 0;
 Vector<MimeClassInfo*> *KJS::PluginBase::mimes = 0;
 int KJS::PluginBase::m_plugInCacheRefCount = 0;
 
-const ClassInfo Navigator::info = { "Navigator", 0, &NavigatorTable, 0 };
+const ClassInfo Navigator::info = { "Navigator", 0, &NavigatorTable };
 /*
-@begin NavigatorTable 13
-  appCodeName   Navigator::AppCodeName  DontDelete|ReadOnly
-  appName       Navigator::AppName      DontDelete|ReadOnly
-  appVersion    Navigator::AppVersion   DontDelete|ReadOnly
-  language      Navigator::Language     DontDelete|ReadOnly
-  userAgent     Navigator::UserAgent    DontDelete|ReadOnly
-  platform      Navigator::Platform     DontDelete|ReadOnly
-  plugins       Navigator::_Plugins     DontDelete|ReadOnly
-  mimeTypes     Navigator::_MimeTypes   DontDelete|ReadOnly
-  product       Navigator::Product      DontDelete|ReadOnly
-  productSub    Navigator::ProductSub   DontDelete|ReadOnly
-  vendor        Navigator::Vendor       DontDelete|ReadOnly
-  vendorSub     Navigator::VendorSub    DontDelete|ReadOnly
-  cookieEnabled Navigator::CookieEnabled DontDelete|ReadOnly
-  javaEnabled   Navigator::JavaEnabled  DontDelete|Function 0
+@begin NavigatorTable 16
+  appCodeName   Navigator::AppCodeName                  DontDelete|ReadOnly
+  appName       Navigator::AppName                      DontDelete|ReadOnly
+  appVersion    Navigator::AppVersion                   DontDelete|ReadOnly
+  language      Navigator::Language                     DontDelete|ReadOnly
+  userAgent     Navigator::UserAgent                    DontDelete|ReadOnly
+  platform      Navigator::Platform                     DontDelete|ReadOnly
+  plugins       Navigator::_Plugins                     DontDelete|ReadOnly
+  mimeTypes     Navigator::_MimeTypes                   DontDelete|ReadOnly
+  product       Navigator::Product                      DontDelete|ReadOnly
+  productSub    Navigator::ProductSub                   DontDelete|ReadOnly
+  vendor        Navigator::Vendor                       DontDelete|ReadOnly
+  vendorSub     Navigator::VendorSub                    DontDelete|ReadOnly
+  cookieEnabled Navigator::CookieEnabled                DontDelete|ReadOnly
+  onLine        Navigator::OnLine                       DontDelete|ReadOnly
+  standalone    Navigator::Standalone                   DontDelete|ReadOnly
+  javaEnabled   navigatorProtoFuncJavaEnabled  DontDelete|Function 0
 @end
 */
-KJS_IMPLEMENT_PROTOFUNC(NavigatorFunc)
 
-Navigator::Navigator(ExecState *exec, Frame *f) 
-    : m_frame(f)
+Navigator::Navigator(JSObject* prototype, Frame* frame)
+    : DOMObject(prototype)
+    , m_frame(frame)
 {
-    setPrototype(exec->lexicalInterpreter()->builtinObjectPrototype());
 }
 
 bool Navigator::getOwnPropertySlot(ExecState *exec, const Identifier& propertyName, PropertySlot& slot)
 {
-  return getStaticPropertySlot<NavigatorFunc, Navigator, JSObject>(exec, &NavigatorTable, this, propertyName, slot);
+  return getStaticPropertySlot<Navigator, JSObject>(exec, &NavigatorTable, this, propertyName, slot);
 }
 
-JSValue *Navigator::getValueProperty(ExecState *exec, int token) const
+static bool needsYouTubeQuirk(ExecState*, Frame*);
+
+#if !PLATFORM(WIN)
+
+static inline bool needsYouTubeQuirk(ExecState*, Frame*)
 {
-  String userAgent = m_frame->userAgent();
+    return false;
+}
+
+#else
+
+static bool needsYouTubeQuirk(ExecState* exec, Frame* frame)
+{
+    // This quirk works around a mistaken check in an ad at youtube.com.
+    // There's a function called isSafari that returns false if the function
+    // called isWindows returns true; thus the site malfunctions with Windows Safari.
+
+    // Do the quirk only if the function's name is "isWindows".
+    FunctionImp* function = exec->function();
+    if (!function)
+        return false;
+    static const Identifier& isWindowsFunctionName = *new Identifier("isWindows");
+    if (function->functionName() != isWindowsFunctionName)
+        return false;
+
+    // Do the quirk only if the function is called by an "isSafari" function.
+    // However, that function is not itself named -- it is stored in the isSafari
+    // property, though, so that's how recognize it.
+    ExecState* callingExec = exec->callingExecState();
+    if (!callingExec)
+        return false;
+    FunctionImp* callingFunction = callingExec->function();
+    if (!callingFunction)
+        return false;
+    JSObject* thisObject = callingExec->thisValue();
+    if (!thisObject)
+        return false;
+    static const Identifier& isSafariFunctionName = *new Identifier("isSafari");
+    JSValue* isSafariFunction = thisObject->getDirect(isSafariFunctionName);
+    if (isSafariFunction != callingFunction)
+        return false;
+
+    // FIXME: The document is never null, so we should remove this check along with the
+    // other similar ones in this file when we are absolutely sure it's safe.
+    Document* document = frame->document(); 
+    if (!document)
+        return false;
+
+    // Do the quirk only on the front page of the global version of YouTube.
+    const KURL& url = document->url();
+    if (url.host() != "youtube.com" && url.host() != "www.youtube.com")
+        return false;
+    if (url.path() != "/")
+        return false;
+
+    // As with other site-specific quirks, allow website developers to turn this off.
+    // In theory, this allows website developers to check if their fixes are effective.
+    Settings* settings = frame->settings(); 
+    if (!settings)
+        return false;
+    if (!settings->needsSiteSpecificQuirks())
+        return false;
+
+    return true;
+}
+
+#endif
+
+static bool isStandalone(Frame* frame)
+{
+    Settings* settings = frame->settings();
+    if (!settings)
+        return false;
+    return settings->standalone();
+}
+
+JSValue* Navigator::getValueProperty(ExecState* exec, int token) const
+{
   switch (token) {
   case AppCodeName:
     return jsString("Mozilla");
   case AppName:
     return jsString("Netscape");
-  case AppVersion:
-    // We assume the string is something like Mozilla/version (properties)
+  case AppVersion: {
+    if (needsYouTubeQuirk(exec, m_frame))
+        return jsString("");
+    // Version is everything in the user agent string past the "Mozilla/" prefix.
+    const String userAgent = m_frame->loader()->userAgent(m_frame->document() ? m_frame->document()->url() : KURL());
     return jsString(userAgent.substring(userAgent.find('/') + 1));
+  }
   case Product:
-    return jsString("Gecko");
+    return jsString(WEBCORE_NAVIGATOR_PRODUCT);
   case ProductSub:
-    return jsString("20030107");
+    return jsString(WEBCORE_NAVIGATOR_PRODUCT_SUB);
   case Vendor:
-    return jsString("Apple Computer, Inc.");
+    return jsString(WEBCORE_NAVIGATOR_VENDOR);
   case VendorSub:
-    return jsString("");
+    return jsString(WEBCORE_NAVIGATOR_VENDOR_SUB);
   case Language:
     return jsString(defaultLanguage());
   case UserAgent:
-    return jsString(userAgent);
+    return jsString(m_frame->loader()->userAgent(m_frame->document() ? m_frame->document()->url() : KURL()));
   case Platform:
-    return jsString(WEBCORE_NAVIGATOR_PLATFORM);
+      return jsString(WEBCORE_NAVIGATOR_PLATFORM);
   case _Plugins:
     return new Plugins(exec);
   case _MimeTypes:
     return new MimeTypes(exec);
   case CookieEnabled:
-    return jsBoolean(cookiesEnabled());
+    return jsBoolean(cookiesEnabled(m_frame->document()));
+  case OnLine:
+    return jsBoolean(networkStateNotifier().onLine());
+  case Standalone:
+    return jsBoolean(isStandalone(m_frame));
   }
   return 0;
 }
@@ -207,7 +314,7 @@ void PluginBase::cachePluginDataIfNecessary()
         mimes = new Vector<MimeClassInfo*>;
         
         // read configuration
-        PlugInInfoStore c;
+        PluginInfoStore c;
         unsigned pluginCount = c.pluginCount();
         for (unsigned n = 0; n < pluginCount; n++) {
             PluginInfo* plugin = c.createPluginInfoForPluginAtIndex(n);
@@ -215,7 +322,7 @@ void PluginBase::cachePluginDataIfNecessary()
                 continue;
             
             plugins->append(plugin);
-            if (!plugin->mimes)
+            if (plugin->mimes.isEmpty())
                 continue;
             
             Vector<MimeClassInfo*>::iterator end = plugin->mimes.end();
@@ -225,10 +332,9 @@ void PluginBase::cachePluginDataIfNecessary()
     }
 }
 
-PluginBase::PluginBase(ExecState *exec)
+PluginBase::PluginBase(ExecState* exec)
+    : DOMObject(exec->lexicalGlobalObject()->objectPrototype())
 {
-    setPrototype(exec->lexicalInterpreter()->builtinObjectPrototype());
-
     cachePluginDataIfNecessary();
     m_plugInCacheRefCount++;
 }
@@ -272,15 +378,14 @@ void PluginBase::refresh(bool reload)
 
 /*
 @begin PluginsTable 2
-  length        Plugins::Length         DontDelete|ReadOnly
-  refresh       Plugins::Refresh        DontDelete|Function 0
+  length        Plugins::Length                        DontDelete|ReadOnly
+  refresh       pluginsFunctionRefresh                 DontDelete|Function 0
 @end
 */
-KJS_IMPLEMENT_PROTOFUNC(PluginsFunc)
 
 JSValue *Plugins::getValueProperty(ExecState *exec, int token) const
 {
-  assert(token == Length);
+  ASSERT(token == Length);
   return jsNumber(plugins->size());
 }
 
@@ -306,7 +411,7 @@ bool Plugins::getOwnPropertySlot(ExecState *exec, const Identifier& propertyName
     const HashEntry* entry = Lookup::findEntry(&PluginsTable, propertyName);
     if (entry) {
       if (entry->attr & Function)
-        slot.setStaticEntry(this, entry, staticFunctionGetter<PluginsFunc>);
+        slot.setStaticEntry(this, entry, staticFunctionGetter);
       else
         slot.setStaticEntry(this, entry, staticValueGetter<Plugins>);
       return true;
@@ -343,7 +448,7 @@ bool Plugins::getOwnPropertySlot(ExecState *exec, const Identifier& propertyName
 
 JSValue *MimeTypes::getValueProperty(ExecState *exec, int token) const
 {
-  assert(token == Length);
+  ASSERT(token == Length);
   return jsNumber(mimes->size());
 }
 
@@ -417,7 +522,7 @@ JSValue *Plugin::getValueProperty(ExecState *exec, int token) const
     case Length: 
         return jsNumber(m_info->mimes.size());
     default:
-        assert(0);
+        ASSERT(0);
         return jsUndefined();
     }
 }
@@ -492,9 +597,10 @@ JSValue *MimeType::getValueProperty(ExecState *exec, int token) const
     case Description:
         return jsString(m_info->desc);
     case EnabledPlugin: {
-        ScriptInterpreter *interpreter = static_cast<ScriptInterpreter *>(exec->dynamicInterpreter());
-        Frame *frame = interpreter->frame();
-        if (frame && frame->pluginsEnabled())
+        Frame* frame = Window::retrieveActive(exec)->impl()->frame();
+        ASSERT(frame);
+        Settings* settings = frame->settings();
+        if (settings && settings->arePluginsEnabled())
             return new Plugin(exec, m_info->plugin);
         else
             return jsUndefined();
@@ -509,19 +615,20 @@ bool MimeType::getOwnPropertySlot(ExecState *exec, const Identifier& propertyNam
     return getStaticValueSlot<MimeType, PluginBase>(exec, &MimeTypeTable, this, propertyName, slot);
 }
 
-JSValue *PluginsFunc::callAsFunction(ExecState *exec, JSObject *, const List &args)
+JSValue* pluginsFunctionRefresh(ExecState* exec, JSObject*, const List& args)
 {
-    PluginBase(exec).refresh(args[0]->toBoolean(exec));
+    PluginBase::refresh(args[0]->toBoolean(exec));
     return jsUndefined();
 }
 
-JSValue *NavigatorFunc::callAsFunction(ExecState *exec, JSObject *thisObj, const List &)
+JSValue* navigatorProtoFuncJavaEnabled(ExecState* exec, JSObject* thisObj, const List&)
 {
   if (!thisObj->inherits(&KJS::Navigator::info))
     return throwError(exec, TypeError);
   Navigator *nav = static_cast<Navigator *>(thisObj);
   // javaEnabled()
-  return jsBoolean(nav->frame()->javaEnabled());
+  Settings* settings = nav->frame() ? nav->frame()->settings() : 0;
+  return jsBoolean(settings && settings->isJavaEnabled());
 }
 
 } // namespace

@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2004-2006 Apple Computer, Inc.  All rights reserved.
  * Copyright (C) 2006 James G. Speth (speth@end.com)
+ * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,142 +27,339 @@
 
 #import "DOM.h"
 
-namespace WebCore {
-    class CSSStyleDeclaration;
-    class CSSStyleSheet;
-    class DocumentFragment;
-    class Document;
-    class DocumentType;
-    class Element;
-    class NodeFilter;
-    class Node;
-    class NodeIterator;
-    class NamedNodeMap;
-    class NodeList;
-    class Range;
-    class StyleSheetList;
-    class TreeWalker;
+#import "Color.h"
+#import "DOMObject.h"
+#import "DOMRGBColor.h"
+#import "HitTestResult.h"
 
-    typedef int ExceptionCode;
+#if ENABLE(XPATH)
+#import "DOMXPathExpressionInternal.h"
+#import "DOMXPathNSResolver.h"
+#import "DOMXPathResultInternal.h"
+#endif // ENABLE(XPATH)
+
+// Auto-generated internal interfaces
+#import "DOMAbstractViewInternal.h"
+#import "DOMAttrInternal.h"
+#import "DOMCDATASectionInternal.h"
+#import "DOMCSSCharsetRuleInternal.h"
+#import "DOMCSSFontFaceRuleInternal.h"
+#import "DOMCSSImportRuleInternal.h"
+#import "DOMCSSMediaRuleInternal.h"
+#import "DOMCSSPageRuleInternal.h"
+#import "DOMCSSPrimitiveValueInternal.h"
+#import "DOMCSSRuleInternal.h"
+#import "DOMCSSRuleListInternal.h"
+#import "DOMCSSStyleDeclarationInternal.h"
+#import "DOMCSSStyleRuleInternal.h"
+#import "DOMCSSStyleSheetInternal.h"
+#import "DOMCSSUnknownRuleInternal.h"
+#import "DOMCSSValueInternal.h"
+#import "DOMCSSValueListInternal.h"
+#import "DOMCharacterDataInternal.h"
+#import "DOMCommentInternal.h"
+#import "DOMCounterInternal.h"
+#import "DOMDOMImplementationInternal.h"
+#import "DOMDocumentFragmentInternal.h"
+#import "DOMDocumentInternal.h"
+#import "DOMDocumentTypeInternal.h"
+#import "DOMElementInternal.h"
+#import "DOMEntityInternal.h"
+#import "DOMEntityReferenceInternal.h"
+#import "DOMEventInternal.h"
+#import "DOMHTMLAnchorElementInternal.h"
+#import "DOMHTMLAppletElementInternal.h"
+#import "DOMHTMLAreaElementInternal.h"
+#import "DOMHTMLBRElementInternal.h"
+#import "DOMHTMLBaseElementInternal.h"
+#import "DOMHTMLBaseFontElementInternal.h"
+#import "DOMHTMLBodyElementInternal.h"
+#import "DOMHTMLButtonElementInternal.h"
+#import "DOMHTMLCollectionInternal.h"
+#import "DOMHTMLDListElementInternal.h"
+#import "DOMHTMLDirectoryElementInternal.h"
+#import "DOMHTMLDivElementInternal.h"
+#import "DOMHTMLDocumentInternal.h"
+#import "DOMHTMLElementInternal.h"
+#import "DOMHTMLEmbedElementInternal.h"
+#import "DOMHTMLFieldSetElementInternal.h"
+#import "DOMHTMLFontElementInternal.h"
+#import "DOMHTMLFormElementInternal.h"
+#import "DOMHTMLFrameElementInternal.h"
+#import "DOMHTMLFrameSetElementInternal.h"
+#import "DOMHTMLHRElementInternal.h"
+#import "DOMHTMLHeadElementInternal.h"
+#import "DOMHTMLHeadingElementInternal.h"
+#import "DOMHTMLHtmlElementInternal.h"
+#import "DOMHTMLIFrameElementInternal.h"
+#import "DOMHTMLImageElementInternal.h"
+#import "DOMHTMLInputElementInternal.h"
+#import "DOMHTMLIsIndexElementInternal.h"
+#import "DOMHTMLLIElementInternal.h"
+#import "DOMHTMLLabelElementInternal.h"
+#import "DOMHTMLLegendElementInternal.h"
+#import "DOMHTMLLinkElementInternal.h"
+#import "DOMHTMLMapElementInternal.h"
+#import "DOMHTMLMarqueeElementInternal.h"
+#import "DOMHTMLMenuElementInternal.h"
+#import "DOMHTMLMetaElementInternal.h"
+#import "DOMHTMLModElementInternal.h"
+#import "DOMHTMLOListElementInternal.h"
+#import "DOMHTMLObjectElementInternal.h"
+#import "DOMHTMLOptGroupElementInternal.h"
+#import "DOMHTMLOptionElementInternal.h"
+#import "DOMHTMLOptionsCollectionInternal.h"
+#import "DOMHTMLParagraphElementInternal.h"
+#import "DOMHTMLParamElementInternal.h"
+#import "DOMHTMLPreElementInternal.h"
+#import "DOMHTMLQuoteElementInternal.h"
+#import "DOMHTMLScriptElementInternal.h"
+#import "DOMHTMLSelectElementInternal.h"
+#import "DOMHTMLStyleElementInternal.h"
+#import "DOMHTMLTableCaptionElementInternal.h"
+#import "DOMHTMLTableCellElementInternal.h"
+#import "DOMHTMLTableColElementInternal.h"
+#import "DOMHTMLTableElementInternal.h"
+#import "DOMHTMLTableRowElementInternal.h"
+#import "DOMHTMLTableSectionElementInternal.h"
+#import "DOMHTMLTextAreaElementInternal.h"
+#import "DOMHTMLTitleElementInternal.h"
+#import "DOMHTMLUListElementInternal.h"
+#import "DOMKeyboardEventInternal.h"
+#import "DOMMediaListInternal.h"
+#import "DOMMouseEventInternal.h"
+#import "DOMMutationEventInternal.h"
+#import "DOMNamedNodeMapInternal.h"
+#import "DOMNodeInternal.h"
+#import "DOMNodeIteratorInternal.h"
+#import "DOMNodeListInternal.h"
+#import "DOMNotationInternal.h"
+#import "DOMOverflowEventInternal.h"
+#import "DOMProcessingInstructionInternal.h"
+#import "DOMRangeInternal.h"
+#import "DOMRectInternal.h"
+#import "DOMStyleSheetInternal.h"
+#import "DOMStyleSheetListInternal.h"
+#import "DOMTextInternal.h"
+#import "DOMTextEventInternal.h"
+#import "DOMTreeWalkerInternal.h"
+#import "DOMUIEventInternal.h"
+#import "DOMWebKitCSSMatrixInternal.h"
+#import "DOMWebKitCSSKeyframeRuleInternal.h"
+#import "DOMWebKitCSSKeyframesRuleInternal.h"
+#import "DOMWheelEventInternal.h"
+
+#if ENABLE(SVG)
+#import "DOMSVGAElementInternal.h"
+#import "DOMSVGAngleInternal.h"
+#import "DOMSVGAnimateColorElementInternal.h"
+#import "DOMSVGAnimateElementInternal.h"
+#import "DOMSVGAnimateTransformElementInternal.h"
+#import "DOMSVGAnimatedAngleInternal.h"
+#import "DOMSVGAnimatedBooleanInternal.h"
+#import "DOMSVGAnimatedEnumerationInternal.h"
+#import "DOMSVGAnimatedIntegerInternal.h"
+#import "DOMSVGAnimatedLengthInternal.h"
+#import "DOMSVGAnimatedLengthListInternal.h"
+#import "DOMSVGAnimatedNumberInternal.h"
+#import "DOMSVGAnimatedNumberListInternal.h"
+#import "DOMSVGAnimatedPreserveAspectRatioInternal.h"
+#import "DOMSVGAnimatedRectInternal.h"
+#import "DOMSVGAnimatedStringInternal.h"
+#import "DOMSVGAnimatedTransformListInternal.h"
+#import "DOMSVGAnimationElementInternal.h"
+#import "DOMSVGCircleElementInternal.h"
+#import "DOMSVGClipPathElementInternal.h"
+#import "DOMSVGColorInternal.h"
+#import "DOMSVGComponentTransferFunctionElementInternal.h"
+#import "DOMSVGCursorElementInternal.h"
+#import "DOMSVGDefsElementInternal.h"
+#import "DOMSVGDefinitionSrcElementInternal.h"
+#import "DOMSVGDescElementInternal.h"
+#import "DOMSVGDocumentInternal.h"
+#import "DOMSVGElementInternal.h"
+#import "DOMSVGElementInstanceInternal.h"
+#import "DOMSVGElementInstanceListInternal.h"
+#import "DOMSVGEllipseElementInternal.h"
+#import "DOMSVGFEBlendElementInternal.h"
+#import "DOMSVGFEColorMatrixElementInternal.h"
+#import "DOMSVGFEComponentTransferElementInternal.h"
+#import "DOMSVGFECompositeElementInternal.h"
+#import "DOMSVGFEDiffuseLightingElementInternal.h"
+#import "DOMSVGFEDisplacementMapElementInternal.h"
+#import "DOMSVGFEDistantLightElementInternal.h"
+#import "DOMSVGFEFloodElementInternal.h"
+#import "DOMSVGFEFuncAElementInternal.h"
+#import "DOMSVGFEFuncBElementInternal.h"
+#import "DOMSVGFEFuncGElementInternal.h"
+#import "DOMSVGFEFuncRElementInternal.h"
+#import "DOMSVGFEGaussianBlurElementInternal.h"
+#import "DOMSVGFEImageElementInternal.h"
+#import "DOMSVGFEMergeElementInternal.h"
+#import "DOMSVGFEMergeNodeElementInternal.h"
+#import "DOMSVGFEOffsetElementInternal.h"
+#import "DOMSVGFEPointLightElementInternal.h"
+#import "DOMSVGFESpecularLightingElementInternal.h"
+#import "DOMSVGFESpotLightElementInternal.h"
+#import "DOMSVGFETileElementInternal.h"
+#import "DOMSVGFETurbulenceElementInternal.h"
+#import "DOMSVGFilterElementInternal.h"
+#import "DOMSVGFontElementInternal.h"
+#import "DOMSVGFontFaceElementInternal.h"
+#import "DOMSVGFontFaceFormatElementInternal.h"
+#import "DOMSVGFontFaceNameElementInternal.h"
+#import "DOMSVGFontFaceSrcElementInternal.h"
+#import "DOMSVGFontFaceUriElementInternal.h"
+#import "DOMSVGForeignObjectElementInternal.h"
+#import "DOMSVGGElementInternal.h"
+#import "DOMSVGGlyphElementInternal.h"
+#import "DOMSVGGradientElementInternal.h"
+#import "DOMSVGImageElementInternal.h"
+#import "DOMSVGLengthInternal.h"
+#import "DOMSVGLengthListInternal.h"
+#import "DOMSVGLineElementInternal.h"
+#import "DOMSVGLinearGradientElementInternal.h"
+#import "DOMSVGMarkerElementInternal.h"
+#import "DOMSVGMaskElementInternal.h"
+#import "DOMSVGMatrixInternal.h"
+#import "DOMSVGMetadataElementInternal.h"
+#import "DOMSVGMissingGlyphElementInternal.h"
+#import "DOMSVGNumberInternal.h"
+#import "DOMSVGNumberListInternal.h"
+#import "DOMSVGPaintInternal.h"
+#import "DOMSVGPathElementInternal.h"
+#import "DOMSVGPathSegArcAbsInternal.h"
+#import "DOMSVGPathSegArcRelInternal.h"
+#import "DOMSVGPathSegClosePathInternal.h"
+#import "DOMSVGPathSegCurvetoCubicAbsInternal.h"
+#import "DOMSVGPathSegCurvetoCubicRelInternal.h"
+#import "DOMSVGPathSegCurvetoCubicSmoothAbsInternal.h"
+#import "DOMSVGPathSegCurvetoCubicSmoothRelInternal.h"
+#import "DOMSVGPathSegCurvetoQuadraticAbsInternal.h"
+#import "DOMSVGPathSegCurvetoQuadraticRelInternal.h"
+#import "DOMSVGPathSegCurvetoQuadraticSmoothAbsInternal.h"
+#import "DOMSVGPathSegCurvetoQuadraticSmoothRelInternal.h"
+#import "DOMSVGPathSegInternal.h"
+#import "DOMSVGPathSegLinetoAbsInternal.h"
+#import "DOMSVGPathSegLinetoHorizontalAbsInternal.h"
+#import "DOMSVGPathSegLinetoHorizontalRelInternal.h"
+#import "DOMSVGPathSegLinetoRelInternal.h"
+#import "DOMSVGPathSegLinetoVerticalAbsInternal.h"
+#import "DOMSVGPathSegLinetoVerticalRelInternal.h"
+#import "DOMSVGPathSegListInternal.h"
+#import "DOMSVGPathSegMovetoAbsInternal.h"
+#import "DOMSVGPathSegMovetoRelInternal.h"
+#import "DOMSVGPatternElementInternal.h"
+#import "DOMSVGPointInternal.h"
+#import "DOMSVGPointListInternal.h"
+#import "DOMSVGPolygonElementInternal.h"
+#import "DOMSVGPolylineElementInternal.h"
+#import "DOMSVGPreserveAspectRatioInternal.h"
+#import "DOMSVGRadialGradientElementInternal.h"
+#import "DOMSVGRectElementInternal.h"
+#import "DOMSVGRectInternal.h"
+#import "DOMSVGRenderingIntentInternal.h"
+#import "DOMSVGSVGElementInternal.h"
+#import "DOMSVGScriptElementInternal.h"
+#import "DOMSVGSetElementInternal.h"
+#import "DOMSVGStopElementInternal.h"
+#import "DOMSVGStringListInternal.h"
+#import "DOMSVGStyleElementInternal.h"
+#import "DOMSVGSwitchElementInternal.h"
+#import "DOMSVGSymbolElementInternal.h"
+#import "DOMSVGTRefElementInternal.h"
+#import "DOMSVGTSpanElementInternal.h"
+#import "DOMSVGTextContentElementInternal.h"
+#import "DOMSVGTextElementInternal.h"
+#import "DOMSVGTextPathElementInternal.h"
+#import "DOMSVGTextPositioningElementInternal.h"
+#import "DOMSVGTitleElementInternal.h"
+#import "DOMSVGTransformInternal.h"
+#import "DOMSVGTransformListInternal.h"
+#import "DOMSVGUnitTypesInternal.h"
+#import "DOMSVGUseElementInternal.h"
+#import "DOMSVGViewElementInternal.h"
+#import "DOMSVGZoomEventInternal.h"
+#endif // ENABLE(SVG)
+
+#import "DOMTouchInternal.h"
+#import "DOMTouchListInternal.h"
+#import "DOMGestureEventInternal.h"
+
+namespace KJS {
+    class JSObject;
+    
+    namespace Bindings {
+        class RootObject;
+    }
 }
 
-@interface DOMNode (WebCoreInternal)
-+ (DOMNode *)_nodeWith:(WebCore::Node *)impl;
-- (WebCore::Node *)_node;
-@end
+namespace WebCore {
+    class FloatQuad;
+    class NodeFilter;
+#if ENABLE(SVG)
+    class AffineTransform;
+    class FloatPoint;
+    class FloatRect;
+#endif // ENABLE(SVG)
 
-@interface DOMNamedNodeMap (WebCoreInternal)
-+ (DOMNamedNodeMap *)_namedNodeMapWith:(WebCore::NamedNodeMap *)impl;
-@end
+#if ENABLE(XPATH)
+    class XPathNSResolver;
+#endif // ENABLE(XPATH)
 
-@interface DOMNodeList (WebCoreInternal)
-+ (DOMNodeList *)_nodeListWith:(WebCore::NodeList *)impl;
-@end
+    class Touch;
+    }
 
-@interface DOMElement (WebCoreInternal)
-+ (DOMElement *)_elementWith:(WebCore::Element *)impl;
-- (WebCore::Element *)_element;
-@end
-
-@interface DOMDocument (WebCoreInternal)
-+ (DOMDocument *)_documentWith:(WebCore::Document *)impl;
-- (WebCore::Document *)_document;
-- (DOMElement *)_ownerElement;
-@end
-
-@interface DOMDocumentFragment (WebCoreInternal)
-+ (DOMDocumentFragment *)_documentFragmentWith:(WebCore::DocumentFragment *)impl;
-- (WebCore::DocumentFragment *)_fragment;
-@end
-
-@interface DOMRange (WebCoreInternal)
-+ (DOMRange *)_rangeWith:(WebCore::Range *)impl;
-- (WebCore::Range *)_range;
-@end
-
-@interface DOMNodeIterator (WebCoreInternal)
-+ (DOMNodeIterator *)_nodeIteratorWith:(WebCore::NodeIterator *)impl filter:(id <DOMNodeFilter>)filter;
-@end
-
-@interface DOMTreeWalker (WebCoreInternal)
-+ (DOMTreeWalker *)_treeWalkerWith:(WebCore::TreeWalker *)impl filter:(id <DOMNodeFilter>)filter;
-@end
+// Core Internal Interfaces
 
 @interface DOMObject (WebCoreInternal)
 - (id)_init;
 @end
 
-@interface DOMCSSStyleDeclaration (WebCoreInternal)
-+ (DOMCSSStyleDeclaration *)_styleDeclarationWith:(WebCore::CSSStyleDeclaration *)impl;
-- (WebCore::CSSStyleDeclaration *)_styleDeclaration;
+// CSS Internal Interfaces
+
+@interface DOMRGBColor (WebCoreInternal)
++ (DOMRGBColor *)_wrapRGBColor:(WebCore::RGBA32)value;
+- (WebCore::RGBA32)_RGBColor;
 @end
 
-@interface DOMStyleSheetList (WebCoreInternal)
-+ (DOMStyleSheetList *)_styleSheetListWith:(WebCore::StyleSheetList *)impl;
-@end
-
-@interface DOMCSSStyleSheet (WebCoreInternal)
-+ (DOMCSSStyleSheet *)_CSSStyleSheetWith:(WebCore::CSSStyleSheet *)impl;
-@end
+// Traversal Internal Interfaces
 
 @interface DOMNodeFilter : DOMObject <DOMNodeFilter>
-+ (DOMNodeFilter *)_nodeFilterWith:(WebCore::NodeFilter *)impl;
++ (DOMNodeFilter *)_wrapNodeFilter:(WebCore::NodeFilter *)impl;
 @end
+
+#if ENABLE(XPATH)
+
+// XPath Internal Interfaces
+
+@interface DOMNativeXPathNSResolver : DOMObject <DOMXPathNSResolver>
++ (DOMNativeXPathNSResolver *)_wrapXPathNSResolver:(WebCore::XPathNSResolver *)impl;
+- (WebCore::XPathNSResolver *)_xpathNSResolver;
+@end
+
+#endif // ENABLE(XPATH)
 
 // Helper functions for DOM wrappers and gluing to Objective-C
 
-// Like reinterpret_cast, but a compiler error if you use it on the wrong type.
-template <class Target, class Source> Target DOM_cast(Source) { Source::failToCompile(); }
+namespace WebCore {
 
-// Type safe DOM wrapper access.
+    id createDOMWrapper(KJS::JSObject*, PassRefPtr<KJS::Bindings::RootObject> origin, PassRefPtr<KJS::Bindings::RootObject> current);
 
-NSObject* getDOMWrapper(DOMObjectInternal*);
-void addDOMWrapper(NSObject* wrapper, DOMObjectInternal*);
+    NSObject* getDOMWrapper(DOMObjectInternal*);
+    void addDOMWrapper(NSObject* wrapper, DOMObjectInternal*);
+    void removeDOMWrapper(DOMObjectInternal*);
 
-template <class Source> inline id getDOMWrapper(Source impl) { return getDOMWrapper(DOM_cast<DOMObjectInternal*>(impl)); }
-template <class Source> inline void addDOMWrapper(NSObject* wrapper, Source impl) { addDOMWrapper(wrapper, DOM_cast<DOMObjectInternal*>(impl)); }
-void removeDOMWrapper(DOMObjectInternal*);
+    template <class Source>
+    inline id getDOMWrapper(Source impl)
+    {
+        return getDOMWrapper(reinterpret_cast<DOMObjectInternal*>(impl));
+    }
 
-void raiseDOMException(WebCore::ExceptionCode);
+    template <class Source>
+    inline void addDOMWrapper(NSObject* wrapper, Source impl)
+    {
+        addDOMWrapper(wrapper, reinterpret_cast<DOMObjectInternal*>(impl));
+    }
 
-inline void raiseOnDOMError(WebCore::ExceptionCode ec) 
-{
-    if (ec) 
-        raiseDOMException(ec);
-}
-
-// Implementation details for the above.
-
-#define ALLOW_DOM_CAST(type) \
-    namespace WebCore { class type; } \
-    template <> inline DOMObjectInternal* DOM_cast<DOMObjectInternal*, class WebCore::type*>(class WebCore::type* p) \
-        { return reinterpret_cast<DOMObjectInternal *>(p); } \
-    template <> inline class WebCore::type* DOM_cast<class WebCore::type*, DOMObjectInternal*>(DOMObjectInternal* p) \
-        { return reinterpret_cast<class WebCore::type*>(p); }
-
-// No class should appear in this list if its base class is already here.
-ALLOW_DOM_CAST(Counter)
-ALLOW_DOM_CAST(CSSRule)
-ALLOW_DOM_CAST(CSSRuleList)
-ALLOW_DOM_CAST(CSSStyleDeclaration)
-ALLOW_DOM_CAST(CSSStyleSheet)
-ALLOW_DOM_CAST(CSSValue)
-ALLOW_DOM_CAST(DOMImplementationFront)
-ALLOW_DOM_CAST(HTMLCollection)
-ALLOW_DOM_CAST(HTMLOptionsCollection)
-ALLOW_DOM_CAST(MediaList)
-ALLOW_DOM_CAST(NamedNodeMap)
-ALLOW_DOM_CAST(NodeFilter)
-ALLOW_DOM_CAST(Node)
-ALLOW_DOM_CAST(NodeIterator)
-ALLOW_DOM_CAST(NodeList)
-ALLOW_DOM_CAST(Range)
-ALLOW_DOM_CAST(RectImpl)
-ALLOW_DOM_CAST(StyleSheet)
-ALLOW_DOM_CAST(StyleSheetList)
-ALLOW_DOM_CAST(TreeWalker)
-#if XPATH_SUPPORT
-ALLOW_DOM_CAST(XPathExpression)
-ALLOW_DOM_CAST(XPathNSResolver)
-ALLOW_DOM_CAST(XPathResult)
-#endif // XPATH_SUPPORT
+} // namespace WebCore

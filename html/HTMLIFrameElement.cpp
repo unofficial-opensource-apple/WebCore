@@ -19,18 +19,16 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "HTMLIFrameElement.h"
 
 #include "CSSPropertyNames.h"
 #include "Frame.h"
-#include "FrameTree.h"
 #include "HTMLDocument.h"
 #include "HTMLNames.h"
-#include "Page.h"
 #include "RenderPartObject.h"
 
 namespace WebCore {
@@ -38,15 +36,7 @@ namespace WebCore {
 using namespace HTMLNames;
 
 HTMLIFrameElement::HTMLIFrameElement(Document* doc)
-    : HTMLFrameElement(iframeTag, doc)
-    , needWidgetUpdate(false)
-{
-    m_frameBorder = false;
-    m_marginWidth = -1;
-    m_marginHeight = -1;
-}
-
-HTMLIFrameElement::~HTMLIFrameElement()
+    : HTMLFrameElementBase(iframeTag, doc)
 {
 }
 
@@ -62,7 +52,12 @@ bool HTMLIFrameElement::mapToEntry(const QualifiedName& attrName, MappedAttribut
         return false;
     }
     
-    return HTMLElement::mapToEntry(attrName, result);
+    if (attrName == frameborderAttr) {
+        result = eReplaced;
+        return false;
+    }
+
+    return HTMLFrameElementBase::mapToEntry(attrName, result);
 }
 
 void HTMLIFrameElement::parseMappedAttribute(MappedAttribute *attr)
@@ -76,115 +71,60 @@ void HTMLIFrameElement::parseMappedAttribute(MappedAttribute *attr)
     else if (attr->name() == nameAttr) {
         String newNameAttr = attr->value();
         if (inDocument() && document()->isHTMLDocument()) {
-            HTMLDocument *doc = static_cast<HTMLDocument *>(document());
+            HTMLDocument* doc = static_cast<HTMLDocument* >(document());
             doc->removeDocExtraNamedItem(oldNameAttr);
             doc->addDocExtraNamedItem(newNameAttr);
         }
         oldNameAttr = newNameAttr;
+    } else if (attr->name() == frameborderAttr) {
+        // Frame border doesn't really match the HTML4 spec definition for iframes.  It simply adds
+        // a presentational hint that the border should be off if set to zero.
+        if (!attr->isNull() && !attr->value().toInt())
+            // Add a rule that nulls out our border width.
+            addCSSLength(attr, CSS_PROP_BORDER_WIDTH, "0");
     } else
-        HTMLFrameElement::parseMappedAttribute(attr);
+        HTMLFrameElementBase::parseMappedAttribute(attr);
+}
+
+bool HTMLIFrameElement::rendererIsNeeded(RenderStyle* style)
+{
+    return isURLAllowed(m_URL) && style->display() != NONE;
+}
+
+RenderObject* HTMLIFrameElement::createRenderer(RenderArena* arena, RenderStyle*)
+{
+    return new (arena) RenderPartObject(this);
 }
 
 void HTMLIFrameElement::insertedIntoDocument()
 {
     if (document()->isHTMLDocument()) {
-        HTMLDocument *doc = static_cast<HTMLDocument *>(document());
+        HTMLDocument* doc = static_cast<HTMLDocument*>(document());
         doc->addDocExtraNamedItem(oldNameAttr);
     }
 
-    HTMLElement::insertedIntoDocument();
-    
-    // Load the frame
-    m_name = getAttribute(nameAttr);
-    if (m_name.isNull())
-        m_name = getAttribute(idAttr);
-    
-    if (Frame* parentFrame = document()->frame()) {
-        m_name = parentFrame->tree()->uniqueChildName(m_name);
-        
-        openURL();
-    }    
-}
-
-void HTMLIFrameElement::willRemove()
-{
-    if (Frame* frame = contentFrame()) {
-        frame->disconnectOwnerElement();
-        frame->frameDetached();
-        ASSERT(!contentFrame());
-    }
-
-    HTMLElement::willRemove();
+    HTMLFrameElementBase::insertedIntoDocument();
 }
 
 void HTMLIFrameElement::removedFromDocument()
 {
     if (document()->isHTMLDocument()) {
-        HTMLDocument *doc = static_cast<HTMLDocument *>(document());
+        HTMLDocument* doc = static_cast<HTMLDocument*>(document());
         doc->removeDocExtraNamedItem(oldNameAttr);
     }
 
-    HTMLElement::removedFromDocument();
-}
-
-bool HTMLIFrameElement::rendererIsNeeded(RenderStyle *style)
-{
-    // Don't ignore display: none the way frame does.
-    return isURLAllowed(m_URL) && style->display() != NONE;
-}
-
-RenderObject *HTMLIFrameElement::createRenderer(RenderArena *arena, RenderStyle *style)
-{
-    return new (arena) RenderPartObject(this);
+    HTMLFrameElementBase::removedFromDocument();
 }
 
 void HTMLIFrameElement::attach()
 {
-    HTMLElement::attach();
+    HTMLFrameElementBase::attach();
 
-    RenderPartObject* renderPart = static_cast<RenderPartObject*>(renderer());
-
-    if (renderPart) {        
-        if (!contentFrame())
-            openURL();
-
-        if (contentFrame()) {
-            renderPart->setWidget(contentFrame()->view());
-            renderPart->updateWidget();
-            needWidgetUpdate = false;
-        }
-    }
+    if (RenderPartObject* renderPartObject = static_cast<RenderPartObject*>(renderer()))
+        renderPartObject->updateWidget(false);
 }
 
-void HTMLIFrameElement::detach()
-{
-    HTMLElement::detach();
-}
-
-
-void HTMLIFrameElement::recalcStyle( StyleChange ch )
-{
-    if (needWidgetUpdate) {
-        if (renderer())
-            static_cast<RenderPartObject*>(renderer())->updateWidget();
-        needWidgetUpdate = false;
-    }
-    HTMLElement::recalcStyle( ch );
-}
-
-void HTMLIFrameElement::openURL()
-{
-    if (!isURLAllowed(m_URL))
-        return;
-    if (m_URL.isEmpty())
-        m_URL = "about:blank";
-    
-    document()->frame()->requestFrame(this, m_URL, m_name);
-    if (contentFrame())
-        contentFrame()->setInViewSourceMode(viewSourceMode());
-}
-
-bool HTMLIFrameElement::isURLAttribute(Attribute *attr) const
+bool HTMLIFrameElement::isURLAttribute(Attribute* attr) const
 {
     return attr->name() == srcAttr;
 }
@@ -207,11 +147,6 @@ String HTMLIFrameElement::height() const
 void HTMLIFrameElement::setHeight(const String &value)
 {
     setAttribute(heightAttr, value);
-}
-
-String HTMLIFrameElement::src() const
-{
-    return document()->completeURL(getAttribute(srcAttr));
 }
 
 String HTMLIFrameElement::width() const

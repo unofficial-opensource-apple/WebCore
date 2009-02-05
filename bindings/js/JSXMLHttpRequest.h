@@ -16,52 +16,69 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
-#ifndef JSXMLHTTPREQUEST_H_
-#define JSXMLHTTPREQUEST_H_
+#ifndef JSXMLHttpRequest_h
+#define JSXMLHttpRequest_h
 
 #include "kjs_binding.h"
 
 namespace WebCore {
-    class XMLHttpRequest;
-    class Document;
+
+class XMLHttpRequest;
+class Document;
+
 }
 
 namespace KJS {
 
-  class JSXMLHttpRequestConstructorImp : public DOMObject {
-  public:
-    JSXMLHttpRequestConstructorImp(ExecState *exec, WebCore::Document *d);
-    virtual bool implementsConstruct() const;
-    virtual JSObject *construct(ExecState *exec, const List &args);
-  private:
-    RefPtr<WebCore::Document> doc;
-  };
+class JSXMLHttpRequestConstructorImp : public DOMObject {
+public:
+    JSXMLHttpRequestConstructorImp(ExecState*, WebCore::Document*);
 
-  class JSXMLHttpRequest : public DOMObject {
-  public:
-    JSXMLHttpRequest(ExecState *, WebCore::Document *d);
+    virtual bool implementsConstruct() const;
+    virtual JSObject* construct(ExecState*, const List&);
+
+private:
+    RefPtr<WebCore::Document> doc;
+};
+
+class JSXMLHttpRequest : public DOMObject {
+public:
+    JSXMLHttpRequest(JSObject* prototype, WebCore::Document*);
     ~JSXMLHttpRequest();
+
     virtual const ClassInfo* classInfo() const { return &info; }
     static const ClassInfo info;
     enum { Onload, Onreadystatechange, ReadyState, ResponseText, ResponseXML, Status,
-        StatusText, Abort, GetAllResponseHeaders, GetResponseHeader, Open, Send, SetRequestHeader,
-        OverrideMIMEType };
+        StatusText, Abort, GetAllResponseHeaders, GetResponseHeader, Open, Send, SetRequestHeader, OverrideMIMEType,
+        AddEventListener, RemoveEventListener, DispatchEvent };
 
-    virtual bool getOwnPropertySlot(ExecState *, const Identifier&, PropertySlot&);
-    JSValue *getValueProperty(ExecState *exec, int token) const;
-    virtual void put(ExecState *exec, const Identifier &propertyName, JSValue *value, int attr = None);
-    void putValueProperty(ExecState *exec, int token, JSValue *value, int /*attr*/);
-    virtual bool toBoolean(ExecState *) const { return true; }
+    virtual bool getOwnPropertySlot(ExecState*, const Identifier&, PropertySlot&);
+    JSValue* getValueProperty(ExecState*, int token) const;
+    virtual void put(ExecState*, const Identifier& propertyName, JSValue* value, int attr = None);
+    void putValueProperty(ExecState*, int token, JSValue* value, int /*attr*/);
+    virtual bool toBoolean(ExecState*) const { return true; }
     virtual void mark();
 
-  private:
-    friend class JSXMLHttpRequestProtoFunc;
+    WebCore::XMLHttpRequest* impl() const { return m_impl.get(); }
+
+private:
     RefPtr<WebCore::XMLHttpRequest> m_impl;
-  };
+};
 
-} // namespace
+JSValue* jsXMLHttpRequestPrototypeFunctionAbort(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionGetAllResponseHeaders(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionGetResponseHeader(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionOpen(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionSend(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionSetRequestHeader(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionOverrideMIMEType(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionAddEventListener(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionRemoveEventListener(ExecState*, JSObject*, const List&);
+JSValue* jsXMLHttpRequestPrototypeFunctionDispatchEvent(ExecState*, JSObject*, const List&);
 
-#endif
+} // namespace KJS
+
+#endif // JSXMLHttpRequest_h

@@ -17,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HTMLLinkElement_H
-#define HTMLLinkElement_H
+#ifndef HTMLLinkElement_h
+#define HTMLLinkElement_h
 
 #include "HTMLElement.h"
 #include "CachedResourceClient.h"
@@ -62,7 +62,7 @@ public:
     String rev() const;
     void setRev(const String&);
 
-    String target() const;
+    virtual String target() const;
     void setTarget(const String&);
 
     String type() const;
@@ -79,9 +79,9 @@ public:
     virtual void removedFromDocument();
 
     // from CachedResourceClient
-    virtual void setStyleSheet(const String &url, const String &sheet);
+    virtual void setCSSStyleSheet(const String &url, const String& charset, const String &sheet);
     bool isLoading() const;
-    void sheetLoaded();
+    virtual bool sheetLoaded();
 
     bool isAlternate() const { return m_disabledState == 0 && m_alternate; }
     bool isDisabled() const { return m_disabledState == 2; }
@@ -92,7 +92,7 @@ public:
 
     virtual bool isURLAttribute(Attribute*) const;
     
-    void tokenizeRelAttribute(const AtomicString& rel);
+    static void tokenizeRelAttribute(const AtomicString& value, bool& stylesheet, bool& alternate, bool& icon);
 
 protected:
     CachedCSSStyleSheet* m_cachedSheet;
@@ -101,10 +101,10 @@ protected:
     String m_type;
     String m_media;
     int m_disabledState; // 0=unset(default), 1=enabled via script, 2=disabled
-    bool m_loading : 1;
-    bool m_alternate : 1;
-    bool m_isStyleSheet : 1;
-    bool m_isIcon : 1;
+    bool m_loading;
+    bool m_alternate;
+    bool m_isStyleSheet;
+    bool m_isIcon;
 };
 
 } //namespace

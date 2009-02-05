@@ -15,8 +15,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 #ifndef QualifiedName_h
@@ -28,7 +28,7 @@ namespace WebCore {
 
 class QualifiedName {
 public:
-    class QualifiedNameImpl : public Shared<QualifiedNameImpl> {
+    class QualifiedNameImpl : public RefCounted<QualifiedNameImpl> {
     public:
         QualifiedNameImpl(const AtomicString& p, const AtomicString& l, const AtomicString& n) :m_prefix(p), m_localName(l), m_namespace(n) {}
 
@@ -60,6 +60,8 @@ public:
 
     String toString() const;
 
+    QualifiedNameImpl* impl() const { return m_impl; }
+    
     // Init routine for globals
     static void init();
 
@@ -71,7 +73,7 @@ private:
     QualifiedNameImpl* m_impl;
 };
 
-#if !WEBCORE_QUALIFIEDNAME_HIDE_GLOBALS
+#ifndef WEBCORE_QUALIFIEDNAME_HIDE_GLOBALS
 extern const QualifiedName anyName;
 inline const QualifiedName& anyQName() { return anyName; }
 #endif

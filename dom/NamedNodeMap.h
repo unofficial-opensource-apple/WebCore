@@ -18,15 +18,15 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef DOM_NamedNodeMapImpl_h
-#define DOM_NamedNodeMapImpl_h
+#ifndef NamedNodeMap_h
+#define NamedNodeMap_h
 
-#include "Shared.h"
+#include <wtf/RefCounted.h>
 #include <wtf/PassRefPtr.h>
 
 namespace WebCore {
@@ -39,7 +39,7 @@ typedef int ExceptionCode;
 
 // Generic NamedNodeMap interface
 // Other classes implement this for more specific situations e.g. attributes of an element.
-class NamedNodeMap : public Shared<NamedNodeMap> {
+class NamedNodeMap : public RefCounted<NamedNodeMap> {
 public:
     NamedNodeMap() { }
     virtual ~NamedNodeMap() { }

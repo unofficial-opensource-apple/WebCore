@@ -17,19 +17,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLAreaElement_H
-#define HTMLAreaElement_H
+#ifndef HTMLAreaElement_h
+#define HTMLAreaElement_h
 
 #include "HTMLAnchorElement.h"
+#include "IntSize.h"
 #include "Path.h"
-#include "RenderObject.h" // for RenderObject::NodeInfo
 
 namespace WebCore {
+
+class HitTestResult;
 
 class HTMLAreaElement : public HTMLAnchorElement {
 public:
@@ -45,9 +47,10 @@ public:
 
     bool isDefault() const { return m_shape == Default; }
 
-    bool mapMouseEvent(int x, int y, const IntSize&, RenderObject::NodeInfo&);
+    bool mapMouseEvent(int x, int y, const IntSize&, HitTestResult&);
 
     virtual IntRect getRect(RenderObject*) const;
+    virtual FloatQuad getAbsoluteQuad(RenderObject*) const;     // takes transforms into account
 
     String accessKey() const;
     void setAccessKey(const String&);
@@ -67,10 +70,9 @@ public:
     String shape() const;
     void setShape(const String&);
 
-    int tabIndex() const;
     void setTabIndex(int);
 
-    String target() const;
+    virtual String target() const;
     void setTarget(const String&);
 
 protected:

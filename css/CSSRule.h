@@ -3,7 +3,7 @@
  *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006 Apple Computer, Inc.
+ * Copyright (C) 2002, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSRule_H
-#define CSSRule_H
+#ifndef CSSRule_h
+#define CSSRule_h
 
 #include "StyleBase.h"
 
@@ -30,34 +30,39 @@ namespace WebCore {
 
 class CSSStyleSheet;
 
-class CSSRule : public StyleBase
-{
+typedef int ExceptionCode;
+
+class CSSRule : public StyleBase {
 public:
-    enum CSSRuleType { 
-        UNKNOWN_RULE, 
-        STYLE_RULE, 
-        CHARSET_RULE, 
-        IMPORT_RULE, 
-        MEDIA_RULE, 
-        FONT_FACE_RULE, 
-        PAGE_RULE 
+    // NB: this has to match the list in CSSRule.idl
+    enum CSSRuleType {
+        UNKNOWN_RULE,
+        STYLE_RULE,
+        CHARSET_RULE,
+        IMPORT_RULE,
+        MEDIA_RULE,
+        FONT_FACE_RULE,
+        PAGE_RULE,
+        WEBKIT_KEYFRAMES_RULE,
+        WEBKIT_KEYFRAME_RULE
     };
-    
-    CSSRule(StyleBase* parent) : StyleBase(parent), m_type(UNKNOWN_RULE) { }
+
+    CSSRule(StyleBase* parent)
+        : StyleBase(parent)
+    {
+    }
 
     virtual bool isRule() { return true; }
-    unsigned short type() const { return m_type; }
+
+    virtual unsigned short type() const = 0;
 
     CSSStyleSheet* parentStyleSheet() const;
     CSSRule* parentRule() const;
 
     virtual String cssText() const;
-    void setCssText(String str);
-
-protected:
-    CSSRuleType m_type;
+    void setCssText(String, ExceptionCode&);
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSRule_h

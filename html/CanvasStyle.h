@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef HTMLCanvasStyle_h
-#define HTMLCanvasStyle_h
+#ifndef CanvasStyle_h
+#define CanvasStyle_h
 
 #include "PlatformString.h"
 
@@ -34,7 +34,7 @@ namespace WebCore {
     class CanvasPattern;
     class GraphicsContext;
 
-    class CanvasStyle : public Shared<CanvasStyle> {
+    class CanvasStyle : public RefCounted<CanvasStyle> {
     public:
         CanvasStyle(const String& color);
         CanvasStyle(float grayLevel);
@@ -50,7 +50,9 @@ namespace WebCore {
         CanvasPattern* pattern() const { return m_pattern.get(); }
 
         // These do nothing for gradients or patterns.
+#if !PLATFORM(CAIRO)
         void applyFillColor(GraphicsContext*);
+#endif
         void applyStrokeColor(GraphicsContext*);
 
     private:

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,19 +26,36 @@
 #ifndef DeprecatedString_h
 #define DeprecatedString_h
 
-#include <ctype.h>
-#include <unicode/uchar.h>
-#if __APPLE__
-#include <CoreFoundation/CoreFoundation.h>
-#endif
 #include "DeprecatedCString.h"
+#include <wtf/ASCIICType.h>
+#include <wtf/unicode/Unicode.h>
 
-#if __APPLE__
+/* On some ARM platforms GCC won't pack structures by default so sizeof(DeprecatedChar)
+   will end up being != 2 which causes crashes since the code depends on that. */
+#if COMPILER(GCC) && PLATFORM(FORCE_PACK)
+#define PACK_STRUCT __attribute__((packed))
+#else
+#define PACK_STRUCT
+#endif
+
+#if PLATFORM(CF)
+typedef const struct __CFString * CFStringRef;
+#endif
+
+#if PLATFORM(MAC)
 #ifdef __OBJC__
 @class NSString;
 #else
 class NSString;
 #endif
+#endif
+
+#if PLATFORM(QT)
+class QString;
+#endif
+
+#if PLATFORM(WX)
+class wxString;
 #endif
 
 namespace KJS {
@@ -68,7 +85,7 @@ public:
 
 private:
     unsigned short c;
-};
+} PACK_STRUCT;
 
 inline DeprecatedChar::DeprecatedChar() : c(0)
 {
@@ -105,21 +122,33 @@ inline unsigned short DeprecatedChar::unicode() const
 
 inline bool DeprecatedChar::isSpace() const
 {
+#if USE(ICU_UNICODE)
     // Use isspace() for basic Latin-1.
     // This will include newlines, which aren't included in unicode DirWS.
-    return c <= 0x7F ? isspace(c) : (u_charDirection(c) == U_WHITE_SPACE_NEUTRAL);
+    return c <= 0x7F ? WTF::isASCIISpace(c) : (u_charDirection(c) == U_WHITE_SPACE_NEUTRAL);
+#elif USE(QT4_UNICODE)
+    return QChar(c).isSpace();
+#endif
 }
 
 inline DeprecatedChar DeprecatedChar::lower() const
 {
+#if USE(ICU_UNICODE)
     // FIXME: If fast enough, we should just call u_tolower directly.
-    return c <= 0x7F ? tolower(c) : u_tolower(c);
+    return c <= 0x7F ? WTF::toASCIILower(c) : u_tolower(c);
+#elif USE(QT4_UNICODE)
+    return QChar(c).toLower().unicode();
+#endif
 }
 
 inline DeprecatedChar DeprecatedChar::upper() const
 {
+#if USE(ICU_UNICODE)
     // FIXME: If fast enough, we should just call u_toupper directly.
-    return c <= 0x7F ? toupper(c) : u_toupper(c);
+    return c <= 0x7F ? WTF::toASCIIUpper(c) : u_toupper(c);
+#elif USE(QT4_UNICODE)
+    return QChar(c).toUpper().unicode();
+#endif
 }
 
 inline char DeprecatedChar::latin1() const
@@ -183,7 +212,7 @@ struct DeprecatedStringData
     void initialize(const char *u, unsigned l);
 
     // Move from destination to source.
-    DeprecatedStringData(DeprecatedStringData &);
+    static DeprecatedStringData* createAndAdopt(DeprecatedStringData &);
 
     ~DeprecatedStringData();
 
@@ -210,15 +239,20 @@ struct DeprecatedStringData
     unsigned _length;
     mutable DeprecatedChar *_unicode;
     mutable char *_ascii;
+
     unsigned _maxUnicode : 30;
     bool _isUnicodeValid : 1;
     bool _isHeapAllocated : 1; // Fragile, but the only way we can be sure the instance was created with 'new'.
     unsigned _maxAscii : 31;
     bool _isAsciiValid : 1;
-    
-    char _internalBuffer[WEBCORE_DS_INTERNAL_BUFFER_SIZE]; // Pad out to a (((size + 1) & ~15) + 14) size
 
+    // _internalBuffer must be at the end - otherwise it breaks on archs that
+    // don't pack structs on byte boundary, like some versions of gcc on ARM
+    char _internalBuffer[WEBCORE_DS_INTERNAL_BUFFER_SIZE]; // Pad out to a (((size + 1) & ~15) + 14) size
+    
 private:
+    void adopt(DeprecatedStringData&);
+
     DeprecatedStringData(const DeprecatedStringData &);
     DeprecatedStringData &operator=(const DeprecatedStringData &);
 };
@@ -248,13 +282,24 @@ public:
     operator KJS::Identifier() const;
     operator KJS::UString() const;
 
+#if PLATFORM(QT)
+    DeprecatedString(const QString&);
+    operator QString() const;
+#endif
+
     static DeprecatedString fromLatin1(const char *);
     static DeprecatedString fromLatin1(const char *, int len);
     static DeprecatedString fromUtf8(const char *);
     static DeprecatedString fromUtf8(const char *, int len);
-#if __APPLE__
+#if PLATFORM(CF)
     static DeprecatedString fromCFString(CFStringRef);
+#endif
+#if PLATFORM(MAC)
     static DeprecatedString fromNSString(NSString*);
+#endif
+#if PLATFORM(SYMBIAN)
+    static DeprecatedString fromDes(const TDesC&);
+    static DeprecatedString fromDes(const TDesC8&);
 #endif
     DeprecatedString &operator=(char);
     DeprecatedString &operator=(DeprecatedChar);
@@ -306,8 +351,12 @@ public:
     short toShort(bool *ok = 0, int base = 10) const;
     unsigned short toUShort(bool *ok = 0, int base = 10) const;
     int toInt(bool *ok = 0, int base = 10) const;
+    int64_t toInt64(bool *ok = 0, int base = 10) const;
     unsigned toUInt(bool *ok = 0, int base = 10) const;
+    uint64_t toUInt64(bool *ok = 0, int base = 10) const;
+
     double toDouble(bool *ok = 0) const;
+    float toFloat(bool* ok = 0) const;
 
     static DeprecatedString number(int);
     static DeprecatedString number(unsigned);
@@ -336,11 +385,7 @@ public:
     DeprecatedString &setNum(unsigned long);
     DeprecatedString &setNum(double);
 
-    DeprecatedString &sprintf(const char *, ...) 
-#if __GNUC__
-    __attribute__ ((format (printf, 2, 3)))
-#endif
-    ;
+    DeprecatedString& format(const char *, ...) WTF_ATTRIBUTE_PRINTF(2, 3);
 
     DeprecatedString &append(const DeprecatedString &);
     DeprecatedString &append(DeprecatedChar);
@@ -378,10 +423,29 @@ public:
     DeprecatedString &operator+=(DeprecatedChar c) { return append(c); }
     DeprecatedString &operator+=(char c) { return append(c); }
 
-#if __APPLE__
+#if PLATFORM(CF)
     CFStringRef getCFString() const;
-    NSString *getNSString() const;
     void setBufferFromCFString(CFStringRef);
+#endif
+    
+#if PLATFORM(MAC)
+    NSString *getNSString() const;
+
+#ifdef __OBJC__
+    operator NSString*() const { return getNSString(); }
+#endif
+
+#endif
+
+#if PLATFORM(WX)
+    operator wxString() const;
+#endif
+
+#if PLATFORM(SYMBIAN)
+    TPtrC des() const;
+    TPtrC8 des8() const;
+    void setBufferFromDes(const TDesC&);
+    void setBufferFromDes(const TDesC8&);
 #endif
 
 private:
@@ -405,6 +469,7 @@ private:
 
     friend bool operator==(const DeprecatedString &, const DeprecatedString &);
     friend bool operator==(const DeprecatedString &, const char *);
+    friend bool equalIgnoringCase(const DeprecatedString&, const DeprecatedString&);
 
     friend class DeprecatedConstString;
     friend class QGDict;
@@ -418,6 +483,10 @@ DeprecatedString operator+(const DeprecatedString &, char);
 DeprecatedString operator+(const char *, const DeprecatedString &);
 DeprecatedString operator+(DeprecatedChar, const DeprecatedString &);
 DeprecatedString operator+(char, const DeprecatedString &);
+
+bool equalIgnoringCase(const DeprecatedString&, const DeprecatedString&);
+inline bool equalIgnoringCase(const DeprecatedString& a, const char* b) { return equalIgnoringCase(a, DeprecatedString(b)); }
+inline bool equalIgnoringCase(const char* a, const DeprecatedString& b) { return equalIgnoringCase(DeprecatedString(a), b); }
 
 inline char *DeprecatedStringData::ascii()
 {
@@ -449,11 +518,13 @@ inline const DeprecatedChar *DeprecatedString::unicode() const
     return dataHandle[0]->unicode();
 }
 
-#if __APPLE__
+#if PLATFORM(MAC)
+#if PLATFORM(CF)
 inline CFStringRef DeprecatedString::getCFString() const
 {
     return (CFStringRef)getNSString();
 }
+#endif
 #endif
 
 inline DeprecatedString DeprecatedString::fromLatin1(const char *chs)

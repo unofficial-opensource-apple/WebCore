@@ -1,8 +1,6 @@
 /*
- * This file is part of the html renderer for KDE.
- *
  * Copyright (C) 2001 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,63 +14,64 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderContainer_H
-#define RenderContainer_H
+#ifndef RenderContainer_h
+#define RenderContainer_h
 
 #include "RenderBox.h"
 
 namespace WebCore {
 
-class Position;
-
-/**
- * Base class for rendering objects that can have children
- */
-class RenderContainer : public RenderBox
-{
+// Base class for rendering objects that can have children.
+class RenderContainer : public RenderBox {
 public:
     RenderContainer(Node*);
     virtual ~RenderContainer();
 
-    RenderObject *firstChild() const { return m_first; }
-    RenderObject *lastChild() const { return m_last; }
+    virtual RenderObject* firstChild() const { return m_firstChild; }
+    virtual RenderObject* lastChild() const { return m_lastChild; }
 
     virtual bool canHaveChildren() const;
-    virtual void addChild(RenderObject *newChild, RenderObject *beforeChild = 0);
-    virtual void removeChild(RenderObject *oldChild);
+    virtual void addChild(RenderObject* newChild, RenderObject* beforeChild = 0);
+    virtual void removeChild(RenderObject*);
 
     virtual void destroy();
     void destroyLeftoverChildren();
+
+    virtual RenderObject* removeChildNode(RenderObject*, bool fullRemove = true);
+    virtual void appendChildNode(RenderObject*, bool fullAppend = true);
+    virtual void insertChildNode(RenderObject* child, RenderObject* before, bool fullInsert = true);
     
-    virtual RenderObject* removeChildNode(RenderObject* child);
-    virtual void appendChildNode(RenderObject* child);
-    virtual void insertChildNode(RenderObject* child, RenderObject* before);
-
+    // Designed for speed.  Don't waste time doing a bunch of work like layer updating and repainting when we know that our
+    // change in parentage is not going to affect anything.
+    virtual void moveChildNode(RenderObject* child) { appendChildNode(child->parent()->removeChildNode(child, false), false); }
+    
     virtual void layout();
-    virtual void calcMinMaxWidth() { setMinMaxKnown( true ); }
+    virtual void calcPrefWidths() { setPrefWidthsDirty(false); }
 
-    virtual void removeLeftoverAnonymousBoxes();
+    virtual void removeLeftoverAnonymousBlock(RenderBlock* child);
 
-    RenderObject* pseudoChild(RenderStyle::PseudoId) const;
-    virtual void updatePseudoChild(RenderStyle::PseudoId);
-    void updatePseudoChildForObject(RenderStyle::PseudoId, RenderObject*);
+    RenderObject* beforeAfterContainer(RenderStyle::PseudoId);
+    virtual void updateBeforeAfterContent(RenderStyle::PseudoId);
+    void updateBeforeAfterContentForContainer(RenderStyle::PseudoId, RenderContainer*);
+    bool isAfterContent(RenderObject* child) const;
 
     virtual VisiblePosition positionForCoordinates(int x, int y);
-    
-    virtual DeprecatedValueList<IntRect> lineBoxRects();
 
-protected:
-    void setFirstChild(RenderObject *first) { m_first = first; }
-    void setLastChild(RenderObject *last) { m_last = last; }
+    // In TOT WebCore, RenderContainer::addLineBoxRects has a different signature from RenderObject::addLineBoxRects which would sometimes
+    // give unexpected results.  We can remove this fix once we sync back up to TOT WebCore.
+    virtual void addLineBoxRects(Vector<IntRect>&, unsigned startOffset = 0, unsigned endOffset = UINT_MAX, bool useSelectionHeight = false);
 
-protected:
-    RenderObject *m_first;
-    RenderObject *m_last;
+    virtual void addLineBoxQuads(Vector<FloatQuad>&, unsigned startOffset = 0, unsigned endOffset = UINT_MAX, bool useSelectionHeight = false);
+
+private:
+    RenderObject* m_firstChild;
+    RenderObject* m_lastChild;
 };
 
-}
-#endif
+} // namespace WebCore
+
+#endif // RenderContainer_h

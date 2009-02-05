@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,16 +14,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 module core {
 
-    interface [LegacyParent=KJS::DOMNode, GenerateConstructor] Node {
-
-        // DOM Level 2 Core
-        
+    interface [
+        CustomMarkFunction,
+        GenerateConstructor,
+        GenerateNativeConverter,
+        GenerateToJS,
+        ObjCCustomInternalImpl,
+        InterfaceUUID=84BA0D7A-7E3E-4a7b-B6FB-7653E8FB54ED,
+        ImplementationUUID=81B47FDB-94B0-40fd-8E0C-FB2A6E53CC04
+    ] Node {
         // NodeType
         const unsigned short      ELEMENT_NODE                   = 1;
         const unsigned short      ATTRIBUTE_NODE                 = 2;
@@ -36,5 +42,94 @@ module core {
         const unsigned short      DOCUMENT_TYPE_NODE             = 10;
         const unsigned short      DOCUMENT_FRAGMENT_NODE         = 11;
         const unsigned short      NOTATION_NODE                  = 12;
+
+        readonly attribute [ConvertNullStringTo=Null] DOMString        nodeName;
+
+                 // FIXME: the spec says this can also raise on retrieval.
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString        nodeValue
+                     setter raises(DOMException);
+
+        readonly attribute unsigned short   nodeType;
+        readonly attribute Node             parentNode;
+        readonly attribute NodeList         childNodes;
+        readonly attribute Node             firstChild;
+        readonly attribute Node             lastChild;
+        readonly attribute Node             previousSibling;
+        readonly attribute Node             nextSibling;
+        readonly attribute NamedNodeMap     attributes;
+        readonly attribute Document         ownerDocument;
+
+        [OldStyleObjC, Custom] Node insertBefore(in [Return] Node newChild, 
+                                                 in Node refChild)
+            raises(DOMException);
+        [OldStyleObjC, Custom] Node replaceChild(in Node newChild, 
+                                                 in [Return] Node oldChild)
+            raises(DOMException);
+        [Custom] Node               removeChild(in [Return] Node oldChild)
+            raises(DOMException);
+        [Custom] Node               appendChild(in [Return] Node newChild)
+            raises(DOMException);
+
+        boolean            hasChildNodes();
+        Node               cloneNode(in boolean deep);
+        void               normalize();
+
+        // Introduced in DOM Level 2:
+
+        [OldStyleObjC] boolean isSupported(in DOMString feature, 
+                                           in [ConvertNullToNullString] DOMString version);
+
+        readonly attribute [ConvertNullStringTo=Null] DOMString        namespaceURI;
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString        prefix
+                     setter raises(DOMException);
+        readonly attribute [ConvertNullStringTo=Null] DOMString        localName;
+
+        boolean            hasAttributes();
+#if WTF_PLATFORM_IPHONE
+        Element            rootEditableElement();
+#endif
+
+        // Introduced in DOM Level 3:
+
+        readonly attribute [ConvertNullStringTo=Null] DOMString       baseURI;
+
+                 // FIXME: the spec says this can also raise on retrieval.
+                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString       textContent
+                     setter raises(DOMException);
+
+        boolean            isSameNode(in Node other);
+        boolean            isEqualNode(in Node other);
+        [ConvertNullStringTo=Null] DOMString          lookupPrefix(in [ConvertNullToNullString] DOMString namespaceURI);
+        boolean            isDefaultNamespace(in [ConvertNullToNullString] DOMString namespaceURI);
+        [ConvertNullStringTo=Null] DOMString          lookupNamespaceURI(in [ConvertNullToNullString] DOMString prefix);
+
+#if 0
+        // DocumentPosition
+        const unsigned short      DOCUMENT_POSITION_DISCONNECTED = 0x01;
+        const unsigned short      DOCUMENT_POSITION_PRECEDING    = 0x02;
+        const unsigned short      DOCUMENT_POSITION_FOLLOWING    = 0x04;
+        const unsigned short      DOCUMENT_POSITION_CONTAINS     = 0x08;
+        const unsigned short      DOCUMENT_POSITION_CONTAINED_BY = 0x10;
+        const unsigned short      DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 0x20;
+
+        unsigned short     compareDocumentPosition(in Node other)
+            raises(DOMException);
+
+        DOMObject          getFeature(in DOMString feature, 
+                                      in DOMString version);
+        DOMUserData        setUserData(in DOMString key, 
+                                       in DOMUserData data, 
+                                       in UserDataHandler handler);
+        DOMUserData        getUserData(in DOMString key);
+#endif /* 0 */
+
+        // IE extentions
+        readonly attribute Node             parentElement;
+
+#if defined(LANGUAGE_OBJECTIVE_C)
+        // Objective-C extensions
+        readonly attribute boolean          isContentEditable;
+#endif /* defined(LANGUAGE_OBJECTIVE_C) */
     };
+
 }

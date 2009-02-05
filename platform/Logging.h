@@ -20,11 +20,11 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef Logging_H
-#define Logging_H
+#ifndef Logging_h
+#define Logging_h
 
 #include <wtf/Assertions.h>
 
@@ -35,7 +35,6 @@
 namespace WebCore {
 
     extern WTFLogChannel LogNotYetImplemented;
-
     extern WTFLogChannel LogFrames;
     extern WTFLogChannel LogLoading;
     extern WTFLogChannel LogPopupBlocking;
@@ -43,7 +42,23 @@ namespace WebCore {
     extern WTFLogChannel LogEditing;
     extern WTFLogChannel LogTextConversion;
     extern WTFLogChannel LogIconDatabase;
+    extern WTFLogChannel LogSQLDatabase;
+    extern WTFLogChannel LogSpellingAndGrammar;
+    extern WTFLogChannel LogBackForward;
+    extern WTFLogChannel LogHistory;
+    extern WTFLogChannel LogPageCache;
+    extern WTFLogChannel LogPlatformLeaks;
+    extern WTFLogChannel LogNetwork;
+    extern WTFLogChannel LogFTP;
+    extern WTFLogChannel LogThreading;
+    extern WTFLogChannel LogStorageAPI;
+    extern WTFLogChannel LogMedia;
+    extern WTFLogChannel LogPlugin;
+#if ENABLE(HW_COMP)
+    extern WTFLogChannel LogCassoulet;
+#endif
 
+    void InitializeLoggingChannelsIfNecessary();
 }
 
-#endif
+#endif // Logging_h

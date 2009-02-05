@@ -27,12 +27,19 @@
 #import "SharedTimer.h"
 #import "WebCoreThread.h"
 
-#include <CoreFoundation/CoreFoundation.h>
+#include <Foundation/Foundation.h>
 #include <wtf/Assertions.h>
+
 
 namespace WebCore {
 
 static void (*sharedTimerFiredFunction)();
+static void timerFired(CFRunLoopTimerRef, void*);
+
+}
+
+
+namespace WebCore {
 
 void setSharedTimerFiredFunction(void (*f)())
 {
@@ -43,7 +50,10 @@ void setSharedTimerFiredFunction(void (*f)())
 
 static void timerFired(CFRunLoopTimerRef, void*)
 {
+    // FIXME: We can remove this global catch-all if we fix <rdar://problem/5299018>.
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     sharedTimerFiredFunction();
+    [pool drain];
 }
 
 void setSharedTimerFireTime(double fireTime)
@@ -51,16 +61,17 @@ void setSharedTimerFireTime(double fireTime)
     ASSERT(sharedTimerFiredFunction);
     WebThreadContext *threadContext = WebThreadCurrentContext();
     CFRunLoopTimerRef sharedTimer = threadContext->sharedTimer;
-    
+
     if (sharedTimer) {
         CFRunLoopTimerInvalidate(sharedTimer);
         CFRelease(sharedTimer);
     }
-    
+
     CFAbsoluteTime fireDate = fireTime - kCFAbsoluteTimeIntervalSince1970;
     sharedTimer = CFRunLoopTimerCreate(0, fireDate, 0, 0, 0, timerFired, 0);
     threadContext->sharedTimer = sharedTimer;
-    CFRunLoopAddTimer(threadContext->runLoop, sharedTimer, kCFRunLoopDefaultMode);
+    CFRunLoopAddTimer(threadContext->runLoop, sharedTimer, kCFRunLoopCommonModes);
+    
 }
 
 void stopSharedTimer()

@@ -16,26 +16,26 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "CSSProperty.h"
-#include "PlatformString.h"
 
-// Not in any header, so just declare it here for now.
-WebCore::String getPropertyName(unsigned short id);
+#include "CSSPropertyNames.h"
+#include "PlatformString.h"
 
 namespace WebCore {
 
 String CSSProperty::cssText() const
 {
-    return getPropertyName(id()) + ": " + m_value->cssText() + (isImportant() ? " !important" : "") + "; ";
+    return String(getPropertyName(static_cast<CSSPropertyID>(id()))) + ": " + m_value->cssText() + (isImportant() ? " !important" : "") + "; ";
 }
 
-bool operator==(const CSSProperty &a, const CSSProperty &b)
+bool operator==(const CSSProperty& a, const CSSProperty& b)
 {
     return a.m_id == b.m_id && a.m_important == b.m_important && a.m_value == b.m_value;
 }
 
-}
+} // namespace WebCore

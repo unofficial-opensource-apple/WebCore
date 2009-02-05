@@ -16,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "EntityReference.h"
@@ -29,7 +29,7 @@ EntityReference::EntityReference(Document* doc)
 {
 }
 
-EntityReference::EntityReference(Document* doc, StringImpl* entityName)
+EntityReference::EntityReference(Document* doc, const String& entityName)
     : ContainerNode(doc)
     , m_entityName(entityName)
 {
@@ -37,7 +37,7 @@ EntityReference::EntityReference(Document* doc, StringImpl* entityName)
 
 String EntityReference::nodeName() const
 {
-    return m_entityName.get();
+    return m_entityName;
 }
 
 Node::NodeType EntityReference::nodeType() const
@@ -47,7 +47,7 @@ Node::NodeType EntityReference::nodeType() const
 
 PassRefPtr<Node> EntityReference::cloneNode(bool deep)
 {
-    RefPtr<EntityReference> clone = new EntityReference(document(), m_entityName.get());
+    RefPtr<EntityReference> clone = new EntityReference(document(), m_entityName);
     // ### make sure children are readonly
     // ### since we are a reference, should we clone children anyway (even if not deep?)
     if (deep)
@@ -75,7 +75,7 @@ bool EntityReference::childTypeAllowed(NodeType type)
 String EntityReference::toString() const
 {
     String result = "&";
-    result += m_entityName.get();
+    result += m_entityName;
     result += ";";
 
     return result;

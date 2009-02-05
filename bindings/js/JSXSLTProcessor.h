@@ -23,34 +23,31 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifdef KHTML_XSLT
+#ifndef JSXSLTProcessor_h
+#define JSXSLTProcessor_h
 
-#ifndef XSLTProcessor_H
-#define XSLTProcessor_H
+#if ENABLE(XSLT)
 
 #include "kjs_binding.h"
 
 namespace WebCore {
     class XSLTProcessor;
-};
+}
 
 // Eventually we should implement XSLTException:
 // http://lxr.mozilla.org/seamonkey/source/content/xsl/public/nsIXSLTException.idl
-// http://bugzilla.opendarwin.org/show_bug.cgi?id=5446
+// http://bugs.webkit.org/show_bug.cgi?id=5446
 
 namespace KJS {
 
 class JSXSLTProcessor : public DOMObject {
 public:
-    JSXSLTProcessor(ExecState *exec);
+    JSXSLTProcessor(JSObject* prototype);
     ~JSXSLTProcessor();
     
     virtual const ClassInfo *classInfo() const { return &info; }
     static const ClassInfo info;
-    
-    enum { ImportStylesheet, TransformToFragment, TransformToDocument, SetParameter,
-            GetParameter, RemoveParameter, ClearParameters, Reset };
-    
+
     WebCore::XSLTProcessor *impl() const { return m_impl.get(); }
 private:
     RefPtr<WebCore::XSLTProcessor> m_impl;
@@ -58,13 +55,23 @@ private:
 
 class XSLTProcessorConstructorImp : public DOMObject {
 public:
-    XSLTProcessorConstructorImp(ExecState *);
-    virtual bool implementsConstruct() const { return true; }
-    virtual JSObject *construct(ExecState *exec, const List &args) { return new JSXSLTProcessor(exec); }
+    XSLTProcessorConstructorImp(ExecState*);
+
+    virtual bool implementsConstruct() const;
+    virtual JSObject* construct(ExecState*, const List&);
 };
 
-};
+JSValue* jsXSLTProcessorPrototypeFunctionImportStylesheet(ExecState*, JSObject*, const List&);
+JSValue* jsXSLTProcessorPrototypeFunctionTransformToFragment(ExecState*, JSObject*, const List&);
+JSValue* jsXSLTProcessorPrototypeFunctionTransformToDocument(ExecState*, JSObject*, const List&);
+JSValue* jsXSLTProcessorPrototypeFunctionSetParameter(ExecState*, JSObject*, const List&);
+JSValue* jsXSLTProcessorPrototypeFunctionGetParameter(ExecState*, JSObject*, const List&);
+JSValue* jsXSLTProcessorPrototypeFunctionRemoveParameter(ExecState*, JSObject*, const List&);
+JSValue* jsXSLTProcessorPrototypeFunctionClearParameters(ExecState*, JSObject*, const List&);
+JSValue* jsXSLTProcessorPrototypeFunctionReset(ExecState*, JSObject*, const List&);
 
-#endif
+} // namespace KJS
 
-#endif // KHTML_XSLT
+#endif // ENABLE(XSLT)
+
+#endif // JSXSLTProcessor_h

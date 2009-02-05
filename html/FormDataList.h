@@ -19,55 +19,52 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTML_FormDataList_h
-#define HTML_FormDataList_h
+#ifndef FormDataList_h
+#define FormDataList_h
 
+#include "CString.h"
 #include "PlatformString.h"
 #include "TextEncoding.h"
-#include "DeprecatedValueList.h"
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
 struct FormDataListItem {
-    FormDataListItem(const DeprecatedCString &data) : m_data(data) { }
-    FormDataListItem(const DeprecatedString &path) : m_path(path) { }
+    FormDataListItem() { }
+    FormDataListItem(const CString& data) : m_data(data) { }
+    FormDataListItem(const String& path) : m_path(path) { }
 
-    DeprecatedString m_path;
-    DeprecatedCString m_data;
+    String m_path;
+    CString m_data;
 };
 
 class FormDataList {
 public:
     FormDataList(const TextEncoding&);
 
-    void appendData(const String &key, const String &value)
-        { appendString(key.deprecatedString()); appendString(value.deprecatedString()); }
-    void appendData(const String &key, const DeprecatedString &value)
-        { appendString(key.deprecatedString()); appendString(value); }
-    void appendData(const String &key, const DeprecatedCString &value)
-        { appendString(key.deprecatedString()); appendString(value); }
-    void appendData(const String &key, int value)
-        { appendString(key.deprecatedString()); appendString(DeprecatedString::number(value)); }
-    void appendFile(const String &key, const String &filename);
+    void appendData(const String& key, const String& value)
+        { appendString(key); appendString(value); }
+    void appendData(const String& key, const CString& value)
+        { appendString(key); appendString(value); }
+    void appendData(const String& key, int value)
+        { appendString(key); appendString(String::number(value)); }
+    void appendFile(const String& key, const String& filename);
 
-    DeprecatedValueListConstIterator<FormDataListItem> begin() const
-        { return m_list.begin(); }
-    DeprecatedValueListConstIterator<FormDataListItem> end() const
-        { return m_list.end(); }
+    const Vector<FormDataListItem>& list() const { return m_list; }
 
 private:
-    void appendString(const DeprecatedCString &s);
-    void appendString(const DeprecatedString &s);
+    void appendString(const CString&);
+    void appendString(const String&);
 
     TextEncoding m_encoding;
-    DeprecatedValueList<FormDataListItem> m_list;
+    Vector<FormDataListItem> m_list;
 };
 
-};
+} // namespace WebCore
 
-#endif
+#endif // FormDataList_h

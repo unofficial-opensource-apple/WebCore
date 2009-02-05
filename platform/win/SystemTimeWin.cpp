@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 #include "config.h"
 #include "SystemTime.h"
 
+#include "NotImplemented.h"
 #include <windows.h>
 
 namespace WebCore {
@@ -50,7 +51,14 @@ double currentTime()
     // of which 89 were leap years (1700, 1800, and 1900 were not leap years).
     // That is a total of 134774 days, which is 11644473600 seconds.
 
-    return t.QuadPart * 0.0000001 + 11644473600.0;
+    return t.QuadPart * 0.0000001 - 11644473600.0;
+}
+
+float userIdleTime()
+{
+    // Needed for back/forward cache.
+    notImplemented();
+    return 0.0F;
 }
 
 }

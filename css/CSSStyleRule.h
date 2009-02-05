@@ -17,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSStyleRule_H
-#define CSSStyleRule_H
+#ifndef CSSStyleRule_h
+#define CSSStyleRule_h
 
 #include "CSSRule.h"
 #include <wtf/PassRefPtr.h>
@@ -33,20 +33,26 @@ namespace WebCore {
 class CSSMutableStyleDeclaration;
 class CSSSelector;
 
-class CSSStyleRule : public CSSRule
-{
+typedef int ExceptionCode;
+
+class CSSStyleRule : public CSSRule {
 public:
     CSSStyleRule(StyleBase* parent);
     virtual ~CSSStyleRule();
 
-    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
-
     virtual bool isStyleRule() { return true; }
-    virtual String cssText() const;
 
     String selectorText() const;
-    void setSelectorText(String);
+    void setSelectorText(const String&, ExceptionCode&);
 
+    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
+
+    // Inherited from CSSRule
+    virtual unsigned short type() const { return STYLE_RULE; }
+
+    virtual String cssText() const;
+
+    // Not part of the CSSOM
     virtual bool parseString(const String&, bool = false);
 
     void setSelector(CSSSelector* selector) { m_selector = selector; }
@@ -60,6 +66,6 @@ protected:
     CSSSelector* m_selector;
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSStyleRule_h

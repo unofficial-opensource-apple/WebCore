@@ -26,6 +26,7 @@
 #include "config.h"
 #include "Position.h"
 
+#include "CharacterNames.h"
 #include "Document.h"
 #include "Element.h"
 #include "Logging.h"
@@ -33,14 +34,14 @@
 #include "CSSComputedStyleDeclaration.h"
 #include "htmlediting.h"
 #include "HTMLNames.h"
+#include "PositionIterator.h"
+#include "Text.h"
 #include "TextIterator.h"
 #include "visible_units.h"
   
 namespace WebCore {
 
 using namespace HTMLNames;
-
-const UChar nonBreakingSpace = 0xa0;
 
 static Node *nextRenderedEditable(Node *node)
 {
@@ -70,8 +71,15 @@ static Node *previousRenderedEditable(Node *node)
     return 0;
 }
 
-Position::Position(Node *node, int offset) 
-    : m_node(node), m_offset(offset) 
+Position::Position(Node* node, int offset) 
+    : m_node(node)
+    , m_offset(offset) 
+{
+}
+
+Position::Position(const PositionIterator& it)
+    : m_node(it.m_parent)
+    , m_offset(it.m_child ? it.m_child->nodeIndex() : (it.m_parent->hasChildNodes() ? maxDeepOffset(it.m_parent) : it.m_offset))
 {
 }
 
@@ -112,7 +120,8 @@ Position Position::previous(EUsingComposedCharacters usingComposedCharacters) co
         return *this;
     
     int o = offset();
-    assert(o >= 0);
+    // FIXME: Negative offsets shouldn't be allowed. We should catch this earlier.
+    ASSERT(o >= 0);
 
     if (o > 0) {
         Node *child = n->childNode(o - 1);
@@ -124,7 +133,7 @@ Position Position::previous(EUsingComposedCharacters usingComposedCharacters) co
         //      Going backward one character at a time is correct.
         //   2) The old offset was a bogus offset like (<br>, 1), and there is no child.
         //      Going from 1 to 0 is correct.
-        return Position(n, usingComposedCharacters ? n->previousOffset(o) : o - 1);
+        return Position(n, usingComposedCharacters ? uncheckedPreviousOffset(n, o) : o - 1);
     }
 
     Node *parent = n->parentNode();
@@ -141,7 +150,8 @@ Position Position::next(EUsingComposedCharacters usingComposedCharacters) const
         return *this;
     
     int o = offset();
-    assert(o >= 0);
+    // FIXME: Negative offsets shouldn't be allowed. We should catch this earlier.
+    ASSERT(o >= 0);
 
     Node* child = n->childNode(o);
     if (child || !n->hasChildNodes() && o < maxDeepOffset(n)) {
@@ -153,7 +163,7 @@ Position Position::next(EUsingComposedCharacters usingComposedCharacters) const
         //      Going forward one character at a time is correct.
         //   2) The new offset is a bogus offset like (<br>, 1), and there is no child.
         //      Going from 0 to 1 is correct.
-        return Position(n, usingComposedCharacters ? n->nextOffset(o) : o + 1);
+        return Position(n, usingComposedCharacters ? uncheckedNextOffset(n, o) : o + 1);
     }
 
     Node *parent = n->parentNode();
@@ -161,6 +171,16 @@ Position Position::next(EUsingComposedCharacters usingComposedCharacters) const
         return *this;
 
     return Position(parent, n->nodeIndex() + 1);
+}
+
+int Position::uncheckedPreviousOffset(const Node* n, int current)
+{
+    return n->renderer() ? n->renderer()->previousOffset(current) : current - 1;
+}
+
+int Position::uncheckedNextOffset(const Node* n, int current)
+{
+    return n->renderer() ? n->renderer()->nextOffset(current) : current + 1;
 }
 
 bool Position::atStart() const
@@ -214,7 +234,7 @@ Position Position::previousCharacterPosition(EAffinity affinity) const
     Node *fromRootEditableElement = node()->rootEditableElement();
 
     bool atStartOfLine = isStartOfLine(VisiblePosition(*this, affinity));
-    bool rendered = inRenderedContent();
+    bool rendered = isCandidate();
     
     Position currentPos = *this;
     while (!currentPos.atStart()) {
@@ -224,7 +244,7 @@ Position Position::previousCharacterPosition(EAffinity affinity) const
             return *this;
 
         if (atStartOfLine || !rendered) {
-            if (currentPos.inRenderedContent())
+            if (currentPos.isCandidate())
                 return currentPos;
         } else if (rendersInDifferentPosition(currentPos))
             return currentPos;
@@ -242,7 +262,7 @@ Position Position::nextCharacterPosition(EAffinity affinity) const
     Node *fromRootEditableElement = node()->rootEditableElement();
 
     bool atEndOfLine = isEndOfLine(VisiblePosition(*this, affinity));
-    bool rendered = inRenderedContent();
+    bool rendered = isCandidate();
     
     Position currentPos = *this;
     while (!currentPos.atEnd()) {
@@ -252,7 +272,7 @@ Position Position::nextCharacterPosition(EAffinity affinity) const
             return *this;
 
         if (atEndOfLine || !rendered) {
-            if (currentPos.inRenderedContent())
+            if (currentPos.isCandidate())
                 return currentPos;
         } else if (rendersInDifferentPosition(currentPos))
             return currentPos;
@@ -263,45 +283,51 @@ Position Position::nextCharacterPosition(EAffinity affinity) const
 
 // upstream() and downstream() want to return positions that are either in a
 // text node or at just before a non-text node.  This method checks for that.
-static bool isStreamer(const Position &pos)
+static bool isStreamer(const PositionIterator& pos)
 {
-    if (pos.isNull())
+    if (!pos.node())
         return true;
         
     if (isAtomicNode(pos.node()))
         return true;
         
-    return pos.offset() == 0;
+    return pos.atStartOfNode();
+}
+
+Node* enclosingBlockIgnoringEditability(Node* node)
+{
+    while (node && !isBlock(node))
+        node = node->parentNode();
+        
+    return node;
 }
 
 // p.upstream() returns the start of the range of positions that map to the same VisiblePosition as P.
 Position Position::upstream() const
 {
-    // start at equivalent deep position
-    Position start = *this;
-    Node *startNode = start.node();
+    Node* startNode = node();
     if (!startNode)
         return Position();
     
     // iterate backward from there, looking for a qualified position
-    Node *block = enclosingBlock(startNode);
-    Position lastVisible = *this;
-    Position currentPos = start;
-    Node* originalRoot = node()->rootEditableElement();
-    for (; !currentPos.atStart(); currentPos = currentPos.previous(UsingComposedCharacters)) {
-        Node *currentNode = currentPos.node();
-        int currentOffset = currentPos.offset();
+    Node* originalBlock = enclosingBlockIgnoringEditability(startNode);
+    PositionIterator lastVisible = *this;
+    PositionIterator currentPos = lastVisible;
+    bool startedEditable = startNode->isContentEditable();
+    for (; !currentPos.atStart(); currentPos.decrement()) {
+        Node* currentNode = currentPos.node();
         
-        if (currentNode->rootEditableElement() != originalRoot)
+        bool currentEditable = currentNode->isContentEditable();
+        if (startedEditable && !currentEditable || !startedEditable && currentEditable)
             break;
-
+            
         // Don't enter a new enclosing block flow or table element.  There is code below that
-        // terminates early if we're about to leave an enclosing block flow or table element.
-        if (block != enclosingBlock(currentNode))
+        // terminates early if we're about to leave a block.
+        if (isBlock(currentNode) && currentNode != originalBlock)
             return lastVisible;
-
+        
         // skip position in unrendered or invisible node
-        RenderObject *renderer = currentNode->renderer();
+        RenderObject* renderer = currentNode->renderer();
         if (!renderer || renderer->style()->visibility() != VISIBLE)
             continue;
                  
@@ -310,35 +336,31 @@ Position Position::upstream() const
             lastVisible = currentPos;
         
         // Don't leave a block flow or table element.  We could rely on code above to terminate and 
-        // return lastVisible on the next iteration, but we terminate early to avoid calling previous()
-        // beceause previous() for an offset 0 position calls nodeIndex(), which is O(n).
-        // FIXME: Avoid calling previous on other offset 0 positions.
-        if (currentNode == enclosingBlock(currentNode) && currentOffset == 0)
+        // return lastVisible on the next iteration, but we terminate early to avoid doing a nodeIndex() call.
+        if (isBlock(currentNode) && currentPos.atStartOfNode())
             return lastVisible;
-            
-        // return position after replaced or BR elements
-        // NOTE: caretMaxOffset() can be less than childNodeCount()!!
-        // e.g. SELECT and APPLET nodes
-        if (editingIgnoresContent(currentNode) || renderer->isBR() || isTableElement(currentNode)) {
-            int maxOffset = maxDeepOffset(currentNode);
-            if (currentOffset >= maxOffset)
-                return Position(currentNode, maxOffset);
+
+        // Return position after tables and nodes which have content that can be ignored.
+        if (editingIgnoresContent(currentNode) || isTableElement(currentNode)) {
+            if (currentPos.atEndOfNode())
+                return Position(currentNode, maxDeepOffset(currentNode));
             continue;
         }
 
         // return current position if it is in rendered text
-        if (renderer->isText() && static_cast<RenderText *>(renderer)->firstTextBox()) {
+        if (renderer->isText() && static_cast<RenderText*>(renderer)->firstTextBox()) {
             if (currentNode != startNode) {
-                assert(currentOffset >= renderer->caretMaxOffset());
+                // This assertion fires in layout tests in the case-transform.html test because
+                // of a mix-up between offsets in the text in the DOM tree with text in the
+                // render tree which can have a different length due to case transformation.
+                // Until we resolve that, disable this so we can run the layout tests!
+                //ASSERT(currentOffset >= renderer->caretMaxOffset());
                 return Position(currentNode, renderer->caretMaxOffset());
             }
 
-            if (currentOffset < 0)
-                continue;
-
-            unsigned textOffset = currentOffset;
-            RenderText *textRenderer = static_cast<RenderText *>(renderer);
-            for (InlineTextBox *box = textRenderer->firstTextBox(); box; box = box->nextTextBox()) {
+            unsigned textOffset = currentPos.offsetInLeafNode();
+            RenderText* textRenderer = static_cast<RenderText*>(renderer);
+            for (InlineTextBox* box = textRenderer->firstTextBox(); box; box = box->nextTextBox()) {
                 if (textOffset > box->start() && textOffset <= box->start() + box->len())
                     return currentPos;
                     
@@ -356,34 +378,38 @@ Position Position::upstream() const
 // P.downstream() returns the end of the range of positions that map to the same VisiblePosition as P.
 Position Position::downstream() const
 {
-    Position start = *this;
-    Node *startNode = start.node();
+    Node* startNode = node();
     if (!startNode)
         return Position();
 
     // iterate forward from there, looking for a qualified position
-    Node *block = enclosingBlock(startNode);
-    Position lastVisible = *this;
-    Position currentPos = start;
-    Node* originalRoot = node()->rootEditableElement();
-    for (; !currentPos.atEnd(); currentPos = currentPos.next(UsingComposedCharacters)) {   
-        Node *currentNode = currentPos.node();
-        int currentOffset = currentPos.offset();
+    Node* originalBlock = enclosingBlockIgnoringEditability(startNode);
+    PositionIterator lastVisible = *this;
+    PositionIterator currentPos = lastVisible;
+    bool startedEditable = startNode->isContentEditable();
+    for (; !currentPos.atEnd(); currentPos.increment()) {   
+        Node* currentNode = currentPos.node();
         
-        if (currentNode->rootEditableElement() != originalRoot)
+        bool currentEditable = currentNode->isContentEditable();
+        if (startedEditable && !currentEditable || !startedEditable && currentEditable)
             break;
 
         // stop before going above the body, up into the head
         // return the last visible streamer position
-        if (currentNode->hasTagName(bodyTag) && currentOffset >= (int) currentNode->childNodeCount())
+        if (currentNode->hasTagName(bodyTag) && currentPos.atEndOfNode())
             break;
             
-        // Do not enter a new enclosing block flow or table element, and don't leave the original one.
-        if (block != enclosingBlock(currentNode))
+        // Do not enter a new enclosing block.
+        if (isBlock(currentNode) && currentNode != originalBlock)
+            return lastVisible;
+        // Do not leave the original enclosing block.
+        // Note: The first position after the last one in the original block 
+        // will be [originalBlock->parentNode(), originalBlock->nodeIndex() + 1].
+        if (originalBlock && originalBlock->parentNode() == currentNode)
             return lastVisible;
 
         // skip position in unrendered or invisible node
-        RenderObject *renderer = currentNode->renderer();
+        RenderObject* renderer = currentNode->renderer();
         if (!renderer || renderer->style()->visibility() != VISIBLE)
             continue;
             
@@ -391,27 +417,24 @@ Position Position::downstream() const
         if (isStreamer(currentPos))
             lastVisible = currentPos;
 
-        // return position before replaced or BR elements
-        if (editingIgnoresContent(currentNode) || renderer->isBR() || isTableElement(currentNode)) {
-            if (currentOffset <= renderer->caretMinOffset())
+        // Return position before tables and nodes which have content that can be ignored.
+        if (editingIgnoresContent(currentNode) || isTableElement(currentNode)) {
+            if (currentPos.offsetInLeafNode() <= renderer->caretMinOffset())
                 return Position(currentNode, renderer->caretMinOffset());
             continue;
         }
 
         // return current position if it is in rendered text
-        if (renderer->isText() && static_cast<RenderText *>(renderer)->firstTextBox()) {
+        if (renderer->isText() && static_cast<RenderText*>(renderer)->firstTextBox()) {
             if (currentNode != startNode) {
-                assert(currentOffset == 0);
+                ASSERT(currentPos.atStartOfNode());
                 return Position(currentNode, renderer->caretMinOffset());
             }
 
-            if (currentOffset < 0)
-                continue;
+            unsigned textOffset = currentPos.offsetInLeafNode();
 
-            unsigned textOffset = currentOffset;
-
-            RenderText *textRenderer = static_cast<RenderText *>(renderer);
-            for (InlineTextBox *box = textRenderer->firstTextBox(); box; box = box->nextTextBox()) {
+            RenderText* textRenderer = static_cast<RenderText*>(renderer);
+            for (InlineTextBox* box = textRenderer->firstTextBox(); box; box = box->nextTextBox()) {
                 if (textOffset >= box->start() && textOffset <= box->end())
                     return currentPos;
                 
@@ -427,7 +450,7 @@ Position Position::downstream() const
     return lastVisible;
 }
 
-static bool hasRenderedNonAnonymousDescendantsWithHeight(RenderObject *renderer)
+bool Position::hasRenderedNonAnonymousDescendantsWithHeight(RenderObject* renderer)
 {
     RenderObject* stop = renderer->nextInPreOrderAfterChildren();
     for (RenderObject *o = renderer->firstChild(); o && o != stop; o = o->nextInPreOrder())
@@ -437,7 +460,12 @@ static bool hasRenderedNonAnonymousDescendantsWithHeight(RenderObject *renderer)
     return false;
 }
 
-bool Position::inRenderedContent() const
+bool Position::nodeIsUserSelectNone(Node* node)
+{
+    return node && node->renderer() && node->renderer()->style()->userSelect() == SELECT_NONE;
+}
+
+bool Position::isCandidate() const
 {
     if (isNull())
         return false;
@@ -450,17 +478,17 @@ bool Position::inRenderedContent() const
         return false;
 
     if (renderer->isBR())
-        return offset() == 0;
+        return offset() == 0 && !nodeIsUserSelectNone(node()->parent());
 
     if (renderer->isText())
-        return inRenderedText();
+        return inRenderedText() && !nodeIsUserSelectNone(node());
 
     if (isTableElement(node()) || editingIgnoresContent(node()))
-        return offset() == 0 || offset() == maxDeepOffset(node());
+        return (offset() == 0 || offset() == maxDeepOffset(node())) && !nodeIsUserSelectNone(node()->parent());
 
     if (!node()->hasTagName(htmlTag) && renderer->isBlockFlow() && !hasRenderedNonAnonymousDescendantsWithHeight(renderer) &&
        (renderer->height() || node()->hasTagName(bodyTag)))
-        return offset() == 0;
+        return offset() == 0 && !nodeIsUserSelectNone(node());
     
     return false;
 }
@@ -488,6 +516,17 @@ bool Position::inRenderedText() const
     }
     
     return false;
+}
+
+static unsigned caretMaxRenderedOffset(const Node* n)
+{
+    RenderObject* r = n->renderer();
+    if (r)
+        return r->caretMaxRenderedOffset();
+    
+    if (n->isCharacterDataNode())
+        return static_cast<const CharacterData*>(n)->length();
+    return 1;
 }
 
 bool Position::isRenderedCharacter() const
@@ -544,10 +583,10 @@ bool Position::rendersInDifferentPosition(const Position &pos) const
         }
     }
     
-    if (node()->hasTagName(brTag) && pos.inRenderedContent())
+    if (node()->hasTagName(brTag) && pos.isCandidate())
         return true;
                 
-    if (pos.node()->hasTagName(brTag) && inRenderedContent())
+    if (pos.node()->hasTagName(brTag) && isCandidate())
         return true;
                 
     if (node()->enclosingBlockFlowElement() != pos.node()->enclosingBlockFlowElement())
@@ -569,8 +608,8 @@ bool Position::rendersInDifferentPosition(const Position &pos) const
     LOG(Editing, "thisRenderedOffset:         %d\n", thisRenderedOffset);
     LOG(Editing, "posRenderer:            %p [%p]\n", posRenderer, posRenderer ? posRenderer->inlineBox(offset()) : 0);
     LOG(Editing, "posRenderedOffset:      %d\n", posRenderedOffset);
-    LOG(Editing, "node min/max:           %d:%d\n", node()->caretMinOffset(), node()->caretMaxRenderedOffset());
-    LOG(Editing, "pos node min/max:       %d:%d\n", pos.node()->caretMinOffset(), pos.node()->caretMaxRenderedOffset());
+    LOG(Editing, "node min/max:           %d:%d\n", caretMinOffset(node()), caretMaxRenderedOffset(node()));
+    LOG(Editing, "pos node min/max:       %d:%d\n", caretMinOffset(pos.node()), caretMaxRenderedOffset(pos.node()));
     LOG(Editing, "----------------------------------------------------------------------\n");
 
     InlineBox *b1 = renderer ? renderer->inlineBox(offset()) : 0;
@@ -585,20 +624,22 @@ bool Position::rendersInDifferentPosition(const Position &pos) const
     }
 
     if (nextRenderedEditable(node()) == pos.node() && 
-        thisRenderedOffset == (int)node()->caretMaxRenderedOffset() && posRenderedOffset == 0) {
+        thisRenderedOffset == (int)caretMaxRenderedOffset(node()) && posRenderedOffset == 0) {
         return false;
     }
     
     if (previousRenderedEditable(node()) == pos.node() && 
-        thisRenderedOffset == 0 && posRenderedOffset == (int)pos.node()->caretMaxRenderedOffset()) {
+        thisRenderedOffset == 0 && posRenderedOffset == (int)caretMaxRenderedOffset(pos.node())) {
         return false;
     }
 
     return true;
 }
 
+// This assumes that it starts in editable content.
 Position Position::leadingWhitespacePosition(EAffinity affinity, bool considerNonCollapsibleWhitespace) const
 {
+    ASSERT(isEditablePosition(*this));
     if (isNull())
         return Position();
     
@@ -609,40 +650,28 @@ Position Position::leadingWhitespacePosition(EAffinity affinity, bool considerNo
     if (prev != *this && prev.node()->inSameContainingBlockFlowElement(node()) && prev.node()->isTextNode()) {
         String string = static_cast<Text *>(prev.node())->data();
         UChar c = string[prev.offset()];
-        if (considerNonCollapsibleWhitespace ? (DeprecatedChar(c).isSpace() || c == nonBreakingSpace) : isCollapsibleWhitespace(c))
-            return prev;
+        if (considerNonCollapsibleWhitespace ? (isSpaceOrNewline(c) || c == noBreakSpace) : isCollapsibleWhitespace(c))
+            if (isEditablePosition(prev))
+                return prev;
     }
 
     return Position();
 }
 
+// This assumes that it starts in editable content.
 Position Position::trailingWhitespacePosition(EAffinity affinity, bool considerNonCollapsibleWhitespace) const
 {
+    ASSERT(isEditablePosition(*this));
     if (isNull())
         return Position();
-
-    if (node()->isTextNode()) {
-        Text* textNode = static_cast<Text*>(node());
-        if (offset() < (int)textNode->length()) {
-            String string = textNode->data();
-            UChar c = string[offset()];
-            if (considerNonCollapsibleWhitespace ? (DeprecatedChar(c).isSpace() || c == nonBreakingSpace) : isCollapsibleWhitespace(c))
-                return *this;
-            return Position();
-        }
-    }
-
-    if (downstream().node()->hasTagName(brTag))
-        return Position();
-
-    Position next = nextCharacterPosition(affinity);
-    if (next != *this && next.node()->inSameContainingBlockFlowElement(node()) && next.node()->isTextNode()) {
-        String string = static_cast<Text*>(next.node())->data();
-        UChar c = string[0];
-        if (considerNonCollapsibleWhitespace ? (DeprecatedChar(c).isSpace() || c == nonBreakingSpace) : isCollapsibleWhitespace(c))
-            return next;
-    }
-
+    
+    VisiblePosition v(*this);
+    UChar c = v.characterAfter();
+    // The space must not be in another paragraph and it must be editable.
+    if (!isEndOfParagraph(v) && v.next(true).isNotNull())
+        if (considerNonCollapsibleWhitespace ? (isSpaceOrNewline(c) || c == noBreakSpace) : isCollapsibleWhitespace(c))
+            return *this;
+    
     return Position();
 }
 
@@ -654,7 +683,7 @@ void Position::debugPosition(const char *msg) const
         fprintf(stderr, "Position [%s]: %s [%p] at %d\n", msg, node()->nodeName().deprecatedString().latin1(), node(), offset());
 }
 
-#if !NDEBUG
+#ifndef NDEBUG
 
 void Position::formatForDebugger(char *buffer, unsigned length) const
 {

@@ -13,15 +13,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 module html {
 
-    interface [LegacyParent=KJS::JSHTMLElement] HTMLOptGroupElement : HTMLElement {
+    interface [
+        GenerateConstructor,
+        InterfaceUUID=18b0ea8c-d3ea-4b14-abd8-8e1d4269fffc,
+        ImplementationUUID=e26d8c4b-5181-4858-8231-f68ccbf819df
+    ] HTMLOptGroupElement : HTMLElement {
         attribute  boolean              disabled;
-        attribute  DOMString            label;
+        attribute  [ConvertNullToNullString] DOMString            label;
     };
 
 }

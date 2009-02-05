@@ -30,7 +30,6 @@
 #include "Document.h"
 #include "Element.h"
 #include "Frame.h"
-#include "Logging.h"
 #include "Text.h"
 #include "VisiblePosition.h"
 #include "Range.h"
@@ -78,64 +77,61 @@ void InsertLineBreakCommand::insertNodeBeforePosition(Node *node, const Position
         insertNodeBefore(node, pos.node());
 }
 
+// Whether we should insert a break element or a '\n'.
+bool InsertLineBreakCommand::shouldUseBreakElement(const Position& insertionPos)
+{
+    // An editing position like [input, 0] actually refers to the position before
+    // the input element, and in that case we need to check the input element's
+    // parent's renderer.
+    Position p(rangeCompliantEquivalent(insertionPos));
+    return p.node()->renderer() && !p.node()->renderer()->style()->preserveNewline();
+}
+
 void InsertLineBreakCommand::doApply()
 {
     deleteSelection();
     Selection selection = endingSelection();
     if (selection.isNone())
         return;
-
-    Position pos(selection.start().upstream());
+    
+    VisiblePosition caret(selection.visibleStart());
+    Position pos(caret.deepEquivalent());
 
     pos = positionAvoidingSpecialElementBoundary(pos);
-
-    Node* styleNode = pos.node();
-    bool isTabSpan = isTabSpanTextNode(styleNode);
-    if (isTabSpan)
-        styleNode = styleNode->parentNode()->parentNode();
-    RenderObject* styleRenderer = styleNode->renderer();
-    bool useBreakElement = !styleRenderer || !styleRenderer->style()->preserveNewline();
+    
+    pos = positionOutsideTabSpan(pos);
 
     RefPtr<Node> nodeToInsert;
-    if (useBreakElement)
+    if (shouldUseBreakElement(pos))
         nodeToInsert = createBreakElement(document());
     else
         nodeToInsert = document()->createTextNode("\n");
-        // FIXME: Need to merge text nodes when inserting just after or before text.
     
-    if (isTabSpan) {
-        insertNodeAtTabSpanPosition(nodeToInsert.get(), pos);
-        setEndingSelection(Position(nodeToInsert->traverseNextNode(), 0), DOWNSTREAM);
-    } else if (isEndOfBlock(VisiblePosition(pos, selection.affinity()))) {
-        Node* block = pos.node()->enclosingBlockFlowElement();
+    // FIXME: Need to merge text nodes when inserting just after or before text.
+    
+    if (isEndOfParagraph(caret) && !lineBreakExistsAtPosition(caret)) {
+        bool needExtraLineBreak = !pos.node()->hasTagName(hrTag) && !pos.node()->hasTagName(tableTag);
         
-        // Insert an extra break element so that there will be a blank line after the last
-        // inserted line break. In HTML, a line break at the end of a block ends the last
-        // line in the block, while in editable text, a line break at the end of block
-        // creates a last blank line. We need an extra break element to get HTML to act
-        // the way editable text would.
-        bool haveBreak = pos.downstream().node()->hasTagName(brTag) && pos.downstream().offset() == 0;
-        insertNodeAt(nodeToInsert.get(), pos.node(), pos.offset());
-        if (!haveBreak)
-            insertNodeAfter(createBreakElement(document()).get(), nodeToInsert.get());
-            
-        setEndingSelection(Position(block, maxDeepOffset(block)), DOWNSTREAM);
-    } else if (pos.offset() <= pos.node()->caretMinOffset()) {
-        LOG(Editing, "input newline case 2");
-        // Insert node before downstream position, and place caret there as well. 
-        Position endingPosition = pos.downstream();
-        insertNodeBeforePosition(nodeToInsert.get(), endingPosition);
-        setEndingSelection(endingPosition, DOWNSTREAM);
-    } else if (pos.offset() >= pos.node()->caretMaxOffset()) {
-        LOG(Editing, "input newline case 3");
-        // Insert BR after this node. Place caret in the position that is downstream
-        // of the current position, reckoned before inserting the BR in between.
-        Position endingPosition = pos.downstream();
-        insertNodeAfterPosition(nodeToInsert.get(), pos);
-        setEndingSelection(endingPosition, DOWNSTREAM);
+        insertNodeAt(nodeToInsert.get(), pos);
+        
+        if (needExtraLineBreak)
+            insertNodeBefore(nodeToInsert->cloneNode(false).get(), nodeToInsert.get());
+        
+        VisiblePosition endingPosition(Position(nodeToInsert.get(), 0));
+        setEndingSelection(Selection(endingPosition));
+    } else if (pos.offset() <= caretMinOffset(pos.node())) {
+        insertNodeAt(nodeToInsert.get(), pos);
+        
+        // Insert an extra br or '\n' if the just inserted one collapsed.
+        if (!isStartOfParagraph(VisiblePosition(Position(nodeToInsert.get(), 0))))
+            insertNodeBefore(nodeToInsert->cloneNode(false).get(), nodeToInsert.get());
+        
+        setEndingSelection(Selection(positionAfterNode(nodeToInsert.get()), DOWNSTREAM));
+    } else if (pos.offset() >= caretMaxOffset(pos.node())) {
+        insertNodeAt(nodeToInsert.get(), pos);
+        setEndingSelection(Selection(positionAfterNode(nodeToInsert.get()), DOWNSTREAM));
     } else {
         // Split a text node
-        LOG(Editing, "input newline case 4");
         ASSERT(pos.node()->isTextNode());
         
         // Do the split
@@ -150,13 +146,21 @@ void InsertLineBreakCommand::doApply()
         // Handle whitespace that occurs after the split
         updateLayout();
         if (!endingPosition.isRenderedCharacter()) {
+            Position positionBeforeTextNode(positionBeforeNode(textNode));
             // Clear out all whitespace and insert one non-breaking space
             deleteInsignificantTextDownstream(endingPosition);
             ASSERT(!textNode->renderer() || textNode->renderer()->style()->collapseWhiteSpace());
-            insertTextIntoNode(textNode, 0, nonBreakingSpaceString());
+            // Deleting insignificant whitespace will remove textNode if it contains nothing but insignificant whitespace.
+            if (textNode->inDocument())
+                insertTextIntoNode(textNode, 0, nonBreakingSpaceString());
+            else {
+                RefPtr<Text> nbspNode = document()->createTextNode(nonBreakingSpaceString());
+                insertNodeAt(nbspNode.get(), positionBeforeTextNode);
+                endingPosition = Position(nbspNode.get(), 0);
+            }
         }
         
-        setEndingSelection(endingPosition, DOWNSTREAM);
+        setEndingSelection(Selection(endingPosition, DOWNSTREAM));
     }
 
     // Handle the case where there is a typing style.

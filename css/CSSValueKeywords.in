@@ -34,7 +34,11 @@ icon
 menu
 message-box
 small-caption
+-webkit-mini-control
+-webkit-small-control
+-webkit-control
 status-bar
+
 #
 # CSS_PROP_FONT_STYLE:
 #
@@ -262,6 +266,16 @@ crosshair
 default
 pointer
 move
+vertical-text
+cell
+context-menu
+alias
+# copy
+progress
+no-drop
+not-allowed
+-webkit-zoom-in
+-webkit-zoom-out
 e-resize
 ne-resize
 nw-resize
@@ -279,6 +293,8 @@ row-resize
 text
 wait
 help
+all-scroll
+# none
 #
 # CSS_PROP_DIRECTION:
 #
@@ -449,6 +465,11 @@ skip-white-space
 #
 # CSS_PROP_WORD_BREAK
 #
+break-all
+
+#
+# CSS_PROP_WORD_WRAP
+#
 break-word
 
 #
@@ -472,6 +493,13 @@ button
 button-bevel
 listbox
 listitem
+media-fullscreen-button
+media-mute-button
+media-play-button
+media-seek-back-button
+media-seek-forward-button
+media-slider
+media-sliderthumb
 menulist
 menulist-button
 menulist-text
@@ -492,8 +520,10 @@ sliderthumb-horizontal
 sliderthumb-vertical
 caret
 searchfield
-searchfield-results
-searchfield-close
+searchfield-decoration
+searchfield-results-decoration
+searchfield-results-button
+searchfield-cancel-button
 textfield
 textarea
 
@@ -512,7 +542,7 @@ content
 padding
 
 #
-# CSS_PROP_BOX_SIZING
+# CSS_PROP__WEBKIT_BOX_SIZING
 #
 border-box
 content-box
@@ -524,6 +554,37 @@ logical
 visual
 
 #
+# CSS_PROP__WEBKIT_BORDER_FIT
+#
+lines
+
+#
+# CSS_PROP__WEBKIT_TRANSITION_TIMING_FUNCTION
+#
+linear
+ease
+ease-in
+ease-out
+ease-in-out
+
+#
 # CSS_PROP__WEBKIT_IMAGE_LOADING_BORDER
 #
 -webkit-loading-outline
+
+#
+# CSS_PROP__WEBKIT_ANIMATION_PLAY_STATE
+#
+running
+paused
+
+#
+# CSS_PROP__WEBKIT_ANIMATION_DELAY
+#
+now
+
+#
+# CSS_PROP__WEBKIT_TRANSFORM_STYLE
+#
+flat
+preserve-3d

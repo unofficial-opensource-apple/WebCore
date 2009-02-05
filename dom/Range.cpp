@@ -1,11 +1,9 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * (C) 1999 Lars Knoll (knoll@kde.org)
  * (C) 2000 Gunnstein Lye (gunnstein@netcom.no)
  * (C) 2000 Frederik Holljen (frederik.holljen@hig.no)
  * (C) 2001 Peter Kelly (pmk@post.com)
- * Copyright (C) 2004 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
@@ -32,14 +30,31 @@
 #include "HTMLElement.h"
 #include "HTMLNames.h"
 #include "ProcessingInstruction.h"
+#include "RangeException.h"
 #include "RenderBlock.h"
+#include "Text.h"
 #include "TextIterator.h"
 #include "markup.h"
 #include "visible_units.h"
 
 namespace WebCore {
 
+using namespace std;
 using namespace HTMLNames;
+
+#ifndef NDEBUG
+class RangeCounter {
+public:
+    static unsigned count;
+    ~RangeCounter()
+    {
+        if (count)
+            fprintf(stderr, "LEAK: %u Range\n", count);
+    }
+};
+unsigned RangeCounter::count = 0;
+static RangeCounter rangeCounter;
+#endif
 
 Range::Range(Document* ownerDocument)
     : m_ownerDocument(ownerDocument)
@@ -49,32 +64,58 @@ Range::Range(Document* ownerDocument)
     , m_endOffset(0)
     , m_detached(false)
 {
+#ifndef NDEBUG
+    ++RangeCounter::count;
+#endif
 }
 
 Range::Range(Document* ownerDocument,
               Node* startContainer, int startOffset,
               Node* endContainer, int endOffset)
     : m_ownerDocument(ownerDocument)
-    , m_startContainer(startContainer)
-    , m_startOffset(startOffset)
-    , m_endContainer(endContainer)
-    , m_endOffset(endOffset)
+    , m_startContainer(ownerDocument)
+    , m_startOffset(0)
+    , m_endContainer(ownerDocument)
+    , m_endOffset(0)
     , m_detached(false)
 {
+#ifndef NDEBUG
+    ++RangeCounter::count;
+#endif
+    // Simply setting the containers and offsets directly would not do any of the checking
+    // that setStart and setEnd do, so we must call those functions.
+    ExceptionCode ec = 0;
+    setStart(startContainer, startOffset, ec);
+    ASSERT(ec == 0);
+    setEnd(endContainer, endOffset, ec);
+    ASSERT(ec == 0);
 }
 
 Range::Range(Document* ownerDocument, const Position& start, const Position& end)
     : m_ownerDocument(ownerDocument)
-    , m_startContainer(start.node())
-    , m_startOffset(start.offset())
-    , m_endContainer(end.node())
-    , m_endOffset(end.offset())
+    , m_startContainer(ownerDocument)
+    , m_startOffset(0)
+    , m_endContainer(ownerDocument)
+    , m_endOffset(0)
     , m_detached(false)
 {
+#ifndef NDEBUG
+    ++RangeCounter::count;
+#endif
+    // Simply setting the containers and offsets directly would not do any of the checking
+    // that setStart and setEnd do, so we must call those functions.
+    ExceptionCode ec = 0;
+    setStart(start.node(), start.offset(), ec);
+    ASSERT(ec == 0);
+    setEnd(end.node(), end.offset(), ec);
+    ASSERT(ec == 0);
 }
 
 Range::~Range()
 {
+#ifndef NDEBUG
+    --RangeCounter::count;
+#endif
 }
 
 Node *Range::startContainer(ExceptionCode& ec) const
@@ -141,9 +182,6 @@ Node *Range::commonAncestorContainer(Node *containerA, Node *containerB)
         if (parentStart == parentEnd)
             break;
     }
-
-    if (!parentStart)
-        return containerA->document()->documentElement();
         
     return parentStart;
 }
@@ -175,7 +213,8 @@ void Range::setStart( Node *refNode, int offset, ExceptionCode& ec)
         return;
     }
 
-    checkNodeWOffset( refNode, offset, ec );
+    ec = 0;
+    checkNodeWOffset(refNode, offset, ec);
     if (ec)
         return;
 
@@ -213,7 +252,8 @@ void Range::setEnd( Node *refNode, int offset, ExceptionCode& ec)
         return;
     }
 
-    checkNodeWOffset( refNode, offset, ec );
+    ec = 0;
+    checkNodeWOffset(refNode, offset, ec);
     if (ec)
         return;
 
@@ -272,10 +312,10 @@ bool Range::isPointInRange(Node* refNode, int offset, ExceptionCode& ec)
         return false;
     }
 
+    ec = 0;
     checkNodeWOffset(refNode, offset, ec);
     if (ec)
         return false;
-
 
     // point is not before the start and not after the end
     if ((compareBoundaryPoints(refNode, offset, m_startContainer.get(), m_startOffset) != -1) && 
@@ -288,7 +328,7 @@ bool Range::isPointInRange(Node* refNode, int offset, ExceptionCode& ec)
 short Range::comparePoint(Node* refNode, int offset, ExceptionCode& ec)
 {
     // http://developer.mozilla.org/en/docs/DOM:range.comparePoint
-    // This method returns Ð1, 0 or 1 depending on if the point described by the 
+    // This method returns -1, 0 or 1 depending on if the point described by the 
     // refNode node and an offset within the node is before, same as, or after the range respectively.
 
     if (!refNode) {
@@ -302,7 +342,7 @@ short Range::comparePoint(Node* refNode, int offset, ExceptionCode& ec)
     }
 
     if (!m_detached && !refNode->attached()) {
-        // firefox doesn't throw an exception for this case; it returns 1
+        // firefox doesn't throw an exception for this case; it returns -1
         return -1;
     }
 
@@ -311,6 +351,7 @@ short Range::comparePoint(Node* refNode, int offset, ExceptionCode& ec)
         return 0;
     }
 
+    ec = 0;
     checkNodeWOffset(refNode, offset, ec);
     if (ec)
         return 0;
@@ -328,6 +369,53 @@ short Range::comparePoint(Node* refNode, int offset, ExceptionCode& ec)
         return 0;
 }
 
+Range::CompareResults Range::compareNode(Node* refNode, ExceptionCode& ec)
+{
+    // http://developer.mozilla.org/en/docs/DOM:range.compareNode
+    // This method returns 0, 1, 2, or 3 based on if the node is before, after,
+    // before and after(surrounds), or inside the range, respectively
+
+    if (!refNode) {
+        ec = NOT_FOUND_ERR;
+        return NODE_BEFORE;
+    }
+    
+    if (m_detached && refNode->attached()) {
+        ec = INVALID_STATE_ERR;
+        return NODE_BEFORE;
+    }
+
+    if (!m_detached && !refNode->attached()) {
+        // firefox doesn't throw an exception for this case; it returns 0
+        return NODE_BEFORE;
+    }
+
+    if (refNode->document() != m_ownerDocument) {
+        // firefox doesn't throw an exception for this case; it returns 0
+        return NODE_BEFORE;
+    }
+
+    Node* parentNode = refNode->parentNode();
+    unsigned nodeIndex = refNode->nodeIndex();
+    
+    if (!parentNode) {
+        // if the node is the top document we should return NODE_BEFORE_AND_AFTER
+        // but we throw to match firefox behavior
+        ec = NOT_FOUND_ERR;
+        return NODE_BEFORE;
+    }
+
+    if (comparePoint(parentNode, nodeIndex, ec) == -1) { // starts before
+        if (comparePoint(parentNode, nodeIndex + 1, ec) == 1) // ends after the range
+            return NODE_BEFORE_AND_AFTER;
+        return NODE_BEFORE; // ends before or in the range
+    } else { // starts at or after the range start
+        if (comparePoint(parentNode, nodeIndex + 1, ec) == 1) // ends after the range
+            return NODE_AFTER;
+        return NODE_INSIDE; // ends inside the range
+    }
+}
+
 
 short Range::compareBoundaryPoints(CompareHow how, const Range *sourceRange, ExceptionCode& ec) const
 {
@@ -341,7 +429,10 @@ short Range::compareBoundaryPoints(CompareHow how, const Range *sourceRange, Exc
         return 0;
     }
 
+    ec = 0;
     Node *thisCont = commonAncestorContainer(ec);
+    if (ec)
+        return 0;
     Node *sourceCont = sourceRange->commonAncestorContainer(ec);
     if (ec)
         return 0;
@@ -444,6 +535,8 @@ short Range::compareBoundaryPoints( Node *containerA, int offsetA, Node *contain
     // case 4: containers A & B are siblings, or children of siblings
     // ### we need to do a traversal here instead
     Node *cmnRoot = commonAncestorContainer(containerA,containerB);
+    if (!cmnRoot)
+        return 0;
     Node *childA = containerA;
     while (childA && childA->parentNode() != cmnRoot)
         childA = childA->parentNode();
@@ -468,7 +561,7 @@ short Range::compareBoundaryPoints( Node *containerA, int offsetA, Node *contain
     }
 
     // Should never reach this point.
-    assert(0);
+    ASSERT(0);
     return 0;
 }
 
@@ -479,7 +572,7 @@ short Range::compareBoundaryPoints( const Position &a, const Position &b )
 
 bool Range::boundaryPointsValid() const
 {
-    return compareBoundaryPoints(m_startContainer.get(), m_startOffset, m_endContainer.get(), m_endOffset) <= 0;
+    return m_startContainer && m_endContainer && compareBoundaryPoints(m_startContainer.get(), m_startOffset, m_endContainer.get(), m_endOffset) <= 0;
 }
 
 void Range::deleteContents(ExceptionCode& ec) {
@@ -488,11 +581,49 @@ void Range::deleteContents(ExceptionCode& ec) {
         return;
     }
 
+    ec = 0;
     checkDeleteExtract(ec);
     if (ec)
         return;
 
     processContents(DELETE_CONTENTS,ec);
+}
+
+bool Range::intersectsNode(Node* refNode, ExceptionCode& ec)
+{
+    // http://developer.mozilla.org/en/docs/DOM:range.intersectsNode
+    // Returns a bool if the node intersects the range.
+
+    if (!refNode) {
+        ec = NOT_FOUND_ERR;
+        return false;
+    }
+    
+    if (m_detached && refNode->attached() ||
+        !m_detached && !refNode->attached() ||
+        refNode->document() != m_ownerDocument)
+        // firefox doesn't throw an exception for these case; it returns false
+        return false;
+
+    Node* parentNode = refNode->parentNode();
+    unsigned nodeIndex = refNode->nodeIndex();
+    
+    if (!parentNode) {
+        // if the node is the top document we should return NODE_BEFORE_AND_AFTER
+        // but we throw to match firefox behavior
+        ec = NOT_FOUND_ERR;
+        return false;
+    }
+
+    if (comparePoint(parentNode, nodeIndex, ec) == -1 && // starts before start
+        comparePoint(parentNode, nodeIndex + 1, ec) == -1) { // ends before start
+        return false;
+    } else if(comparePoint(parentNode, nodeIndex, ec) == 1 && // starts after end
+              comparePoint(parentNode, nodeIndex + 1, ec) == 1) { // ends after end
+        return false;
+    }
+    
+    return true;    //all other cases
 }
 
 PassRefPtr<DocumentFragment> Range::processContents ( ActionType action, ExceptionCode& ec)
@@ -502,8 +633,13 @@ PassRefPtr<DocumentFragment> Range::processContents ( ActionType action, Excepti
 
     // ### perhaps disable node deletion notification for this range while we do this?
 
+    RefPtr<DocumentFragment> fragment;
+    if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS)
+        fragment = new DocumentFragment(m_ownerDocument.get());
+    
+    ec = 0;
     if (collapsed(ec))
-        return 0;
+        return fragment.release();
     if (ec)
         return 0;
 
@@ -527,10 +663,6 @@ PassRefPtr<DocumentFragment> Range::processContents ( ActionType action, Excepti
             partialEnd = partialEnd->parentNode();
     }
 
-    RefPtr<DocumentFragment> fragment;
-    if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS)
-        fragment = new DocumentFragment(m_ownerDocument.get());
-
     // Simple case: the start and end containers are the same. We just grab
     // everything >= start offset and < end offset
     if (m_startContainer == m_endContainer) {
@@ -550,7 +682,17 @@ PassRefPtr<DocumentFragment> Range::processContents ( ActionType action, Excepti
             }
         }
         else if (m_startContainer->nodeType() == Node::PROCESSING_INSTRUCTION_NODE) {
-            // ### operate just on data ?
+            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
+                RefPtr<ProcessingInstruction> c = static_pointer_cast<ProcessingInstruction>(m_startContainer->cloneNode(true));
+                c->setData(c->data().substring(m_startOffset, m_endOffset - m_startOffset), ec);
+                fragment->appendChild(c.release(), ec);
+            }
+            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS) {
+                ProcessingInstruction* pi= static_cast<ProcessingInstruction*>(m_startContainer.get());
+                String data(pi->data());
+                data.remove(m_startOffset, m_endOffset - m_startOffset);
+                pi->setData(data, ec);
+            }
         }
         else {
             Node *n = m_startContainer->firstChild();
@@ -611,8 +753,16 @@ PassRefPtr<DocumentFragment> Range::processContents ( ActionType action, Excepti
             }
         }
         else if (m_startContainer->nodeType() == Node::PROCESSING_INSTRUCTION_NODE) {
-            // ### operate just on data ?
-            // leftContents = ...
+            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
+                RefPtr<ProcessingInstruction> c = static_pointer_cast<ProcessingInstruction>(m_startContainer->cloneNode(true));
+                c->setData(c->data().substring(m_startOffset), ec);
+                leftContents = c.release();
+            }
+            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS) {
+                ProcessingInstruction* pi= static_cast<ProcessingInstruction*>(m_startContainer.get());
+                String data(pi->data());
+                pi->setData(data.left(m_startOffset), ec);
+            }
         }
         else {
             if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS)
@@ -673,9 +823,16 @@ PassRefPtr<DocumentFragment> Range::processContents ( ActionType action, Excepti
                 m_startContainer->document()->updateLayout();
             }
         }
-        else if (m_startContainer->nodeType() == Node::PROCESSING_INSTRUCTION_NODE) {
-            // ### operate just on data ?
-            // rightContents = ...
+        else if (m_endContainer->nodeType() == Node::PROCESSING_INSTRUCTION_NODE) {
+            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
+                RefPtr<ProcessingInstruction> c = static_pointer_cast<ProcessingInstruction>(m_endContainer->cloneNode(true));
+                c->setData(c->data().left(m_endOffset), ec);
+                rightContents = c.release();
+            }
+            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS) {
+                ProcessingInstruction* pi= static_cast<ProcessingInstruction*>(m_endContainer.get());
+                pi->setData(pi->data().substring(m_endOffset), ec);
+            }
         }
         else {
             if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS)
@@ -802,6 +959,7 @@ PassRefPtr<DocumentFragment> Range::extractContents(ExceptionCode& ec)
         return 0;
     }
 
+    ec = 0;
     checkDeleteExtract(ec);
     if (ec)
         return 0;
@@ -821,8 +979,15 @@ PassRefPtr<DocumentFragment> Range::cloneContents( int &ec  )
 
 void Range::insertNode(PassRefPtr<Node> newNode, ExceptionCode& ec)
 {
+    ec = 0;
+
     if (m_detached) {
         ec = INVALID_STATE_ERR;
+        return;
+    }
+
+    if (!newNode) {
+        ec = NOT_FOUND_ERR;
         return;
     }
 
@@ -867,8 +1032,7 @@ void Range::insertNode(PassRefPtr<Node> newNode, ExceptionCode& ec)
                 return;
             }
         }
-    }
-    else {
+    } else {
         if (!checkAgainst->childTypeAllowed(newNode->nodeType())) {
             ec = HIERARCHY_REQUEST_ERR;
             return;
@@ -883,54 +1047,62 @@ void Range::insertNode(PassRefPtr<Node> newNode, ExceptionCode& ec)
     }
 
     // INVALID_NODE_TYPE_ERR: Raised if newNode is an Attr, Entity, Notation, or Document node.
-    if( newNode->nodeType() == Node::ATTRIBUTE_NODE ||
+    if (newNode->nodeType() == Node::ATTRIBUTE_NODE ||
         newNode->nodeType() == Node::ENTITY_NODE ||
         newNode->nodeType() == Node::NOTATION_NODE ||
         newNode->nodeType() == Node::DOCUMENT_NODE) {
-        ec = INVALID_NODE_TYPE_ERR;
+        ec = RangeException::INVALID_NODE_TYPE_ERR;
         return;
     }
 
-    if( m_startContainer->nodeType() == Node::TEXT_NODE ||
-        m_startContainer->nodeType() == Node::CDATA_SECTION_NODE )
-    {
-        Text *newText = static_cast<Text*>(m_startContainer.get())->splitText(m_startOffset,ec);
+    unsigned endOffsetDelta = 0;
+    if (m_startContainer->nodeType() == Node::TEXT_NODE ||
+        m_startContainer->nodeType() == Node::CDATA_SECTION_NODE) {
+        RefPtr<Text> newText = static_cast<Text*>(m_startContainer.get())->splitText(m_startOffset, ec);
         if (ec)
             return;
-        m_startContainer->parentNode()->insertBefore( newNode, newText, ec );
+
+        if (m_startContainer == m_endContainer)
+            endOffsetDelta = -m_startOffset;
+
+        m_startContainer->parentNode()->insertBefore(newNode, newText.get(), ec);
+        if (ec)
+            return;
+        m_endContainer = newText;
+    } else {
+        if (m_startContainer == m_endContainer) {
+            bool isFragment = newNode->nodeType() == Node::DOCUMENT_FRAGMENT_NODE;
+            endOffsetDelta = isFragment ? newNode->childNodeCount() : 1;
+        }
+
+        m_startContainer->insertBefore(newNode, m_startContainer->childNode(m_startOffset), ec);
+        if (ec)
+            return;
     }
-    else {
-        m_startContainer->insertBefore( newNode, m_startContainer->childNode( m_startOffset ), ec );
-    }
+    m_endOffset += endOffsetDelta;
 }
 
 String Range::toString(ExceptionCode& ec) const
-{
-    return toString(false, ec);
-}
-
-String Range::toString(bool convertBRsToNewlines, ExceptionCode& ec) const
 {
     if (m_detached) {
         ec = INVALID_STATE_ERR;
         return String();
     }
 
-    String text = "";
-    Node *pastEnd = pastEndNode();
-    for (Node *n = startNode(); n != pastEnd; n = n->traverseNextNode()) {
+    Vector<UChar> result;
+
+    Node* pastEnd = pastEndNode();
+    for (Node* n = startNode(); n != pastEnd; n = n->traverseNextNode()) {
         if (n->nodeType() == Node::TEXT_NODE || n->nodeType() == Node::CDATA_SECTION_NODE) {
-            String str = static_cast<Text *>(n)->data().copy();
-            if (n == m_endContainer)
-                str.truncate(m_endOffset);
-            if (n == m_startContainer)
-                str.remove(0, m_startOffset);
-            text += str;
+            String data = static_cast<CharacterData*>(n)->data();
+            unsigned length = data.length();
+            unsigned start = (n == m_startContainer) ? min(m_startOffset, length) : 0;
+            unsigned end = (n == m_endContainer) ? min(max(start, m_endOffset), length) : length;
+            result.append(data.characters() + start, end - start);
         }
-        if (n->hasTagName(brTag) && convertBRsToNewlines)
-            text += "\n";
     }
-    return text;
+
+    return String::adopt(result);
 }
 
 String Range::toHTML() const
@@ -958,12 +1130,13 @@ PassRefPtr<DocumentFragment> Range::createContextualFragment(const String &html,
         return 0;
     }
 
-    if (! m_startContainer->isHTMLElement()) {
+    Node* htmlElement = m_startContainer->isHTMLElement() ? m_startContainer.get() : m_startContainer->parentNode();
+    if (!htmlElement || !htmlElement->isHTMLElement()) {
         ec = NOT_SUPPORTED_ERR;
         return 0;
     }
 
-    RefPtr<DocumentFragment> fragment = static_cast<HTMLElement*>(m_startContainer.get())->createContextualFragment(html);
+    RefPtr<DocumentFragment> fragment = static_cast<HTMLElement*>(htmlElement)->createContextualFragment(html);
     if (!fragment) {
         ec = NOT_SUPPORTED_ERR;
         return 0;
@@ -990,31 +1163,30 @@ bool Range::isDetached() const
     return m_detached;
 }
 
-void Range::checkNodeWOffset( Node *n, int offset, ExceptionCode& ec) const
+void Range::checkNodeWOffset(Node* n, int offset, ExceptionCode& ec) const
 {
-    if( offset < 0 ) {
+    if (offset < 0)
         ec = INDEX_SIZE_ERR;
-    }
+        // no return here
 
     switch (n->nodeType()) {
         case Node::ENTITY_NODE:
         case Node::NOTATION_NODE:
         case Node::DOCUMENT_TYPE_NODE:
-            ec = INVALID_NODE_TYPE_ERR;
+            ec = RangeException::INVALID_NODE_TYPE_ERR;
             break;
         case Node::TEXT_NODE:
         case Node::COMMENT_NODE:
         case Node::CDATA_SECTION_NODE:
-            if ( (unsigned)offset > static_cast<CharacterData*>(n)->length() )
+            if ((unsigned)offset > static_cast<CharacterData*>(n)->length())
                 ec = INDEX_SIZE_ERR;
             break;
         case Node::PROCESSING_INSTRUCTION_NODE:
-            // ### are we supposed to check with just data or the whole contents?
-            if ( (unsigned)offset > static_cast<ProcessingInstruction*>(n)->data().length() )
+            if ((unsigned)offset > static_cast<ProcessingInstruction*>(n)->data().length())
                 ec = INDEX_SIZE_ERR;
             break;
         default:
-            if ( (unsigned)offset > n->childNodeCount() )
+            if ((unsigned)offset > n->childNodeCount())
                 ec = INDEX_SIZE_ERR;
             break;
     }
@@ -1032,7 +1204,7 @@ void Range::checkNodeBA( Node *n, ExceptionCode& ec) const
           root->nodeType() == Node::DOCUMENT_NODE ||
           root->nodeType() == Node::DOCUMENT_FRAGMENT_NODE ||
           root->isShadowNode())) {
-        ec = INVALID_NODE_TYPE_ERR;
+        ec = RangeException::INVALID_NODE_TYPE_ERR;
         return;
     }
 
@@ -1041,7 +1213,7 @@ void Range::checkNodeBA( Node *n, ExceptionCode& ec) const
         n->nodeType() == Node::ATTRIBUTE_NODE ||
         n->nodeType() == Node::ENTITY_NODE ||
         n->nodeType() == Node::NOTATION_NODE )
-        ec = INVALID_NODE_TYPE_ERR;
+        ec = RangeException::INVALID_NODE_TYPE_ERR;
 
 }
 
@@ -1072,11 +1244,12 @@ void Range::setStartAfter( Node *refNode, ExceptionCode& ec)
         return;
     }
 
+    ec = 0;
     checkNodeBA( refNode, ec );
     if (ec)
         return;
 
-    setStart( refNode->parentNode(), refNode->nodeIndex()+1, ec );
+    setStart(refNode->parentNode(), refNode->nodeIndex() + 1, ec);
 }
 
 void Range::setEndBefore( Node *refNode, ExceptionCode& ec)
@@ -1096,11 +1269,12 @@ void Range::setEndBefore( Node *refNode, ExceptionCode& ec)
         return;
     }
 
-    checkNodeBA( refNode, ec );
+    ec = 0;
+    checkNodeBA(refNode, ec);
     if (ec)
         return;
 
-    setEnd( refNode->parentNode(), refNode->nodeIndex(), ec );
+    setEnd(refNode->parentNode(), refNode->nodeIndex(), ec);
 }
 
 void Range::setEndAfter( Node *refNode, ExceptionCode& ec)
@@ -1120,11 +1294,12 @@ void Range::setEndAfter( Node *refNode, ExceptionCode& ec)
         return;
     }
 
-    checkNodeBA( refNode, ec );
+    ec = 0;
+    checkNodeBA(refNode, ec);
     if (ec)
         return;
 
-    setEnd( refNode->parentNode(), refNode->nodeIndex()+1, ec );
+    setEnd(refNode->parentNode(), refNode->nodeIndex() + 1, ec);
 
 }
 
@@ -1149,7 +1324,7 @@ void Range::selectNode( Node *refNode, ExceptionCode& ec)
             anc->nodeType() == Node::NOTATION_NODE ||
             anc->nodeType() == Node::DOCUMENT_TYPE_NODE) {
 
-            ec = INVALID_NODE_TYPE_ERR;
+            ec = RangeException::INVALID_NODE_TYPE_ERR;
             return;
         }
     }
@@ -1160,10 +1335,11 @@ void Range::selectNode( Node *refNode, ExceptionCode& ec)
         refNode->nodeType() == Node::ENTITY_NODE ||
         refNode->nodeType() == Node::NOTATION_NODE) {
 
-        ec = INVALID_NODE_TYPE_ERR;
+        ec = RangeException::INVALID_NODE_TYPE_ERR;
         return;
     }
 
+    ec = 0;
     setStartBefore( refNode, ec );
     if (ec)
         return;
@@ -1190,7 +1366,7 @@ void Range::selectNodeContents( Node *refNode, ExceptionCode& ec)
             n->nodeType() == Node::NOTATION_NODE ||
             n->nodeType() == Node::DOCUMENT_TYPE_NODE) {
 
-            ec = INVALID_NODE_TYPE_ERR;
+            ec = RangeException::INVALID_NODE_TYPE_ERR;
             return;
         }
     }
@@ -1198,7 +1374,7 @@ void Range::selectNodeContents( Node *refNode, ExceptionCode& ec)
     m_startContainer = refNode;
     m_startOffset = 0;
     m_endContainer = refNode;
-    m_endOffset = refNode->offsetInCharacters() ? refNode->maxOffset() : refNode->childNodeCount();
+    m_endOffset = refNode->offsetInCharacters() ? refNode->maxCharacterOffset() : refNode->childNodeCount();
 }
 
 void Range::surroundContents(PassRefPtr<Node> passNewParent, ExceptionCode& ec)
@@ -1223,7 +1399,7 @@ void Range::surroundContents(PassRefPtr<Node> passNewParent, ExceptionCode& ec)
         newParent->nodeType() == Node::DOCUMENT_TYPE_NODE ||
         newParent->nodeType() == Node::DOCUMENT_NODE ||
         newParent->nodeType() == Node::DOCUMENT_FRAGMENT_NODE) {
-        ec = INVALID_NODE_TYPE_ERR;
+        ec = RangeException::INVALID_NODE_TYPE_ERR;
         return;
     }
 
@@ -1241,19 +1417,20 @@ void Range::surroundContents(PassRefPtr<Node> passNewParent, ExceptionCode& ec)
         return;
     }
 
-    // HIERARCHY_REQUEST_ERR: Raised if the container of the start of the Range is of a type that
-    // does not allow children of the type of newParent or if newParent is an ancestor of the container
-    // or if node would end up with a child node of a type not allowed by the type of node.
-    if (!m_startContainer->childTypeAllowed(newParent->nodeType())) {
+    // Raise a HIERARCHY_REQUEST_ERR if m_startContainer doesn't accept children like newParent.
+    Node* parentOfNewParent = m_startContainer.get();
+    // If m_startContainer is a textNode, it will be split and it will be its parent that will 
+    // need to accept newParent.
+    if (parentOfNewParent->isTextNode())
+        parentOfNewParent = parentOfNewParent->parentNode();
+    if (!parentOfNewParent->childTypeAllowed(newParent->nodeType())) {
         ec = HIERARCHY_REQUEST_ERR;
         return;
     }
-
-    for (Node *n = m_startContainer.get(); n; n = n->parentNode()) {
-        if (n == newParent) {
-            ec = HIERARCHY_REQUEST_ERR;
-            return;
-        }
+    
+    if (m_startContainer == newParent || m_startContainer->isDescendantOf(newParent.get())) {
+        ec = HIERARCHY_REQUEST_ERR;
+        return;
     }
 
     // ### check if node would end up with a child node of a type not allowed by the type of node
@@ -1261,17 +1438,18 @@ void Range::surroundContents(PassRefPtr<Node> passNewParent, ExceptionCode& ec)
     // BAD_BOUNDARYPOINTS_ERR: Raised if the Range partially selects a non-text node.
     if (!m_startContainer->offsetInCharacters()) {
         if (m_startOffset > 0 && m_startOffset < m_startContainer->childNodeCount()) {
-            ec = BAD_BOUNDARYPOINTS_ERR;
+            ec = RangeException::BAD_BOUNDARYPOINTS_ERR;
             return;
         }
     }
     if (!m_endContainer->offsetInCharacters()) {
         if (m_endOffset > 0 && m_endOffset < m_endContainer->childNodeCount()) {
-            ec = BAD_BOUNDARYPOINTS_ERR;
+            ec = RangeException::BAD_BOUNDARYPOINTS_ERR;
             return;
         }
     }
 
+    ec = 0;
     while (Node* n = newParent->firstChild()) {
         newParent->removeChild(n, ec);
         if (ec)
@@ -1306,15 +1484,19 @@ void Range::setStartBefore( Node *refNode, ExceptionCode& ec)
         return;
     }
 
-    checkNodeBA( refNode, ec );
+    ec = 0;
+    checkNodeBA(refNode, ec);
     if (ec)
         return;
 
-    setStart( refNode->parentNode(), refNode->nodeIndex(), ec );
+    setStart(refNode->parentNode(), refNode->nodeIndex(), ec);
 }
 
 void Range::checkDeleteExtract(ExceptionCode& ec)
 {
+    if (!commonAncestorContainer(ec) || ec)
+        return;
+        
     Node *pastEnd = pastEndNode();
     for (Node *n = startNode(); n != pastEnd; n = n->traverseNextNode()) {
         if (n->isReadOnlyNode()) {
@@ -1399,7 +1581,7 @@ Position Range::editingStartPosition() const
 
 Node *Range::pastEndNode() const
 {
-    if (!m_endContainer)
+    if (!m_startContainer || !m_endContainer)
         return 0;
     if (m_endContainer->offsetInCharacters())
         return m_endContainer->traverseNextSibling();
@@ -1407,6 +1589,38 @@ Node *Range::pastEndNode() const
     if (child)
         return child;
     return m_endContainer->traverseNextSibling();
+}
+
+IntRect Range::boundingBox()
+{
+    IntRect result;
+    Vector<IntRect> rects;
+    addLineBoxRects(rects);
+    const size_t n = rects.size();
+    for (size_t i = 0; i < n; ++i)
+        result.unite(rects[i]);
+    return result;
+}
+
+void Range::addLineBoxRects(Vector<IntRect>& rects, bool useSelectionHeight)
+{
+    if (!m_startContainer || !m_endContainer)
+        return;
+
+    RenderObject* start = m_startContainer->renderer();
+    RenderObject* end = m_endContainer->renderer();
+    if (!start || !end)
+        return;
+
+    RenderObject* stop = end->nextInPreOrderAfterChildren();
+    for (RenderObject* r = start; r && r != stop; r = r->nextInPreOrder()) {
+        // only ask leaf render objects for their line box rects
+        if (!r->firstChild()) {
+            int startOffset = r == start ? m_startOffset : 0;
+            int endOffset = r == end ? m_endOffset : UINT_MAX;
+            r->addLineBoxRects(rects, startOffset, endOffset, useSelectionHeight);
+        }
+    }
 }
 
 #ifndef NDEBUG
@@ -1457,8 +1671,9 @@ bool operator==(const Range &a, const Range &b)
         && a.endOffset(exception) == b.endOffset(exception);
 }
 
-PassRefPtr<Range> rangeOfContents(Node *node)
+PassRefPtr<Range> rangeOfContents(Node* node)
 {
+    ASSERT(node);
     RefPtr<Range> range = new Range(node->document());
     int exception = 0;
     range->selectNodeContents(node, exception);

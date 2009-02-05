@@ -16,24 +16,23 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSInheritedValue_H
-#define CSSInheritedValue_H
+#ifndef CSSInheritedValue_h
+#define CSSInheritedValue_h
 
 #include "CSSValue.h"
 
 namespace WebCore {
 
-class CSSInheritedValue : public CSSValue
-{
+class CSSInheritedValue : public CSSValue {
 public:
     virtual unsigned short cssValueType() const;
     virtual String cssText() const;
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSInheritedValue_h

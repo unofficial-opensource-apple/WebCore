@@ -15,50 +15,51 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
-// -------------------------------------------------------------------------
 
 #include "config.h"
 #include "EllipsisBox.h"
 
+#include "Document.h"
 #include "GraphicsContext.h"
+#include "HitTestResult.h"
 
 namespace WebCore {
 
-void EllipsisBox::paint(RenderObject::PaintInfo& i, int _tx, int _ty)
+void EllipsisBox::paint(RenderObject::PaintInfo& paintInfo, int tx, int ty)
 {
-    GraphicsContext* p = i.p;
-    RenderStyle* _style = m_firstLine ? m_object->firstLineStyle() : m_object->style();
-    if (_style->font() != p->font())
-        p->setFont(_style->font());
+    GraphicsContext* context = paintInfo.context;
+    RenderStyle* style = m_object->style(m_firstLine);
+    if (style->font() != context->font())
+        context->setFont(style->font());
 
-    Color textColor = _style->color();
-    if (textColor != p->pen().color())
-        p->setPen(textColor);
+    Color textColor = style->color();
+    if (textColor != context->fillColor())
+        context->setFillColor(textColor);
     bool setShadow = false;
-    if (_style->textShadow()) {
-        p->setShadow(IntSize(_style->textShadow()->x, _style->textShadow()->y),
-                     _style->textShadow()->blur, _style->textShadow()->color);
+    if (style->textShadow()) {
+        context->setShadow(IntSize(style->textShadow()->x, style->textShadow()->y),
+                           style->textShadow()->blur, style->textShadow()->color);
         setShadow = true;
     }
 
     const String& str = m_str;
-    p->drawText(TextRun(str.impl()), IntPoint(m_x + _tx, m_y + _ty + m_baseline), TextStyle(0, 0, 0, false, _style->visuallyOrdered()));
+    context->drawText(TextRun(str.characters(), str.length(), false, 0, 0, false, style->visuallyOrdered()), IntPoint(m_x + tx, m_y + ty + m_baseline));
 
     if (setShadow)
-        p->clearShadow();
+        context->clearShadow();
 
     if (m_markupBox) {
         // Paint the markup box
-        _tx += m_x + m_width - m_markupBox->xPos();
-        _ty += m_y + m_baseline - (m_markupBox->yPos() + m_markupBox->baseline());
-        m_markupBox->paint(i, _tx, _ty);
+        tx += m_x + m_width - m_markupBox->xPos();
+        ty += m_y + m_baseline - (m_markupBox->yPos() + m_markupBox->baseline());
+        m_markupBox->paint(paintInfo, tx, ty);
     }
 }
 
-bool EllipsisBox::nodeAtPoint(RenderObject::NodeInfo& info, int x, int y, int tx, int ty)
+bool EllipsisBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, int x, int y, int tx, int ty)
 {
     tx += m_x;
     ty += m_y;
@@ -67,18 +68,18 @@ bool EllipsisBox::nodeAtPoint(RenderObject::NodeInfo& info, int x, int y, int tx
     if (m_markupBox) {
         int mtx = tx + m_width - m_markupBox->xPos();
         int mty = ty + m_baseline - (m_markupBox->yPos() + m_markupBox->baseline());
-        if (m_markupBox->nodeAtPoint(info, x, y, mtx, mty)) {
-            object()->setInnerNode(info);
+        if (m_markupBox->nodeAtPoint(request, result, x, y, mtx, mty)) {
+            object()->updateHitTestResult(result, IntPoint(x - mtx, y - mty));
             return true;
         }
     }
 
     if (object()->style()->visibility() == VISIBLE && IntRect(tx, ty, m_width, m_height).contains(x, y)) {
-        object()->setInnerNode(info);
+        object()->updateHitTestResult(result, IntPoint(x - tx, y - ty));
         return true;
     }
 
     return false;
 }
 
-}
+} // namespace WebCore

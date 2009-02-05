@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2007 Alp Toker <alp@atoker.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,22 +24,26 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef HTMLGradient_h
-#define HTMLGradient_h
+#ifndef CanvasGradient_h
+#define CanvasGradient_h
 
 #include "FloatPoint.h"
-#include "Shared.h"
+#include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 
-#if __APPLE__
+#if PLATFORM(CG)
 typedef struct CGShading* CGShadingRef;
+#elif PLATFORM(QT)
+class QGradient;
+#elif PLATFORM(CAIRO)
+typedef struct _cairo_pattern cairo_pattern_t;
 #endif
 
 namespace WebCore {
 
     class String;
 
-    class CanvasGradient : public Shared<CanvasGradient> {
+    class CanvasGradient : public RefCounted<CanvasGradient> {
     public:
         CanvasGradient(const FloatPoint& p0, const FloatPoint& p1);
         CanvasGradient(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1);
@@ -48,8 +53,12 @@ namespace WebCore {
 
         void getColor(float value, float* r, float* g, float* b, float* a);
 
-#if __APPLE__
+#if PLATFORM(CG)
         CGShadingRef platformShading();
+#elif PLATFORM(QT)
+        QGradient *platformShading();
+#elif PLATFORM(CAIRO)
+        cairo_pattern_t* platformShading();
 #endif
 
         struct ColorStop {
@@ -73,8 +82,12 @@ namespace WebCore {
         mutable bool m_stopsSorted;
         mutable int m_lastStop;
 
-#if __APPLE__
+#if PLATFORM(CG)
         CGShadingRef m_shading;
+#elif PLATFORM(QT)
+        QGradient *m_shading;
+#elif PLATFORM(CAIRO)
+        cairo_pattern_t* m_shading;
 #endif
     };
 

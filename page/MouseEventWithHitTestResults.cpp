@@ -13,12 +13,15 @@
 
    You should have received a copy of the GNU Library General Public License
    along with this library; see the file COPYING.LIB.  If not, write to
-   the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
-   Boston, MA 02111-1307, USA.
+   the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+   Boston, MA 02110-1301, USA.
 */
 
 #include "config.h"
 #include "MouseEventWithHitTestResults.h"
+
+#include "Element.h"
+#include "Node.h"
 
 // Would TargetedMouseEvent be a better name?
 
@@ -34,20 +37,38 @@ static inline Element* targetElement(Node* node)
     return static_cast<Element*>(parent);
 }
 
-MouseEventWithHitTestResults::MouseEventWithHitTestResults(const PlatformMouseEvent& event,
-        PassRefPtr<Node> node, bool isOverLink)
+MouseEventWithHitTestResults::MouseEventWithHitTestResults(const PlatformMouseEvent& event, const HitTestResult& hitTestResult)
     : m_event(event)
-    , m_targetNode(node)
-    , m_targetElement(targetElement(m_targetNode.get()))
-    , m_isOverLink(isOverLink)
+    , m_hitTestResult(hitTestResult)
 {
 }
         
 Node* MouseEventWithHitTestResults::targetNode() const
 {
-    if (m_targetElement && !m_targetNode->inDocument() && m_targetElement->inDocument())
-        return m_targetElement.get();
-    return m_targetNode.get();
+    Node* node = m_hitTestResult.innerNode();
+    if (node && node->inDocument())
+        return node;
+
+    Element* element = targetElement(node);
+    if (element && element->inDocument())
+        return element;
+
+    return node;
+}
+
+const IntPoint MouseEventWithHitTestResults::localPoint() const
+{
+    return m_hitTestResult.localPoint();
+}
+
+PlatformScrollbar* MouseEventWithHitTestResults::scrollbar() const
+{
+    return m_hitTestResult.scrollbar();
+}
+
+bool MouseEventWithHitTestResults::isOverLink() const
+{
+    return m_hitTestResult.URLElement() && m_hitTestResult.URLElement()->isLink();
 }
 
 }

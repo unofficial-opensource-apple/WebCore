@@ -16,20 +16,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLBlockquoteElement_H
-#define HTMLBlockquoteElement_H
+#ifndef HTMLBlockquoteElement_h
+#define HTMLBlockquoteElement_h
 
 #include "HTMLElement.h"
 
 namespace WebCore {
 
-class HTMLBlockquoteElement : public HTMLElement
-{
+class HTMLBlockquoteElement : public HTMLElement {
 public:
     HTMLBlockquoteElement(Document*);
     ~HTMLBlockquoteElement();
@@ -41,5 +40,6 @@ public:
     void setCite(const String&);
 };
 
-}; //namespace
-#endif
+} // namespace WebCore
+
+#endif // HTMLBlockquoteElement_h

@@ -16,30 +16,45 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef Counter_H
-#define Counter_H
+#ifndef Counter_h
+#define Counter_h
 
-#include "Shared.h"
+#include "CSSPrimitiveValue.h"
 #include "PlatformString.h"
+#include <wtf/RefCounted.h>
+#include <wtf/PassRefPtr.h>
 
 namespace WebCore {
 
-class Counter : public Shared<Counter> {
+class Counter : public RefCounted<Counter> {
 public:
-    String identifier() const { return m_identifier; }
-    String listStyle() const { return m_listStyle; }
-    String separator() const { return m_separator; }
+    Counter(PassRefPtr<CSSPrimitiveValue> identifier, PassRefPtr<CSSPrimitiveValue> listStyle, PassRefPtr<CSSPrimitiveValue> separator)
+        : m_identifier(identifier)
+        , m_listStyle(listStyle)
+        , m_separator(separator)
+    {
+    }
 
-private:
-    String m_identifier;
-    String m_listStyle;
-    String m_separator;
+    String identifier() const { return m_identifier ? m_identifier->getStringValue() : String(); }
+    String listStyle() const { return m_listStyle ? m_listStyle->getStringValue() : String(); }
+    String separator() const { return m_separator ? m_separator->getStringValue() : String(); }
+
+    int listStyleNumber() const { return m_listStyle ? m_listStyle->getIntValue() : 0; }
+
+    void setIdentifier(PassRefPtr<CSSPrimitiveValue> identifier) { m_identifier = identifier; }
+    void setListStyle(PassRefPtr<CSSPrimitiveValue> listStyle) { m_listStyle = listStyle; }
+    void setSeparator(PassRefPtr<CSSPrimitiveValue> separator) { m_separator = separator; }
+
+protected:
+    RefPtr<CSSPrimitiveValue> m_identifier; // String
+    RefPtr<CSSPrimitiveValue> m_listStyle;  // int
+    RefPtr<CSSPrimitiveValue> m_separator;  // String
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // Counter_h

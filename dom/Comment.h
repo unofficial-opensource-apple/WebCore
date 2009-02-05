@@ -17,13 +17,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef DOM_CommentImpl_h
-#define DOM_CommentImpl_h
+#ifndef Comment_h
+#define Comment_h
 
 #include "CharacterData.h"
 
@@ -37,7 +37,6 @@ public:
     virtual ~Comment();
 
     // DOM methods overridden from  parent classes
-    const AtomicString& localName() const;
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
     virtual PassRefPtr<Node> cloneNode(bool deep);
@@ -45,11 +44,10 @@ public:
     // Other methods (not part of DOM)
     virtual bool isCommentNode() const { return true; }
     virtual bool childTypeAllowed(NodeType);
-    virtual bool offsetInCharacters() const;
 
     virtual String toString() const;
 };
 
 } // namespace WebCore
 
-#endif // DOM_CommentImpl_h
+#endif // Comment_h

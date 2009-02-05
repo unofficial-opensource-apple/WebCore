@@ -16,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "Entity.h"
@@ -31,21 +31,21 @@ Entity::Entity(Document* doc)
 
 Entity::Entity(Document* doc, const String& name)
     : ContainerNode(doc)
-    , m_name(name.impl())
+    , m_name(name)
 {
 }
 
 Entity::Entity(Document* doc, const String& publicId, const String& systemId, const String& notationName)
     : ContainerNode(doc)
-    , m_publicId(publicId.impl())
-    , m_systemId(systemId.impl())
-    , m_notationName(notationName.impl())
+    , m_publicId(publicId)
+    , m_systemId(systemId)
+    , m_notationName(notationName)
 {
 }
 
 String Entity::nodeName() const
 {
-    return m_name.get();
+    return m_name;
 }
 
 Node::NodeType Entity::nodeType() const
@@ -80,26 +80,26 @@ String Entity::toString() const
 {
     String result = "<!ENTITY' ";
 
-    if (m_name && m_name->length()) {
+    if (!m_name.isEmpty()) {
         result += " ";
-        result += m_name.get();
+        result += m_name;
     }
 
-    if (m_publicId && m_publicId->length()) {
+    if (!m_publicId.isEmpty()) {
         result += " PUBLIC \"";
-        result += m_publicId.get();
+        result += m_publicId;
         result += "\" \"";
-        result += m_systemId.get();
+        result += m_systemId;
         result += "\"";
-    } else if (m_systemId && m_systemId->length()) {
+    } else if (!m_systemId.isEmpty()) {
         result += " SYSTEM \"";
-        result += m_systemId.get();
+        result += m_systemId;
         result += "\"";
     }
 
-    if (m_notationName && m_notationName->length()) {
+    if (!m_notationName.isEmpty()) {
         result += " NDATA ";
-        result += m_notationName.get();
+        result += m_notationName;
     }
 
     result += ">";

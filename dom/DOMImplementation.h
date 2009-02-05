@@ -18,15 +18,15 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef DOM_DOMImplementationImpl_h
-#define DOM_DOMImplementationImpl_h
+#ifndef DOMImplementation_h
+#define DOMImplementation_h
 
-#include "Shared.h"
+#include <wtf/RefCounted.h>
 #include <wtf/Forward.h>
 
 namespace WebCore {
@@ -34,14 +34,13 @@ namespace WebCore {
 class CSSStyleSheet;
 class Document;
 class DocumentType;
-class FrameView;
+class Frame;
 class HTMLDocument;
 class String;
-class TextDocument;
 
 typedef int ExceptionCode;
 
-class DOMImplementation : public Shared<DOMImplementation> {
+class DOMImplementation : public RefCounted<DOMImplementation> {
 public:
     virtual ~DOMImplementation(); 
 
@@ -59,15 +58,16 @@ public:
     PassRefPtr<HTMLDocument> createHTMLDocument(const String& title);
 
     // Other methods (not part of DOM)
-    PassRefPtr<Document> createDocument(FrameView* = 0);
-    PassRefPtr<HTMLDocument> createHTMLDocument(FrameView* = 0);
+    PassRefPtr<Document> createDocument(const String& MIMEType, Frame*, bool inViewSourceMode);
+    PassRefPtr<Document> createDocument(Frame*);
+    PassRefPtr<HTMLDocument> createHTMLDocument(Frame*);
 
     // Returns the static instance of this class - only one instance of this class should
     // ever be present, and is used as a factory method for creating Document objects
     static DOMImplementation* instance();
 
-    static bool isXMLMIMEType(const String& mimeType);
-    static bool isTextMIMEType(const String& mimeType);
+    static bool isXMLMIMEType(const String& MIMEType);
+    static bool isTextMIMEType(const String& MIMEType);
 };
 
 } //namespace

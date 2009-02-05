@@ -17,19 +17,20 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HTMLStyleElement_H
-#define HTMLStyleElement_H
+#ifndef HTMLStyleElement_h
+#define HTMLStyleElement_h
 
-#include "HTMLElement.h"
 #include "CSSStyleSheet.h"
+#include "HTMLElement.h"
+#include "StyleElement.h"
 
 namespace WebCore {
 
-class HTMLStyleElement : public HTMLElement
+class HTMLStyleElement : public HTMLElement, public StyleElement
 {
 public:
     HTMLStyleElement(Document*);
@@ -38,31 +39,35 @@ public:
     virtual int tagPriority() const { return 1; }
     virtual bool checkDTD(const Node* newChild) { return newChild->isTextNode(); }
 
-    StyleSheet* sheet() const;
-
     // overload from HTMLElement
     virtual void parseMappedAttribute(MappedAttribute*);
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
-    virtual void childrenChanged();
+    virtual void childrenChanged(bool changedByParser = false);
 
-    bool isLoading() const;
-    void sheetLoaded();
+    void setCreatedByParser(bool createdByParser) { m_createdByParser = createdByParser; }
+    virtual void finishParsingChildren();
+
+    virtual bool isLoading() const;
+    virtual bool sheetLoaded();
 
     bool disabled() const;
     void setDisabled(bool);
 
-    String media() const;
-    void setMedia(const String&);
+    virtual const AtomicString& media() const;
+    void setMedia(const AtomicString&);
 
-    String type() const;
-    void setType(const String&);
+    virtual const AtomicString& type() const;
+    void setType(const AtomicString&);
+
+    StyleSheet* sheet();
+
+    virtual void setLoading(bool loading) { m_loading = loading; }
 
 protected:
-    RefPtr<CSSStyleSheet> m_sheet;
-    bool m_loading;
-    String m_type;
     String m_media;
+    bool m_loading;
+    bool m_createdByParser;
 };
 
 } //namespace

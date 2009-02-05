@@ -1,11 +1,9 @@
 /*
-    This file is part of the KDE libraries
-
     Copyright (C) 1998 Lars Knoll (knoll@mpi-hd.mpg.de)
     Copyright (C) 2001 Dirk Mueller (mueller@kde.org)
     Copyright (C) 2002 Waldo Bastian (bastian@kde.org)
     Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
-    Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+    Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -19,39 +17,44 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
-    Boston, MA 02111-1307, USA.
-
-    This class provides all functionality needed for loading images, style sheets and html
-    pages from the web. It has a memory cache for these objects.
+    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301, USA.
 */
 
 #include "config.h"
 #include "CachedImage.h"
 
+#include "BitmapImage.h"
 #include "Cache.h"
 #include "CachedResourceClient.h"
 #include "CachedResourceClientWalker.h"
 #include "DocLoader.h"
-#include "Image.h"
-#include "LoaderFunctions.h"
+#include "Frame.h"
 #include "Request.h"
+#include "SystemTime.h"
 #include <wtf/Vector.h>
 
-#include "Frame.h"
+#include "SystemMemory.h"
+
+#if PLATFORM(CG)
+#include "PDFDocumentImage.h"
+#endif
+
+#if ENABLE(SVG_AS_IMAGE)
+#include "SVGImage.h"
+#endif
 
 using std::max;
 
 namespace WebCore {
 
-CachedImage::CachedImage(DocLoader* docLoader, const String& url, CachePolicy cachePolicy)
-    : CachedResource(url, ImageResource, cachePolicy)
+CachedImage::CachedImage(DocLoader* docLoader, const String& url, bool forCache)
+    : CachedResource(url, ImageResource, forCache)
 {
     m_image = 0;
-    m_errorOccurred = false;
     m_status = Unknown;
     if (!docLoader || docLoader->autoLoadImages())  {
-    m_loading = true;
+        m_loading = true;
         cache()->loader()->load(docLoader, this, true);
     } else
         m_loading = false;
@@ -60,6 +63,16 @@ CachedImage::CachedImage(DocLoader* docLoader, const String& url, CachePolicy ca
     if (docLoader && docLoader->frame()) {
         m_maxDataSize = docLoader->frame()->maximumImageSize();
     }
+}
+
+CachedImage::CachedImage(Image* image)
+    : CachedResource(String(), ImageResource, false /* not for cache */)
+{
+    m_image = image;
+    m_status = Cached;
+    m_loading = false;
+
+    m_maxDataSize = 0;
 }
 
 CachedImage::~CachedImage()
@@ -88,13 +101,13 @@ static Image* brokenImage()
 {
     static Image* brokenImage;
     if (!brokenImage)
-        brokenImage = Image::loadResource("missingImage");
+        brokenImage = Image::loadPlatformResource("missingImage");
     return brokenImage;
 }
 
 static Image* nullImage()
 {
-    static Image nullImage;
+    static BitmapImage nullImage;
     return &nullImage;
 }
 
@@ -107,6 +120,36 @@ Image* CachedImage::image() const
         return m_image;
 
     return nullImage();
+}
+
+void CachedImage::setImageContainerSize(const IntSize& containerSize)
+{
+    if (m_image)
+        m_image->setContainerSize(containerSize);
+}
+
+bool CachedImage::usesImageContainerSize() const
+{
+    if (m_image)
+        return m_image->usesContainerSize();
+
+    return false;
+}
+
+bool CachedImage::imageHasRelativeWidth() const
+{
+    if (m_image)
+        return m_image->hasRelativeWidth();
+
+    return false;
+}
+
+bool CachedImage::imageHasRelativeHeight() const
+{
+    if (m_image)
+        return m_image->hasRelativeHeight();
+
+    return false;
 }
 
 IntSize CachedImage::imageSize() const
@@ -137,31 +180,51 @@ void CachedImage::clear()
 inline void CachedImage::createImage()
 {
     // Create the image if it doesn't yet exist.
-    if (!m_image)
-#if __APPLE__
-        m_image = new Image(this, ResponseMIMEType(m_response) == "application/pdf");
-#else
-        m_image = new Image(this, false);
-        p->setShouldCacheDecodedImages(m_shouldCacheDecodedImages);
+    if (m_image)
+        return;
+#if PLATFORM(CG)
+    if (m_response.mimeType() == "application/pdf") {
+        m_image = new PDFDocumentImage;
+        return;
+    }
 #endif
+#if ENABLE(SVG_AS_IMAGE)
+    if (m_response.mimeType() == "image/svg+xml") {
+        m_image = new SVGImage(this);
+        return;
+    }
+#endif
+    m_image = new BitmapImage(this);
 }
 
-Vector<char>& CachedImage::bufferData(const char* bytes, int addedSize, Request* request)
+bool CachedImage::checkOutOfMemory()
 {
-    createImage();
-
-    // Add new bytes DIRECTLY to the buffer in the Image object.
-    Vector<char>& buffer = m_image->dataBuffer();
-
-    unsigned oldSize = buffer.size();
-    buffer.resize(oldSize + addedSize);
-    memcpy(buffer.data() + oldSize, bytes, addedSize);
-
-    return buffer;
+    CachedResourceClientWalker w(m_clients);
+    while (CachedResourceClient* c = w.next())
+        if (c->memoryLimitReached())
+            return true;
+    return false;
 }
 
-void CachedImage::data(Vector<char>& data, bool allDataReceived)
+unsigned CachedImage::animatedImageSize()
 {
+    if (!m_image)
+        return 0;
+    return m_image->animatedImageSize();
+}
+    
+void CachedImage::stopAnimatedImage()
+{
+    if (!m_image)
+        return;
+    m_image->disableImageAnimation();
+}
+    
+    
+void CachedImage::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+{
+    m_data = data;
+
     createImage();
 
     bool sizeAvailable = false;
@@ -169,7 +232,7 @@ void CachedImage::data(Vector<char>& data, bool allDataReceived)
     // Have the image update its data from its internal buffer.
     // It will not do anything now, but will delay decoding until 
     // queried for info (like size or specific image frames).
-    sizeAvailable = m_image->setData(allDataReceived);
+    sizeAvailable = m_image->setData(m_data, allDataReceived);
 
     // Go ahead and tell our observers to try to draw if we have either
     // received all the data or the size is known.  Each chunk from the
@@ -178,19 +241,19 @@ void CachedImage::data(Vector<char>& data, bool allDataReceived)
     if (sizeAvailable || allDataReceived) {
         IntSize s = imageSize();
         // Disallow loading images greater than maxDataSize
-        if (m_image->isNull() || (m_maxDataSize > 0 && s.width() * s.height() * 4 > m_maxDataSize)) {
-            m_errorOccurred = true;
-            notifyObservers();
+        if (m_image->isNull() || (m_maxDataSize > 0 && s.width() * s.height() * 4 > m_maxDataSize) || checkOutOfMemory()) {
+            // FIXME: I'm not convinced this case can even be hit.
+            error();
             if (inCache())
                 cache()->remove(this);
-        } else
-            notifyObservers();
-
-            if (m_image) { 
-	            Vector<char>& imageBuffer = m_image->dataBuffer(); 
-	            setEncodedSize(imageBuffer.size()); 
-	        } 
+            return;
         }
+        
+        notifyObservers();
+
+        if (m_image)
+            setEncodedSize(m_image->data() ? m_image->data()->size() : 0);
+    }
     
     if (allDataReceived) {
         m_loading = false;
@@ -223,32 +286,24 @@ void CachedImage::destroyDecodedData()
         m_image->destroyDecodedData();
 }
 
-unsigned CachedImage::decodedSize() const
-{
-    if (m_image && !m_errorOccurred)
-        return m_image->decodedSize();
-    return 0;
-}
-
-void CachedImage::decodedSizeChanging(const Image* image, int delta)
-{
-    if (image != m_image)
-        return;
-    
-    if (inCache() && referenced())
-        cache()->removeFromLiveResourcesList(this);
-}
-
 void CachedImage::decodedSizeChanged(const Image* image, int delta)
 {
     if (image != m_image)
         return;
     
-    if (inCache()) {
-        cache()->adjustSize(referenced(), delta, delta);
-        if (referenced())
-            cache()->insertInLiveResourcesList(this);
-    }
+    setDecodedSize(decodedSize() + delta);
+}
+
+void CachedImage::didDraw(const Image* image)
+{
+    if (image != m_image)
+        return;
+    
+    double timeStamp = Frame::currentPaintTimeStamp();
+    if (!timeStamp) // If didDraw is called outside of a Frame paint.
+        timeStamp = currentTime();
+    
+    CachedResource::didAccessDecodedData(timeStamp);
 }
 
 bool CachedImage::shouldPauseAnimation(const Image* image)
@@ -269,6 +324,38 @@ void CachedImage::animationAdvanced(const Image* image)
 {
     if (image == m_image)
         notifyObservers();
+}
+    
+bool CachedImage::shouldDecodeFrame(const Image* image, const IntSize& frameSize)
+{
+    unsigned fullFrameBytes = frameSize.width() * frameSize.height();
+
+    const unsigned smallImageThreshold = 258 * 256 * 4;
+    if (fullFrameBytes < smallImageThreshold)
+        return true;
+
+    if (hasEnoughMemoryFor(fullFrameBytes))
+        return true;
+
+    // Low on memory, lets try to prune the cache
+    cache()->prune();
+    if (hasEnoughMemoryFor(fullFrameBytes))
+        return true;
+
+    // We are still low on memory, lets try some aggressive pruning of live decoded resources
+    cache()->pruneLiveResources(true);
+#if ENABLE(DENY_LOW_MEMORY_IMAGE_DECODING)
+    if (hasEnoughMemoryFor(fullFrameBytes))
+        return true;
+
+    // Still looking bad, don't decode the image at all.
+    return false;
+#else
+    // So we allow decoding anyway. This might cause crash or jetsam but as long as WebKit
+    // suffers from memory growth problems there are situations where restarting is the only way
+    // to access the content user is trying to see.
+    return true;
+#endif
 }
 
 } //namespace WebCore

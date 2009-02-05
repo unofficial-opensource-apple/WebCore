@@ -31,7 +31,7 @@
 @end
 
 @interface WAKWindow : WAKResponder
-- (void)sendEvent:(GSEventRef)event;
+- (void)sendGSEvent:(GSEventRef)event;
 @end
 
 @protocol WebPolicyDecisionListener <NSObject>
@@ -48,8 +48,3 @@
 
 @interface DOMObject : WebScriptObject
 @end
-
-@interface DOMNode : DOMObject
-- (void)simulateCompleteClick;
-@end
-

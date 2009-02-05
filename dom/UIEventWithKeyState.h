@@ -18,22 +18,18 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #ifndef UIEventWithKeyState_h
 #define UIEventWithKeyState_h
 
-#include "AtomicString.h"
-#include "DOMWindow.h"
 #include "UIEvent.h"
 
 namespace WebCore {
     
-    typedef DOMWindow AbstractView;
-
     class UIEventWithKeyState : public UIEvent {
     public:
         UIEventWithKeyState()
@@ -66,6 +62,8 @@ namespace WebCore {
         bool m_shiftKey : 1;
         bool m_metaKey : 1;
     };
+
+    UIEventWithKeyState* findEventWithKeyState(Event*);
 
 } // namespace WebCore
 

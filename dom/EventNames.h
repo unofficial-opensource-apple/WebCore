@@ -1,7 +1,5 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
- * Copyright (C) 2005 Apple Computer, Inc.
+ * Copyright (C) 2005, 2007 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Jon Shier (jshier@iastate.edu)
  *
  * This library is free software; you can redistribute it and/or
@@ -16,30 +14,35 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef EVENT_NAMES_H
-#define EVENT_NAMES_H
+#ifndef EventNames_h
+#define EventNames_h
 
 #include "AtomicString.h"
 
 namespace WebCore { namespace EventNames {
 
+// IPHONE: Added orientationchange, touchstart, touchmove, touchend, touchcancel, gesturestart, gesturechange, gestureend to original list
 #define DOM_EVENT_NAMES_FOR_EACH(macro) \
     \
     macro(abort) \
     macro(beforecopy) \
     macro(beforecut) \
     macro(beforepaste) \
+    macro(beforeunload) \
     macro(blur) \
+    macro(cached) \
     macro(change) \
+    macro(checking) \
     macro(click) \
     macro(contextmenu) \
     macro(copy) \
     macro(cut) \
+    macro(downloading) \
     macro(dblclick) \
     macro(drag) \
     macro(dragend) \
@@ -55,14 +58,25 @@ namespace WebCore { namespace EventNames {
     macro(keypress) \
     macro(keyup) \
     macro(load) \
+    macro(message) \
     macro(mousedown) \
     macro(mousemove) \
     macro(mouseout) \
     macro(mouseover) \
     macro(mouseup) \
     macro(mousewheel) \
+    macro(noupdate) \
+    macro(offline) \
+    macro(online) \
+    macro(orientationchange) \
+    macro(touchstart) \
+    macro(touchmove) \
+    macro(touchend) \
+    macro(touchcancel) \
+    macro(gesturestart) \
+    macro(gesturechange) \
+    macro(gestureend) \
     macro(overflowchanged) \
-    macro(beforeunload) \
     macro(paste) \
     macro(readystatechange) \
     macro(reset) \
@@ -74,6 +88,7 @@ namespace WebCore { namespace EventNames {
     macro(submit) \
     macro(textInput) \
     macro(unload) \
+    macro(updateready) \
     macro(zoom) \
     \
     macro(DOMActivate) \
@@ -86,17 +101,42 @@ namespace WebCore { namespace EventNames {
     macro(DOMNodeRemoved) \
     macro(DOMNodeRemovedFromDocument) \
     macro(DOMSubtreeModified) \
+    macro(DOMContentLoaded) \
     \
-    macro(khtmlBeforeTextInserted) \
-    macro(khtmlDragdrop) \
-    macro(khtmlEditableContentChanged) \
-    macro(khtmlHorizontalmousewheel) \
-    macro(khtmlMove) \
-    macro(khtmlOrigclickMouseup) \
+    macro(webkitBeforeTextInserted) \
+    macro(webkitEditableContentChanged) \
     \
+    macro(canshowcurrentframe) \
+    macro(canplay) \
+    macro(canplaythrough) \
+    macro(dataunavailable) \
+    macro(durationchange) \
+    macro(emptied) \
+    macro(ended) \
+    macro(loadedfirstframe) \
+    macro(loadedmetadata) \
+    macro(pause) \
+    macro(play) \
+    macro(ratechange) \
+    macro(timeupdate) \
+    macro(volumechange) \
+    macro(waiting) \
+    \
+    macro(begin) \
+    macro(progress) \
+    macro(stalled) \
+    \
+    macro(webkitAnimationEnd) \
+    macro(webkitAnimationStart) \
+    macro(webkitAnimationIteration) \
+    \
+    macro(webkitTransitionEnd) \
+    \
+    
 // end of DOM_EVENT_NAMES_FOR_EACH
 
-#if !DOM_EVENT_NAMES_HIDE_GLOBALS
+
+#ifndef DOM_EVENT_NAMES_HIDE_GLOBALS
     #define DOM_EVENT_NAMES_DECLARE(name) extern const AtomicString name##Event;
     DOM_EVENT_NAMES_FOR_EACH(DOM_EVENT_NAMES_DECLARE)
     #undef DOM_EVENT_NAMES_DECLARE

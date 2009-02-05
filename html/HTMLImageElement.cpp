@@ -1,9 +1,7 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,13 +15,14 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "HTMLImageElement.h"
 
-#include "csshelper.h"
+#include "CSSHelper.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "EventNames.h"
@@ -84,11 +83,11 @@ bool HTMLImageElement::mapToEntry(const QualifiedName& attrName, MappedAttribute
     return HTMLElement::mapToEntry(attrName, result);
 }
 
-void HTMLImageElement::parseMappedAttribute(MappedAttribute *attr)
+void HTMLImageElement::parseMappedAttribute(MappedAttribute* attr)
 {
     const QualifiedName& attrName = attr->name();
     if (attrName == altAttr) {
-        if (renderer())
+        if (renderer() && renderer()->isImage())
             static_cast<RenderImage*>(renderer())->updateAltText();
     } else if (attrName == srcAttr)
         m_imageLoader.updateFromElement();
@@ -98,13 +97,11 @@ void HTMLImageElement::parseMappedAttribute(MappedAttribute *attr)
         addCSSLength(attr, CSS_PROP_HEIGHT, attr->value());
     else if (attrName == borderAttr) {
         // border="noborder" -> border="0"
-        if(attr->value().toInt()) {
-            addCSSLength(attr, CSS_PROP_BORDER_WIDTH, attr->value());
-            addCSSProperty(attr, CSS_PROP_BORDER_TOP_STYLE, CSS_VAL_SOLID);
-            addCSSProperty(attr, CSS_PROP_BORDER_RIGHT_STYLE, CSS_VAL_SOLID);
-            addCSSProperty(attr, CSS_PROP_BORDER_BOTTOM_STYLE, CSS_VAL_SOLID);
-            addCSSProperty(attr, CSS_PROP_BORDER_LEFT_STYLE, CSS_VAL_SOLID);
-        }
+        addCSSLength(attr, CSS_PROP_BORDER_WIDTH, attr->value().toInt() ? attr->value() : "0");
+        addCSSProperty(attr, CSS_PROP_BORDER_TOP_STYLE, CSS_VAL_SOLID);
+        addCSSProperty(attr, CSS_PROP_BORDER_RIGHT_STYLE, CSS_VAL_SOLID);
+        addCSSProperty(attr, CSS_PROP_BORDER_BOTTOM_STYLE, CSS_VAL_SOLID);
+        addCSSProperty(attr, CSS_PROP_BORDER_LEFT_STYLE, CSS_VAL_SOLID);
     } else if (attrName == vspaceAttr) {
         addCSSLength(attr, CSS_PROP_MARGIN_TOP, attr->value());
         addCSSLength(attr, CSS_PROP_MARGIN_BOTTOM, attr->value());
@@ -138,6 +135,16 @@ void HTMLImageElement::parseMappedAttribute(MappedAttribute *attr)
             doc->addNamedItem(newNameAttr);
         }
         oldNameAttr = newNameAttr;
+    } else if (attr->name() == idAttr) {
+        String newIdAttr = attr->value();
+        if (inDocument() && document()->isHTMLDocument()) {
+            HTMLDocument *doc = static_cast<HTMLDocument *>(document());
+            doc->removeDocExtraNamedItem(oldIdAttr);
+            doc->addDocExtraNamedItem(newIdAttr);
+        }
+        oldIdAttr = newIdAttr;
+        // also call superclass
+        HTMLElement::parseMappedAttribute(attr);
     } else
         HTMLElement::parseMappedAttribute(attr);
 }
@@ -154,7 +161,7 @@ String HTMLImageElement::altText() const
     return alt;
 }
 
-RenderObject *HTMLImageElement::createRenderer(RenderArena *arena, RenderStyle *style)
+RenderObject* HTMLImageElement::createRenderer(RenderArena* arena, RenderStyle* style)
 {
      if (style->contentData())
         return RenderObject::createObject(this, style);
@@ -166,24 +173,37 @@ void HTMLImageElement::attach()
 {
     HTMLElement::attach();
 
-    if (RenderImage* imageObj = static_cast<RenderImage*>(renderer()))
+    if (renderer() && renderer()->isImage()) {
+        RenderImage* imageObj = static_cast<RenderImage*>(renderer());
         imageObj->setCachedImage(m_imageLoader.image());
+        
+        // If we have no image at all because we have no src attribute, set
+        // image height and width for the alt text instead.
+        if (!m_imageLoader.image() && !imageObj->cachedImage())
+            imageObj->setImageSizeForAltText();
+    }
 }
 
 void HTMLImageElement::insertedIntoDocument()
 {
-    Document* doc = document();
-    if (doc->isHTMLDocument())
-        static_cast<HTMLDocument*>(doc)->addNamedItem(oldNameAttr);
+    if (document()->isHTMLDocument()) {
+        HTMLDocument* doc = static_cast<HTMLDocument*>(document());
+
+        doc->addNamedItem(oldNameAttr);
+        doc->addDocExtraNamedItem(oldIdAttr);
+    }
 
     HTMLElement::insertedIntoDocument();
 }
 
 void HTMLImageElement::removedFromDocument()
 {
-    Document* doc = document();
-    if (doc->isHTMLDocument())
-        static_cast<HTMLDocument*>(doc)->removeNamedItem(oldNameAttr);
+    if (document()->isHTMLDocument()) {
+        HTMLDocument* doc = static_cast<HTMLDocument*>(document());
+
+        doc->removeNamedItem(oldNameAttr);
+        doc->removeDocExtraNamedItem(oldIdAttr);
+    }
 
     HTMLElement::removedFromDocument();
 }
@@ -202,11 +222,10 @@ int HTMLImageElement::width(bool ignorePendingStylesheets) const
             return m_imageLoader.image()->imageSize().width();
     }
 
-    Document* doc = document();
     if (ignorePendingStylesheets)
-        doc->updateLayoutIgnorePendingStylesheets();
+        document()->updateLayoutIgnorePendingStylesheets();
     else
-        doc->updateLayout();
+        document()->updateLayout();
 
     return renderer() ? renderer()->contentWidth() : 0;
 }
@@ -225,18 +244,36 @@ int HTMLImageElement::height(bool ignorePendingStylesheets) const
             return m_imageLoader.image()->imageSize().height();        
     }
 
-    Document* doc = document();
     if (ignorePendingStylesheets)
-        doc->updateLayoutIgnorePendingStylesheets();
+        document()->updateLayoutIgnorePendingStylesheets();
     else
-        doc->updateLayout();
+        document()->updateLayout();
 
     return renderer() ? renderer()->contentHeight() : 0;
 }
 
-bool HTMLImageElement::isURLAttribute(Attribute *attr) const
+int HTMLImageElement::naturalWidth() const
 {
-    return attr->name() == srcAttr || (attr->name() == usemapAttr && attr->value().domString()[0] != '#');
+    if (!m_imageLoader.image())
+        return 0;
+
+    return m_imageLoader.image()->imageSize().width();
+}
+
+int HTMLImageElement::naturalHeight() const
+{
+    if (!m_imageLoader.image())
+        return 0;
+    
+    return m_imageLoader.image()->imageSize().height();
+}
+    
+bool HTMLImageElement::isURLAttribute(Attribute* attr) const
+{
+    return attr->name() == srcAttr
+        || attr->name() == lowsrcAttr
+        || attr->name() == longdescAttr
+        || (attr->name() == usemapAttr && attr->value().domString()[0] != '#');
 }
 
 String HTMLImageElement::name() const
@@ -269,15 +306,14 @@ void HTMLImageElement::setAlt(const String& value)
     setAttribute(altAttr, value);
 }
 
-int HTMLImageElement::border() const
+String HTMLImageElement::border() const
 {
-    // ### return value in pixels
-    return getAttribute(borderAttr).toInt();
+    return getAttribute(borderAttr);
 }
 
-void HTMLImageElement::setBorder(int value)
+void HTMLImageElement::setBorder(const String& value)
 {
-    setAttribute(borderAttr, String::number(value));
+    setAttribute(borderAttr, value);
 }
 
 void HTMLImageElement::setHeight(int value)
@@ -308,12 +344,22 @@ void HTMLImageElement::setIsMap(bool isMap)
 
 String HTMLImageElement::longDesc() const
 {
-    return getAttribute(longdescAttr);
+    return document()->completeURL(getAttribute(longdescAttr));
 }
 
 void HTMLImageElement::setLongDesc(const String& value)
 {
     setAttribute(longdescAttr, value);
+}
+
+String HTMLImageElement::lowsrc() const
+{
+    return document()->completeURL(getAttribute(lowsrcAttr));
+}
+
+void HTMLImageElement::setLowsrc(const String& value)
+{
+    setAttribute(lowsrcAttr, value);
 }
 
 String HTMLImageElement::src() const
@@ -354,7 +400,7 @@ void HTMLImageElement::setWidth(int value)
 
 int HTMLImageElement::x() const
 {
-    RenderObject *r = renderer();
+    RenderObject* r = renderer();
     if (!r)
         return 0;
     int x, y;
@@ -364,7 +410,7 @@ int HTMLImageElement::x() const
 
 int HTMLImageElement::y() const
 {
-    RenderObject *r = renderer();
+    RenderObject* r = renderer();
     if (!r)
         return 0;
     int x, y;
@@ -375,6 +421,11 @@ int HTMLImageElement::y() const
 bool HTMLImageElement::complete() const
 {
     return m_imageLoader.imageComplete();
+}
+
+bool HTMLImageElement::willRespondToMouseClickEvents()
+{
+    return true;
 }
 
 }

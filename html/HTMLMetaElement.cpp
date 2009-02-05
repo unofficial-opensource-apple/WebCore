@@ -18,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "HTMLMetaElement.h"
@@ -66,6 +66,8 @@ void HTMLMetaElement::process()
 {
     if (inDocument() && equalIgnoringCase(name(), "viewport") && !m_content.isNull())
         document()->processViewport(m_content);
+    if (inDocument() && equalIgnoringCase(name(), "format-detection") && !m_content.isNull())
+        document()->processFormatDetection(m_content);
     // Get the document to process the tag, but only if we're actually part of DOM tree (changing a meta tag while
     // it's not in the tree shouldn't have any effect on the document)
     if (inDocument() && !m_equiv.isNull() && !m_content.isNull())

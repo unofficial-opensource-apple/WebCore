@@ -1,9 +1,7 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,8 +15,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
@@ -27,6 +25,11 @@
 #include "Document.h"
 #include "ExceptionCode.h"
 #include "RenderText.h"
+#include "TextBreakIterator.h"
+
+#if ENABLE(SVG)
+#include "RenderSVGInlineText.h"
+#endif // ENABLE(SVG)
 
 namespace WebCore {
 
@@ -48,13 +51,15 @@ Text::~Text()
 {
 }
 
-Text *Text::splitText(unsigned offset, ExceptionCode& ec)
+PassRefPtr<Text> Text::splitText(unsigned offset, ExceptionCode& ec)
 {
     ec = 0;
 
+    // FIXME: This does not copy markers
+    
     // INDEX_SIZE_ERR: Raised if the specified offset is negative or greater than
     // the number of 16-bit units in data.
-    if (offset > str->length()) {
+    if (offset > m_data->length()) {
         ec = INDEX_SIZE_ERR;
         return 0;
     }
@@ -65,29 +70,21 @@ Text *Text::splitText(unsigned offset, ExceptionCode& ec)
         return 0;
     }
 
-    StringImpl *oldStr = str;
-    Text *newText = createNew(str->substring(offset, str->length()-offset));
-    str = str->copy();
-    str->ref();
-    str->remove(offset, str->length()-offset);
+    RefPtr<StringImpl> oldStr = m_data;
+    RefPtr<Text> newText = createNew(oldStr->substring(offset));
+    m_data = oldStr->substring(0, offset);
 
-    dispatchModifiedEvent(oldStr);
-    oldStr->deref();
+    dispatchModifiedEvent(oldStr.get());
 
     if (parentNode())
-        parentNode()->insertBefore(newText,nextSibling(), ec);
+        parentNode()->insertBefore(newText.get(), nextSibling(), ec);
     if (ec)
         return 0;
 
     if (renderer())
-        static_cast<RenderText*>(renderer())->setText(str);
+        static_cast<RenderText*>(renderer())->setText(m_data);
 
-    return newText;
-}
-
-const AtomicString& Text::localName() const
-{
-    return textAtom;
+    return newText.release();
 }
 
 String Text::nodeName() const
@@ -102,7 +99,7 @@ Node::NodeType Text::nodeType() const
 
 PassRefPtr<Node> Text::cloneNode(bool /*deep*/)
 {
-    return document()->createTextNode(str);
+    return document()->createTextNode(m_data);
 }
 
 bool Text::rendererIsNeeded(RenderStyle *style)
@@ -149,7 +146,12 @@ bool Text::rendererIsNeeded(RenderStyle *style)
 
 RenderObject *Text::createRenderer(RenderArena *arena, RenderStyle *style)
 {
-    return new (arena) RenderText(this, str);
+#if ENABLE(SVG)
+    if (parentNode()->isSVGElement())
+        return new (arena) RenderSVGInlineText(this, m_data);
+#endif // ENABLE(SVG)
+    
+    return new (arena) RenderText(this, m_data);
 }
 
 void Text::attach()
@@ -164,8 +166,8 @@ void Text::recalcStyle( StyleChange change )
         if (renderer())
             renderer()->setStyle(parentNode()->renderer()->style());
     if (changed() && renderer() && renderer()->isText())
-        static_cast<RenderText*>(renderer())->setText(str);
-    setChanged(false);
+        static_cast<RenderText*>(renderer())->setText(m_data);
+    setChanged(NoStyleChange);
 }
 
 // DOM Section 1.1.1
@@ -174,15 +176,40 @@ bool Text::childTypeAllowed(NodeType)
     return false;
 }
 
-Text *Text::createNew(StringImpl *_str)
+PassRefPtr<Text> Text::createNew(PassRefPtr<StringImpl> string)
 {
-    return new Text(document(), _str);
+    return new Text(document(), string);
 }
 
 String Text::toString() const
 {
     // FIXME: substitute entity references as needed!
     return nodeValue();
+}
+
+PassRefPtr<Text> Text::createWithLengthLimit(Document* doc, const String& text, unsigned& charsLeft, unsigned maxChars)
+{
+    if (charsLeft == text.length() && charsLeft <= maxChars) {
+        charsLeft = 0;
+        return new Text(doc, text);
+    }
+    
+    unsigned start = text.length() - charsLeft;
+    unsigned end = start + std::min(charsLeft, maxChars);
+    
+    // check we are not on an unbreakable boundary
+    TextBreakIterator* it = characterBreakIterator(text.characters(), text.length());
+    if (end < text.length() && !isTextBreak(it, end))
+        end = textBreakPreceding(it, end);
+        
+    // maxChars of unbreakable characters could lead to infinite loop
+    if (end <= start)
+        end = text.length();
+    
+    String nodeText = text.substring(start, end - start);
+    charsLeft = text.length() - end;
+        
+    return new Text(doc, nodeText);
 }
 
 #ifndef NDEBUG

@@ -1,9 +1,7 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,55 +15,52 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLObjectElement_H
-#define HTMLObjectElement_H
+#ifndef HTMLObjectElement_h
+#define HTMLObjectElement_h
 
 #include "HTMLPlugInElement.h"
-
-#if PLATFORM(MAC)
-#include <JavaScriptCore/runtime.h>
-#else
-namespace KJS { namespace Bindings { class Instance; } }
-#endif
+#include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
-class HTMLFormElement;
 class HTMLImageLoader;
 
-class HTMLObjectElement : public HTMLPlugInElement
-{
+class HTMLObjectElement : public HTMLPlugInElement {
 public:
-    HTMLObjectElement(Document*);
+    HTMLObjectElement(Document*, bool createdByParser);
     ~HTMLObjectElement();
 
-    virtual int tagPriority() const { return 7; }
+    virtual int tagPriority() const { return 5; }
 
     virtual void parseMappedAttribute(MappedAttribute*);
 
     virtual void attach();
     virtual bool rendererIsNeeded(RenderStyle*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual void closeRenderer();
+    virtual void finishParsingChildren();
     virtual void detach();
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
     
-    virtual void recalcStyle(StyleChange ch);
-    virtual void childrenChanged();
+    virtual void recalcStyle(StyleChange);
+    virtual void childrenChanged(bool changedByParser = false);
 
     virtual bool isURLAttribute(Attribute*) const;
+    virtual const QualifiedName& imageSourceAttributeName() const;
+
+    virtual void updateWidget();
+    void setNeedWidgetUpdate(bool needWidgetUpdate) { m_needWidgetUpdate = needWidgetUpdate; }
 
     bool isImageType();
 
     void renderFallbackContent();
 
-#if PLATFORM(MAC)
+#if USE(JAVASCRIPTCORE_BINDINGS)
     virtual KJS::Bindings::Instance* getInstance() const;
 #endif
 
@@ -83,8 +78,6 @@ public:
 
     String codeType() const;
     void setCodeType(const String&);
-
-    Document* contentDocument() const;
     
     String data() const;
     void setData(const String&);
@@ -92,15 +85,12 @@ public:
     bool declare() const;
     void setDeclare(bool);
 
-    HTMLFormElement* form() const;
-    
-    String hspace() const;
-    void setHspace(const String&);
+    int hspace() const;
+    void setHspace(int);
 
     String standby() const;
     void setStandby(const String&);
 
-    int tabIndex() const;
     void setTabIndex(int);
 
     String type() const;
@@ -109,25 +99,23 @@ public:
     String useMap() const;
     void setUseMap(const String&);
 
-    String vspace() const;
-    void setVspace(const String&);
+    int vspace() const;
+    void setVspace(int);
 
-    bool isComplete() const { return m_complete; }
-    void setComplete(bool complete);
-    
     bool isDocNamedItem() const { return m_docNamedItem; }
 
-    DeprecatedString serviceType;
-    DeprecatedString url;
-    String classId;
-    bool needWidgetUpdate : 1;
+    bool containsJavaApplet() const;
+
+    String m_serviceType;
+    String m_url;
+    String m_classId;
+    bool m_needWidgetUpdate : 1;
     bool m_useFallbackContent : 1;
-    HTMLImageLoader* m_imageLoader;
+    OwnPtr<HTMLImageLoader> m_imageLoader;
 
 private:
     void updateDocNamedItem();
     String oldIdAttr;
-    bool m_complete;
     bool m_docNamedItem;
 };
 

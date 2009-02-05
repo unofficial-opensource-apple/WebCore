@@ -1,6 +1,4 @@
 /*
-    This file is part of the KDE libraries
-
     Copyright (C) 1998 Lars Knoll (knoll@mpi-hd.mpg.de)
     Copyright (C) 2001 Dirk Mueller (mueller@kde.org)
     Copyright (C) 2002 Waldo Bastian (bastian@kde.org)
@@ -19,8 +17,8 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
-    Boston, MA 02111-1307, USA.
+    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301, USA.
 
     This class provides all functionality needed for loading images, style sheets and html
     pages from the web. It has a memory cache for these objects.
@@ -32,35 +30,22 @@
 #include "Cache.h"
 #include "CachedResourceClient.h"
 #include "CachedResourceClientWalker.h"
-#include "LoaderFunctions.h"
+#include "TextResourceDecoder.h"
 #include "loader.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
-CachedCSSStyleSheet::CachedCSSStyleSheet(DocLoader* dl, const String &url, CachePolicy cachePolicy, const DeprecatedString& charset)
-    : CachedResource(url, CSSStyleSheet, cachePolicy)
-    , m_encoding(charset.latin1())
+CachedCSSStyleSheet::CachedCSSStyleSheet(DocLoader* dl, const String& url, const String& charset, bool skipCanLoadCheck, bool sendResourceLoadCallbacks)
+    : CachedResource(url, CSSStyleSheet, true, sendResourceLoadCallbacks)
+    , m_decoder(new TextResourceDecoder("text/css", charset))
 {
-    // It's css we want.
-    setAccept("text/css");
-    // load the file
-    cache()->loader()->load(dl, this, false);
+    // Prefer text/css but accept any type (dell.com serves a stylesheet
+    // as text/html; see <http://bugs.webkit.org/show_bug.cgi?id=11451>).
+    setAccept("text/css,*/*;q=0.1");
+    cache()->loader()->load(dl, this, false, skipCanLoadCheck, sendResourceLoadCallbacks);
     m_loading = true;
-    if (!m_encoding.isValid())
-        m_encoding = TextEncoding(Latin1Encoding);
 }
-
-/*
-CachedCSSStyleSheet::CachedCSSStyleSheet(const String &url, const DeprecatedString &stylesheet_data)
-    : CachedResource(url, CSSStyleSheet, CachePolicyVerify, 0, stylesheet_data.length())
-    , m_encoding(InvalidEncoding)
-{
-    m_loading = false;
-    m_status = Persistent;
-    m_sheet = String(stylesheet_data);
-}
-*/
 
 CachedCSSStyleSheet::~CachedCSSStyleSheet()
 {
@@ -71,25 +56,30 @@ void CachedCSSStyleSheet::ref(CachedResourceClient *c)
     CachedResource::ref(c);
 
     if (!m_loading)
-        c->setStyleSheet(m_url, m_sheet);
+        c->setCSSStyleSheet(m_url, m_decoder->encoding().name(), errorOccurred() ? "" : m_sheet);
 }
 
-void CachedCSSStyleSheet::setCharset(const DeprecatedString& chs)
+void CachedCSSStyleSheet::setEncoding(const String& chs)
 {
-    if (!chs.isEmpty()) {
-        TextEncoding encoding = TextEncoding(chs.latin1());
-        if (encoding.isValid())
-            m_encoding = encoding;
-    }
+    m_decoder->setEncoding(chs, TextResourceDecoder::EncodingFromHTTPHeader);
 }
 
-void CachedCSSStyleSheet::data(Vector<char>& data, bool allDataReceived)
+String CachedCSSStyleSheet::encoding() const
+{
+    return m_decoder->encoding().name();
+}
+
+void CachedCSSStyleSheet::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
 {
     if (!allDataReceived)
         return;
 
-    setEncodedSize(data.size());
-    m_sheet = String(m_encoding.toUnicode(data.data(), encodedSize()));
+    m_data = data;
+    setEncodedSize(m_data.get() ? m_data->size() : 0);
+    if (m_data.get()) {
+        m_sheet = m_decoder->decode(m_data->data(), encodedSize());
+        m_sheet += m_decoder->flush();
+    }
     m_loading = false;
     checkNotify();
 }
@@ -100,19 +90,23 @@ void CachedCSSStyleSheet::checkNotify()
         return;
 
     CachedResourceClientWalker w(m_clients);
-    while (CachedResourceClient *c = w.next()) {
-#if __APPLE__
-        if (m_response && !IsResponseURLEqualToURL(m_response, m_url))
-            c->setStyleSheet(String(ResponseURL(m_response)), m_sheet);
-        else
-#endif
-            c->setStyleSheet(m_url, m_sheet);
-    }
+    while (CachedResourceClient *c = w.next())
+        c->setCSSStyleSheet(m_response.url().string(), m_decoder->encoding().name(), m_sheet);
+
+#if USE(LOW_BANDWIDTH_DISPLAY)        
+    // if checkNotify() is called from error(), client's setCSSStyleSheet(...)
+    // can't find "this" from url, so they can't do clean up if needed.
+    // call notifyFinished() to make sure they have a chance.
+    CachedResourceClientWalker n(m_clients);
+    while (CachedResourceClient* s = n.next())
+        s->notifyFinished(this);
+#endif        
 }
 
 void CachedCSSStyleSheet::error()
 {
     m_loading = false;
+    m_errorOccurred = true;
     checkNotify();
 }
 

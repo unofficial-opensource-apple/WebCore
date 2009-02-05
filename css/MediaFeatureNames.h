@@ -15,16 +15,17 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef MEDIAFEATURENAMES_H
-#define MEDIAFEATURENAMES_H
+#ifndef MediaFeatureNames_h
+#define MediaFeatureNames_h
 
 #include "AtomicString.h"
 
-namespace WebCore { namespace MediaFeatureNames {
+namespace WebCore {
+    namespace MediaFeatureNames {
 
 #define CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE(macro) \
     macro(color, "color") \
@@ -54,15 +55,15 @@ namespace WebCore { namespace MediaFeatureNames {
     macro(min_width, "min-width") \
 // end of macro
 
-#if !CSS_MEDIAQUERY_NAMES_HIDE_GLOBALS
+#ifndef CSS_MEDIAQUERY_NAMES_HIDE_GLOBALS
     #define CSS_MEDIAQUERY_NAMES_DECLARE(name, str) extern const AtomicString name##MediaFeature;
     CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE(CSS_MEDIAQUERY_NAMES_DECLARE)
     #undef CSS_MEDIAQUERY_NAMES_DECLARE
 #endif
 
-     void init();
-} }
+        void init();
 
-#endif
+    } // namespace MediaFeatureNames
+} // namespace WebCore
 
-
+#endif // MediaFeatureNames_h

@@ -1,10 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -19,19 +17,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #include "config.h"
 #include "HTMLOptGroupElement.h"
 
+#include "CSSStyleSelector.h"
 #include "Document.h"
 #include "HTMLNames.h"
 #include "HTMLSelectElement.h"
 #include "RenderMenuList.h"
-#include "cssstyleselector.h"
 
 namespace WebCore {
 
@@ -86,15 +84,21 @@ bool HTMLOptGroupElement::appendChild(PassRefPtr<Node> newChild, ExceptionCode& 
     return result;
 }
 
-ContainerNode* HTMLOptGroupElement::addChild(PassRefPtr<Node> newChild)
+bool HTMLOptGroupElement::removeChildren()
 {
-    ContainerNode* result = HTMLGenericFormElement::addChild(newChild);
+    bool result = HTMLGenericFormElement::removeChildren();
     if (result)
         recalcSelectOptions();
     return result;
 }
 
-void HTMLOptGroupElement::parseMappedAttribute(MappedAttribute *attr)
+void HTMLOptGroupElement::childrenChanged(bool changedByParser)
+{
+    recalcSelectOptions();
+    HTMLGenericFormElement::childrenChanged(changedByParser);
+}
+
+void HTMLOptGroupElement::parseMappedAttribute(MappedAttribute* attr)
 {
     HTMLGenericFormElement::parseMappedAttribute(attr);
     recalcSelectOptions();
@@ -102,7 +106,7 @@ void HTMLOptGroupElement::parseMappedAttribute(MappedAttribute *attr)
 
 void HTMLOptGroupElement::recalcSelectOptions()
 {
-    Node *select = parentNode();
+    Node* select = parentNode();
     while (select && !select->hasTagName(selectTag))
         select = select->parentNode();
     if (select)
@@ -121,14 +125,17 @@ void HTMLOptGroupElement::setLabel(const String &value)
 
 bool HTMLOptGroupElement::checkDTD(const Node* newChild)
 {
-    return newChild->hasTagName(HTMLNames::optionTag) || newChild->hasTagName(HTMLNames::hrTag);
+    // Make sure to keep this in sync with <select> (other than not allowing an optgroup).
+    return newChild->isTextNode() || newChild->hasTagName(HTMLNames::optionTag) || newChild->hasTagName(HTMLNames::hrTag) || newChild->hasTagName(HTMLNames::scriptTag);
 }
 
 void HTMLOptGroupElement::attach()
 {
-    RenderStyle* style = styleForRenderer(0);
-    setRenderStyle(style);
-    style->deref(document()->renderArena());
+    if (parentNode()->renderStyle()) {
+        RenderStyle* style = styleForRenderer(0);
+        setRenderStyle(style);
+        style->deref(document()->renderArena());
+    }
     HTMLGenericFormElement::attach();
 }
 
@@ -151,7 +158,7 @@ void HTMLOptGroupElement::setRenderStyle(RenderStyle* newStyle)
         oldStyle->deref(document()->renderArena());
 }
 
-String HTMLOptGroupElement::groupLabelText()
+String HTMLOptGroupElement::groupLabelText() const
 {
     DeprecatedString itemText = getAttribute(labelAttr).deprecatedString();
     

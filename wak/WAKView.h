@@ -1,7 +1,7 @@
 //
 //  WAKView.h
 //
-//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, 2008, Apple Inc.  All rights reserved.
 //
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -11,6 +11,7 @@
 
 #define NSRect CGRect
 #define NSPoint CGPoint
+#define NSSize CGSize
 
 extern NSString *WAKViewFrameSizeDidChangeNotification;
 extern NSString *WAKViewDidScrollNotification;
@@ -83,9 +84,11 @@ extern NSString *WAKViewDidScrollNotification;
 - (WAKView *)previousKeyView;
 - (WAKView *)previousValidKeyView;
 
+- (void)invalidateGState;
 - (void)releaseGState;
 
 - (void)setAutoresizingMask:(unsigned int)mask;
+- (unsigned int)autoresizingMask;
 - (BOOL)inLiveResize;
 
 - (BOOL)mouse:(NSPoint)aPoint inRect:(NSRect)aRect;

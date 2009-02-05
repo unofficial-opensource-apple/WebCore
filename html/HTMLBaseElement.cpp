@@ -18,16 +18,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "HTMLBaseElement.h"
 
+#include "CSSHelper.h"
 #include "Document.h"
 #include "Frame.h"
+#include "FrameLoader.h"
 #include "HTMLNames.h"
-#include "csshelper.h"
+#include "KURL.h"
 
 namespace WebCore {
 
@@ -76,10 +79,10 @@ void HTMLBaseElement::process()
         return;
 
     if (!m_href.isEmpty() && document()->frame())
-        document()->setBaseURL(KURL(document()->frame()->url(), m_href.deprecatedString()).url());
+        document()->setBaseURL(KURL(document()->frame()->loader()->url(), m_href.deprecatedString()).deprecatedString());
 
     if (!m_target.isEmpty())
-        document()->setBaseTarget(m_target.deprecatedString());
+        document()->setBaseTarget(m_target);
 
     // ### should changing a document's base URL dynamically automatically update all images, stylesheets etc?
 }

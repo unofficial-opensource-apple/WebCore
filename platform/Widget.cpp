@@ -30,11 +30,6 @@
 
 namespace WebCore {
 
-IntSize Widget::sizeHint() const 
-{
-    return IntSize();
-}
-
 void Widget::resize(int w, int h) 
 {
     setFrameGeometry(IntRect(x(), y(), w, h));
@@ -85,19 +80,14 @@ void Widget::move(const IntPoint &p)
     move(p.x(), p.y());
 }
 
-int Widget::baselinePosition(int height) const
-{
-    return height;
-}
-
-bool Widget::checksDescendantsForFocus() const
-{
-    return false;
-}
-
 bool Widget::isFrameView() const
 {
     return false;
+}
+
+IntRect Widget::windowClipRect() const
+{
+    return IntRect();
 }
 
 }
