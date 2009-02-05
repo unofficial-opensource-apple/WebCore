@@ -31,6 +31,10 @@
 #include <qmap.h>
 #include <qpixmap.h>
 
+namespace DOM {
+    class HTMLMapElementImpl;
+}
+
 namespace khtml {
 
 class DocLoader;
@@ -38,10 +42,13 @@ class DocLoader;
 class RenderImage : public RenderReplaced
 {
 public:
-    RenderImage(DOM::HTMLElementImpl *_element);
+    RenderImage(DOM::NodeImpl*);
     virtual ~RenderImage();
 
     virtual const char *renderName() const { return "RenderImage"; }
+    
+    virtual SelectionState selectionState() const {return m_selectionState;}
+    virtual void setSelectionState(SelectionState s) {m_selectionState = s;}
 
     virtual bool isImage() const { return true; }
     
@@ -64,19 +71,25 @@ public:
     virtual void notifyFinished(CachedObject *finishedObj);
     void dispatchLoadEvent();
 
-    virtual bool nodeAtPoint(NodeInfo& info, int x, int y, int tx, int ty, bool inside=false);
+    virtual bool nodeAtPoint(NodeInfo& info, int x, int y, int tx, int ty,
+                             HitTestAction hitTestAction = HitTestAll, bool inside=false);
     
     virtual short calcReplacedWidth() const;
     virtual int calcReplacedHeight() const;
 
-    virtual void detach(RenderArena *);
+    virtual void detach();
 
     // Called to set generated content images (e.g., :before/:after generated images).
     void setContentObject(CachedObject* co);
     
+    bool isDisplayingError() const { return berrorPic; }
+    
+    DOM::HTMLMapElementImpl* imageMap();
+
 private:
     bool isWidthSpecified() const;
     bool isHeightSpecified() const;
+    QColor selectionTintColor(QPainter *p) const;
 
     /*
      * Pointer to the image
@@ -98,6 +111,7 @@ private:
     CachedImage *image;
     bool berrorPic : 1;
     bool loadEventSent : 1;
+    SelectionState m_selectionState : 3;
 };
 
 

@@ -2,7 +2,7 @@
 /*
  *  This file is part of the KDE libraries
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003 Apple Computer, Inc.
+ *  Copyright (C) 2004 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -29,6 +29,8 @@
 
 #include <kdebug.h>
 
+using DOM::DOMString;
+
 using namespace KJS;
 
 /* TODO:
@@ -50,6 +52,7 @@ Value DOMObject::get(ExecState *exec, const Identifier &p) const
     // ### oh, and s/QString/i18n or I18N_NOOP (the code in kjs uses I18N_NOOP... but where is it translated ?)
     //     and where does it appear to the user ?
     Object err = Error::create(exec, GeneralError, QString("DOM exception %1").arg(e.code).local8Bit());
+    err.put(exec, "code", Number(e.code));
     exec->setException( err );
     result = Undefined();
   }
@@ -69,6 +72,7 @@ void DOMObject::put(ExecState *exec, const Identifier &propertyName,
   }
   catch (DOM::DOMException e) {
     Object err = Error::create(exec, GeneralError, QString("DOM exception %1").arg(e.code).local8Bit());
+    err.put(exec, "code", Number(e.code));
     exec->setException(err);
   }
   catch (...) {
@@ -90,6 +94,7 @@ Value DOMFunction::get(ExecState *exec, const Identifier &propertyName) const
   catch (DOM::DOMException e) {
     result = Undefined();
     Object err = Error::create(exec, GeneralError, QString("DOM exception %1").arg(e.code).local8Bit());
+    err.put(exec, "code", Number(e.code));
     exec->setException(err);
   }
   catch (...) {
@@ -223,6 +228,25 @@ void ScriptInterpreter::forgetDOMObjectsForDocument( DOM::DocumentImpl* document
   }
 }
 
+void ScriptInterpreter::updateDOMObjectDocument(void *objectHandle, DOM::DocumentImpl *oldDoc, DOM::DocumentImpl *newDoc)
+{
+  InterpreterImp *first = InterpreterImp::firstInterpreter();
+  if (first) {
+    InterpreterImp *scr = first;
+    do {
+      if ( scr->interpreter()->rtti() == 1 ) {
+	ScriptInterpreter *interp = static_cast<ScriptInterpreter *>(scr->interpreter());
+	
+	DOMObject* cachedObject = interp->getDOMObjectForDocument(oldDoc, objectHandle);
+	if (cachedObject) {
+	  interp->putDOMObjectForDocument(newDoc, objectHandle, cachedObject);
+	}
+      }
+	
+      scr = scr->nextInterpreter();
+    } while (scr != first);
+  }
+}
 
 bool ScriptInterpreter::wasRunByUserGesture() const
 {
@@ -234,8 +258,8 @@ bool ScriptInterpreter::wasRunByUserGesture() const
       id == DOM::EventImpl::MOUSEUP_EVENT || id == DOM::EventImpl::KHTML_DBLCLICK_EVENT ||
       id == DOM::EventImpl::KHTML_CLICK_EVENT ||
       // keyboard events
-      id == DOM::EventImpl::KHTML_KEYDOWN_EVENT || id == DOM::EventImpl::KHTML_KEYPRESS_EVENT ||
-      id == DOM::EventImpl::KHTML_KEYUP_EVENT ||
+      id == DOM::EventImpl::KEYDOWN_EVENT || id == DOM::EventImpl::KEYPRESS_EVENT ||
+      id == DOM::EventImpl::KEYUP_EVENT ||
       // other accepted events
       id == DOM::EventImpl::SELECT_EVENT || id == DOM::EventImpl::CHANGE_EVENT ||
       id == DOM::EventImpl::FOCUS_EVENT || id == DOM::EventImpl::BLUR_EVENT ||
@@ -267,7 +291,7 @@ UString::UString(const QString &d)
   rep = UString::Rep::create(dat, len);
 }
 
-UString::UString(const DOM::DOMString &d)
+UString::UString(const DOMString &d)
 {
   if (d.isNull()) {
     attach(&Rep::null);
@@ -280,13 +304,21 @@ UString::UString(const DOM::DOMString &d)
   rep = UString::Rep::create(dat, len);
 }
 
-DOM::DOMString UString::string() const
+DOMString UString::string() const
 {
-  return DOM::DOMString((QChar*) data(), size());
+  if (isNull())
+    return DOMString();
+  if (isEmpty())
+    return DOMString("");
+  return DOMString((QChar*) data(), size());
 }
 
 QString UString::qstring() const
 {
+  if (isNull())
+    return QString();
+  if (isEmpty())
+    return QString("");
   return QString((QChar*) data(), size());
 }
 
@@ -295,13 +327,21 @@ QConstString UString::qconststring() const
   return QConstString((QChar*) data(), size());
 }
 
-DOM::DOMString Identifier::string() const
+DOMString Identifier::string() const
 {
-  return DOM::DOMString((QChar*) data(), size());
+  if (isNull())
+    return DOMString();
+  if (isEmpty())
+    return DOMString("");
+  return DOMString((QChar*) data(), size());
 }
 
 QString Identifier::qstring() const
 {
+  if (isNull())
+    return QString();
+  if (isEmpty())
+    return QString("");
   return QString((QChar*) data(), size());
 }
 
@@ -315,7 +355,7 @@ DOM::Node KJS::toNode(const Value& val)
   return dobj->toNode();
 }
 
-Value KJS::getStringOrNull(DOM::DOMString s)
+Value KJS::getStringOrNull(DOMString s)
 {
   if (s.isNull())
     return Null();

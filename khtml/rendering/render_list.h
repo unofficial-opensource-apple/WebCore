@@ -39,7 +39,7 @@ class RenderListItem;
 class RenderListMarker : public RenderBox
 {
 public:
-    RenderListMarker();
+    RenderListMarker(DOM::DocumentImpl* document);
     ~RenderListMarker();
 
     virtual void setStyle(RenderStyle *style);
@@ -63,10 +63,14 @@ public:
     virtual short baselinePosition(bool b, bool isRootLineBox=false) const;
     
     virtual bool isListMarker() const { return true; }
+
+    CachedImage* listImage() const { return m_listImage; }
     
     RenderListItem* listItem() { return m_listItem; }
     void setListItem(RenderListItem* listItem) { m_listItem = listItem; }
     
+    const QString& text() const { return m_item; }
+
 protected:
     friend class RenderListItem;
     
@@ -84,7 +88,7 @@ public:
     RenderListItem(DOM::NodeImpl*);
     virtual ~RenderListItem();
     
-    virtual void detach(RenderArena *);
+    virtual void detach();
 
     virtual const char *renderName() const { return "RenderListItem"; }
 
@@ -103,6 +107,8 @@ public:
 
     virtual void layout( );
     virtual void calcMinMaxWidth();
+
+    virtual QRect getAbsoluteRepaintRect();
     
     void updateMarkerLocation();
     
