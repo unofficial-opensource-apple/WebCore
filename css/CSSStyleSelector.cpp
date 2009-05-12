@@ -35,11 +35,13 @@
 #include "CSSImageValue.h"
 #include "CSSImportRule.h"
 #include "CSSMediaRule.h"
+#include "CSSParser.h"
 #include "CSSPrimitiveValueMappings.h"
 #include "CSSProperty.h"
 #include "CSSPropertyNames.h"
 #include "CSSRuleList.h"
 #include "CSSSelector.h"
+#include "CSSSelectorList.h"
 #include "CSSStyleRule.h"
 #include "CSSStyleSheet.h"
 #include "CSSTimingFunctionValue.h"
@@ -247,6 +249,16 @@ CSSStyleSheet *CSSStyleSelector::m_svgSheet = 0;
 
 static CSSStyleSelector::Encodedurl *currentEncodedURL = 0;
 static PseudoState pseudoState;
+    
+static CSSStyleSheet* simpleDefaultStyleSheet;
+    
+// FIXME: It would be nice to use some mechanism that guarantees this is in sync with the real UA stylesheet.
+static const char* simpleUserAgentStyleSheet = "html,body,div{display:block}body{margin:8px}div:focus,span:focus{outline:auto 5px -webkit-focus-ring-color}";
+
+static bool elementCanUseSimpleDefaultStyle(Element* e)
+{
+    return e->hasTagName(htmlTag) || e->hasTagName(bodyTag) || e->hasTagName(divTag) || e->hasTagName(spanTag) || e->hasTagName(brTag);
+}
 
 static const MediaQueryEvaluator& screenEval()
 {
@@ -270,8 +282,15 @@ CSSStyleSelector::CSSStyleSelector(Document* doc, const String& userStyleSheet, 
     m_matchAuthorAndUserStyles = matchAuthorAndUserStyles;
 
     strictParsing = _strictParsing;
-    if (!m_defaultStyle)
-        loadDefaultStyle();
+    
+    Element* root = doc->documentElement();
+
+    if (!m_defaultStyle) {
+        if (!root || elementCanUseSimpleDefaultStyle(root))
+            loadSimpleDefaultStyle();
+        else
+            loadFullDefaultStyle();
+    }
 
     m_userStyle = 0;
 
@@ -286,8 +305,6 @@ CSSStyleSelector::CSSStyleSelector(Document* doc, const String& userStyleSheet, 
         m_medium = new MediaQueryEvaluator(view->mediaType());
     else
         m_medium = new MediaQueryEvaluator("all");
-
-    Element* root = doc->documentElement();
 
     if (root)
         m_rootDefaultStyle = styleForElement(root, 0, false, true); // dont ref, because the RenderStyle is allocated from global heap
@@ -352,8 +369,8 @@ void CSSStyleSelector::addKeyframeStyle(Document* doc, WebKitCSSKeyframesRule* r
         m_style = new (doc->renderArena()) RenderStyle();
         m_style->ref();
         CSSMutableStyleDeclaration* decl = kf->style();
-        DeprecatedValueListConstIterator<CSSProperty> end;
-        for (DeprecatedValueListConstIterator<CSSProperty> it = decl->valuesIterator(); it != end; ++it) {
+        CSSMutableStyleDeclaration::const_iterator end = decl->end();
+        for (CSSMutableStyleDeclaration::const_iterator it = decl->begin(); it != end; ++it) {
             const CSSProperty& current = *it;
             applyProperty(current.id(), current.value());
             list->addProperty(current.id());
@@ -420,15 +437,20 @@ template<typename T> CSSStyleSheet* parseUASheet(const T& array)
     return parseUASheet(array, sizeof(array));
 }
 
-void CSSStyleSelector::loadDefaultStyle()
+void CSSStyleSelector::loadFullDefaultStyle()
 {
-    if (m_defaultStyle)
-        return;
-
-    m_defaultStyle = new CSSRuleSet;
-    m_defaultPrintStyle = new CSSRuleSet;
-    m_defaultQuirksStyle = new CSSRuleSet;
-    m_defaultViewSourceStyle = new CSSRuleSet;
+    if (simpleDefaultStyleSheet) {
+        ASSERT(m_defaultStyle);
+        delete m_defaultStyle;
+        delete simpleDefaultStyleSheet;
+        m_defaultStyle = new CSSRuleSet;
+        simpleDefaultStyleSheet = 0;
+    } else {
+        ASSERT(!m_defaultStyle);
+        m_defaultStyle = new CSSRuleSet;
+        m_defaultPrintStyle = new CSSRuleSet;
+        m_defaultQuirksStyle = new CSSRuleSet;
+    }
 
     // Strict-mode rules.
     m_defaultSheet = parseUASheet(html4UserAgentStyleSheet);
@@ -438,8 +460,27 @@ void CSSStyleSelector::loadDefaultStyle()
     // Quirks-mode rules.
     m_quirksSheet = parseUASheet(quirksUserAgentStyleSheet);
     m_defaultQuirksStyle->addRulesFromSheet(m_quirksSheet, screenEval());
+}
+
+void CSSStyleSelector::loadSimpleDefaultStyle()
+{
+    ASSERT(!m_defaultStyle);
+    ASSERT(!simpleDefaultStyleSheet);
     
-    // View source rules.
+    m_defaultStyle = new CSSRuleSet;
+    m_defaultPrintStyle = new CSSRuleSet;
+    m_defaultQuirksStyle = new CSSRuleSet;
+    
+    simpleDefaultStyleSheet = parseUASheet(simpleUserAgentStyleSheet, strlen(simpleUserAgentStyleSheet));
+    m_defaultStyle->addRulesFromSheet(simpleDefaultStyleSheet, screenEval());
+    
+    // No need to initialize quirks sheet yet as there are no quirk rules for elements allowed in simple default style.
+}
+    
+void CSSStyleSelector::loadViewSourceStyle()
+{
+    ASSERT(!m_defaultViewSourceStyle);
+    m_defaultViewSourceStyle = new CSSRuleSet;
     m_viewSourceSheet = parseUASheet(sourceUserAgentStyleSheet);
     m_defaultViewSourceStyle->addRulesFromSheet(m_viewSourceSheet, screenEval());
 }
@@ -971,8 +1012,11 @@ void CSSStyleSelector::matchUARules(int& firstUARule, int& lastUARule)
         matchRules(m_defaultQuirksStyle, firstUARule, lastUARule);
         
     // If we're in view source mode, then we match rules from the view source style sheet.
-    if (m_document->frame() && m_document->frame()->inViewSourceMode())
+    if (m_document->frame() && m_document->frame()->inViewSourceMode()) {
+        if (!m_defaultViewSourceStyle)
+            loadViewSourceStyle();
         matchRules(m_defaultViewSourceStyle, firstUARule, lastUARule);
+    }
 }
 
 // If resolveForRootDefault is true, style based on user agent style sheet only. This is used in media queries, where
@@ -1021,6 +1065,9 @@ RenderStyle* CSSStyleSelector::styleForElement(Element* e, RenderStyle* defaultP
     else
         m_parentStyle = m_style;
 
+    if (simpleDefaultStyleSheet && !elementCanUseSimpleDefaultStyle(e))
+        loadFullDefaultStyle();
+
 #if ENABLE(SVG)
     if (e->isSVGElement() && !m_svgSheet) {
         // SVG rules.
@@ -1048,12 +1095,15 @@ RenderStyle* CSSStyleSelector::styleForElement(Element* e, RenderStyle* defaultP
                 // Walk our attribute list and add in each decl.
                 const NamedMappedAttrMap* map = m_styledElement->mappedAttributes();
                 for (unsigned i = 0; i < map->length(); i++) {
-                    MappedAttribute* attr = map->attributeItem(i);
-                    if (attr->decl()) {
-                        lastAuthorRule = m_matchedDecls.size();
-                        if (firstAuthorRule == -1)
-                            firstAuthorRule = lastAuthorRule;
-                        addMatchedDeclaration(attr->decl());
+                    Attribute* attr = map->attributeItem(i);
+                    if (attr->isMappedAttribute()) {
+                        MappedAttribute* mappedAttr = static_cast<MappedAttribute*>(attr);
+                        if (mappedAttr->decl()) {
+                            lastAuthorRule = m_matchedDecls.size();
+                            if (firstAuthorRule == -1)
+                                firstAuthorRule = lastAuthorRule;
+                            addMatchedDeclaration(mappedAttr->decl());
+                        }
                     }
                 }
             }
@@ -1481,7 +1531,7 @@ CSSStyleSelector::SelectorMatch CSSStyleSelector::checkSelector(CSSSelector* sel
     CSSSelector::Relation relation = sel->relation();
 
     // Prepare next sel
-    sel = sel->m_tagHistory;
+    sel = sel->tagHistory();
     if (!sel)
         return SelectorMatches;
 
@@ -1632,6 +1682,7 @@ bool CSSStyleSelector::checkOneSelector(CSSSelector* sel, Element* e, bool isAnc
     }
 
     if (sel->hasAttribute()) {
+        const QualifiedName& attr = sel->attribute();
         if (sel->m_match == CSSSelector::Class) {
             if (!e->hasClass())
                 return false;
@@ -1642,16 +1693,16 @@ bool CSSStyleSelector::checkOneSelector(CSSSelector* sel, Element* e, bool isAnc
         // with type=cite attributes. Works around this bug:
         // <rdar://problem/5204612> Text narrows into a single vertical line for this message
         else if (m_style && (e != m_element || !m_styledElement || 
-            (e->hasTagName(blockquoteTag) && sel->m_attr == typeAttr) || (!m_styledElement->isMappedAttribute(sel->m_attr) && sel->m_attr != typeAttr && sel->m_attr != readonlyAttr))) {
+            (e->hasTagName(blockquoteTag) && attr == typeAttr) || (!m_styledElement->isMappedAttribute(attr) && attr != typeAttr && attr != readonlyAttr))) {
             m_style->setAffectedByAttributeSelectors(); // Special-case the "type" and "readonly" attributes so input form controls can share style.
-            m_selectorAttrs.add(sel->m_attr.localName().impl());
+            m_selectorAttrs.add(attr.localName().impl());
         }
 
-        const AtomicString& value = e->getAttribute(sel->m_attr);
+        const AtomicString& value = e->getAttribute(attr);
         if (value.isNull())
             return false; // attribute is not set
 
-        bool caseSensitive = m_isXMLDoc || !htmlAttributeHasCaseInsensitiveValue(sel->m_attr);
+        bool caseSensitive = m_isXMLDoc || !htmlAttributeHasCaseInsensitiveValue(attr);
 
         switch (sel->m_match) {
         case CSSSelector::Exact:
@@ -1901,7 +1952,7 @@ bool CSSStyleSelector::checkOneSelector(CSSSelector* sel, Element* e, bool isAnc
                 // calculate a and b every time we run through checkOneSelector
                 // this should probably be saved after we calculate it once, but currently
                 // would require increasing the size of CSSSelector
-                if (!parseNth(sel->m_argument, a, b))
+                if (!parseNth(sel->argument(), a, b))
                     break;
                 if (e->parentNode() && e->parentNode()->isElementNode()) {
                     int count = 1;
@@ -1937,7 +1988,7 @@ bool CSSStyleSelector::checkOneSelector(CSSSelector* sel, Element* e, bool isAnc
                 // FIXME: This selector is very slow.
                 int a, b;
                 // calculate a and b every time we run through checkOneSelector (see above)
-                if (!parseNth(sel->m_argument, a, b))
+                if (!parseNth(sel->argument(), a, b))
                     break;
                 if (e->parentNode() && e->parentNode()->isElementNode()) {
                     int count = 1;
@@ -1965,7 +2016,7 @@ bool CSSStyleSelector::checkOneSelector(CSSSelector* sel, Element* e, bool isAnc
                 // calculate a and b every time we run through checkOneSelector
                 // this should probably be saved after we calculate it once, but currently
                 // would require increasing the size of CSSSelector
-                if (!parseNth(sel->m_argument, a, b))
+                if (!parseNth(sel->argument(), a, b))
                     break;
                 if (e->parentNode() && e->parentNode()->isElementNode()) {
                     Element* parentNode = static_cast<Element*>(e->parentNode());
@@ -1992,7 +2043,7 @@ bool CSSStyleSelector::checkOneSelector(CSSSelector* sel, Element* e, bool isAnc
                 // FIXME: This selector is very slow.
                 int a, b;
                 // calculate a and b every time we run through checkOneSelector (see above)
-                if (!parseNth(sel->m_argument, a, b))
+                if (!parseNth(sel->argument(), a, b))
                     break;
                 if (e->parentNode() && e->parentNode()->isElementNode()) {
                     Element* parentNode = static_cast<Element*>(e->parentNode());
@@ -2126,18 +2177,19 @@ bool CSSStyleSelector::checkOneSelector(CSSSelector* sel, Element* e, bool isAnc
 
                     n = n->parent();
                 }
-                if (value.isEmpty() || !value.startsWith(sel->m_argument, false))
+                const AtomicString& argument = sel->argument();
+                if (value.isEmpty() || !value.startsWith(argument, false))
                     break;
-                if (value.length() != sel->m_argument.length() && value[sel->m_argument.length()] != '-')
+                if (value.length() != argument.length() && value[argument.length()] != '-')
                     break;
                 return true;
             }
             case CSSSelector::PseudoNot: {
                 // check the simple selector
-                for (CSSSelector* subSel = sel->m_simpleSelector; subSel; subSel = subSel->m_tagHistory) {
+                for (CSSSelector* subSel = sel->simpleSelector(); subSel; subSel = subSel->tagHistory()) {
                     // :not cannot nest. I don't really know why this is a
                     // restriction in CSS3, but it is, so let's honour it.
-                    if (subSel->m_simpleSelector)
+                    if (subSel->simpleSelector())
                         break;
                     if (!checkOneSelector(subSel, e, isAncestor, true))
                         return true;
@@ -2298,7 +2350,7 @@ void CSSRuleSet::addRulesFromSheet(CSSStyleSheet* sheet, const MediaQueryEvaluat
         StyleBase* item = sheet->item(i);
         if (item->isStyleRule()) {
             CSSStyleRule* rule = static_cast<CSSStyleRule*>(item);
-            for (CSSSelector* s = rule->selector(); s; s = s->next())
+            for (CSSSelector* s = rule->selectorList().first(); s; s = CSSSelectorList::next(s))
                 addRule(rule, s);
         }
         else if (item->isImportRule()) {
@@ -2317,7 +2369,7 @@ void CSSRuleSet::addRulesFromSheet(CSSStyleSheet* sheet, const MediaQueryEvaluat
                     if (childItem->isStyleRule()) {
                         // It is a StyleRule, so append it to our list
                         CSSStyleRule* rule = static_cast<CSSStyleRule*>(childItem);
-                        for (CSSSelector* s = rule->selector(); s; s = s->next())
+                        for (CSSSelector* s = rule->selectorList().first(); s; s = CSSSelectorList::next(s))
                             addRule(rule, s);
                     } else if (item->isFontFaceRule() && styleSelector) {
                         // Add this font face to our set.
@@ -2371,8 +2423,8 @@ void CSSStyleSelector::applyDeclarations(bool applyFirst, bool isImportant,
     if (startIndex == -1) return;
     for (int i = startIndex; i <= endIndex; i++) {
         CSSMutableStyleDeclaration* decl = m_matchedDecls[i];
-        DeprecatedValueListConstIterator<CSSProperty> end;
-        for (DeprecatedValueListConstIterator<CSSProperty> it = decl->valuesIterator(); it != end; ++it) {
+        CSSMutableStyleDeclaration::const_iterator end = decl->end();
+        for (CSSMutableStyleDeclaration::const_iterator it = decl->begin(); it != end; ++it) {
             const CSSProperty& current = *it;
             // give special priority to font-xxx, color properties
             if (isImportant == current.isImportant()) {
