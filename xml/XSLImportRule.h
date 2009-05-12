@@ -1,7 +1,7 @@
 /*
  * This file is part of the XSL implementation.
  *
- * Copyright (C) 2004, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,58 +15,50 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef XSLImportRule_h
-#define XSLImportRule_h
+#ifndef XSLImportRule_H
+#define XSLImportRule_H
 
-#if ENABLE(XSLT)
+#ifdef KHTML_XSLT
 
-#include "CachedResourceHandle.h"
-#include "CachedStyleSheetClient.h"
+#include "CachedResourceClient.h"
+#include "StyleBase.h"
 #include "XSLStyleSheet.h"
-#include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
 class CachedXSLStyleSheet;
 
-class XSLImportRule : private CachedStyleSheetClient {
-    WTF_MAKE_FAST_ALLOCATED;
+class XSLImportRule : public CachedResourceClient, public StyleBase {
 public:
-    static PassOwnPtr<XSLImportRule> create(XSLStyleSheet* parentSheet, const String& href)
-    {
-        return adoptPtr(new XSLImportRule(parentSheet, href));
-    }
-
+    XSLImportRule(StyleBase* parent, const String& href);
     virtual ~XSLImportRule();
     
-    const String& href() const { return m_strHref; }
+    String href() const { return m_strHref; }
     XSLStyleSheet* styleSheet() const { return m_styleSheet.get(); }
-
-    XSLStyleSheet* parentStyleSheet() const { return m_parentStyleSheet; }
-    void setParentStyleSheet(XSLStyleSheet* styleSheet) { m_parentStyleSheet = styleSheet; }
-
+    
+    virtual bool isImportRule() { return true; }
+    XSLStyleSheet* parentStyleSheet() const;
+    
+    // from CachedResourceClient
+    virtual void setStyleSheet(const String& url, const String& sheet);
+    
     bool isLoading();
     void loadSheet();
     
-private:
-    XSLImportRule(XSLStyleSheet* parentSheet, const String& href);
-
-    virtual void setXSLStyleSheet(const String& href, const KURL& baseURL, const String& sheet);
-    
-    XSLStyleSheet* m_parentStyleSheet;
+protected:
     String m_strHref;
     RefPtr<XSLStyleSheet> m_styleSheet;
-    CachedResourceHandle<CachedXSLStyleSheet> m_cachedSheet;
+    CachedXSLStyleSheet* m_cachedSheet;
     bool m_loading;
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(XSLT)
+#endif // KHTML_XSLT
 
-#endif // XSLImportRule_h
+#endif // XSLImportRule_H

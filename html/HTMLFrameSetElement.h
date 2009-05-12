@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2004, 2006, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,88 +18,64 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLFrameSetElement_h
-#define HTMLFrameSetElement_h
+#ifndef HTMLFrameSetElement_H
+#define HTMLFrameSetElement_H
 
-#include <wtf/OwnArrayPtr.h>
 #include "HTMLElement.h"
 
 namespace WebCore {
 
-class HTMLFrameSetElement : public HTMLElement {
+class HTMLFrameSetElement : public HTMLElement
+{
+    friend class RenderFrameSet;
 public:
-    static PassRefPtr<HTMLFrameSetElement> create(const QualifiedName&, Document*);
+    HTMLFrameSetElement(Document*);
+    ~HTMLFrameSetElement();
 
-    bool hasFrameBorder() const { return m_frameborder; }
-    bool noResize() const { return m_noresize; }
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
+    virtual int tagPriority() const { return 10; }
+    virtual bool checkDTD(const Node* newChild);
+
+    virtual void parseMappedAttribute(MappedAttribute*);
+    virtual void attach();
+    virtual bool rendererIsNeeded(RenderStyle*);
+    virtual RenderObject *createRenderer(RenderArena*, RenderStyle*);
+
+    virtual void defaultEventHandler(Event*);
+
+    bool frameBorder() { return frameborder; }
+    bool noResize() { return noresize; }
 
     int totalRows() const { return m_totalRows; }
     int totalCols() const { return m_totalCols; }
     int border() const { return m_border; }
 
-    bool hasBorderColor() const { return m_borderColorSet; }
-
-    const Length* rowLengths() const { return m_rowLengths.get(); }
-    const Length* colLengths() const { return m_colLengths.get(); }
-
-    // Declared virtual in Element
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(blur);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(error);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(focus);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(load);
-
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(beforeunload);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(hashchange);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(message);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(offline);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(online);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(popstate);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(resize);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(storage);
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(unload);
-#if ENABLE(ORIENTATION_EVENTS)
-    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(orientationchange);
-#endif
-
-private:
-    HTMLFrameSetElement(const QualifiedName&, Document*);
-
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
-
-    virtual void attach();
-    virtual bool rendererIsNeeded(const NodeRenderingContext&);
-    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
+    virtual void recalcStyle( StyleChange ch );
     
-    virtual void defaultEventHandler(Event*);
+    String cols() const;
+    void setCols(const String&);
 
-    virtual bool willRecalcStyle(StyleChange);
+    String rows() const;
+    void setRows(const String&);
 
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
-
-    OwnArrayPtr<Length> m_rowLengths;
-    OwnArrayPtr<Length> m_colLengths;
+protected:
+    Length* m_rows;
+    Length* m_cols;
 
     int m_totalRows;
     int m_totalCols;
-    
     int m_border;
-    bool m_borderSet;
-    
-    bool m_borderColorSet;
 
-    bool m_frameborder;
-    bool m_frameborderSet;
-    bool m_noresize;
+    bool frameborder : 1;
+    bool frameBorderSet : 1;
+    bool noresize : 1;
 };
 
-} // namespace WebCore
+} //namespace
 
-#endif // HTMLFrameSetElement_h
+#endif

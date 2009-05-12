@@ -1,12 +1,8 @@
 //
 //  WKGraphics.h
 //
-//  Copyright (C) 2005, 2006, 2007, 2009 Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
 //
-
-#ifndef WKGraphics_h
-#define WKGraphics_h
-
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreGraphics/CoreGraphicsPrivate.h>
 
@@ -35,27 +31,3 @@ void WKSetPattern(CGContextRef context, CGPatternRef pattern, bool fill, bool st
 #ifdef __cplusplus
 }
 #endif
-
-#ifdef __cplusplus
-class WKFontAntialiasingStateSaver
-{
-public:
-
-    WKFontAntialiasingStateSaver(CGContextRef context, bool useOrientationDependentFontAntialiasing)
-        : m_context(context)
-        , m_useOrientationDependentFontAntialiasing(useOrientationDependentFontAntialiasing)
-    {
-    }
-
-    void setup(bool isLandscapeOrientation);
-    void restore();
-
-private:
-
-    CGContextRef m_context;
-    bool m_useOrientationDependentFontAntialiasing;
-    CGFontAntialiasingStyle m_oldAntialiasingStyle;
-};
-#endif
-
-#endif // WKGraphics_h

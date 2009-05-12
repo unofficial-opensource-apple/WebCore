@@ -1,7 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2007, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,55 +16,34 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLMarqueeElement_h
-#define HTMLMarqueeElement_h
+#ifndef HTMLMarqueeElement_H
+#define HTMLMarqueeElement_H
 
-#include "ActiveDOMObject.h"
 #include "HTMLElement.h"
 
 namespace WebCore {
 
-class RenderMarquee;
-
-class HTMLMarqueeElement : public HTMLElement, private ActiveDOMObject {
+class HTMLMarqueeElement : public HTMLElement
+{
 public:
-    static PassRefPtr<HTMLMarqueeElement> create(const QualifiedName&, Document*);
-
-    int minimumDelay() const;
-
-    // DOM Functions
-
-    void start();
-    void stop();
+    HTMLMarqueeElement(Document*);
     
-    int scrollAmount() const;
-    void setScrollAmount(int, ExceptionCode&);
-    
-    int scrollDelay() const;
-    void setScrollDelay(int, ExceptionCode&);
-    
-    int loop() const;
-    void setLoop(int, ExceptionCode&);
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
+    virtual int tagPriority() const { return 3; }
+
+    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
+
+    int minimumDelay() const { return m_minimumDelay; }
     
 private:
-    HTMLMarqueeElement(const QualifiedName&, Document*);
-
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
-
-    // ActiveDOMObject
-    virtual bool canSuspend() const;
-    virtual void suspend(ReasonForSuspension);
-    virtual void resume();
-
-    RenderMarquee* renderMarquee() const;
+    int m_minimumDelay;
 };
 
-} // namespace WebCore
-
-#endif // HTMLMarqueeElement_h
+}; //namespace
+#endif

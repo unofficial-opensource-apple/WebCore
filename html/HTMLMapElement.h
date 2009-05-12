@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,42 +17,40 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLMapElement_h
-#define HTMLMapElement_h
+#ifndef HTMLMapElement_H
+#define HTMLMapElement_H
 
 #include "HTMLElement.h"
+#include "RenderObject.h" // for RenderObject::NodeInfo
 
 namespace WebCore {
 
-class HitTestResult;
-class HTMLImageElement;
-    
 class HTMLMapElement : public HTMLElement {
 public:
-    static PassRefPtr<HTMLMapElement> create(Document*);
-    static PassRefPtr<HTMLMapElement> create(const QualifiedName&, Document*);
-    virtual ~HTMLMapElement();
+    HTMLMapElement(Document*);
+    ~HTMLMapElement();
+
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
+    virtual int tagPriority() const { return 1; }
+    virtual bool checkDTD(const Node*);
 
     const AtomicString& getName() const { return m_name; }
 
-    bool mapMouseEvent(LayoutPoint location, const LayoutSize&, HitTestResult&);
-    
-    HTMLImageElement* imageElement();
-    HTMLCollection* areas();
+    virtual void parseMappedAttribute(MappedAttribute*);
+
+    bool mapMouseEvent(int x, int y, const IntSize&, RenderObject::NodeInfo&);
+
+    PassRefPtr<HTMLCollection> areas();
+
+    String name() const;
+    void setName(const String&);
 
 private:
-    HTMLMapElement(const QualifiedName&, Document*);
-
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
-
     AtomicString m_name;
 };
 

@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2004-2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2004 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,30 +23,19 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#import <WebCore/DOM.h>
+#import <WebCore/DOMCSS.h>
+#import <WebCore/DOMHTML.h>
+#import <WebCore/DOMRange.h>
+#import <WebCore/DOMEvents.h>
 
-#import <WebCore/WebAutocapitalize.h>
-#import <GraphicsServices/GraphicsServices.h>
+#import <GraphicsServices/GSFont.h>
 
-@interface DOMNode (DOMNodeExtensionsPendingPublic)
-- (NSArray *)textRects;
-@end
-
-// FIXME: this should be removed as soon as all internal Apple uses of it have been replaced with
-// calls to the public method - (NSColor *)color.
-@interface DOMRGBColor (WebPrivate)
-@end
-
-// FIXME: this should be removed as soon as all internal Apple uses of it have been replaced with
-// calls to the public method - (NSString *)text.
 @interface DOMRange (WebPrivate)
+// uses same algorithm as innerText
 - (NSString *)_text;
 @end
 
-@interface DOMRange (DOMRangeExtensions)
-- (CGRect)boundingBox;
-- (NSArray *)lineBoxRects; // Deprecated. Use textRects instead.
-- (NSArray *)textRects;
+@interface DOMRGBColor (WebPrivate)
 @end
 
 @interface DOMElement (WebPrivate)
@@ -67,52 +55,20 @@
 @end
 
 // All the methods in this category are used by Safari forms autofill and should not be used for any other purpose.
-// Each one should eventually be replaced by public DOM API, and when that happens Safari will switch to implementations 
-// using that public API, and these will be deleted.
-@interface DOMHTMLInputElement (FormAutoFillTransition)
-- (BOOL)_isAutofilled;
+// They are stopgap measures until we finish transitioning form controls to not use NSView. Each one should become
+// replaceable by public DOM API, and when that happens Safari will switch to implementations using that public API,
+// and these will be deleted.
+@interface DOMHTMLInputElement(FormsAutoFillTransition)
 - (BOOL)_isTextField;
+- (NSRect)_rectOnScreen; // bounding box of the text field, in screen coordinates
 - (void)_replaceCharactersInRange:(NSRange)targetRange withString:(NSString *)replacementString selectingFromIndex:(int)index;
 - (NSRange)_selectedRange;
 - (void)_setAutofilled:(BOOL)filled;
-@end
-
-// These changes are necessary to detect whether a form input was modified by a user
-// or javascript
-@interface DOMHTMLInputElement (FormPromptAdditions)
-- (BOOL)_isEdited;
-@end
-
-@interface DOMHTMLTextAreaElement (FormPromptAdditions)
-- (BOOL)_isEdited;
 @end
 
 // All the methods in this category are used by Safari forms autofill and should not be used for any other purpose.
 // They are stopgap measures until we finish transitioning form controls to not use NSView. Each one should become
 // replaceable by public DOM API, and when that happens Safari will switch to implementations using that public API,
 // and these will be deleted.
-@interface DOMHTMLSelectElement (FormAutoFillTransition)
-- (void)_activateItemAtIndex:(int)index;
-- (void)_activateItemAtIndex:(int)index allowMultipleSelection:(BOOL)allowMultipleSelection;
-@end
-
-enum { WebMediaQueryOrientationCurrent, WebMediaQueryOrientationPortrait, WebMediaQueryOrientationLandscape };
-@interface DOMHTMLLinkElement (WebPrivate)
-- (BOOL)_mediaQueryMatchesForOrientation:(int)orientation;
-- (BOOL)_mediaQueryMatches;
-@end
-
-// These changes are useful to get the AutocapitalizeType on particular form controls.
-@interface DOMHTMLInputElement (AutocapitalizeAdditions)
-- (WebAutocapitalizeType)_autocapitalizeType;
-@end
-
-@interface DOMHTMLTextAreaElement (AutocapitalizeAdditions)
-- (WebAutocapitalizeType)_autocapitalizeType;
-@end
-
-// These are used by Date and Time input types because the generated ObjC methods default to not dispatching events.
-@interface DOMHTMLInputElement (WebInputChangeEventAdditions)
-- (void)setValueWithChangeEvent:(NSString *)newValue;
-- (void)setValueAsNumberWithChangeEvent:(double)newValueAsNumber;
+@interface DOMHTMLSelectElement(FormsAutoFillTransition)
 @end

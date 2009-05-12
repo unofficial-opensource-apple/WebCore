@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,49 +18,48 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-
-#ifndef DocumentType_h
-#define DocumentType_h
+#ifndef DOM_DocumentTypeImpl_h
+#define DOM_DocumentTypeImpl_h
 
 #include "Node.h"
 
 namespace WebCore {
 
 class NamedNodeMap;
+class DOMImplementation;
 
-class DocumentType : public Node {
+class DocumentType : public Node
+{
 public:
-    static PassRefPtr<DocumentType> create(Document* document, const String& name, const String& publicId, const String& systemId)
-    {
-        return adoptRef(new DocumentType(document, name, publicId, systemId));
-    }
+    DocumentType(DOMImplementation *, Document *, const String &name, const String &publicId, const String &systemId);
+    DocumentType(Document *, const String &name, const String &publicId, const String &systemId);
+    DocumentType(Document *, const DocumentType &);
 
-    // FIXME: We never fill m_entities and m_notations. Current implementation of NamedNodeMap doesn't work without an associated Element yet.
-    NamedNodeMap* entities() const { return m_entities.get(); }
-    NamedNodeMap* notations() const { return m_notations.get(); }
+    // DOM methods & attributes for DocumentType
+    NamedNodeMap *entities() const { return m_entities.get(); }
+    NamedNodeMap *notations() const { return m_notations.get(); }
 
-    const String& name() const { return m_name; }
-    const String& publicId() const { return m_publicId; }
-    const String& systemId() const { return m_systemId; }
-    const String& internalSubset() const { return m_subset; }
+    String name() const { return m_name; }
+    String publicId() const { return m_publicId; }
+    String systemId() const { return m_systemId; }
+    String internalSubset() const { return m_subset; }
 
-private:
-    DocumentType(Document*, const String& name, const String& publicId, const String& systemId);
+    // Other methods (not part of DOM)
+    DOMImplementation *implementation() const { return m_implementation.get(); }
 
-    virtual KURL baseURI() const;
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
     virtual PassRefPtr<Node> cloneNode(bool deep);
+    virtual String toString() const;
 
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
-
-    OwnPtr<NamedNodeMap> m_entities;
-    OwnPtr<NamedNodeMap> m_notations;
+private:
+    RefPtr<DOMImplementation> m_implementation;
+    RefPtr<NamedNodeMap> m_entities;
+    RefPtr<NamedNodeMap> m_notations;
 
     String m_name;
     String m_publicId;
@@ -66,6 +67,6 @@ private:
     String m_subset;
 };
 
-} // namespace WebCore
+} //namespace
 
 #endif

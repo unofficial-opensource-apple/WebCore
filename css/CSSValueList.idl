@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,11 +26,8 @@
 module css {
 
     // Introduced in DOM Level 2:
-    interface [
-        IndexedGetter
-    ] CSSValueList : CSSValue {
+    interface [HasIndexGetter] CSSValueList : CSSValue {
         readonly attribute unsigned long    length;
-        CSSValue           item(in [Optional=DefaultIsUndefined] unsigned long index);
+        CSSValue           item(in unsigned long index);
     };
-
 }

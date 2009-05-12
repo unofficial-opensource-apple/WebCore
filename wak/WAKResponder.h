@@ -2,31 +2,29 @@
 //  WAKResponder.h
 //  WebCore
 //
-//  Copyright (C) 2005, 2006, 2007, 2008, 2009 Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
 //
 
-#ifndef WAKResponder_h
-#define WAKResponder_h
-
-#import "WKTypes.h"
 #import <Foundation/Foundation.h>
 
-@class WebEvent;
+#import "WKTypes.h"
+#import "GraphicsServices/GSBase.h"
 
 @interface WAKResponder : NSObject
 {
 
 }
 
-- (void)handleEvent:(WebEvent *)event;
+- (void)handleEvent:(GSEventRef)event;
 
-- (void)scrollWheel:(WebEvent *)theEvent;
+- (void)scrollWheel:(GSEventRef)theEvent;
 - (BOOL)tryToPerform:(SEL)anAction with:(id)anObject;
-- (void)mouseEntered:(WebEvent *)theEvent;
-- (void)mouseExited:(WebEvent *)theEvent;
-- (void)keyDown:(WebEvent *)event;
-- (void)keyUp:(WebEvent *)event;
-- (void)touch:(WebEvent *)event;
+- (void)mouseEntered:(GSEventRef)theEvent;
+- (void)mouseExited:(GSEventRef)theEvent;
+//- (void)interpretKeyEvents:(NSArray *)eventArray;
+- (void)_wk_interpretKeyEvent:(GSEventRef)event;
+- (void)keyDown:(GSEventRef)event;
+- (void)keyUp:(GSEventRef)event;
 
 - (void)insertText:(NSString *)text;
 
@@ -48,10 +46,9 @@
 - (BOOL)becomeFirstResponder;
 - (BOOL)resignFirstResponder;
 
-- (void)mouseUp:(WebEvent *)theEvent;
-- (void)mouseDown:(WebEvent *)theEvent;
-- (void)mouseMoved:(WebEvent *)theEvent;
+- (void)mouseDragged:(GSEventRef)theEvent;
+- (void)mouseUp:(GSEventRef)theEvent;
+- (void)mouseDown:(GSEventRef)theEvent;
+- (void)mouseMoved:(GSEventRef)theEvent;
 
 @end
-
-#endif // WAKResponder_h

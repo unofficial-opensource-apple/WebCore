@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009, 2010 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,31 +13,30 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface HTMLAnchorElement : HTMLElement {
-        attribute [Reflect] DOMString charset;
-        attribute [Reflect] DOMString coords;
-        attribute [Conditional=DOWNLOAD_ATTRIBUTE, Reflect] DOMString download;
-        attribute [Reflect, URL] DOMString href;
-        attribute [Reflect] DOMString hreflang;
-        attribute [Reflect] DOMString name;
-        attribute [Reflect] DOMString ping;
-        attribute [Reflect] DOMString rel;
-        attribute [Reflect] DOMString rev;
-        attribute [Reflect] DOMString shape;
-        attribute [Reflect] DOMString target;
-        attribute [Reflect] DOMString type;
-
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        attribute [Reflect] DOMString accessKey;
-#endif
-
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLAnchorElement : HTMLElement {
+        attribute DOMString accessKey;
+        attribute DOMString charset;
+        attribute DOMString coords;
+        attribute DOMString href;
+        attribute DOMString hreflang;
+        attribute DOMString name;
+        attribute DOMString rel;
+        attribute DOMString rev;
+        attribute DOMString shape;
+        attribute long tabIndex;
+        attribute DOMString target;
+        attribute DOMString type;
+        
+        [Disabled] void blur();
+        void focus();
+        
+        // IE Extensions
         readonly attribute DOMString hash;
         readonly attribute DOMString host;
         readonly attribute DOMString hostname;
@@ -46,28 +44,7 @@ module html {
         readonly attribute DOMString port;
         readonly attribute DOMString protocol;
         readonly attribute DOMString search;
-#else
-        attribute [TreatNullAs=NullString] DOMString hash;
-        attribute [TreatNullAs=NullString] DOMString host;
-        attribute [TreatNullAs=NullString] DOMString hostname;
-        attribute [TreatNullAs=NullString] DOMString pathname;
-        attribute [TreatNullAs=NullString] DOMString port;
-        attribute [TreatNullAs=NullString] DOMString protocol;
-        attribute [TreatNullAs=NullString] DOMString search;
-
-        readonly attribute [TreatNullAs=NullString] DOMString origin;
-#endif
-
         readonly attribute DOMString text;
-
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-        [NotEnumerable] DOMString toString();
-#endif
-
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        // Objective-C extension:
-        readonly attribute URL absoluteLinkURL;
-#endif
     };
 
 }

@@ -1,6 +1,8 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2009 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 #include "config.h"
 #include "ShadowValue.h"
@@ -29,20 +31,15 @@ namespace WebCore {
 ShadowValue::ShadowValue(PassRefPtr<CSSPrimitiveValue> _x,
     PassRefPtr<CSSPrimitiveValue> _y,
     PassRefPtr<CSSPrimitiveValue> _blur,
-    PassRefPtr<CSSPrimitiveValue> _spread,
-    PassRefPtr<CSSPrimitiveValue> _style,
     PassRefPtr<CSSPrimitiveValue> _color)
-    : CSSValue(ShadowClass)
-    , x(_x)
+    : x(_x)
     , y(_y)
     , blur(_blur)
-    , spread(_spread)
-    , style(_style)
     , color(_color)
 {
 }
 
-String ShadowValue::customCssText() const
+String ShadowValue::cssText() const
 {
     String text("");
 
@@ -62,16 +59,6 @@ String ShadowValue::customCssText() const
         if (!text.isEmpty())
             text += " ";
         text += blur->cssText();
-    }
-    if (spread) {
-        if (!text.isEmpty())
-            text += " ";
-        text += spread->cssText();
-    }
-    if (style) {
-        if (!text.isEmpty())
-            text += " ";
-        text += style->cssText();
     }
 
     return text;

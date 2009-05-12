@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,29 +23,26 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef SplitTextNodeContainingElementCommand_h
-#define SplitTextNodeContainingElementCommand_h
+#ifndef __split_text_node_containing_element_command_h__
+#define __split_text_node_containing_element_command_h__
 
 #include "CompositeEditCommand.h"
 
 namespace WebCore {
 
-class SplitTextNodeContainingElementCommand : public CompositeEditCommand {
+class SplitTextNodeContainingElementCommand : public CompositeEditCommand
+{
 public:
-    static PassRefPtr<SplitTextNodeContainingElementCommand> create(PassRefPtr<Text> node, int offset)
-    {
-        return adoptRef(new SplitTextNodeContainingElementCommand(node, offset));
-    }
-
-private:
-    SplitTextNodeContainingElementCommand(PassRefPtr<Text>, int offset);
+    SplitTextNodeContainingElementCommand(Document *, Text *, int);
+    virtual ~SplitTextNodeContainingElementCommand() { }
 
     virtual void doApply();
 
+private:
     RefPtr<Text> m_text;
     int m_offset;
 };
 
 } // namespace WebCore
 
-#endif // SplitTextNodeContainingElementCommand_h
+#endif // __split_text_node_containing_element_command_h__

@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,39 +17,46 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-
-#ifndef HTMLMetaElement_h
-#define HTMLMetaElement_h
+#ifndef HTMLMetaElement_H
+#define HTMLMetaElement_H
 
 #include "HTMLElement.h"
 
 namespace WebCore {
 
-class HTMLMetaElement : public HTMLElement {
+class HTMLMetaElement : public HTMLElement
+{
 public:
-    static PassRefPtr<HTMLMetaElement> create(const QualifiedName&, Document*);
+    HTMLMetaElement(Document*);
+    ~HTMLMetaElement();
 
-    String content() const;
-    String httpEquiv() const;
-    String name() const;
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
+    virtual int tagPriority() const { return 0; }
 
-private:
-    HTMLMetaElement(const QualifiedName&, Document*);
-
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void parseMappedAttribute(MappedAttribute*);
+    virtual void insertedIntoDocument();
 
     void process();
 
-#if ENABLE(MICRODATA)
-    virtual String itemValueText() const OVERRIDE;
-    virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;
-#endif
+    String content() const;
+    void setContent(const String&);
 
+    String httpEquiv() const;
+    void setHttpEquiv(const String&);
+
+    String name() const;
+    void setName(const String&);
+
+    String scheme() const;
+    void setScheme(const String&);
+
+protected:
+    String m_equiv;
+    String m_content;
 };
 
 } //namespace

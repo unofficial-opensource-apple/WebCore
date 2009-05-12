@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,107 +18,89 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLTextAreaElement_h
-#define HTMLTextAreaElement_h
+#ifndef HTML_HTMLTextAreaElementImpl_H
+#define HTML_HTMLTextAreaElementImpl_H
 
-#include "HTMLTextFormControlElement.h"
+#include "HTMLGenericFormElement.h"
 
 namespace WebCore {
 
-class BeforeTextInsertedEvent;
-class VisibleSelection;
-
-class HTMLTextAreaElement : public HTMLTextFormControlElement {
+class HTMLTextAreaElement : public HTMLGenericFormElement {
 public:
-    static PassRefPtr<HTMLTextAreaElement> create(const QualifiedName&, Document*, HTMLFormElement*);
+    enum WrapMethod { ta_NoWrap, ta_Virtual, ta_Physical };
+
+    HTMLTextAreaElement(Document*, HTMLFormElement* = 0);
+    ~HTMLTextAreaElement();
+
+    virtual bool checkDTD(const Node* newChild) { return newChild->isTextNode(); }
 
     int cols() const { return m_cols; }
     int rows() const { return m_rows; }
 
-    bool shouldWrapText() const { return m_wrap != NoWrap; }
-
-    virtual String value() const;
-    void setValue(const String&);
-    String defaultValue() const;
-    void setDefaultValue(const String&);
-    int textLength() const { return value().length(); }
-    virtual int maxLength() const;
-    void setMaxLength(int, ExceptionCode&);
-    bool valueMissing(const String& value) const { return isRequiredFormControl() && !disabled() && !readOnly() && value.isEmpty(); }
-    bool tooLong(const String&, NeedsToCheckDirtyFlag) const;
-    bool isValidValue(const String&) const;
-    
-    virtual HTMLElement* innerTextElement() const;
-
-    void rendererWillBeDestroyed();
-
-    void setCols(int);
-    void setRows(int);
-
-    virtual bool willRespondToMouseClickEvents() OVERRIDE;
-
-private:
-    HTMLTextAreaElement(const QualifiedName&, Document*, HTMLFormElement*);
-
-    enum WrapMethod { NoWrap, SoftWrap, HardWrap };
-
-    void createShadowSubtree();
-
-    void handleBeforeTextInsertedEvent(BeforeTextInsertedEvent*) const;
-    static String sanitizeUserInputValue(const String&, unsigned maxLength);
-    void updateValue() const;
-    void setNonDirtyValue(const String&);
-    void setValueCommon(const String&);
-
-    virtual bool supportsPlaceholder() const { return true; }
-    virtual HTMLElement* placeholderElement() const;
-    virtual void updatePlaceholderText();
-    virtual bool isEmptyValue() const { return value().isEmpty(); }
-
-    virtual bool isOptionalFormControl() const { return !isRequiredFormControl(); }
-    virtual bool isRequiredFormControl() const { return required(); }
-
-    virtual void defaultEventHandler(Event*);
-    
-    virtual void subtreeHasChanged();
+    WrapMethod wrap() const { return m_wrap; }
 
     virtual bool isEnumeratable() const { return true; }
-    virtual bool supportLabels() const OVERRIDE { return true; }
 
-    virtual const AtomicString& formControlType() const;
+    virtual const AtomicString& type() const;
 
-    virtual bool saveFormControlState(String& value) const;
-    virtual void restoreFormControlState(const String&);
+    virtual String stateValue() const;
+    virtual void restoreState(const String&);
 
-    virtual bool isTextFormControl() const { return true; }
+    bool readOnly() const { return isReadOnlyControl(); }
 
-    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+    int selectionStart();
+    int selectionEnd();
+
+    void setSelectionStart(int);
+    void setSelectionEnd(int);
+
+    void select();
+    void setSelectionRange(int, int);
+
+    virtual void childrenChanged();
+    virtual void parseMappedAttribute(MappedAttribute*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     virtual bool appendFormData(FormDataList&, bool);
     virtual void reset();
+    virtual void defaultEventHandler(Event*);
     virtual bool isMouseFocusable() const;
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
-    virtual void updateFocusAppearance(bool restorePreviousSelection);
+    virtual bool isKeyboardFocusable() const;
+    virtual void focus();
+    virtual void updateFocusAppearance();
 
-    virtual void accessKeyAction(bool sendMouseEvents);
+    String value() const;
+    void setValue(const String&);
+    String defaultValue() const;
+    void setDefaultValue(const String&);
+    
+    void rendererWillBeDestroyed();
+    
+    virtual void accessKeyAction(bool sendToAnyElement);
+    
+    String accessKey() const;
+    void setAccessKey(const String&);
 
-    virtual bool shouldUseInputMethod();
+    void setCols(int);
+    void setRows(int);
+    
+    void cacheSelection(int s, int e) { cachedSelStart = s; cachedSelEnd = e; };
+
+    virtual bool willRespondToMouseClickEvents();
+
+private:
+    void updateValue() const;
 
     int m_rows;
     int m_cols;
     WrapMethod m_wrap;
-    RefPtr<HTMLElement> m_placeholder;
     mutable String m_value;
-    mutable bool m_isDirty;
-    mutable bool m_wasModifiedByUser;
+    int cachedSelStart;
+    int cachedSelEnd;
 };
 
 } //namespace

@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,40 +18,37 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #ifndef Event_h
 #define Event_h
 
-#include "Clipboard.h"
-#include "DOMTimeStamp.h"
-#include <wtf/RefCounted.h>
-#include <wtf/text/AtomicString.h>
+#include "AtomicString.h"
+#include "Node.h"
+#include "Shared.h"
 
 namespace WebCore {
 
-    class EventTarget;
-    class EventDispatcher;
+    // FIXME: this should probably defined elsewhere.
+    typedef unsigned long long DOMTimeStamp;
 
-    struct EventInit {
-        EventInit();
-        
-        bool bubbles;
-        bool cancelable;
-    };
+    // FIXME: these too should probably defined elsewhere.
+    const int EventExceptionOffset = 100;
+    const int EventExceptionMax = 199;
+    enum EventExceptionCode { UNSPECIFIED_EVENT_TYPE_ERR = EventExceptionOffset };
 
-    class Event : public RefCounted<Event> {
+    class Event : public Shared<Event> {
     public:
         enum PhaseType { 
-            NONE                = 0,
             CAPTURING_PHASE     = 1, 
             AT_TARGET           = 2,
             BUBBLING_PHASE      = 3 
         };
 
+        // Reverse-engineered from Netscape
         enum EventType {
             MOUSEDOWN           = 1,
             MOUSEUP             = 2,
@@ -68,94 +67,55 @@ namespace WebCore {
             SELECT              = 16384,
             CHANGE              = 32768
         };
-
-        static PassRefPtr<Event> create()
-        {
-            return adoptRef(new Event);
-        }
-        static PassRefPtr<Event> create(const AtomicString& type, bool canBubble, bool cancelable)
-        {
-            return adoptRef(new Event(type, canBubble, cancelable));
-        }
-
-        static PassRefPtr<Event> create(const AtomicString& type, const EventInit& initializer)
-        {
-            return adoptRef(new Event(type, initializer));
-        }
-
+    
+        Event();
+        Event(const AtomicString& typeArg, bool canBubbleArg, bool cancelableArg);
         virtual ~Event();
 
-        void initEvent(const AtomicString& type, bool canBubble, bool cancelable);
+        void initEvent(const AtomicString &eventTypeArg, bool canBubbleArg, bool cancelableArg);
 
         const AtomicString& type() const { return m_type; }
         
-        EventTarget* target() const { return m_target.get(); }
-        void setTarget(PassRefPtr<EventTarget>);
-
-        EventTarget* currentTarget() const { return m_currentTarget; }
-        void setCurrentTarget(EventTarget* currentTarget) { m_currentTarget = currentTarget; }
-
+        Node* target() const { return m_target.get(); }
+        void setTarget(Node*);
+        
+        Node* currentTarget() const { return m_currentTarget; }
+        void setCurrentTarget(Node* currentTarget) { m_currentTarget = currentTarget; }
+        
         unsigned short eventPhase() const { return m_eventPhase; }
         void setEventPhase(unsigned short eventPhase) { m_eventPhase = eventPhase; }
-
+        
         bool bubbles() const { return m_canBubble; }
         bool cancelable() const { return m_cancelable; }
-        DOMTimeStamp timeStamp() const { return m_createTime; }
-
+        DOMTimeStamp timeStamp() { return m_createTime; }
         void stopPropagation() { m_propagationStopped = true; }
-        void stopImmediatePropagation() { m_immediatePropagationStopped = true; }
-        
-        // IE Extensions
-        EventTarget* srcElement() const { return target(); } // MSIE extension - "the object that fired the event"
 
-        bool returnValue() const { return !defaultPrevented(); }
-        void setReturnValue(bool returnValue) { setDefaultPrevented(!returnValue); }
-
-        Clipboard* clipboardData() const { return isClipboardEvent() ? clipboard() : 0; }
-
-        virtual const AtomicString& interfaceName() const;
-        bool hasInterface(const AtomicString&) const;
-
-        // These events are general classes of events.
         virtual bool isUIEvent() const;
         virtual bool isMouseEvent() const;
+        virtual bool isMutationEvent() const;
         virtual bool isKeyboardEvent() const;
-
-        // Drag events are a subset of mouse events.
-        virtual bool isDragEvent() const;
-
-        // These events lack a DOM interface.
+        virtual bool isDragEvent() const; // a subset of mouse events
         virtual bool isClipboardEvent() const;
+        virtual bool isWheelEvent() const;
         virtual bool isBeforeTextInsertedEvent() const;
-
-        bool propagationStopped() const { return m_propagationStopped || m_immediatePropagationStopped; }
-        bool immediatePropagationStopped() const { return m_immediatePropagationStopped; }
-
+        virtual bool isOverflowEvent() const;
+        
+        bool propagationStopped() const { return m_propagationStopped; }
         bool defaultPrevented() const { return m_defaultPrevented; }
+
+        void setDefaultHandled() { m_defaultHandled = true; }
+        bool defaultHandled() const { return m_defaultHandled; }
+
         void preventDefault() { if (m_cancelable) m_defaultPrevented = true; }
         void setDefaultPrevented(bool defaultPrevented) { m_defaultPrevented = defaultPrevented; }
 
-        bool defaultHandled() const { return m_defaultHandled; }
-        void setDefaultHandled() { m_defaultHandled = true; }
-
-        bool cancelBubble() const { return m_cancelBubble; }
         void setCancelBubble(bool cancel) { m_cancelBubble = cancel; }
-
-        Event* underlyingEvent() const { return m_underlyingEvent.get(); }
-        void setUnderlyingEvent(PassRefPtr<Event>);
+        bool getCancelBubble() const { return m_cancelBubble; }
 
         virtual bool storesResultAsString() const;
         virtual void storeResult(const String&);
 
-        virtual Clipboard* clipboard() const { return 0; }
-
-        bool isBeingDispatched() const { return eventPhase(); }
-
     protected:
-        Event();
-        Event(const AtomicString& type, bool canBubble, bool cancelable);
-        Event(const AtomicString& type, const EventInit&);
-
         virtual void receivedTarget();
         bool dispatched() const { return m_target; }
 
@@ -165,17 +125,14 @@ namespace WebCore {
         bool m_cancelable;
 
         bool m_propagationStopped;
-        bool m_immediatePropagationStopped;
         bool m_defaultPrevented;
         bool m_defaultHandled;
         bool m_cancelBubble;
 
+        Node* m_currentTarget; // ref > 0 maintained externally
         unsigned short m_eventPhase;
-        EventTarget* m_currentTarget;
-        RefPtr<EventTarget> m_target;
+        RefPtr<Node> m_target;
         DOMTimeStamp m_createTime;
-
-        RefPtr<Event> m_underlyingEvent;
     };
 
 } // namespace WebCore

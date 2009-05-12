@@ -1,7 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004-2006 Apple Computer, Inc.  All rights reserved.
  * Copyright (C) 2006 James G. Speth (speth@end.com)
- * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,70 +24,144 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-// This is lets our internals access DOMObject's _internal field while having
-// it be private for clients outside WebKit.
-#define private public
-#import "DOMObject.h"
-#undef private
-
-#import "DOMNodeFilter.h"
-#import "DOMXPathNSResolver.h"
-#import <wtf/Forward.h>
-
-namespace JSC {
-    class JSObject;
-    namespace Bindings {
-        class RootObject;
-    }
-}
+#import "DOM.h"
 
 namespace WebCore {
+    class CSSStyleDeclaration;
+    class CSSStyleSheet;
+    class DocumentFragment;
+    class Document;
+    class DocumentType;
+    class Element;
     class NodeFilter;
-    class XPathNSResolver;
-    class Touch;
+    class Node;
+    class NodeIterator;
+    class NamedNodeMap;
+    class NodeList;
+    class Range;
+    class StyleSheetList;
+    class TreeWalker;
+
+    typedef int ExceptionCode;
 }
 
-@interface DOMNodeFilter : DOMObject <DOMNodeFilter>
+@interface DOMNode (WebCoreInternal)
++ (DOMNode *)_nodeWith:(WebCore::Node *)impl;
+- (WebCore::Node *)_node;
 @end
 
-@interface DOMNativeXPathNSResolver : DOMObject <DOMXPathNSResolver>
+@interface DOMNamedNodeMap (WebCoreInternal)
++ (DOMNamedNodeMap *)_namedNodeMapWith:(WebCore::NamedNodeMap *)impl;
+@end
+
+@interface DOMNodeList (WebCoreInternal)
++ (DOMNodeList *)_nodeListWith:(WebCore::NodeList *)impl;
+@end
+
+@interface DOMElement (WebCoreInternal)
++ (DOMElement *)_elementWith:(WebCore::Element *)impl;
+- (WebCore::Element *)_element;
+@end
+
+@interface DOMDocument (WebCoreInternal)
++ (DOMDocument *)_documentWith:(WebCore::Document *)impl;
+- (WebCore::Document *)_document;
+- (DOMElement *)_ownerElement;
+@end
+
+@interface DOMDocumentFragment (WebCoreInternal)
++ (DOMDocumentFragment *)_documentFragmentWith:(WebCore::DocumentFragment *)impl;
+- (WebCore::DocumentFragment *)_fragment;
+@end
+
+@interface DOMRange (WebCoreInternal)
++ (DOMRange *)_rangeWith:(WebCore::Range *)impl;
+- (WebCore::Range *)_range;
+@end
+
+@interface DOMNodeIterator (WebCoreInternal)
++ (DOMNodeIterator *)_nodeIteratorWith:(WebCore::NodeIterator *)impl filter:(id <DOMNodeFilter>)filter;
+@end
+
+@interface DOMTreeWalker (WebCoreInternal)
++ (DOMTreeWalker *)_treeWalkerWith:(WebCore::TreeWalker *)impl filter:(id <DOMNodeFilter>)filter;
+@end
+
+@interface DOMObject (WebCoreInternal)
+- (id)_init;
+@end
+
+@interface DOMCSSStyleDeclaration (WebCoreInternal)
++ (DOMCSSStyleDeclaration *)_styleDeclarationWith:(WebCore::CSSStyleDeclaration *)impl;
+- (WebCore::CSSStyleDeclaration *)_styleDeclaration;
+@end
+
+@interface DOMStyleSheetList (WebCoreInternal)
++ (DOMStyleSheetList *)_styleSheetListWith:(WebCore::StyleSheetList *)impl;
+@end
+
+@interface DOMCSSStyleSheet (WebCoreInternal)
++ (DOMCSSStyleSheet *)_CSSStyleSheetWith:(WebCore::CSSStyleSheet *)impl;
+@end
+
+@interface DOMNodeFilter : DOMObject <DOMNodeFilter>
++ (DOMNodeFilter *)_nodeFilterWith:(WebCore::NodeFilter *)impl;
 @end
 
 // Helper functions for DOM wrappers and gluing to Objective-C
 
-// Create an NSMapTable mapping from pointers to ObjC objects held with zeroing weak references.
-NSMapTable* createWrapperCache();
+// Like reinterpret_cast, but a compiler error if you use it on the wrong type.
+template <class Target, class Source> Target DOM_cast(Source) { Source::failToCompile(); }
 
-id createDOMWrapper(JSC::JSObject*, PassRefPtr<JSC::Bindings::RootObject> origin, PassRefPtr<JSC::Bindings::RootObject> current);
+// Type safe DOM wrapper access.
 
 NSObject* getDOMWrapper(DOMObjectInternal*);
 void addDOMWrapper(NSObject* wrapper, DOMObjectInternal*);
+
+template <class Source> inline id getDOMWrapper(Source impl) { return getDOMWrapper(DOM_cast<DOMObjectInternal*>(impl)); }
+template <class Source> inline void addDOMWrapper(NSObject* wrapper, Source impl) { addDOMWrapper(wrapper, DOM_cast<DOMObjectInternal*>(impl)); }
 void removeDOMWrapper(DOMObjectInternal*);
 
-template <class Source>
-inline id getDOMWrapper(Source impl)
+void raiseDOMException(WebCore::ExceptionCode);
+
+inline void raiseOnDOMError(WebCore::ExceptionCode ec) 
 {
-    return getDOMWrapper(reinterpret_cast<DOMObjectInternal*>(impl));
+    if (ec) 
+        raiseDOMException(ec);
 }
 
-template <class Source>
-inline void addDOMWrapper(NSObject* wrapper, Source impl)
-{
-    addDOMWrapper(wrapper, reinterpret_cast<DOMObjectInternal*>(impl));
-}
+// Implementation details for the above.
 
-DOMNodeFilter *kit(WebCore::NodeFilter*);
-WebCore::NodeFilter* core(DOMNodeFilter *);
+#define ALLOW_DOM_CAST(type) \
+    namespace WebCore { class type; } \
+    template <> inline DOMObjectInternal* DOM_cast<DOMObjectInternal*, class WebCore::type*>(class WebCore::type* p) \
+        { return reinterpret_cast<DOMObjectInternal *>(p); } \
+    template <> inline class WebCore::type* DOM_cast<class WebCore::type*, DOMObjectInternal*>(DOMObjectInternal* p) \
+        { return reinterpret_cast<class WebCore::type*>(p); }
 
-DOMNativeXPathNSResolver *kit(WebCore::XPathNSResolver*);
-WebCore::XPathNSResolver* core(DOMNativeXPathNSResolver *);
-
-inline NSTimeInterval kit(double msSinceEpoch)
-{
-    return msSinceEpoch / 1000.0 - NSTimeIntervalSince1970;
-}
-
-inline double core(NSTimeInterval sec)
-{
-    return sec * 1000.0 + NSTimeIntervalSince1970;
-}
+// No class should appear in this list if its base class is already here.
+ALLOW_DOM_CAST(Counter)
+ALLOW_DOM_CAST(CSSRule)
+ALLOW_DOM_CAST(CSSRuleList)
+ALLOW_DOM_CAST(CSSStyleDeclaration)
+ALLOW_DOM_CAST(CSSStyleSheet)
+ALLOW_DOM_CAST(CSSValue)
+ALLOW_DOM_CAST(DOMImplementationFront)
+ALLOW_DOM_CAST(HTMLCollection)
+ALLOW_DOM_CAST(HTMLOptionsCollection)
+ALLOW_DOM_CAST(MediaList)
+ALLOW_DOM_CAST(NamedNodeMap)
+ALLOW_DOM_CAST(NodeFilter)
+ALLOW_DOM_CAST(Node)
+ALLOW_DOM_CAST(NodeIterator)
+ALLOW_DOM_CAST(NodeList)
+ALLOW_DOM_CAST(Range)
+ALLOW_DOM_CAST(RectImpl)
+ALLOW_DOM_CAST(StyleSheet)
+ALLOW_DOM_CAST(StyleSheetList)
+ALLOW_DOM_CAST(TreeWalker)
+#if XPATH_SUPPORT
+ALLOW_DOM_CAST(XPathExpression)
+ALLOW_DOM_CAST(XPathNSResolver)
+ALLOW_DOM_CAST(XPathResult)
+#endif // XPATH_SUPPORT

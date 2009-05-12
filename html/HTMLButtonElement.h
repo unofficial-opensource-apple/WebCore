@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,57 +18,55 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
+#ifndef HTML_HTMLButtonElementImpl_H
+#define HTML_HTMLButtonElementImpl_H
 
-#ifndef HTMLButtonElement_h
-#define HTMLButtonElement_h
-
-#include "HTMLFormControlElement.h"
+#include "HTMLGenericFormElement.h"
 
 namespace WebCore {
 
-class HTMLButtonElement : public HTMLFormControlElement {
+class HTMLButtonElement : public HTMLGenericFormElement
+{
 public:
-    static PassRefPtr<HTMLButtonElement> create(const QualifiedName&, Document*, HTMLFormElement*);
+    HTMLButtonElement(Document*, HTMLFormElement* = 0);
+    virtual ~HTMLButtonElement();
 
-    String value() const;
+    enum typeEnum { SUBMIT, RESET, BUTTON };
 
-    virtual bool willRespondToMouseClickEvents() OVERRIDE;
-
-private:
-    HTMLButtonElement(const QualifiedName& tagName, Document*, HTMLFormElement*);
-
-    enum Type { SUBMIT, RESET, BUTTON };
-
-    virtual const AtomicString& formControlType() const;
+    virtual const AtomicString& type() const;
         
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void parseMappedAttribute(MappedAttribute*);
     virtual void defaultEventHandler(Event*);
     virtual bool appendFormData(FormDataList&, bool);
 
     virtual bool isEnumeratable() const { return true; } 
-    virtual bool supportLabels() const OVERRIDE { return true; }
 
     virtual bool isSuccessfulSubmitButton() const;
     virtual bool isActivatedSubmit() const;
     virtual void setActivatedSubmit(bool flag);
 
-    virtual void accessKeyAction(bool sendMouseEvents);
-    virtual bool isURLAttribute(Attribute*) const;
+    virtual void accessKeyAction(bool sendToAnyElement);
 
-    virtual bool canStartSelection() const { return false; }
+    String accessKey() const;
+    void setAccessKey(const String&);
 
-    virtual bool isOptionalFormControl() const { return true; }
-    virtual bool recalcWillValidate() const;
-
-    Type m_type;
-    bool m_isActivatedSubmit;
+    String value() const;
+    void setValue(const String&);
+    
+    virtual bool willRespondToMouseClickEvents();
+    
+protected:
+    String m_value;
+    String m_currValue;
+    unsigned m_type : 2; // typeEnum
+    bool m_dirty : 1;
+    bool m_activeSubmit : 1;
 };
 
 } // namespace

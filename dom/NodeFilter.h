@@ -1,9 +1,11 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  * Copyright (C) 2000 Frederik Holljen (frederik.holljen@hig.no)
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2004, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,21 +19,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #ifndef NodeFilter_h
 #define NodeFilter_h
 
-#include "DOMWrapperWorld.h"
 #include "NodeFilterCondition.h"
+#include <wtf/Noncopyable.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
-    class NodeFilter : public RefCounted<NodeFilter> {
+    class NodeFilter : public Shared<NodeFilter>, Noncopyable {
     public:
         /**
          * The following constants are returned by the acceptNode()
@@ -65,28 +67,11 @@ namespace WebCore {
             SHOW_NOTATION                  = 0x00000800
         };
 
-        static PassRefPtr<NodeFilter> create(PassRefPtr<NodeFilterCondition> condition)
-        {
-            return adoptRef(new NodeFilter(condition));
-        }
-
-        static PassRefPtr<NodeFilter> create()
-        {
-            return adoptRef(new NodeFilter());
-        }
-
-        short acceptNode(ScriptState*, Node*) const;
-
-        // Do not call these functions. They are just scaffolding to support the Objective-C bindings.
-        // They operate in the main thread normal world, and they swallow JS exceptions.
-        short acceptNode(Node* node) const { return acceptNode(scriptStateFromNode(mainThreadNormalWorld(), node), node); }
-        
-        void setCondition(PassRefPtr<NodeFilterCondition> condition) { ASSERT(!m_condition); m_condition = condition; }
+        NodeFilter(NodeFilterCondition*);
+        short acceptNode(Node*) const;
+        void mark() { m_condition->mark(); };
 
     private:
-        NodeFilter(PassRefPtr<NodeFilterCondition> condition) : m_condition(condition) { }
-        NodeFilter() {}
-
         RefPtr<NodeFilterCondition> m_condition;
     };
 

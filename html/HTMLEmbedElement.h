@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2006, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,48 +17,57 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLEmbedElement_h
-#define HTMLEmbedElement_h
+#ifndef HTMLEmbedElement_H
+#define HTMLEmbedElement_H
 
-#include "HTMLPlugInImageElement.h"
+#include "HTMLPlugInElement.h"
+
+#if PLATFORM(MAC)
+#include <JavaScriptCore/runtime.h>
+#else
+namespace KJS { namespace Bindings { class Instance; } }
+#endif
 
 namespace WebCore {
 
-class HTMLEmbedElement : public HTMLPlugInImageElement {
+class HTMLEmbedElement : public HTMLPlugInElement
+{
 public:
-    static PassRefPtr<HTMLEmbedElement> create(const QualifiedName&, Document*, bool createdByParser);
+    HTMLEmbedElement(Document*);
+    ~HTMLEmbedElement();
 
-private:
-    HTMLEmbedElement(const QualifiedName&, Document*, bool createdByParser);
+    virtual int tagPriority() const { return 0; }
 
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
 
-    virtual bool rendererIsNeeded(const NodeRenderingContext&);
-
+    virtual void attach();
+    virtual void detach();
+    virtual bool rendererIsNeeded(RenderStyle*);
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
+    virtual void insertedIntoDocument();
+    virtual void removedFromDocument();
+    
     virtual bool isURLAttribute(Attribute*) const;
-    virtual const QualifiedName& imageSourceAttributeName() const;
 
-    virtual RenderWidget* renderWidgetForJSBindings();
-
-    virtual void updateWidget(PluginCreationOption);
-
-    virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
-
-    void parametersForPlugin(Vector<String>& paramNames, Vector<String>& paramValues);
-
-#if ENABLE(MICRODATA)
-    virtual String itemValueText() const OVERRIDE;
-    virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;
+#if PLATFORM(MAC)
+    virtual KJS::Bindings::Instance* getInstance() const;
 #endif
 
-    virtual bool shouldRegisterAsNamedItem() const OVERRIDE { return true; }
+    String src() const;
+    void setSrc(const String&);
+
+    String type() const;
+    void setType(const String&);
+
+    DeprecatedString url;
+    DeprecatedString pluginPage;
+    DeprecatedString serviceType;
 };
 
 }

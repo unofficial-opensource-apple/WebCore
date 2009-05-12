@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,21 +13,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface HTMLScriptElement : HTMLElement {
-        attribute [TreatNullAs=NullString] DOMString text;
-        attribute [Reflect=for] DOMString htmlFor;
-        attribute [Reflect] DOMString event;
-        attribute [Reflect] DOMString charset;
-        attribute boolean async;
-        attribute [Reflect] boolean defer;
-        attribute [Reflect, URL] DOMString src;
-        attribute [Reflect] DOMString type;
-        attribute [Reflect] DOMString crossOrigin;
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLScriptElement : HTMLElement {
+        attribute DOMString text;
+        attribute DOMString htmlFor;
+        attribute DOMString event;
+        attribute DOMString charset;
+        attribute boolean defer;
+        attribute DOMString src;
+        attribute DOMString type;
     };
 }

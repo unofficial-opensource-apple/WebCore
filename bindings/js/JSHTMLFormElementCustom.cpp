@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,39 +26,26 @@
 #include "config.h"
 #include "JSHTMLFormElement.h"
 
-#include "Frame.h"
-#include "HTMLCollection.h"
 #include "HTMLFormElement.h"
-#include "JSDOMWindowCustom.h"
-#include "JSNodeList.h"
-#include "StaticNodeList.h"
+#include "HTMLCollection.h"
 
-using namespace JSC;
+using namespace KJS;
 
 namespace WebCore {
 
-bool JSHTMLFormElement::canGetItemsForName(ExecState*, HTMLFormElement* form, const Identifier& propertyName)
+bool JSHTMLFormElement::canGetItemsForName(ExecState* exec, HTMLFormElement* form, const AtomicString& propertyName)
 {
-    Vector<RefPtr<Node> > namedItems;
-    form->getNamedElements(identifierToAtomicString(propertyName), namedItems);
-    return namedItems.size();
+    // FIXME: ideally there should be a lighter-weight way of doing this
+    JSValue* namedItems = JSHTMLCollection(exec, form->elements().get()).getNamedItems(exec, propertyName);
+    return !namedItems->isUndefined();
 }
 
-JSValue JSHTMLFormElement::nameGetter(ExecState* exec, JSValue slotBase, const Identifier& propertyName)
+JSValue* JSHTMLFormElement::nameGetter(ExecState* exec, JSObject*, const Identifier& propertyName, const PropertySlot& slot)
 {
-    JSHTMLElement* jsForm = jsCast<JSHTMLFormElement*>(asObject(slotBase));
-    HTMLFormElement* form = static_cast<HTMLFormElement*>(jsForm->impl());
-
-    Vector<RefPtr<Node> > namedItems;
-    form->getNamedElements(identifierToAtomicString(propertyName), namedItems);
+    JSHTMLElement* thisObj = static_cast<JSHTMLElement*>(slot.slotBase());
+    HTMLFormElement* form = static_cast<HTMLFormElement*>(thisObj->impl());
     
-    if (namedItems.isEmpty())
-        return jsUndefined();
-    if (namedItems.size() == 1)
-        return toJS(exec, jsForm->globalObject(), namedItems[0].get());
-
-    // FIXME: HTML5 specifies that this should be a RadioNodeList.
-    return toJS(exec, jsForm->globalObject(), StaticNodeList::adopt(namedItems).get());
+    return JSHTMLCollection(exec, form->elements().get()).getNamedItems(exec, propertyName);
 }
 
 }

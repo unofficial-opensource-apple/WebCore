@@ -77,7 +77,6 @@ mailing address.
 
 #include <string.h>
 #include "GIFImageDecoder.h"
-#include "ImageSource.h"
 
 using WebCore::GIFImageDecoder;
 
@@ -105,11 +104,11 @@ using WebCore::GIFImageDecoder;
 
 //******************************************************************************
 // Send the data to the display front-end.
-bool GIFImageReader::output_row()
+void GIFImageReader::output_row()
 {
   GIFFrameReader* gs = frame_reader;
 
-  int drow_start, drow_end;
+  int width, drow_start, drow_end;
 
   drow_start = drow_end = gs->irow;
 
@@ -155,14 +154,21 @@ bool GIFImageReader::output_row()
 
   /* Protect against too much image data */
   if ((unsigned)drow_start >= gs->height)
-    return true;
+    return;
 
-  // CALLBACK: Let the client know we have decoded a row.
-  if (clientptr && frame_reader &&
-      !clientptr->haveDecodedRow(images_count - 1, frame_reader->rowbuf, frame_reader->rowend,
-                                 drow_start, drow_end - drow_start + 1,
-                                 gs->progressive_display && gs->interlaced && gs->ipass > 1))
-    return false;
+  /* Check for scanline below edge of logical screen */
+  if ((gs->y_offset + gs->irow) < screen_height) {
+    /* Clip if right edge of image exceeds limits */
+    if ((gs->x_offset + gs->width) > screen_width)
+      width = screen_width - gs->x_offset;
+    else
+      width = gs->width;
+
+    // CALLBACK: Let the client know we have decoded a row.
+    if (width > 0 && clientptr && frame_reader)
+      clientptr->haveDecodedRow(images_count - 1, frame_reader->rowbuf, frame_reader->rowend,
+                                drow_start, drow_end - drow_start + 1);
+  }
 
   gs->rowp = gs->rowbuf;
 
@@ -209,17 +215,15 @@ bool GIFImageReader::output_row()
       }
     } while (gs->irow > (gs->height - 1));
   }
-
-  return true;
 }
 
 //******************************************************************************
 /* Perform Lempel-Ziv-Welch decoding */
-bool GIFImageReader::do_lzw(const unsigned char *q)
+int GIFImageReader::do_lzw(const unsigned char *q)
 {
   GIFFrameReader* gs = frame_reader;
   if (!gs)
-    return true;
+    return 0;
 
   int code;
   int incode;
@@ -253,12 +257,11 @@ bool GIFImageReader::do_lzw(const unsigned char *q)
   unsigned rows_remaining = gs->rows_remaining;
 
   if (rowp == rowend)
-    return true;
+    return 0;
 
 #define OUTPUT_ROW                                                  \
   PR_BEGIN_MACRO                                                        \
-    if (!output_row())                                                     \
-      return false;                                                        \
+    output_row();                                                     \
     rows_remaining--;                                                   \
     rowp = frame_reader->rowp;                                                    \
     if (!rows_remaining)                                                \
@@ -291,9 +294,9 @@ bool GIFImageReader::do_lzw(const unsigned char *q)
       /* Check for explicit end-of-stream code */
       if (code == (clear_code + 1)) {
         /* end-of-stream should only appear after all image data */
-        if (!rows_remaining)
-          return true;
-        return clientptr ? clientptr->setFailed() : false;
+        if (rows_remaining != 0)
+          return -1;
+        return 0;
       }
 
       if (oldcode == -1) {
@@ -311,23 +314,19 @@ bool GIFImageReader::do_lzw(const unsigned char *q)
         code = oldcode;
 
         if (stackp == stack + MAX_BITS)
-          return clientptr ? clientptr->setFailed() : false;
+          return -1;
       }
 
       while (code >= clear_code)
       {
-        if (code >= MAX_BITS || code == prefix[code])
-          return clientptr ? clientptr->setFailed() : false;
+        if (code == prefix[code])
+          return -1;
 
-        // Even though suffix[] only holds characters through suffix[avail - 1],
-        // allowing code >= avail here lets us be more tolerant of malformed
-        // data. As long as code < MAX_BITS, the only risk is a garbled image,
-        // which is no worse than refusing to display it.
         *stackp++ = suffix[code];
         code = prefix[code];
 
         if (stackp == stack + MAX_BITS)
-          return clientptr ? clientptr->setFailed() : false;
+          return -1;
       }
 
       *stackp++ = firstchar = suffix[code];
@@ -374,7 +373,7 @@ bool GIFImageReader::do_lzw(const unsigned char *q)
   gs->rowp = rowp;
   gs->rows_remaining = rows_remaining;
 
-  return true;
+  return 0;
 }
 
 
@@ -386,10 +385,8 @@ bool GIFImageReader::do_lzw(const unsigned char *q)
 bool GIFImageReader::read(const unsigned char *buf, unsigned len, 
                      GIFImageDecoder::GIFQuery query, unsigned haltAtFrame)
 {
-  if (!len) {
-    // No new data has come in since the last call, just ignore this call.
-    return true;
-  }
+  if (!len)
+    return false;
 
   const unsigned char *q = buf;
 
@@ -416,9 +413,7 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
       // Not enough in 'buf' to complete current block, get more
       bytes_in_hold += l;
       bytes_to_consume -= l;
-      if (clientptr)
-        clientptr->decodingHalted(0);
-      return false;
+      return true;
     }
     // Reset hold buffer count
     bytes_in_hold = 0;
@@ -443,9 +438,10 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
     switch (state)
     {
     case gif_lzw:
-      if (!do_lzw(q))
-        return false; // If do_lzw() encountered an error, it has already called
-                      // clientptr->setFailed().
+      if (do_lzw(q) < 0) {
+        state = gif_error;
+        break;
+      }
       GETN(1, gif_sub_block);
       break;
 
@@ -453,14 +449,15 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
     {
       /* Initialize LZW parser/decoder */
       int datasize = *q;
-      // Since we use a codesize of 1 more than the datasize, we need to ensure
-      // that our datasize is strictly less than the MAX_LZW_BITS value (12).
-      // This sets the largest possible codemask correctly at 4095.
-      if (datasize >= MAX_LZW_BITS)
-        return clientptr ? clientptr->setFailed() : false;
+      if (datasize > MAX_LZW_BITS) {
+        state = gif_error;
+        break;
+      }
       int clear_code = 1 << datasize;
-      if (clear_code >= MAX_BITS)
-        return clientptr ? clientptr->setFailed() : false;
+      if (clear_code >= MAX_BITS) {
+        state = gif_error;
+        break;
+      }
 
       if (frame_reader) {
         frame_reader->datasize = datasize;
@@ -475,8 +472,6 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
         /* init the tables */
         if (!frame_reader->suffix)
           frame_reader->suffix = new unsigned char[MAX_BITS];
-        // Clearing the whole suffix table lets us be more tolerant of bad data.
-        memset(frame_reader->suffix, 0, MAX_BITS);
         for (int i = 0; i < frame_reader->clear_code; i++)
           frame_reader->suffix[i] = i;
 
@@ -492,12 +487,14 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
     /* All GIF files begin with "GIF87a" or "GIF89a" */
     case gif_type:
     {
-      if (!strncmp((char*)q, "GIF89a", 6))
+      if (!strncmp((char*)q, "GIF89a", 6)) {
         version = 89;
-      else if (!strncmp((char*)q, "GIF87a", 6))
+      } else if (!strncmp((char*)q, "GIF87a", 6)) {
         version = 87;
-      else
-        return clientptr ? clientptr->setFailed() : false;
+      } else {
+        state = gif_error;
+        break;
+      }
       GETN(7, gif_global_header);
     }
     break;
@@ -515,8 +512,8 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
       screen_height = GETINT16(q + 2);
 
       // CALLBACK: Inform the decoderplugin of our size.
-      if (clientptr && !clientptr->setSize(screen_width, screen_height))
-        return false;
+      if (clientptr)
+        clientptr->sizeNowAvailable(screen_width, screen_height);
       
       screen_bgcolor = q[5];
       global_colormap_size = 2<<(q[4]&0x07);
@@ -558,7 +555,7 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
     case gif_image_start:
     {
       if (*q == ';') { /* terminator */
-        GETN(0, gif_done);
+        state = gif_done;
         break;
       }
 
@@ -572,10 +569,21 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
        * between blocks. The GIF87a spec tells us to keep reading
        * until we find an image separator, but GIF89a says such
        * a file is corrupt. We follow GIF89a and bail out. */
-      if (*q != ',')
-        return clientptr ? clientptr->setFailed() : false;
-
-      GETN(9, gif_image_header);
+      if (*q != ',') {
+        if (images_decoded > 0) {
+          /* The file is corrupt, but one or more images have
+           * been decoded correctly. In this case, we proceed
+           * as if the file were correctly terminated and set
+           * the state to gif_done, so the GIF will display.
+           */
+          state = gif_done;
+        } else {
+          /* No images decoded, there is nothing to display. */
+          state = gif_error;
+        }
+        break;
+      } else
+        GETN(9, gif_image_header);
     }
     break;
 
@@ -636,14 +644,16 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
           frame_reader->is_transparent = false;
           // ignoring gfx control extension
         }
-        // NOTE: This relies on the values in the FrameDisposalMethod enum
-        // matching those in the GIF spec!
-        frame_reader->disposal_method = (WebCore::ImageFrame::FrameDisposalMethod)(((*q) >> 2) & 0x7);
+        frame_reader->disposal_method = (gdispose)(((*q) >> 2) & 0x7);
         // Some specs say 3rd bit (value 4), other specs say value 3
         // Let's choose 3 (the more popular)
         if (frame_reader->disposal_method == 4)
-          frame_reader->disposal_method = WebCore::ImageFrame::DisposeOverwritePrevious;
-        frame_reader->delay_time = GETINT16(q + 1) * 10;
+          frame_reader->disposal_method = (gdispose)3;
+        unsigned short n = GETINT16(q + 1);
+        // Many annoying ads specify a 0 duration to make an image flash as quickly as possible.
+        // We follow Firefox's behavior and use a duration of 100 ms for any frames that specify
+        // a duration of <= 10 ms. See gfxImageFrame::GetTimeout in Gecko or Radar 4051389 for more.
+        frame_reader->delay_time = n <= 1 ? 100 : n * 10;
       }
       GETN(1, gif_consume_block);
     }
@@ -689,10 +699,6 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
       if (netscape_extension == 1) {
         loop_count = GETINT16(q + 1);
 
-        /* Zero loop count is infinite animation loop request */
-        if (loop_count == 0)
-          loop_count = WebCore::cAnimationLoopInfinite;
-
         GETN(1, gif_netscape_extension_block);
       }
       /* Wait for specified # of bytes to enter buffer */
@@ -701,10 +707,9 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
         // and doesn't do anything, as our streaming/buffering takes care of it all...
         // See: http://semmix.pl/color/exgraf/eeg24.htm
         GETN(1, gif_netscape_extension_block);
-      } else {
-        // 0,3-7 are yet to be defined netscape extension codes
-        return clientptr ? clientptr->setFailed() : false;
-      }
+      } else
+        state = gif_error; // 0,3-7 are yet to be defined netscape
+                               // extension codes
 
       break;
     }
@@ -735,8 +740,8 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
         y_offset = 0;
 
         // CALLBACK: Inform the decoderplugin of our size.
-        if (clientptr && !clientptr->setSize(screen_width, screen_height))
-          return false;
+        if (clientptr)
+          clientptr->sizeNowAvailable(screen_width, screen_height);
       }
 
       /* Work around more broken GIF files that have zero image
@@ -744,15 +749,16 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
       if (!height || !width) {
         height = screen_height;
         width = screen_width;
-        if (!height || !width)
-          return clientptr ? clientptr->setFailed() : false;
+        if (!height || !width) {
+          state = gif_error;
+          break;
+        }
       }
 
       if (query == GIFImageDecoder::GIFSizeQuery || haltAtFrame == images_decoded) {
         // The decoder needs to stop.  Hand back the number of bytes we consumed from
         // buffer minus 9 (the amount we consumed to read the header).
-        if (clientptr)
-            clientptr->decodingHalted(len + 9);
+        clientptr->decodingHalted(len + 9);
         GETN(9, gif_image_header);
         return true;
       }
@@ -775,16 +781,26 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
           /* XXX Deviant! */
 
           delete []frame_reader->rowbuf;
+          frame_reader->rowbuf = new unsigned char[width];
+
+          if (!frame_reader->rowbuf) {
+            state = gif_oom;
+            break;
+          }
+
           screen_width = width;
-          frame_reader->rowbuf = new unsigned char[screen_width];
-        } else if (!frame_reader->rowbuf) {
-          frame_reader->rowbuf = new unsigned char[screen_width];
+          if (screen_height < frame_reader->height)
+            screen_height = frame_reader->height;
+        }
+        else {
+          if (!frame_reader->rowbuf)
+            frame_reader->rowbuf = new unsigned char[screen_width];
         }
 
-        if (!frame_reader->rowbuf)
-          return clientptr ? clientptr->setFailed() : false;
-        if (screen_height < height)
-          screen_height = height;
+        if (!frame_reader->rowbuf) {
+          state = gif_oom;
+          break;
+        }
 
         if (q[8] & 0x40) {
           frame_reader->interlaced = true;
@@ -823,8 +839,10 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
         if (frame_reader && (!map || (num_colors > frame_reader->local_colormap_size))) {
           delete []map;
           map = new unsigned char[size];
-          if (!map)
-            return clientptr ? clientptr->setFailed() : false;
+          if (!map) {
+            state = gif_oom;
+            break;
+          }
         }
 
         /* Switch to the new local palette after it loads */
@@ -876,9 +894,9 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
         images_decoded++;
 
         // CALLBACK: The frame is now complete.
-        if (clientptr && frame_reader && !clientptr->frameComplete(images_decoded - 1, frame_reader->delay_time, frame_reader->disposal_method))
-          return false; // frameComplete() has already called
-                        // clientptr->setFailed().
+        if (clientptr && frame_reader)
+          clientptr->frameComplete(images_decoded - 1, frame_reader->delay_time, 
+                                   frame_reader->disposal_method == DISPOSE_KEEP);
 
         /* Clear state from this image */
         if (frame_reader) {
@@ -895,6 +913,15 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
       // When the GIF is done, we can stop.
       if (clientptr)
         clientptr->gifComplete();
+      return true;
+
+    // Handle out of memory errors
+    case gif_oom:
+      return false;
+
+    // Handle general errors
+    case gif_error:
+      // nsGIFDecoder2::EndGIF(gs->clientptr, gs->loop_count);
       return true;
 
     // We shouldn't ever get here.
@@ -919,7 +946,6 @@ bool GIFImageReader::read(const unsigned char *buf, unsigned len,
     bytes_to_consume -= len;
   }
 
-  if (clientptr)
-    clientptr->decodingHalted(0);
-  return false;
+  return true;
 }
+

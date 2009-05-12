@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,38 +23,27 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WrapContentsInDummySpanCommand_h
-#define WrapContentsInDummySpanCommand_h
+#ifndef __wrap_contents_in_dummy_span_command_h__
+#define __wrap_contents_in_dummy_span_command_h__
 
 #include "EditCommand.h"
 
 namespace WebCore {
 
-class HTMLElement;
-
-class WrapContentsInDummySpanCommand : public SimpleEditCommand {
+class WrapContentsInDummySpanCommand : public EditCommand
+{
 public:
-    static PassRefPtr<WrapContentsInDummySpanCommand> create(PassRefPtr<Element> element)
-    {
-        return adoptRef(new WrapContentsInDummySpanCommand(element));
-    }
+    WrapContentsInDummySpanCommand(Document *, Element *);
+    virtual ~WrapContentsInDummySpanCommand() { }
+
+    virtual void doApply();
+    virtual void doUnapply();
 
 private:
-    WrapContentsInDummySpanCommand(PassRefPtr<Element>);
-
-    virtual void doApply() OVERRIDE;
-    virtual void doUnapply() OVERRIDE;
-    virtual void doReapply() OVERRIDE;
-    void executeApply();
-
-#ifndef NDEBUG
-    virtual void getNodesInCommand(HashSet<Node*>&) OVERRIDE;
-#endif
-
     RefPtr<Element> m_element;
-    RefPtr<HTMLElement> m_dummySpan;
+    RefPtr<Element> m_dummySpan;
 };
 
 } // namespace WebCore
 
-#endif // WrapContentsInDummySpanCommand_h
+#endif // __wrap_contents_in_dummy_span_command_h__

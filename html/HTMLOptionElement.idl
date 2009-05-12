@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2010 Apple, Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,29 +13,23 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface [
-        JSGenerateToNativeObject,
-        NamedConstructor=Option(in [Optional=DefaultIsNullString] DOMString data, in [Optional=DefaultIsNullString] DOMString value, in [Optional=DefaultIsUndefined] boolean defaultSelected, in [Optional=DefaultIsUndefined] boolean selected),
-        ConstructorRaisesException
-    ] HTMLOptionElement : HTMLElement {
-        attribute [Reflect] boolean disabled;
-        readonly attribute HTMLFormElement form;
-        attribute DOMString label;
-        attribute [Reflect=selected] boolean defaultSelected;
-        attribute boolean selected;
-        attribute DOMString value;
-
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-        attribute DOMString text setter raises(DOMException);
-#else
-        readonly attribute DOMString text;
-#endif
-        readonly attribute long index;
+    interface [LegacyParent=KJS::JSHTMLElement, GenerateNativeConverter] HTMLOptionElement : HTMLElement {
+        readonly attribute  HTMLFormElement      form;
+                 attribute  boolean              defaultSelected;
+                 attribute  DOMString            text
+                        setter raises (DOMException);
+                 attribute  long                 index
+                        setter raises (DOMException); // FIXME: We disallow setting in violation of DOM 1 HTML.
+                 attribute  boolean              disabled;
+                 attribute  DOMString            label;
+                 attribute  boolean              selected;
+                 attribute  DOMString            value;
     };
+
 }

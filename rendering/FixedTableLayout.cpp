@@ -1,7 +1,9 @@
 /*
+ * This file is part of the HTML rendering engine for KDE.
+ *
  * Copyright (C) 2002 Lars Knoll (knoll@kde.org)
  *           (C) 2002 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc.
+ * Copyright (C) 2003, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -34,29 +36,29 @@
 
   With this (fast) algorithm, the horizontal layout of the table does
   not depend on the contents of the cells; it only depends on the
-  table's width, the width of the columns, and borders or cell
+  table's m_width, the m_width of the columns, and borders or cell
   spacing.
 
-  The table's width may be specified explicitly with the 'width'
+  The table's m_width may be specified explicitly with the 'm_width'
   property. A value of 'auto' (for both 'display: table' and 'display:
   inline-table') means use the automatic table layout algorithm.
 
-  In the fixed table layout algorithm, the width of each column is
+  In the fixed table layout algorithm, the m_width of each column is
   determined as follows:
 
-    1. A column element with a value other than 'auto' for the 'width'
-    property sets the width for that column.
+    1. A column element with a value other than 'auto' for the 'm_width'
+    property sets the m_width for that column.
 
     2. Otherwise, a cell in the first row with a value other than
-    'auto' for the 'width' property sets the width for that column. If
-    the cell spans more than one column, the width is divided over the
+    'auto' for the 'm_width' property sets the m_width for that column. If
+    the cell spans more than one column, the m_width is divided over the
     columns.
 
     3. Any remaining columns equally divide the remaining horizontal
     table space (minus borders or cell spacing).
 
-  The width of the table is then the greater of the value of the
-  'width' property for the table element and the sum of the column
+  The m_width of the table is then the greater of the value of the
+  'm_width' property for the table element and the sum of the column
   widths (plus cell spacing or borders). If the table is wider than
   the columns, the extra space should be distributed over the columns.
 
@@ -66,6 +68,13 @@
   not affect column widths. Any cell that has content that overflows
   uses the 'overflow' property to determine whether to clip the
   overflow content.
+
+_____________________________________________________
+
+  This is not quite true when comparing to IE. IE always honours
+  table-layout:fixed and treats a variable table m_width as 100%. Makes
+  a lot of sense, and is implemented here the same way.
+
 */
 
 using namespace std;
@@ -77,100 +86,128 @@ FixedTableLayout::FixedTableLayout(RenderTable* table)
 {
 }
 
-static RenderObject* nextCol(RenderObject* child)
+FixedTableLayout::~FixedTableLayout()
 {
-    // If child is a colgroup, the next col is the colgroup's first child col.
-    if (RenderObject* next = child->firstChild())
-        return next;
-    // Otherwise it's the next col along.
-    if (RenderObject* next = child->nextSibling())
-        return next;
-    // Failing that, the child is the last col in a colgroup, so the next col is the next col/colgroup after its colgroup.
-    if (child->parent()->isTableCol())
-        return child->parent()->nextSibling();
-    return 0;
 }
 
-int FixedTableLayout::calcWidthArray(int)
+int FixedTableLayout::calcWidthArray(int tableWidth)
 {
     int usedWidth = 0;
 
     // iterate over all <col> elements
-    unsigned nEffCols = m_table->numEffCols();
+    RenderObject* child = m_table->firstChild();
+    int cCol = 0;
+    int nEffCols = m_table->numEffCols();
     m_width.resize(nEffCols);
     m_width.fill(Length(Auto));
 
-    unsigned currentEffectiveColumn = 0;
-    for (RenderObject* child = m_table->firstChild();child && child->isTableCol(); child = nextCol(child)) {
+#ifdef DEBUG_LAYOUT
+    qDebug("FixedTableLayout::calcWidthArray(%d)", tableWidth);
+    qDebug("    col elements:");
+#endif
 
-        // Width specified by column-groups does not affect column width in fixed layout tables
-        RenderTableCol* col = toRenderTableCol(child);
-        col->computePreferredLogicalWidths();
-
-        if (col->isTableColGroup())
-            continue;
-
-        Length colStyleLogicalWidth = col->style()->logicalWidth();
-        int effectiveColWidth = 0;
-        if (colStyleLogicalWidth.isFixed() && colStyleLogicalWidth.value() > 0)
-            effectiveColWidth = colStyleLogicalWidth.value();
-
-        unsigned span = col->span();
-        while (span) {
-            unsigned spanInCurrentEffectiveColumn;
-            if (currentEffectiveColumn >= nEffCols) {
-                m_table->appendColumn(span);
-                nEffCols++;
-                m_width.append(Length());
-                spanInCurrentEffectiveColumn = span;
-            } else {
-                if (span < m_table->spanOfEffCol(currentEffectiveColumn)) {
-                    m_table->splitColumn(currentEffectiveColumn, span);
-                    nEffCols++;
-                    m_width.append(Length());
+    Length grpWidth;
+    while (child) {
+        if (child->isTableCol()) {
+            RenderTableCol *col = static_cast<RenderTableCol *>(child);
+            int span = col->span();
+            if (col->firstChild())
+                grpWidth = col->style()->width();
+            else {
+                Length w = col->style()->width();
+                if (w.isAuto())
+                    w = grpWidth;
+                int effWidth = 0;
+                if (w.isFixed() && w.value() > 0)
+                    effWidth = w.value();
+                
+#ifdef DEBUG_LAYOUT
+                qDebug("    col element: effCol=%d, span=%d: %d w=%d type=%d",
+                       cCol, span, effWidth,  w.value, w.type());
+#endif
+                int usedSpan = 0;
+                int i = 0;
+                while (usedSpan < span) {
+                    if(cCol + i >= nEffCols) {
+                        m_table->appendColumn(span - usedSpan);
+                        nEffCols++;
+                        m_width.resize(nEffCols);
+                        m_width[nEffCols-1] = Length();
+                    }
+                    int eSpan = m_table->spanOfEffCol(cCol+i);
+                    if ((w.isFixed() || w.isPercent()) && w.value() > 0) {
+                        m_width[cCol+i] = Length(w.value() * eSpan, w.type());
+                        usedWidth += effWidth * eSpan;
+#ifdef DEBUG_LAYOUT
+                        qDebug("    setting effCol %d (span=%d) to m_width %d(type=%d)",
+                               cCol+i, eSpan, m_width[cCol+i].value, m_width[cCol+i].type());
+#endif
+                    }
+                    usedSpan += eSpan;
+                    i++;
                 }
-                spanInCurrentEffectiveColumn = m_table->spanOfEffCol(currentEffectiveColumn);
+                cCol += i;
             }
-            if ((colStyleLogicalWidth.isFixed() || colStyleLogicalWidth.isPercent()) && colStyleLogicalWidth.isPositive()) {
-                m_width[currentEffectiveColumn] = colStyleLogicalWidth;
-                m_width[currentEffectiveColumn] *= spanInCurrentEffectiveColumn;
-                usedWidth += effectiveColWidth * spanInCurrentEffectiveColumn;
-            }
-            span -= spanInCurrentEffectiveColumn;
-            currentEffectiveColumn++;
+        } else
+            break;
+
+        RenderObject *next = child->firstChild();
+        if (!next)
+            next = child->nextSibling();
+        if (!next && child->parent()->isTableCol()) {
+            next = child->parent()->nextSibling();
+            grpWidth = Length();
         }
+        child = next;
     }
 
-    // Iterate over the first row in case some are unspecified.
-    RenderTableSection* section = m_table->topNonEmptySection();
+#ifdef DEBUG_LAYOUT
+    qDebug("    first row:");
+#endif
+    // iterate over the first row in case some are unspecified.
+    RenderTableSection *section = m_table->head;
+    if (!section)
+        section = m_table->firstBody;
+    if (!section)
+        section = m_table->foot;
     if (section) {
-        unsigned cCol = 0;
+        cCol = 0;
+        // FIXME: Technically the first row could be in an arbitrary section (e.g., an nth section
+        // if the previous n-1 sections have no rows), so this check isn't good enough.
+        // get the first cell in the first row
         RenderObject* firstRow = section->firstChild();
-        RenderObject* child = firstRow->firstChild();
+        child = firstRow ? firstRow->firstChild() : 0;
         while (child) {
             if (child->isTableCell()) {
-                RenderTableCell* cell = toRenderTableCell(child);
-                if (cell->preferredLogicalWidthsDirty())
-                    cell->computePreferredLogicalWidths();
-
-                Length w = cell->styleOrColLogicalWidth();
-                unsigned span = cell->colSpan();
-                int effectiveColWidth = 0;
-                if (w.isFixed() && w.isPositive()) {
-                    w.setValue(w.value() + cell->borderAndPaddingLogicalWidth());
-                    effectiveColWidth = w.value();
-                }
+                RenderTableCell *cell = static_cast<RenderTableCell *>(child);
+                Length w = cell->styleOrColWidth();
+                int span = cell->colSpan();
+                int effWidth = 0;
+                if ((w.isFixed() || w.isPercent()) && w.value() > 0)
+                    effWidth = w.value();
                 
-                unsigned usedSpan = 0;
-                unsigned i = 0;
-                while (usedSpan < span && cCol + i < nEffCols) {
-                    float eSpan = m_table->spanOfEffCol(cCol + i);
-                    // Only set if no col element has already set it.
-                    if (m_width[cCol + i].isAuto() && w.type() != Auto) {
-                        m_width[cCol + i] = w;
-                        m_width[cCol + i] *= eSpan / span;
-                        usedWidth += effectiveColWidth * eSpan / span;
+#ifdef DEBUG_LAYOUT
+                qDebug("    table cell: effCol=%d, span=%d: %d",  cCol, span, effWidth);
+#endif
+                int usedSpan = 0;
+                int i = 0;
+                while (usedSpan < span) {
+                    ASSERT(cCol + i < nEffCols);
+                    int eSpan = m_table->spanOfEffCol(cCol+i);
+                    // only set if no col element has already set it.
+                    if (m_width[cCol+i].isAuto() && w.type() != Auto) {
+                        m_width[cCol+i] = Length(w.value() * eSpan, w.type());
+                        usedWidth += effWidth*eSpan;
+#ifdef DEBUG_LAYOUT
+                        qDebug("    setting effCol %d (span=%d) to m_width %d(type=%d)",
+                               cCol+i, eSpan, m_width[cCol+i].value, m_width[cCol+i].type());
+#endif
                     }
+#ifdef DEBUG_LAYOUT
+                    else {
+                        qDebug("    m_width of col %d already defined (span=%d)", cCol, m_table->spanOfEffCol(cCol));
+                    }
+#endif
                     usedSpan += eSpan;
                     i++;
                 }
@@ -181,148 +218,122 @@ int FixedTableLayout::calcWidthArray(int)
     }
 
     return usedWidth;
+
 }
 
-void FixedTableLayout::computePreferredLogicalWidths(LayoutUnit& minWidth, LayoutUnit& maxWidth)
+void FixedTableLayout::calcMinMaxWidth()
 {
     // FIXME: This entire calculation is incorrect for both minwidth and maxwidth.
     
     // we might want to wait until we have all of the first row before
     // layouting for the first time.
 
-    // only need to calculate the minimum width as the sum of the
-    // cols/cells with a fixed width.
+    // only need to calculate the minimum m_width as the sum of the
+    // cols/cells with a fixed m_width.
     //
-    // The maximum width is max(minWidth, tableWidth).
-    int bordersPaddingAndSpacing = m_table->bordersPaddingAndSpacingInRowDirection();
+    // The maximum m_width is max(minWidth, tableWidth).
+    int bs = m_table->bordersPaddingAndSpacing();
+    
+    int tableWidth = m_table->style()->width().isFixed() ? m_table->style()->width().value() - bs : 0;
+    int mw = calcWidthArray(tableWidth) + bs;
 
-    int tableLogicalWidth = m_table->style()->logicalWidth().isFixed() ? m_table->style()->logicalWidth().value() - bordersPaddingAndSpacing : 0;
-    int mw = calcWidthArray(tableLogicalWidth) + bordersPaddingAndSpacing;
-
-    minWidth = max(mw, tableLogicalWidth);
-    maxWidth = minWidth;
-
-    // This quirk is very similar to one that exists in RenderBlock::calcBlockPrefWidths().
-    // Here's the example for this one:
-    /*
-        <table style="width:100%; background-color:red"><tr><td>
-            <table style="background-color:blue"><tr><td>
-                <table style="width:100%; background-color:green; table-layout:fixed"><tr><td>
-                    Content
-                </td></tr></table>
-            </td></tr></table>
-        </td></tr></table>
-    */ 
-    // In this example, the two inner tables should be as large as the outer table. 
-    // We can achieve this effect by making the maxwidth of fixed tables with percentage
-    // widths be infinite.
-    if (m_table->document()->inQuirksMode() && m_table->style()->logicalWidth().isPercent() && maxWidth < tableMaxWidth)
-        maxWidth = tableMaxWidth;
+    m_table->m_minWidth = max(mw, tableWidth);
+    m_table->m_maxWidth = m_table->m_minWidth;
 }
 
 void FixedTableLayout::layout()
 {
-    int tableLogicalWidth = m_table->logicalWidth() - m_table->bordersPaddingAndSpacingInRowDirection();
-    unsigned nEffCols = m_table->numEffCols();
-    Vector<int> calcWidth(nEffCols, 0);
+    int tableWidth = m_table->width() - m_table->bordersPaddingAndSpacing();
+    int available = tableWidth;
+    int nEffCols = m_table->numEffCols();
+    int totalPercent = 0;
+    
+#ifdef DEBUG_LAYOUT
+    qDebug("FixedTableLayout::layout: tableWidth=%d, numEffCols=%d",  tableWidth, nEffCols);
+#endif
 
-    unsigned numAuto = 0;
-    unsigned autoSpan = 0;
-    int totalFixedWidth = 0;
-    int totalPercentWidth = 0;
-    float totalPercent = 0;
 
-    // Compute requirements and try to satisfy fixed and percent widths.
-    // Percentages are of the table's width, so for example
-    // for a table width of 100px with columns (40px, 10%), the 10% compute
-    // to 10px here, and will scale up to 20px in the final (80px, 20px).
-    for (unsigned i = 0; i < nEffCols; i++) {
+    Vector<int> calcWidth(nEffCols, -1);
+
+    // assign  percent m_width
+    if (available > 0) {
+        for (int i = 0; i < nEffCols; i++)
+            if (m_width[i].isPercent())
+                totalPercent += m_width[i].value();
+
+        // calculate how much to distribute to percent cells.
+        int base = tableWidth * totalPercent / 100;
+        if (base > available)
+            base = available;
+        else
+            totalPercent = 100;
+
+#ifdef DEBUG_LAYOUT
+        qDebug("FixedTableLayout::layout: assigning percent m_width, base=%d, totalPercent=%d", base, totalPercent);
+#endif
+        for (int i = 0; available > 0 && i < nEffCols; i++) {
+            if (m_width[i].isPercent()) {
+                int w = base * m_width[i].value() / totalPercent;
+                available -= w;
+                calcWidth[i] = w;
+            }
+        }
+    }
+    
+    // next assign fixed m_width
+    for (int i = 0; i < nEffCols; i++) {
         if (m_width[i].isFixed()) {
             calcWidth[i] = m_width[i].value();
-            totalFixedWidth += calcWidth[i];
-        } else if (m_width[i].isPercent()) {
-            calcWidth[i] = valueForLength(m_width[i], tableLogicalWidth);
-            totalPercentWidth += calcWidth[i];
-            totalPercent += m_width[i].percent();
-        } else if (m_width[i].isAuto()) {
-            numAuto++;
-            autoSpan += m_table->spanOfEffCol(i);
+            available -= m_width[i].value();
         }
     }
 
-    int hspacing = m_table->hBorderSpacing();
-    int totalWidth = totalFixedWidth + totalPercentWidth;
-    if (!numAuto || totalWidth > tableLogicalWidth) {
-        // If there are no auto columns, or if the total is too wide, take
-        // what we have and scale it to fit as necessary.
-        if (totalWidth != tableLogicalWidth) {
-            // Fixed widths only scale up
-            if (totalFixedWidth && totalWidth < tableLogicalWidth) {
-                totalFixedWidth = 0;
-                for (unsigned i = 0; i < nEffCols; i++) {
-                    if (m_width[i].isFixed()) {
-                        calcWidth[i] = calcWidth[i] * tableLogicalWidth / totalWidth;
-                        totalFixedWidth += calcWidth[i];
-                    }
-                }
-            }
-            if (totalPercent) {
-                totalPercentWidth = 0;
-                for (unsigned i = 0; i < nEffCols; i++) {
-                    if (m_width[i].isPercent()) {
-                        calcWidth[i] = m_width[i].percent() * (tableLogicalWidth - totalFixedWidth) / totalPercent;
-                        totalPercentWidth += calcWidth[i];
-                    }
-                }
-            }
-            totalWidth = totalFixedWidth + totalPercentWidth;
-        }
-    } else {
-        // Divide the remaining width among the auto columns.
-        ASSERT(autoSpan >= numAuto);
-        int remainingWidth = tableLogicalWidth - totalFixedWidth - totalPercentWidth - hspacing * (autoSpan - numAuto);
-        int lastAuto = 0;
-        for (unsigned i = 0; i < nEffCols; i++) {
+    // assign variable m_width
+    if (available > 0) {
+        int totalAuto = 0;
+        for (int i = 0; i < nEffCols; i++)
+            if (m_width[i].isAuto())
+                totalAuto++;
+
+        for (int i = 0; available > 0 && i < nEffCols; i++) {
             if (m_width[i].isAuto()) {
-                unsigned span = m_table->spanOfEffCol(i);
-                int w = remainingWidth * span / autoSpan;
-                calcWidth[i] = w + hspacing * (span - 1);
-                remainingWidth -= w;
-                if (!remainingWidth)
-                    break;
-                lastAuto = i;
-                numAuto--;
-                ASSERT(autoSpan >= span);
-                autoSpan -= span;
+                int w = available / totalAuto;
+                available -= w;
+                calcWidth[i] = w;
+                totalAuto--;
             }
         }
-        // Last one gets the remainder.
-        if (remainingWidth)
-            calcWidth[lastAuto] += remainingWidth;
-        totalWidth = tableLogicalWidth;
     }
 
-    if (totalWidth < tableLogicalWidth) {
-        // Spread extra space over columns.
-        int remainingWidth = tableLogicalWidth - totalWidth;
+    for (int i = 0; i < nEffCols; i++)
+        if (calcWidth[i] <= 0)
+            calcWidth[i] = 0; // IE gives min 1 px...
+
+    // spread extra space over columns
+    if (available > 0) {
         int total = nEffCols;
-        while (total) {
-            int w = remainingWidth / total;
-            remainingWidth -= w;
-            calcWidth[--total] += w;
+        // still have some m_width to spread
+        int i = nEffCols;
+        while ( i--) {
+            int w = available / total;
+            available -= w;
+            total--;
+            calcWidth[i] += w;
         }
-        if (nEffCols > 0)
-            calcWidth[nEffCols - 1] += remainingWidth;
     }
     
     int pos = 0;
-    for (unsigned i = 0; i < nEffCols; i++) {
-        m_table->columnPositions()[i] = pos;
+    int hspacing = m_table->hBorderSpacing();
+    for (int i = 0; i < nEffCols; i++) {
+#ifdef DEBUG_LAYOUT
+        qDebug("col %d: %d (m_width %d)", i, pos, calcWidth[i]);
+#endif
+        m_table->columnPos[i] = pos;
         pos += calcWidth[i] + hspacing;
     }
-    int colPositionsSize = m_table->columnPositions().size();
-    if (colPositionsSize > 0)
-        m_table->columnPositions()[colPositionsSize - 1] = pos;
+    m_table->columnPos[m_table->columnPos.size()-1] = pos;
 }
 
-} // namespace WebCore
+#undef DEBUG_LAYOUT
+
+}

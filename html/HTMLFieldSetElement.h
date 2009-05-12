@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,36 +18,39 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLFieldSetElement_h
-#define HTMLFieldSetElement_h
+#ifndef KHTML_HTMLFieldSetElementImpl_H
+#define KHTML_HTMLFieldSetElementImpl_H
 
-#include "HTMLFormControlElement.h"
+#include "HTMLGenericFormElement.h"
+
+namespace WebCore {
+    class RenderStyle;
+}
 
 namespace WebCore {
 
-class HTMLFieldSetElement : public HTMLFormControlElement {
+class HTMLFormElement;
+class Document;
+class Node;
+
+class HTMLFieldSetElement : public HTMLGenericFormElement {
 public:
-    static PassRefPtr<HTMLFieldSetElement> create(const QualifiedName&, Document*, HTMLFormElement*);
-    HTMLLegendElement* legend() const;
+    HTMLFieldSetElement(Document*, HTMLFormElement* = 0);
+    virtual ~HTMLFieldSetElement();
+    
+    virtual int tagPriority() const { return 3; }
+    virtual bool checkDTD(const Node* newChild);
 
-protected:
-    virtual void disabledAttributeChanged() OVERRIDE;
-
-private:
-    HTMLFieldSetElement(const QualifiedName&, Document*, HTMLFormElement*);
-
-    virtual bool isEnumeratable() const { return true; }
-    virtual bool supportsFocus() const;
+    virtual bool isFocusable() const;
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual const AtomicString& formControlType() const;
-    virtual bool recalcWillValidate() const { return false; }
+    virtual const AtomicString& type() const;
 };
 
-} // namespace
+} //namespace
 
 #endif

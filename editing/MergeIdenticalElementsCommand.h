@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,30 +23,23 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef MergeIdenticalElementsCommand_h
-#define MergeIdenticalElementsCommand_h
+#ifndef __merge_identical_elements_command_h__
+#define __merge_identical_elements_command_h__
 
 #include "EditCommand.h"
 
 namespace WebCore {
 
-class MergeIdenticalElementsCommand : public SimpleEditCommand {
+class MergeIdenticalElementsCommand : public EditCommand
+{
 public:
-    static PassRefPtr<MergeIdenticalElementsCommand> create(PassRefPtr<Element> element1, PassRefPtr<Element> element2)
-    {
-        return adoptRef(new MergeIdenticalElementsCommand(element1, element2));
-    }
+    MergeIdenticalElementsCommand(Document *, Element *first, Element *second);
+    virtual ~MergeIdenticalElementsCommand() { }
+
+    virtual void doApply();
+    virtual void doUnapply();
 
 private:
-    MergeIdenticalElementsCommand(PassRefPtr<Element>, PassRefPtr<Element>);
-
-    virtual void doApply() OVERRIDE;
-    virtual void doUnapply() OVERRIDE;
-    
-#ifndef NDEBUG
-    virtual void getNodesInCommand(HashSet<Node*>&) OVERRIDE;
-#endif
-    
     RefPtr<Element> m_element1;
     RefPtr<Element> m_element2;
     RefPtr<Node> m_atChild;
@@ -54,4 +47,4 @@ private:
 
 } // namespace WebCore
 
-#endif // MergeIdenticalElementsCommand_h
+#endif // __merge_identical_elements_command_h__

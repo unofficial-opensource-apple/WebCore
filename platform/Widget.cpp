@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,183 +27,77 @@
 #include "Widget.h"
 
 #include "IntRect.h"
-#include "ScrollView.h"
-
-#include <wtf/Assertions.h>
 
 namespace WebCore {
 
-void Widget::init(PlatformWidget widget)
+IntSize Widget::sizeHint() const 
 {
-    m_parent = 0;
-    m_selfVisible = false;
-    m_parentVisible = false;
-    m_widget = widget;
-    if (m_widget)
-        retainPlatformWidget();
+    return IntSize();
 }
 
-void Widget::setParent(ScrollView* view)
+void Widget::resize(int w, int h) 
 {
-    ASSERT(!view || !m_parent);
-    if (!view || !view->isVisible())
-        setParentVisible(false);
-    m_parent = view;
-    if (view && view->isVisible())
-        setParentVisible(true);
+    setFrameGeometry(IntRect(x(), y(), w, h));
 }
 
-ScrollView* Widget::root() const
+int Widget::x() const
 {
-    const Widget* top = this;
-    while (top->parent())
-        top = top->parent();
-    if (top->isFrameView())
-        return const_cast<ScrollView*>(static_cast<const ScrollView*>(top));
-    return 0;
-}
-    
-void Widget::removeFromParent()
-{
-    if (parent())
-        parent()->removeChild(this);
+    return frameGeometry().x();
 }
 
-IntRect Widget::convertFromRootView(const IntRect& rootRect) const
+int Widget::y() const 
 {
-    if (const ScrollView* parentScrollView = parent()) {
-        IntRect parentRect = parentScrollView->convertFromRootView(rootRect);
-        return convertFromContainingView(parentRect);
-    }
-    return rootRect;
+    return frameGeometry().y();
 }
 
-IntRect Widget::convertToRootView(const IntRect& localRect) const
-{
-    if (const ScrollView* parentScrollView = parent()) {
-        IntRect parentRect = convertToContainingView(localRect);
-        return parentScrollView->convertToRootView(parentRect);
-    }
-    return localRect;
+int Widget::width() const 
+{ 
+    return frameGeometry().width();
 }
 
-IntPoint Widget::convertFromRootView(const IntPoint& rootPoint) const
+int Widget::height() const 
 {
-    if (const ScrollView* parentScrollView = parent()) {
-        IntPoint parentPoint = parentScrollView->convertFromRootView(rootPoint);
-        return convertFromContainingView(parentPoint);
-    }
-    return rootPoint;
+    return frameGeometry().height();
 }
 
-IntPoint Widget::convertToRootView(const IntPoint& localPoint) const
+IntSize Widget::size() const 
 {
-    if (const ScrollView* parentScrollView = parent()) {
-        IntPoint parentPoint = convertToContainingView(localPoint);
-        return parentScrollView->convertToRootView(parentPoint);
-    }
-    return localPoint;
+    return frameGeometry().size();
 }
 
-IntRect Widget::convertFromContainingWindow(const IntRect& windowRect) const
+void Widget::resize(const IntSize &s) 
 {
-    if (const ScrollView* parentScrollView = parent()) {
-        IntRect parentRect = parentScrollView->convertFromContainingWindow(windowRect);
-        return convertFromContainingView(parentRect);
-    }
-    return convertFromContainingWindowToRoot(this, windowRect);
+    resize(s.width(), s.height());
 }
 
-IntRect Widget::convertToContainingWindow(const IntRect& localRect) const
+IntPoint Widget::pos() const 
 {
-    if (const ScrollView* parentScrollView = parent()) {
-        IntRect parentRect = convertToContainingView(localRect);
-        return parentScrollView->convertToContainingWindow(parentRect);
-    }
-    return convertFromRootToContainingWindow(this, localRect);
+    return frameGeometry().location();
 }
 
-IntPoint Widget::convertFromContainingWindow(const IntPoint& windowPoint) const
+void Widget::move(int x, int y) 
 {
-    if (const ScrollView* parentScrollView = parent()) {
-        IntPoint parentPoint = parentScrollView->convertFromContainingWindow(windowPoint);
-        return convertFromContainingView(parentPoint);
-    }
-    return convertFromContainingWindowToRoot(this, windowPoint);
+    setFrameGeometry(IntRect(x, y, width(), height()));
 }
 
-IntPoint Widget::convertToContainingWindow(const IntPoint& localPoint) const
+void Widget::move(const IntPoint &p) 
 {
-    if (const ScrollView* parentScrollView = parent()) {
-        IntPoint parentPoint = convertToContainingView(localPoint);
-        return parentScrollView->convertToContainingWindow(parentPoint);
-    }
-    return convertFromRootToContainingWindow(this, localPoint);
+    move(p.x(), p.y());
 }
 
-#if !PLATFORM(MAC)
-IntRect Widget::convertFromRootToContainingWindow(const Widget*, const IntRect& rect)
+int Widget::baselinePosition(int height) const
 {
-    return rect;
+    return height;
 }
 
-IntRect Widget::convertFromContainingWindowToRoot(const Widget*, const IntRect& rect)
+bool Widget::checksDescendantsForFocus() const
 {
-    return rect;
+    return false;
 }
 
-IntPoint Widget::convertFromRootToContainingWindow(const Widget*, const IntPoint& point)
+bool Widget::isFrameView() const
 {
-    return point;
+    return false;
 }
 
-IntPoint Widget::convertFromContainingWindowToRoot(const Widget*, const IntPoint& point)
-{
-    return point;
 }
-#endif
-
-IntRect Widget::convertToContainingView(const IntRect& localRect) const
-{
-    if (const ScrollView* parentScrollView = parent()) {
-        IntRect parentRect(localRect);
-        parentRect.setLocation(parentScrollView->convertChildToSelf(this, localRect.location()));
-        return parentRect;
-    }
-    return localRect;
-}
-
-IntRect Widget::convertFromContainingView(const IntRect& parentRect) const
-{
-    if (const ScrollView* parentScrollView = parent()) {
-        IntRect localRect = parentRect;
-        localRect.setLocation(parentScrollView->convertSelfToChild(this, localRect.location()));
-        return localRect;
-    }
-
-    return parentRect;
-}
-
-IntPoint Widget::convertToContainingView(const IntPoint& localPoint) const
-{
-    if (const ScrollView* parentScrollView = parent())
-        return parentScrollView->convertChildToSelf(this, localPoint);
-
-    return localPoint;
-}
-
-IntPoint Widget::convertFromContainingView(const IntPoint& parentPoint) const
-{
-    if (const ScrollView* parentScrollView = parent())
-        return parentScrollView->convertSelfToChild(this, parentPoint);
-
-    return parentPoint;
-}
-
-#if !PLATFORM(EFL)
-void Widget::frameRectsChanged()
-{
-}
-#endif
-
-} // namespace WebCore

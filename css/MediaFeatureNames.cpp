@@ -1,4 +1,6 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2005 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -13,26 +15,25 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
 
-#ifdef SKIP_STATIC_CONSTRUCTORS_ON_GCC
+#if AVOID_STATIC_CONSTRUCTORS
 #define CSS_MEDIAQUERY_NAMES_HIDE_GLOBALS 1
 #endif
 
 #include "MediaFeatureNames.h"
-#include <wtf/StaticConstructors.h>
+#include "StaticConstructors.h"
 
-namespace WebCore {
-namespace MediaFeatureNames {
+namespace WebCore { namespace MediaFeatureNames {
 
 #define DEFINE_MEDIAFEATURE_GLOBAL(name, str) \
     DEFINE_GLOBAL(AtomicString, name##MediaFeature, str)
-    CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE_IOS(DEFINE_MEDIAFEATURE_GLOBAL)
+CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE(DEFINE_MEDIAFEATURE_GLOBAL)
 #undef DEFINE_MEDIAFEATURE_GLOBAL
 
 void init()
@@ -43,11 +44,10 @@ void init()
 
         AtomicString::init();
         #define INITIALIZE_GLOBAL(name, str) new ((void*)&name##MediaFeature) AtomicString(str);
-        CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE_IOS(INITIALIZE_GLOBAL)
+        CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE(INITIALIZE_GLOBAL)
         #undef INITIALIZE_GLOBAL
         initialized = true;
     }
 }
 
-} // namespace MediaFeatureNames
-} // namespace WebCore
+} }

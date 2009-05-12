@@ -1,10 +1,12 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,182 +20,125 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
 #include "RenderTableRow.h"
-
-#include "CachedImage.h"
+#include "RenderTableCell.h"
 #include "Document.h"
 #include "HTMLNames.h"
-#include "PaintInfo.h"
-#include "RenderTableCell.h"
-#include "RenderView.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
 RenderTableRow::RenderTableRow(Node* node)
-    : RenderBox(node)
-    , m_rowIndex(unsetRowIndex)
+    : RenderContainer(node)
 {
     // init RenderObject attributes
     setInline(false);   // our object is not Inline
 }
 
-void RenderTableRow::willBeDestroyed()
+void RenderTableRow::destroy()
 {
-    RenderTableSection* recalcSection = section();
+    RenderTableSection *s = section();
+    if (s)
+        s->setNeedCellRecalc();
     
-    RenderBox::willBeDestroyed();
-    
-    if (recalcSection)
-        recalcSection->setNeedsCellRecalc();
+    RenderContainer::destroy();
 }
 
-void RenderTableRow::updateBeforeAndAfterContent()
+void RenderTableRow::setStyle(RenderStyle* newStyle)
 {
-    if (!isAnonymous() && document()->usesBeforeAfterRules()) {
-        children()->updateBeforeAfterContent(this, BEFORE);
-        children()->updateBeforeAfterContent(this, AFTER);
-    }
-}
+    if (section() && style() && style()->height() != newStyle->height())
+        section()->setNeedCellRecalc();
 
-void RenderTableRow::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
-{
-    ASSERT(style()->display() == TABLE_ROW);
+    newStyle->setDisplay(TABLE_ROW);
 
-    RenderBox::styleDidChange(diff, oldStyle);
-    propagateStyleToAnonymousChildren();
-
-    if (parent())
-        updateBeforeAndAfterContent();
-
-    if (section() && oldStyle && style()->logicalHeight() != oldStyle->logicalHeight())
-        section()->rowLogicalHeightChanged(rowIndex());
-
-    // If border was changed, notify table.
-    if (parent()) {
-        RenderTable* table = this->table();
-        if (table && !table->selfNeedsLayout() && !table->normalChildNeedsLayout() && oldStyle && oldStyle->border() != style()->border())
-            table->invalidateCollapsedBorders();
-    }
+    RenderContainer::setStyle(newStyle);
 }
 
 void RenderTableRow::addChild(RenderObject* child, RenderObject* beforeChild)
 {
-    // Make sure we don't append things after :after-generated content if we have it.
-    if (!beforeChild)
-        beforeChild = afterPseudoElementRenderer();
-
+    bool isTableRow = element() && element()->hasTagName(trTag);
+    
     if (!child->isTableCell()) {
-        RenderObject* last = beforeChild;
-        if (!last)
-            last = lastChild();
-        if (last && last->isAnonymous() && last->isTableCell() && !last->isBeforeOrAfterContent()) {
-            if (beforeChild == last)
-                beforeChild = last->firstChild();
-            last->addChild(child, beforeChild);
+        if (isTableRow && child->element() && child->element()->hasTagName(formTag) && document()->isHTMLDocument()) {
+            RenderContainer::addChild(child, beforeChild);
             return;
         }
 
-        if (beforeChild && !beforeChild->isAnonymous() && beforeChild->parent() == this) {
-            RenderObject* cell = beforeChild->previousSibling();
-            if (cell && cell->isTableCell() && cell->isAnonymous()) {
-                cell->addChild(child);
-                return;
-            }
+        RenderObject* last = beforeChild;
+        if (!last)
+            last = lastChild();
+        if (last && last->isAnonymous() && last->isTableCell()) {
+            last->addChild(child);
+            return;
         }
 
         // If beforeChild is inside an anonymous cell, insert into the cell.
-        if (last && !last->isTableCell() && last->parent() && last->parent()->isAnonymous() && !last->parent()->isBeforeOrAfterContent()) {
+        if (last && !last->isTableCell() && last->parent() && last->parent()->isAnonymous()) {
             last->parent()->addChild(child, beforeChild);
             return;
         }
 
-        RenderTableCell* cell = RenderTableCell::createAnonymousWithParentRenderer(this);
+        RenderTableCell* cell = new (renderArena()) RenderTableCell(document() /* anonymous object */);
+        RenderStyle* newStyle = new (renderArena()) RenderStyle();
+        newStyle->inheritFrom(style());
+        newStyle->setDisplay(TABLE_CELL);
+        cell->setStyle(newStyle);
         addChild(cell, beforeChild);
         cell->addChild(child);
         return;
     } 
+    
+    // If the next renderer is actually wrapped in an anonymous table cell, we need to go up and find that
+    while (beforeChild && !beforeChild->isTableCell())
+        beforeChild = beforeChild->parent();
 
-    if (beforeChild && beforeChild->parent() != this)
-        beforeChild = splitAnonymousBoxesAroundChild(beforeChild);    
+    RenderTableCell* cell = static_cast<RenderTableCell*>(child);
 
-    RenderTableCell* cell = toRenderTableCell(child);
+    section()->addCell(cell, this);
 
-    // Generated content can result in us having a null section so make sure to null check our parent.
-    if (parent())
-        section()->addCell(cell, this);
-
-    ASSERT(!beforeChild || beforeChild->isTableCell());
-    RenderBox::addChild(cell, beforeChild);
+    RenderContainer::addChild(cell, beforeChild);
 
     if (beforeChild || nextSibling())
-        section()->setNeedsCellRecalc();
+        section()->setNeedCellRecalc();
 }
 
 void RenderTableRow::layout()
 {
     ASSERT(needsLayout());
+    ASSERT(minMaxKnown());
 
-    // Table rows do not add translation.
-    LayoutStateMaintainer statePusher(view(), this, LayoutSize(), style()->isFlippedBlocksWritingMode());
-
-    bool paginated = view()->layoutState()->isPaginated();
-                
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
+    for (RenderObject *child = firstChild(); child; child = child->nextSibling()) {
         if (child->isTableCell()) {
-            RenderTableCell* cell = toRenderTableCell(child);
-            if (!cell->needsLayout() && paginated && view()->layoutState()->pageLogicalHeight() && view()->layoutState()->pageLogicalOffset(cell, cell->logicalTop()) != cell->pageLogicalOffset())
-                cell->setChildNeedsLayout(true, MarkOnlyThis);
-
+            RenderTableCell *cell = static_cast<RenderTableCell *>(child);
             if (child->needsLayout()) {
-                cell->computeBlockDirectionMargins(table());
+                cell->calcVerticalMargins();
                 cell->layout();
             }
         }
     }
-
-    // We only ever need to repaint if our cells didn't, which menas that they didn't need
-    // layout, so we know that our bounds didn't change. This code is just making up for
-    // the fact that we did not repaint in setStyle() because we had a layout hint.
-    // We cannot call repaint() because our clippedOverflowRectForRepaint() is taken from the
-    // parent table, and being mid-layout, that is invalid. Instead, we repaint our cells.
-    if (selfNeedsLayout() && checkForRepaintDuringLayout()) {
-        for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
-            if (child->isTableCell())
-                child->repaint();
-        }
-    }
-
-    statePusher.pop();
-    // RenderTableSection::layoutRows will set our logical height and width later, so it calls updateLayerTransform().
     setNeedsLayout(false);
 }
 
-LayoutRect RenderTableRow::clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const
+IntRect RenderTableRow::getAbsoluteRepaintRect()
 {
-    ASSERT(parent());
-
-    if (repaintContainer == this)
-        return RenderBox::clippedOverflowRectForRepaint(repaintContainer);
-
     // For now, just repaint the whole table.
     // FIXME: Find a better way to do this, e.g., need to repaint all the cells that we
     // might have propagated a background color into.
-    // FIXME: do repaintContainer checks here
-    if (RenderTable* parentTable = table())
-        return parentTable->clippedOverflowRectForRepaint(repaintContainer);
-
-    return LayoutRect();
+    RenderTable* parentTable = table();
+    if (parentTable)
+        return parentTable->getAbsoluteRepaintRect();
+    else
+        return IntRect();
 }
 
 // Hit Testing
-bool RenderTableRow::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction action)
+bool RenderTableRow::nodeAtPoint(NodeInfo& info, int x, int y, int tx, int ty, HitTestAction action)
 {
     // Table rows cannot ever be hit tested.  Effectively they do not exist.
     // Just forward to our children always.
@@ -202,55 +147,32 @@ bool RenderTableRow::nodeAtPoint(const HitTestRequest& request, HitTestResult& r
         // at the moment (a demoted inline <form> for example). If we ever implement a
         // table-specific hit-test method (which we should do for performance reasons anyway),
         // then we can remove this check.
-        if (child->isTableCell() && !toRenderBox(child)->hasSelfPaintingLayer()) {
-            LayoutPoint cellPoint = flipForWritingModeForChild(toRenderTableCell(child), accumulatedOffset);
-            if (child->nodeAtPoint(request, result, pointInContainer, cellPoint, action)) {
-                updateHitTestResult(result, pointInContainer - toLayoutSize(cellPoint));
-                return true;
-            }
+        if (!child->layer() && !child->isInlineFlow() && child->nodeAtPoint(info, x, y, tx, ty, action)) {
+            setInnerNode(info);
+            return true;
         }
     }
     
     return false;
 }
 
-void RenderTableRow::paintOutlineForRowIfNeeded(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderTableRow::paint(PaintInfo& i, int tx, int ty)
 {
-    PaintPhase paintPhase = paintInfo.phase;
-    if ((paintPhase == PaintPhaseOutline || paintPhase == PaintPhaseSelfOutline) && style()->visibility() == VISIBLE)
-        paintOutline(paintInfo.context, LayoutRect(paintOffset, size()));
-}
+    assert(m_layer);
+    if (!m_layer)
+        return;
 
-void RenderTableRow::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    ASSERT(hasSelfPaintingLayer());
-
-    paintOutlineForRowIfNeeded(paintInfo, paintOffset);
     for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
         if (child->isTableCell()) {
             // Paint the row background behind the cell.
-            if (paintInfo.phase == PaintPhaseBlockBackground || paintInfo.phase == PaintPhaseChildBlockBackground) {
-                RenderTableCell* cell = toRenderTableCell(child);
-                cell->paintBackgroundsBehindCell(paintInfo, paintOffset, this);
+            if (i.phase == PaintPhaseBlockBackground || i.phase == PaintPhaseChildBlockBackground) {
+                RenderTableCell* cell = static_cast<RenderTableCell*>(child);
+                cell->paintBackgroundsBehindCell(i, tx, ty, this);
             }
-            if (!toRenderBox(child)->hasSelfPaintingLayer())
-                child->paint(paintInfo, paintOffset);
+            if (!child->layer())
+                child->paint(i, tx, ty);
         }
     }
 }
 
-void RenderTableRow::imageChanged(WrappedImagePtr, const IntRect*)
-{
-    // FIXME: Examine cells and repaint only the rect the image paints in.
-    repaint();
 }
-
-RenderTableRow* RenderTableRow::createAnonymousWithParentRenderer(const RenderObject* parent)
-{
-    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(parent->style(), TABLE_ROW);
-    RenderTableRow* newRow = new (parent->renderArena()) RenderTableRow(parent->document() /* is anonymous */);
-    newRow->setStyle(newStyle.release());
-    return newRow;
-}
-
-} // namespace WebCore

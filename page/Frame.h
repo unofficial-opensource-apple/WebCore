@@ -1,13 +1,13 @@
-/*
+// -*- c-basic-offset: 2 -*-
+ /* This file is part of the KDE project
+ *
  * Copyright (C) 1998, 1999 Torben Weis <weis@kde.org>
  *                     1999-2001 Lars Knoll <knoll@kde.org>
  *                     1999-2001 Antti Koivisto <koivisto@kde.org>
  *                     2000-2001 Simon Hausmann <hausmann@kde.org>
  *                     2000-2001 Dirk Mueller <mueller@kde.org>
  *                     2000 Stefan Schimanski <1Stein@gmx.de>
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
- * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
- * Copyright (C) 2008 Eric Seidel <eric@webkit.org>
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,482 +21,867 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef Frame_h
-#define Frame_h
+#ifndef Frame_H
+#define Frame_H
 
-#include "AdjustViewSizeOrNot.h"
-#include "AnimationController.h"
-#include "DragImage.h"
-#include "Editor.h"
-#include "EventHandler.h"
-#include "FrameLoader.h"
-#include "FrameSelection.h"
-#include "FrameTree.h"
-#include "NavigationScheduler.h"
-#include "ScriptController.h"
-#include "UserScriptTypes.h"
+#include "BrowserExtension.h"
+#include "Color.h"
+#include "DeprecatedStringList.h"
+#include "EditAction.h"
+#include "FrameView.h"
+#include "ScrollBar.h"
+#include "Node.h"
+#include "TextAffinity.h"
+#include "TextGranularity.h"
+#include <wtf/Vector.h>
+#include "RenderObject.h"
 
-#include "FloatSize.h"
+namespace KJS {
+    class JSValue;
+    class PausedTimeouts;
+    class SavedBuiltins;
+    class SavedProperties;
 
-#include "KURL.h"
-#include "MathMLNames.h"
-#include "SVGNames.h"
-#include "ViewportArguments.h"
-#include "XLinkNames.h"
-
-#if PLATFORM(WIN)
-#include "FrameWin.h"
-#endif
-
-#if USE(TILED_BACKING_STORE)
-#include "TiledBackingStoreClient.h"
-#endif
-
-#ifndef __OBJC__
-class NSArray;
-class NSMutableDictionary;
-class NSString;
-#endif
-
-#ifdef __OBJC__
-@class DOMNode;
-@class DOMCSSStyleDeclaration;
-#else
-class DOMNode;
-class DOMCSSStyleDeclaration;
-#endif
-
-#if PLATFORM(WIN)
-typedef struct HBITMAP__* HBITMAP;
-#endif
+    namespace Bindings {
+        class Instance;
+    }
+}
 
 namespace WebCore {
 
-    class Document;
-    class FrameDestructionObserver;
-    class FrameView;
-    class HTMLTableCellElement;
-    class RegularExpression;
-    class RenderLayer;
-    class RenderPart;
-    class TiledBackingStore;
+class CSSComputedStyleDeclaration;
+class CSSMutableStyleDeclaration;
+class CSSStyleDeclaration;
+class DrawContentsEvent;
+class DOMWindow;
+class EditCommandPtr;
+class FramePrivate;
+class FrameTree;
+class KJSProxy;
+class Page;
+class Plugin;
+class MouseEventWithHitTestResults;
+class Range;
+class RenderLayer;
+class Selection;
+class SelectionController;
+class Settings;
+class VisiblePosition;
+class RenderLayer;
 
-    enum NodeImageFlag {
-        DrawNormally = 0,
-        AllowDownsampling = 1,
-        DrawContentBehindTransparentNodes = 1 << 1
-    };
-    typedef unsigned NodeImageFlags;
+template <typename T> class Timer;
 
-    enum { 
-        OverflowScrollNone =  0x0,
-        OverflowScrollLeft =  0x1,
-        OverflowScrollRight = 0x2,
-        OverflowScrollUp    = 0x4,
-        OverflowScrollDown  = 0x8
-    };
+struct MarkedTextUnderline {
+    MarkedTextUnderline(unsigned s, unsigned e, const Color& c, bool t) 
+        : startOffset(s), endOffset(e), color(c), thick(t) { }
+    unsigned startOffset;
+    unsigned endOffset;
+    Color color;
+    bool thick;
+};
+enum { 
+    OverflowScrollNone =  0x0,
+    OverflowScrollLeft =  0x1,
+    OverflowScrollRight = 0x2,
+    OverflowScrollUp    = 0x4,
+    OverflowScrollDown  = 0x8
+};
 
-    enum OverflowScrollAction { DoNotPerformOverflowScroll, PerformOverflowScroll };
-    typedef Node* (*NodeQualifier)(const HitTestResult& hitTestResult, Node* terminationNode, IntRect* nodeBounds);
+enum OverflowScrollAction { DoNotPerformOverflowScroll, PerformOverflowScroll };
 
-#if !USE(TILED_BACKING_STORE)
-    class TiledBackingStoreClient { };
+enum ObjectContentType {
+    ObjectContentNone,
+    ObjectContentImage,
+    ObjectContentFrame,
+    ObjectContentPlugin,
+};
+
+class Frame : public Shared<Frame>, Noncopyable {
+
+public:
+  enum { NoXPosForVerticalArrowNavigation = INT_MIN };
+
+  Frame(Page*, Element*);
+  virtual ~Frame();
+
+  virtual bool canTargetLoadInFrame(Frame*) { return false; }
+
+  virtual bool openURL(const KURL&);
+  virtual bool closeURL();
+
+  void didExplicitOpen();
+
+  Page* page() const;
+  void pageDestroyed();
+  
+  /**
+   * Stop loading the document and kill all data requests (for images, etc.)
+   */
+  void stopLoading(bool sendUnload = false);
+
+  /**
+   * Returns a pointer to the @ref BrowserExtension.
+   */
+  BrowserExtension* browserExtension() const;
+
+  /**
+   * Returns a pointer to the HTML document's view.
+   */
+  FrameView* view() const;
+
+  virtual void setView(FrameView*);
+
+  /**
+   * Returns @p true if Javascript is enabled, @p false otherwise.
+   */
+  bool jScriptEnabled() const;
+
+  /**
+   * Returns true if Java is enabled, false otherwise.
+   */
+  bool javaEnabled() const;
+  
+  /**
+   * Returns true if plugins are enabled, false otherwise.
+   */
+  bool pluginsEnabled() const;
+
+  /**
+   * Execute the specified snippet of JavaScript code.
+   */
+  KJS::JSValue* executeScript(Node*, const DeprecatedString& script, bool forceUserGesture = false);
+
+  /**
+   * Implementation of CSS property -webkit-user-drag == auto
+   */
+  virtual bool shouldDragAutoNode(Node*, const IntPoint&) const;
+  
+  /**
+   * Specifies whether images contained in the document should be loaded
+   * automatically or not.
+   *
+   * @note Request will be ignored if called before @ref begin().
+   */
+  void setAutoLoadImages(bool enable);
+  /**
+   * Returns whether images contained in the document are loaded automatically
+   * or not.
+   * @note that the returned information is unreliable as long as no begin()
+   * was called.
+   */
+  bool autoLoadImages() const;
+
+  KURL baseURL() const;
+  String baseTarget() const;
+
+  /**
+   * Schedules a redirection after @p delay seconds.
+   */
+  void scheduleRedirection(double delay, const DeprecatedString& url, bool lockHistory = true);
+
+  /**
+   * Make a location change, or schedule one for later.
+   * These are used for JavaScript-triggered location changes.
+   */
+  void changeLocation(const DeprecatedString& URL, const DeprecatedString& referrer, bool lockHistory = true, bool userGesture = false);
+  void scheduleLocationChange(const DeprecatedString& url, const DeprecatedString& referrer, bool lockHistory = true, bool userGesture = false);
+  void scheduleRefresh(bool userGesture = false);
+  bool isScheduledLocationChangePending() const;
+
+  /**
+   * Schedules a history navigation operation (go forward, go back, etc.).
+   * This is used for JavaScript-triggered location changes.
+   */
+  void scheduleHistoryNavigation(int steps);
+
+  /**
+   * Clears the widget and prepares it for new content.
+   *
+   * If you want @ref url() to return
+   * for example "file:/tmp/test.html", you can use the following code:
+   * <PRE>
+   * view->begin(KURL("file:/tmp/test.html"));
+   * </PRE>
+   *
+   * @param url is the url of the document to be displayed.  Even if you
+   * are generating the HTML on the fly, it may be useful to specify
+   * a directory so that any images are found.
+   *
+   * All child frames and the old document are removed if you call
+   * this method.
+   */
+  virtual void begin(const KURL& url = KURL());
+
+  /**
+   * Writes another part of the HTML code to the widget.
+   *
+   * You may call
+   * this function many times in sequence. But remember: The fewer calls
+   * you make, the faster the widget will be.
+   *
+   * The HTML code is send through a decoder which decodes the stream to
+   * Unicode.
+   *
+   * The @p len parameter is needed for streams encoded in utf-16,
+   * since these can have \0 chars in them. In case the encoding
+   * you're using isn't utf-16, you can safely leave out the length
+   * parameter.
+   *
+   * Attention: Don't mix calls to @ref write(const char*) with calls
+   * to @ref write(const DeprecatedString&  ).
+   *
+   * The result might not be what you want.
+   */
+  virtual void write(const char* str, int len = -1);
+
+  /**
+   * Writes another part of the HTML code to the widget.
+   *
+   * You may call
+   * this function many times in sequence. But remember: The fewer calls
+   * you make, the faster the widget will be.
+   */
+  virtual void write(const DeprecatedString& str);
+
+  /**
+   * Call this after your last call to @ref write().
+   */
+  virtual void end();
+
+  void endIfNotLoading();
+
+  /**
+   * Similar to end, but called to abort a load rather than cleanly end.
+   */
+  void stop();
+
+  void paint(GraphicsContext*, const IntRect&);
+
+  void setEncoding(const DeprecatedString& encoding, bool userChosen);
+
+  /**
+   * Returns the encoding the page currently uses.
+   *
+   * Note that the encoding might be different from the charset.
+   */
+  DeprecatedString encoding() const;
+
+  /**
+   * Sets a user defined style sheet to be used on top of the HTML4,
+   * SVG and printing default style sheets.
+   */
+  void setUserStyleSheetLocation(const KURL&);
+  void setUserStyleSheet(const String& styleSheetData);
+  
+  /**
+   * Sets the standard font style.
+   *
+   * @param name The font name to use for standard text.
+   */
+  void setStandardFont(const String& name);
+
+  /**
+   * Sets the fixed font style.
+   *
+   * @param name The font name to use for fixed text, e.g.
+   * the <tt>&lt;pre&gt;</tt> tag.
+   */
+  void setFixedFont(const String& name);
+
+  /**
+   * Finds the anchor named @p name.
+   *
+   * If the anchor is found, the widget
+   * scrolls to the closest position. Returns @p if the anchor has
+   * been found.
+   */
+  bool gotoAnchor(const String& name);
+
+  /**
+   * Sets the Zoom factor. The value is given in percent, larger values mean a
+   * generally larger font and larger page contents. It is not guaranteed that
+   * all parts of the page are scaled with the same factor though.
+   *
+   * The given value should be in the range of 20..300, values outside that
+   * range are not guaranteed to work. A value of 100 will disable all zooming
+   * and show the page with the sizes determined via the given lengths in the
+   * stylesheets.
+   */
+  void setZoomFactor(int percent);
+
+  /**
+   * Returns the current zoom factor.
+   */
+  int zoomFactor() const;
+
+  /**
+   * Returns the text the user has marked.
+   */
+  virtual String selectedText() const;
+  
+  bool findString(const String&, bool, bool, bool);
+
+  /**
+   * Returns the granularity of the selection (character, word, line, paragraph).
+   */
+  TextGranularity selectionGranularity() const;
+  
+  /**
+   * Sets the granularity of the selection (character, word, line, paragraph).
+   */
+  void setSelectionGranularity(TextGranularity granularity) const;
+
+  // FIXME: Replace these with functions on the selection controller.
+  void setSelection(const SelectionController&, bool closeTyping = true);
+  bool shouldChangeSelection(const SelectionController&) const;
+  virtual bool shouldDeleteSelection(const SelectionController&) const;
+  
+  void notifyRendererOfSelectionChange(bool userTriggered);
+
+  virtual void notifySelectionLayoutChanged() const;    
+  void setSingleLineSelectionBehavior(bool b);
+  bool singleLineSelectionBehavior() const;
+
+  /**
+   * Returns a mark, to be used as emacs uses it.
+   */
+  const Selection& mark() const;
+  void setMark(const Selection&);
+
+  // FIXME: Replace this with a function on the selection controller or change it to Selection instead?
+  void setDragCaret(const SelectionController&);
+  
+  /**
+   * Transposes characters either side of caret selection.
+   */
+  void transpose();
+  
+  /**
+   * Clears the current selection.
+   */
+  void clearSelection();
+
+  /**
+   * Invalidates the current selection.
+   */
+  void invalidateSelection();
+
+  void setCaretVisible(bool flag = true);
+  void paintCaret(GraphicsContext*, const IntRect&) const;  
+  void paintDragCaret(GraphicsContext*, const IntRect&) const;
+
+  void setCaretColor(const Color &color);
+
+  /**
+   * Set info for vertical arrow navigation.
+   */
+  void setXPosForVerticalArrowNavigation(int x);
+
+  /**
+   * Get info for vertical arrow navigation.
+   */
+  int xPosForVerticalArrowNavigation() const;
+  /**
+   * Scroll the selection in an overflow layer.
+   */
+  void scrollOverflowLayer(RenderLayer *, const IntRect &visibleRect, const IntRect &exposeRect);
+
+  /**
+   * Has the user selected anything?
+   *
+   *  Call @ref selectedText() to
+   * retrieve the selected text.
+   *
+   * @return @p true if there is text selected.
+   */
+  bool hasSelection() const;
+
+  /**
+   * Marks all text in the document as selected.
+   */
+  void selectAll();
+
+  /**
+   * Marks contents of node as selected.
+   * Returns whether the selection changed.
+   */
+  bool selectContentsOfNode(Node*);
+ 
+  /**
+   * Returns whether editing should end in the given range
+   */
+  virtual bool shouldBeginEditing(const Range*) const;
+
+  /**
+   * Returns whether editing should end in the given range
+   */
+  virtual bool shouldEndEditing(const Range*) const;
+
+  /**
+   * Called when editing has begun.
+   */
+  virtual void didBeginEditing() const {};
+   
+  /**
+   * Called when editing has ended.
+   */
+  virtual void didEndEditing() const {};
+    
+  /**
+   * Returns the contentEditable "override" value for the part
+   */
+  virtual bool isContentEditable() const;
+
+  virtual void textFieldDidBeginEditing(Element*);
+  virtual void textFieldDidEndEditing(Element*);
+  virtual void textDidChangeInTextField(Element*);
+  virtual bool doTextFieldCommandFromEvent(Element*, const PlatformKeyboardEvent*);
+  virtual void textWillBeDeletedInTextField(Element* input);
+  virtual void textDidChangeInTextArea(Element*);
+  
+  virtual void formElementDidSetValue(Element *);
+  virtual void formElementDidFocus(Element*);
+  virtual void formElementDidBlur(Element*);
+  virtual void didReceiveViewportArguments(ViewportArguments);
+  virtual void setNeedsScrollNotifications(bool);
+
+  virtual bool inputManagerHasMarkedText() const { return false; }
+  
+  /**
+   * Returns the most recent edit command applied.
+   */
+  EditCommandPtr lastEditCommand();
+
+  /**
+   * Called when editing has been applied.
+   */
+  void appliedEditing(EditCommandPtr&);
+
+  /**
+   * Called when editing has been unapplied.
+   */
+  void unappliedEditing(EditCommandPtr&);
+
+  /**
+   * Called when editing has been reapplied.
+   */
+  void reappliedEditing(EditCommandPtr&);
+
+  /**
+   * Returns the typing style for the document.
+   */
+  CSSMutableStyleDeclaration* typingStyle() const;
+
+  /**
+   * Sets the typing style for the document.
+   */
+  void setTypingStyle(CSSMutableStyleDeclaration*);
+
+  /**
+   * Clears the typing style for the document.
+   */
+  void clearTypingStyle();
+
+  virtual void tokenizerProcessedData() {}
+
+  bool inViewSourceMode() const;
+  void setInViewSourceMode(bool = true) const;
+
+  const Settings* settings() const;
+
+  void setJSStatusBarText(const String&);
+  void setJSDefaultStatusBarText(const String&);
+  String jsStatusBarText() const;
+  String jsDefaultStatusBarText() const;
+
+  /**
+   * Referrer used for links in this page.
+   */
+  DeprecatedString referrer() const;
+
+  /**
+   * Last-modified date (in raw string format), if received in the [HTTP] headers.
+   */
+  String lastModified() const;
+
+  bool isPointInsideSelection(const IntPoint&);
+
+  virtual bool tabsToLinks() const;
+  virtual bool tabsToAllControls() const;
+
+  // Editing operations.
+  enum TriState { falseTriState, trueTriState, mixedTriState };
+  void copyToPasteboard();
+  void cutToPasteboard();
+  void pasteFromPasteboard();
+  void pasteAndMatchStyle();
+  virtual bool canPaste() const = 0;
+  void redo();
+  void undo();
+  virtual bool canRedo() const = 0;
+  virtual bool canUndo() const = 0;
+  void computeAndSetTypingStyle(CSSStyleDeclaration* , EditAction editingAction=EditActionUnspecified);
+  void applyStyle(CSSStyleDeclaration* , EditAction editingAction=EditActionUnspecified);
+  void applyParagraphStyle(CSSStyleDeclaration* , EditAction editingAction=EditActionUnspecified);
+  TriState selectionHasStyle(CSSStyleDeclaration*) const;
+  bool selectionStartHasStyle(CSSStyleDeclaration*) const;
+  TriState selectionListState() const;
+  String selectionStartStylePropertyValue(int stylePropertyID) const;
+  void applyEditingStyleToBodyElement() const;
+  void removeEditingStyleFromBodyElement() const;
+  void applyEditingStyleToElement(Element*) const;
+  void removeEditingStyleFromElement(Element*) const;
+  virtual void print() = 0;
+  virtual bool isCharacterSmartReplaceExempt(const DeprecatedChar&, bool);
+
+  // Used to keep the part alive when running a script that might destroy it.
+  void keepAlive();
+
+  static void endAllLifeSupport();
+
+#ifndef NDEBUG
+  static void cancelAllKeepAlive();
+#endif
+  
+  virtual void deferredContentChangeObserved() = 0;
+  virtual void clearObservedContentModifiers() = 0;
+  
+  /**
+   * returns a KURL object for the given url. Use when
+   * you know what you're doing.
+   */
+  KURL completeURL(const DeprecatedString& url);
+
+  virtual void handleMouseReleaseDoubleClickEvent(const MouseEventWithHitTestResults&);
+  virtual void handleMousePressEvent(const MouseEventWithHitTestResults&);
+  virtual void handleMouseMoveEvent(const MouseEventWithHitTestResults&);
+  virtual void handleMouseReleaseEvent(const MouseEventWithHitTestResults&);
+  
+  void selectClosestWordFromMouseEvent(const PlatformMouseEvent&, Node* innerNode);
+
+  virtual void urlSelected(const DeprecatedString& url, const String& target);
+  virtual void urlSelected(const ResourceRequest&, const String& target);
+
+
+  // Methods with platform-specific overrides (and no base class implementation).
+  virtual void setTitle(const String&) = 0;
+  virtual void handledOnloadEvents() = 0;
+  virtual String userAgent() const = 0;
+  virtual String incomingReferrer() const = 0;
+  virtual String mimeTypeForFileName(const String&) const = 0;
+  virtual KJS::Bindings::Instance* getEmbedInstanceForWidget(Widget*) = 0;
+  virtual KJS::Bindings::Instance* getObjectInstanceForWidget(Widget*) = 0;
+  virtual void markMisspellingsInAdjacentWords(const VisiblePosition&) = 0;
+  virtual void markMisspellings(const SelectionController&) = 0;
+  virtual void runJavaScriptAlert(const String& message) = 0;
+  virtual bool runJavaScriptConfirm(const String& message) = 0;
+  virtual bool runJavaScriptPrompt(const String& message, const String& defaultValue, String& result) = 0;  
+  virtual bool shouldInterruptJavaScript() = 0;
+  virtual bool locationbarVisible() = 0;
+  virtual bool menubarVisible() = 0;
+  virtual bool personalbarVisible() = 0;
+  virtual bool statusbarVisible() = 0;
+  virtual bool toolbarVisible() = 0;
+  virtual void scheduleClose() = 0;
+  virtual void focusWindow() = 0;
+  virtual void unfocusWindow() = 0;
+  virtual void createEmptyDocument() = 0;
+  virtual Range* markedTextRange() const = 0;
+  virtual void registerCommandForUndo(const EditCommandPtr&) = 0;
+  virtual void registerCommandForRedo(const EditCommandPtr&) = 0;
+  virtual void clearUndoRedoOperations() = 0;
+  virtual void issueUndoCommand() = 0;
+  virtual void issueRedoCommand() = 0;
+  virtual void issueCutCommand() = 0;
+  virtual void issueCopyCommand() = 0;
+  virtual void issuePasteCommand() = 0;
+  virtual void issuePasteAndMatchStyleCommand() = 0;
+  virtual void issueTransposeCommand() = 0;
+  virtual void respondToChangedSelection(const SelectionController& oldSelection, bool closeTyping) = 0;
+  virtual void respondToChangedContents() = 0;
+  virtual bool shouldChangeSelection(const SelectionController& oldSelection, const SelectionController& newSelection, EAffinity affinity, bool stillSelecting) const = 0;
+  virtual void partClearedInBegin() = 0; 
+  virtual void saveDocumentState() = 0;
+  virtual void restoreDocumentState() = 0;
+  virtual bool canGoBackOrForward(int distance) const = 0;
+  virtual void openURLRequest(const ResourceRequest&) = 0;
+  virtual void submitForm(const ResourceRequest&) = 0;
+  virtual void urlSelected(const ResourceRequest&) = 0;
+  virtual bool passSubframeEventToSubframe(MouseEventWithHitTestResults&, Frame* subframePart = 0) = 0;
+  virtual bool passWheelEventToChildWidget(Node*) = 0;
+  virtual void passEventToScrollView() { }
+  virtual bool lastEventIsMouseUp() const = 0;
+  virtual String overrideMediaType() const = 0;
+  virtual void redirectDataToPlugin(Widget* pluginWidget) { }
+  
+  void selectionLayoutChanged();
+  
+protected:
+  virtual Plugin* createPlugin(Element* node, const KURL& url, const Vector<String>& paramNames, const Vector<String>& paramValues, const String& mimeType) = 0;
+  virtual Frame* createFrame(const KURL& url, const String& name, Element* ownerElement, const String& referrer) = 0;
+  virtual ObjectContentType objectContentType(const KURL& url, const String& mimeType) = 0;
+
+  virtual void redirectionTimerFired(Timer<Frame>*);
+
+public:
+  void loadDone();
+
+  void finishedParsing();
+
+  void checkCompleted();
+
+  void reparseConfiguration();
+
+private:
+
+  void childBegin();
+
+  void submitFormAgain();
+
+  void started();
+
+  void completed(bool);
+  void childCompleted(bool);
+  void parentCompleted();
+
+    void lifeSupportTimerFired(Timer<Frame>*);
+    void endLifeSupport();
+
+  virtual void clear(bool clearWindowProperties = true);
+
+  void clearCaretRectIfNeeded();
+  void setFocusNodeIfNeeded();
+  void caretBlinkTimerFired(Timer<Frame>*);
+
+  void overflowAutoScrollTimerFired(Timer<Frame>*);
+  void startOverflowAutoScroll(const IntPoint &);
+  void stopOverflowAutoScroll();
+  int checkOverflowScroll(OverflowScrollAction);
+
+  void startAutoScroll();
+  void stopAutoScroll();
+  void overURL( const QString &url, const QString &target, bool shiftPressed = false );
+  bool shouldUsePlugin(Node* element, const KURL& url, const String& mimeType, bool hasFallback, bool& useFallback);
+  bool loadPlugin(RenderPart* renderer, const KURL& url, const String& mimeType, 
+                  const Vector<String>& paramNames, const Vector<String>& paramValues, bool useFallback);
+  Frame* loadSubframe(Element* ownerElement, const KURL& url, const String& name, const String& referrer);
+
+public:
+  void submitForm(const char* action, const String& url, const FormData& formData,
+                  const String& target, const String& contentType = String(),
+                  const String& boundary = String());
+  
+  bool requestObject(RenderPart* frame, const String& url, const AtomicString& frameName,
+                     const String& serviceType, const Vector<String>& paramNames, const Vector<String>& paramValues);
+  bool requestFrame(Element* ownerElement, const String& url, const AtomicString& frameName);
+
+  Document* document() const;
+  void setDocument(Document* newDoc);
+
+  // Workaround for the fact that it's hard to delete a frame.
+  // Call this after doing user-triggered selections to make it easy to delete the frame you entirely selected.
+  void selectFrameElementInParentIfFullySelected();
+  
+  virtual bool mouseDownMayStartSelect() const { return true; }
+
+  void handleFallbackContent();
+
+private:
+  void cancelRedirection(bool newLoadInProgress = false);
+
+ public:
+  KJS::JSValue* executeScript(const String& filename, int baseLine, Node*, const DeprecatedString& script);
+  KJSProxy* jScript();
+  Frame* opener();
+  void setOpener(Frame* _opener);
+  bool openedByJS();
+  void setOpenedByJS(bool _openedByJS);
+
+  void setSettings(Settings*);
+
+  void provisionalLoadStarted();
+  bool userGestureHint();
+  void didNotOpenURL(const KURL&);
+  void addData(const char* bytes, int length);
+  void addMetaData(const String& key, const String& value);
+  void setMediaType(const String&);
+
+  // root renderer for the document contained in this frame
+  RenderObject* renderer() const;
+  
+  Element* ownerElement();
+  // renderer for the element that contains this frame
+  RenderPart* ownerRenderer();
+
+  IntRect selectionRect() const;
+  FloatRect visibleSelectionRect() const;
+  bool isFrameSet() const;
+
+  HTMLFormElement* currentForm() const;
+
+  RenderStyle* styleForSelectionStart(Node* &nodeToRemove) const;
+
+  // Scrolls as necessary to reveal the selection
+  void revealSelection();
+  // Centers the selection regardless of whether it was already visible
+  void centerSelectionInVisibleArea() const;
+  void setSelectionFromNone();
+
+  bool scrollOverflow(ScrollDirection direction, ScrollGranularity granularity);
+
+  void adjustPageHeight(float* newBottom, float oldTop, float oldBottom, float bottomLimit);
+
+  bool canCachePage();
+  KJS::PausedTimeouts* pauseTimeouts();
+  void resumeTimeouts(KJS::PausedTimeouts*);
+  void pauseTimeoutsAndSave();
+  void resumeSavedTimeouts();
+  virtual int maximumImageSize() {return 0;}
+  void saveWindowProperties(KJS::SavedProperties* windowProperties);
+  void saveLocationProperties(KJS::SavedProperties* locationProperties);
+  void restoreWindowProperties(KJS::SavedProperties* windowProperties);
+  void restoreLocationProperties(KJS::SavedProperties* locationProperties);
+  void saveInterpreterBuiltins(KJS::SavedBuiltins& interpreterBuiltins);
+  void restoreInterpreterBuiltins(const KJS::SavedBuiltins& interpreterBuiltins);
+
+  static Frame* frameForWidget(const Widget*);
+  static Node* nodeForWidget(const Widget*);
+  static Frame* frameForNode(Node*);
+
+  static void clearDocumentFocus(Widget*);
+
+  void updatePolicyBaseURL();
+  void setPolicyBaseURL(const String&);
+
+  void forceLayout();
+  void forceLayoutWithPageWidthRange(float minPageWidth, float maxPageWidth);
+
+  void sendResizeEvent();
+  void sendOrientationChangeEvent();
+  virtual int orientation() const { return 0; }
+  void sendScrollEvent();
+  bool scrollbarsVisible();
+  void scrollToAnchor(const KURL&);
+  bool canMouseDownStartSelect(Node*);
+  bool passWidgetMouseDownEventToWidget(const MouseEventWithHitTestResults&, bool isDoubleClick);
+  bool passWidgetMouseDownEventToWidget(RenderWidget*);
+  virtual bool passMouseDownEventToWidget(Widget*) = 0;
+
+  void clearTimers();
+  static void clearTimers(FrameView*);
+
+    void setCaretBlinks(bool flag = true);
+
+  bool isActive() const;
+  virtual void setIsActive(bool flag);
+  void setWindowHasFocus(bool flag);
+  // Convenience, to avoid repeating the code to dig down to get this.
+
+  UChar backslashAsCurrencySymbol() const;
+
+  DeprecatedValueList<MarkedTextUnderline> markedTextUnderlines() const;  
+  bool markedTextUsesUnderlines() const;
+  
+  unsigned markAllMatchesForText(const String&, bool caseFlag);
+  bool markedTextMatchesAreHighlighted() const;
+  void setMarkedTextMatchesAreHighlighted(bool flag);
+  
+  // Call this method before handling a new user action, like on a mouse down or key down.
+  // Currently, all this does is clear the "don't submit form twice" data member.
+  void prepareForUserAction();
+  Node* mousePressNode();
+  
+  void clearRecordedFormValues();
+  void recordFormValue(const String& name, const String& value, PassRefPtr<HTMLFormElement>);
+
+  bool isComplete() const;
+  bool isLoadingMainResource() const;
+  
+  void replaceContentsWithScriptResult(const KURL& url);
+
+    void disconnectOwnerElement();
+
+    void setNeedsReapplyStyles();
+
+protected:
+    virtual void startRedirectionTimer();
+    virtual void stopRedirectionTimer();
+    
+    void handleAutoscroll(RenderLayer*);
+    void startAutoscrollTimer();
+    void stopAutoscrollTimer();
+
+ private:
+  void emitLoadEvent();
+  
+  void receivedFirstData();
+
+  /**
+   * @internal Extracts anchor and tries both encoded and decoded form.
+   */
+  void gotoAnchor();
+
+  void handleMousePressEventSingleClick(const MouseEventWithHitTestResults&);
+  void handleMousePressEventDoubleClick(const MouseEventWithHitTestResults&);
+  void handleMousePressEventTripleClick(const MouseEventWithHitTestResults&);
+
+  CSSComputedStyleDeclaration* selectionComputedStyle(Node* &nodeToRemove) const;
+
+    virtual void setStatusBarText(const String&);
+    
+    void autoscrollTimerFired(Timer<Frame>*);
+
+public:
+  friend class FrameMac;
+  friend class FrameWin;
+#if PLATFORM(GDK)
+  friend class FrameGdk;
 #endif
 
-    class TreeScope;
+  RenderObject::NodeInfo nodeInfoAtPoint(const IntPoint&, bool allowShadowContent);
+  bool hasSelection();
+  String documentTypeString() const;
 
-    class Frame : public RefCounted<Frame>, public TiledBackingStoreClient {
-    public:
-        static PassRefPtr<Frame> create(Page*, HTMLFrameOwnerElement*, FrameLoaderClient*);
+  void checkEmitLoadEvent();
+  bool didOpenURL(const KURL&);
+  virtual void didParse(double) { }
+  virtual void didLayout(bool, double) {}
+  virtual void didForcedLayout() {}
+  virtual void didReceiveDocType() {}
+  virtual char *windowState() { return 0; }
+  void setLayoutInterval(double);
+  double layoutInterval();
+  void setMaxParseDuration(double);
+  double maxParseDuration();
 
-        void init();
-        // Creates <html><body style="..."></body></html> doing minimal amount of work
-        void initWithSimpleHTMLDocument(const String& style, const KURL& url);
-        void setView(PassRefPtr<FrameView>);
-        void createView(const IntSize&, const Color&, bool, const IntSize&, bool,
-            ScrollbarMode = ScrollbarAuto, bool horizontalLock = false,
-            ScrollbarMode = ScrollbarAuto, bool verticalLock = false);
+  virtual void frameDetached();
 
-        ~Frame();
+  void updateBaseURLForEmptyDocument();
 
-        void addDestructionObserver(FrameDestructionObserver*);
-        void removeDestructionObserver(FrameDestructionObserver*);
+  KURL url() const;
+  void setResourceRequest(const ResourceRequest& request);
+  const ResourceRequest& resourceRequest() const;
 
-        void willDetachPage();
-        void detachFromPage();
-        void disconnectOwnerElement();
+  bool containsPlugins() const;
+  
+  bool prohibitsScrolling() const;
+  void setProhibitsScrolling(const bool);
+  
+  // split out controller objects
+  FrameTree* tree() const;
+  SelectionController& selection() const; // FIXME: Change to pointer?
+  SelectionController& dragCaret() const; // FIXME: Change to pointer?
+  DOMWindow* domWindow() const;
 
-        Page* page() const;
-        HTMLFrameOwnerElement* ownerElement() const;
+ private:
+  friend class FramePrivate;
+  FramePrivate* d;
+};
 
-        Document* document() const;
-        FrameView* view() const;
+}
 
-        Editor* editor() const;
-        EventHandler* eventHandler() const;
-        FrameLoader* loader() const;
-        NavigationScheduler* navigationScheduler() const;
-        FrameSelection* selection() const;
-        FrameTree* tree() const;
-        AnimationController* animation() const;
-        ScriptController* script();
-        
-        RenderView* contentRenderer() const; // Root of the render tree for the document contained in this frame.
-        RenderPart* ownerRenderer() const; // Renderer for the element that contains this frame.
-
-#if ENABLE(PAGE_VISIBILITY_API)
-        void dispatchVisibilityStateChangeEvent();
 #endif
-
-    // ======== All public functions below this point are candidates to move out of Frame into another class. ========
-
-        bool isDisconnected() const;
-        void setIsDisconnected(bool);
-        bool excludeFromTextSearch() const;
-        void setExcludeFromTextSearch(bool);
-        bool inScope(TreeScope*) const;
-
-        float documentScale() const; // Current zoom level.
-        float minimumDocumentScale() const; // Zoomed out scale.
-        float deviceScaleFactor() const; // Device screen resolution.
-        void documentScaleChanged();
-
-        void injectUserScripts(UserScriptInjectionTime);
-        
-        String layerTreeAsText(bool showDebugInfo = false) const;
-
-        // Unlike most accessors in this class, domWindow() always creates a new DOMWindow if m_domWindow is null.
-        // Callers that don't need a new DOMWindow to be created should use existingDOMWindow().
-        DOMWindow* domWindow() const;
-        DOMWindow* existingDOMWindow() { return m_domWindow.get(); }
-        void setDOMWindow(DOMWindow*);
-        void clearDOMWindow();
-
-        static Frame* frameForWidget(const Widget*);
-
-        Settings* settings() const; // can be NULL
-
-        void setPrinting(bool printing, const FloatSize& pageSize, const FloatSize& originalPageSize, float maximumShrinkRatio, AdjustViewSizeOrNot);
-        bool shouldUsePrintingLayout() const;
-        FloatSize resizePageRectsKeepingRatio(const FloatSize& originalSize, const FloatSize& expectedSize);
-
-        bool inViewSourceMode() const;
-        void setInViewSourceMode(bool = true);
-
-        void setDocument(PassRefPtr<Document>);
-
-        void setPageZoomFactor(float factor);
-        float pageZoomFactor() const { return m_pageZoomFactor; }
-        void setTextZoomFactor(float factor);
-        float textZoomFactor() const { return m_textZoomFactor; }
-        void setPageAndTextZoomFactors(float pageZoomFactor, float textZoomFactor);
-
-        // Scale factor of this frame with respect to the container.
-        float frameScaleFactor() const;
-
-#if USE(ACCELERATED_COMPOSITING)
-        void deviceOrPageScaleFactorChanged();
-#endif
-
-        void didParse(double);
-        void didLayout(bool, double);
-        void didForcedLayout();
-        void getPPTStats(unsigned& parseCount, unsigned& layoutCount, unsigned& forcedLayoutCount, CFTimeInterval& parseDuration, CFTimeInterval& layoutDuration);
-        void clearPPTStats();
-
-        const ViewportArguments& viewportArguments() const;
-        void setViewportArguments(const ViewportArguments&);
-        NSDictionary* dictionaryForViewportArguments(const ViewportArguments& arguments) const;
-
-        void betterApproximateNode(const IntPoint& testPoint, NodeQualifier, Node*& best, Node* failedNode, IntPoint& bestPoint, IntRect& bestRect, const IntRect& testRect);
-        bool hitTestResultAtViewportLocation(CGPoint* viewportLocation, HitTestResult& hitTestResult, IntPoint& center);
-        Node* qualifyingNodeAtViewportLocation(CGPoint* viewportLocation, NodeQualifier aQualifer, bool shouldApproximate);
-
-        Node* deepestNodeAtLocation(CGPoint* viewportLocation);
-        Node* nodeRespondingToClickEvents(CGPoint* viewportLocation);
-        Node* nodeRespondingToScrollWheelEvents(CGPoint* viewportLocation);
-
-        int indexCountOfWordPrecedingSelection(NSString *word) const;
-        NSArray *wordsInCurrentParagraph() const;
-        CGRect renderRectForPoint(CGPoint point, bool* isReplaced, float* fontSize) const;
-
-        void setSelectionChangeCallbacksDisabled(bool b = true);
-        bool selectionChangeCallbacksDisabled() const;
-        void viewportOffsetChanged();
-        
-        void overflowScrollPositionChangedForNode(const IntPoint&, Node*, bool isUserScroll);
-
-        void resetAllGeolocationPermission();
-
-#if ENABLE(ORIENTATION_EVENTS)
-        // Orientation is the interface orientation in degrees. Some examples are:
-        //  0 is straight up; -90 is when the device is rotated 90 clockwise;
-        //  90 is when rotated counter clockwise.
-        void sendOrientationChangeEvent(int orientation);
-        int orientation() const { return m_orientation; }
-#endif
-
-        void clearTimers();
-        static void clearTimers(FrameView*, Document*);
-
-        String documentTypeString() const;
-
-        String displayStringModifiedByEncoding(const String&) const;
-
-        DragImageRef nodeImage(Node*);
-        DragImageRef dragImageForSelection();
-
-        void setSingleLineSelectionBehavior(bool b);
-        bool singleLineSelectionBehavior() const;
-
-        /**
-         * Scroll the selection in an overflow layer on iPhone.
-         */
-        void scrollOverflowLayer(RenderLayer *, const IntRect &visibleRect, const IntRect &exposeRect);
-
-    private:
-        void overflowAutoScrollTimerFired(Timer<Frame>*);
-        void startOverflowAutoScroll(const IntPoint &);
-        void stopOverflowAutoScroll();
-        int checkOverflowScroll(OverflowScrollAction);
-
-    public:
-
-        VisiblePosition visiblePositionForPoint(const IntPoint& framePoint);
-        Document* documentAtPoint(const IntPoint& windowPoint);
-        PassRefPtr<Range> rangeForPoint(const IntPoint& framePoint);
-
-        String searchForLabelsAboveCell(RegularExpression*, HTMLTableCellElement*, size_t* resultDistanceFromStartOfCell);
-        String searchForLabelsBeforeElement(const Vector<String>& labels, Element*, size_t* resultDistance, bool* resultIsInCellAbove);
-        String matchLabelsAgainstElement(const Vector<String>& labels, Element*);
-
-#if PLATFORM(MAC)
-        CGImageRef selectionImage(bool forceBlackText = false) const;
-        CGImageRef nodeImage(Node*, NodeImageFlags flags = DrawNormally) const;
-        CGImageRef imageFromRect(NSRect, bool allowDownsampling = false) const;
-#endif
-
-    public:
-        void setTextAutosizingWidth(float width);
-        float textAutosizingWidth() const;
-
-    public:
-        int preferredHeight() const;
-        int innerLineHeight(DOMNode *node) const;
-        void updateLayout() const;
-        NSRect caretRect() const;
-        NSRect rectForScrollToVisible() const;
-        NSRect rectForSelection(VisibleSelection&) const;
-        DOMCSSStyleDeclaration *styleAtSelectionStart() const;
-        void createDefaultFieldEditorDocumentStructure() const;
-        unsigned formElementsCharacterCount() const;
-        void setTimersPaused(bool);
-        bool timersPaused() const { return m_timersPausedCount; }
-        void dispatchPageHideEventBeforePause();
-        void dispatchPageShowEventBeforeResume();
-        void setRangedSelectionBaseToCurrentSelection();
-        void setRangedSelectionBaseToCurrentSelectionStart();
-        void setRangedSelectionBaseToCurrentSelectionEnd();
-        void clearRangedSelectionInitialExtent();
-        void setRangedSelectionInitialExtentToCurrentSelectionStart();
-        void setRangedSelectionInitialExtentToCurrentSelectionEnd();
-        VisibleSelection rangedSelectionBase() const;
-        VisibleSelection rangedSelectionInitialExtent() const;
-        void recursiveSetUpdateAppearanceEnabled(bool);
-        NSArray* interpretationsForCurrentRoot() const;
-    private:
-        void setTimersPausedInternal(bool);
-    public:
-        void suspendActiveDOMObjectsAndAnimations();
-        void resumeActiveDOMObjectsAndAnimations();
-        bool activeDOMObjectsAndAnimationsSuspended() const { return m_activeDOMObjectsAndAnimationsSuspendedCount > 0; }
-
-        // Should only be called on the main frame of a page.
-        void notifyChromeClientWheelEventHandlerCountChanged() const;
-        void notifyChromeClientTouchEventHandlerCountChanged() const;
-
-    // ========
-
-    private:
-        Frame(Page*, HTMLFrameOwnerElement*, FrameLoaderClient*);
-
-        void injectUserScriptsForWorld(DOMWrapperWorld*, const UserScriptVector&, UserScriptInjectionTime);
-
-        HashSet<FrameDestructionObserver*> m_destructionObservers;
-
-        Page* m_page;
-        mutable FrameTree m_treeNode;
-        mutable FrameLoader m_loader;
-        mutable NavigationScheduler m_navigationScheduler;
-
-        mutable RefPtr<DOMWindow> m_domWindow;
-
-        HTMLFrameOwnerElement* m_ownerElement;
-        RefPtr<FrameView> m_view;
-        RefPtr<Document> m_doc;
-
-        ScriptController m_script;
-
-        mutable Editor m_editor;
-        mutable FrameSelection m_selection;
-        mutable EventHandler m_eventHandler;
-        mutable AnimationController m_animationController;
-
-        Timer<Frame> m_overflowAutoScrollTimer;
-        float m_overflowAutoScrollDelta;
-        IntPoint m_overflowAutoScrollPos;
-        ViewportArguments m_viewportArguments;
-        bool m_selectionChangeCallbacksDisabled;
-        VisibleSelection m_rangedSelectionBase;
-        VisibleSelection m_rangedSelectionInitialExtent;
-        float m_textAutosizingWidth;
-        unsigned m_parseCount;
-        unsigned m_layoutCount;
-        unsigned m_forcedLayoutCount;
-        CFTimeInterval m_parseDuration;
-        CFTimeInterval m_layoutDuration;
-
-        float m_pageZoomFactor;
-        float m_textZoomFactor;
-
-#if ENABLE(ORIENTATION_EVENTS)
-        int m_orientation;
-#endif
-
-        bool m_inViewSourceMode;
-        bool m_isDisconnected;
-        bool m_excludeFromTextSearch;
-
-#if USE(TILED_BACKING_STORE)
-    // FIXME: The tiled backing store belongs in FrameView, not Frame.
-
-    public:
-        TiledBackingStore* tiledBackingStore() const { return m_tiledBackingStore.get(); }
-        void setTiledBackingStoreEnabled(bool);
-
-    private:
-        // TiledBackingStoreClient interface
-        virtual void tiledBackingStorePaintBegin();
-        virtual void tiledBackingStorePaint(GraphicsContext*, const IntRect&);
-        virtual void tiledBackingStorePaintEnd(const Vector<IntRect>& paintedArea);
-        virtual IntRect tiledBackingStoreContentsRect();
-        virtual IntRect tiledBackingStoreVisibleRect();
-        virtual Color tiledBackingStoreBackgroundColor() const;
-
-        OwnPtr<TiledBackingStore> m_tiledBackingStore;
-#endif
-
-        int m_activeDOMObjectsAndAnimationsSuspendedCount;
-        bool m_singleLineSelectionBehavior;
-        int m_timersPausedCount;
-    };
-
-    inline void Frame::init()
-    {
-        // Avoid doing this work on simple document construction.
-        XLinkNames::init();
-        m_loader.init();
-    }
-
-    inline FrameLoader* Frame::loader() const
-    {
-        return &m_loader;
-    }
-
-    inline NavigationScheduler* Frame::navigationScheduler() const
-    {
-        return &m_navigationScheduler;
-    }
-
-    inline FrameView* Frame::view() const
-    {
-        return m_view.get();
-    }
-
-    inline ScriptController* Frame::script()
-    {
-        return &m_script;
-    }
-
-    inline Document* Frame::document() const
-    {
-        return m_doc.get();
-    }
-
-    inline FrameSelection* Frame::selection() const
-    {
-        return &m_selection;
-    }
-
-    inline Editor* Frame::editor() const
-    {
-        return &m_editor;
-    }
-
-    inline AnimationController* Frame::animation() const
-    {
-        return &m_animationController;
-    }
-
-    inline HTMLFrameOwnerElement* Frame::ownerElement() const
-    {
-        return m_ownerElement;
-    }
-
-    inline bool Frame::isDisconnected() const
-    {
-        return m_isDisconnected;
-    }
-
-    inline void Frame::setIsDisconnected(bool isDisconnected)
-    {
-        m_isDisconnected = isDisconnected;
-    }
-
-    inline bool Frame::excludeFromTextSearch() const
-    {
-        return m_excludeFromTextSearch;
-    }
-
-    inline void Frame::setExcludeFromTextSearch(bool exclude)
-    {
-        m_excludeFromTextSearch = exclude;
-    }
-
-    inline bool Frame::inViewSourceMode() const
-    {
-        return m_inViewSourceMode;
-    }
-
-    inline void Frame::setInViewSourceMode(bool mode)
-    {
-        m_inViewSourceMode = mode;
-    }
-
-    inline FrameTree* Frame::tree() const
-    {
-        return &m_treeNode;
-    }
-
-    inline Page* Frame::page() const
-    {
-        return m_page;
-    }
-
-    inline void Frame::detachFromPage()
-    {
-        m_page = 0;
-    }
-
-    inline EventHandler* Frame::eventHandler() const
-    {
-        return &m_eventHandler;
-    }
-
-} // namespace WebCore
-
-#endif // Frame_h

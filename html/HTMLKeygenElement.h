@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,43 +18,31 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLKeygenElement_h
-#define HTMLKeygenElement_h
+#ifndef HTML_HTMLKeygenElementImpl_H
+#define HTML_HTMLKeygenElementImpl_H
 
-#include "HTMLFormControlElementWithState.h"
+#include "HTMLSelectElement.h"
 
 namespace WebCore {
 
-class HTMLSelectElement;
-
-class HTMLKeygenElement : public HTMLFormControlElementWithState {
+class HTMLKeygenElement : public HTMLSelectElement {
 public:
-    static PassRefPtr<HTMLKeygenElement> create(const QualifiedName&, Document*, HTMLFormElement*);
+    HTMLKeygenElement(Document*, HTMLFormElement* = 0);
 
-    virtual bool willValidate() const { return false; }
+    virtual int tagPriority() const { return 0; }
+    virtual const AtomicString& type() const;
+    virtual bool isEnumeratable() const { return false; }
+    virtual void parseMappedAttribute(MappedAttribute*);
+    virtual bool appendFormData(FormDataList&, bool);
 
 private:
-    HTMLKeygenElement(const QualifiedName&, Document*, HTMLFormElement*);
-
-    virtual bool canStartSelection() const { return false; }
-
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-
-    virtual bool appendFormData(FormDataList&, bool);
-    virtual const AtomicString& formControlType() const;
-    virtual bool isOptionalFormControl() const { return false; }
-
-    virtual bool isEnumeratable() const { return true; }
-    virtual bool supportLabels() const OVERRIDE { return true; }
-
-    virtual void reset();
-
-    HTMLSelectElement* shadowSelect() const;
+    AtomicString m_challenge;
+    AtomicString m_keyType;
 };
 
 } //namespace

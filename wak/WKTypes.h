@@ -1,12 +1,8 @@
 //
 //  WKTypes.h
 //
-//  Copyright (C) 2005, 2006, 2007, 2009 Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
 //
-
-#ifndef WKTypes_h
-#define WKTypes_h
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -14,11 +10,12 @@ extern "C" {
 typedef struct _WKObject WKObject;
 typedef struct _WKObject *WKObjectRef;
 typedef struct WKControl* WKControlRef;
+typedef struct WKClipView* WKClipViewRef;
+typedef struct WKScrollerView* WKScrollerViewRef;
+typedef struct WKScrollView* WKScrollViewRef;
 typedef struct WKWindow* WKWindowRef;
 typedef struct WKView* WKViewRef;
 
 #ifdef __cplusplus
 }
 #endif
-
-#endif // WKTypes_h

@@ -1,7 +1,7 @@
 /*
  * This file is part of the XSL implementation.
  *
- * Copyright (C) 2004, 2006, 2008, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,126 +15,70 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef XSLStyleSheet_h
-#define XSLStyleSheet_h
+#ifndef XSLStyleSheet_H
+#define XSLStyleSheet_H
 
-#if ENABLE(XSLT)
+#ifdef KHTML_XSLT
 
-#include "ProcessingInstruction.h"
 #include "StyleSheet.h"
-
-#if !USE(QXMLQUERY)
 #include <libxml/parser.h>
 #include <libxslt/transform.h>
-#endif
-
-#include <wtf/PassRefPtr.h>
 
 namespace WebCore {
 
+class DocLoader;
+class Document;
 class XSLImportRule;
     
 class XSLStyleSheet : public StyleSheet {
 public:
-#if !USE(QXMLQUERY)
-    static PassRefPtr<XSLStyleSheet> create(XSLImportRule* parentImport, const String& originalURL, const KURL& finalURL)
-    {
-        return adoptRef(new XSLStyleSheet(parentImport, originalURL, finalURL));
-    }
-#endif
-    static PassRefPtr<XSLStyleSheet> create(ProcessingInstruction* parentNode, const String& originalURL, const KURL& finalURL)
-    {
-        return adoptRef(new XSLStyleSheet(parentNode, originalURL, finalURL, false));
-    }
-    static PassRefPtr<XSLStyleSheet> createEmbedded(ProcessingInstruction* parentNode, const KURL& finalURL)
-    {
-        return adoptRef(new XSLStyleSheet(parentNode, finalURL.string(), finalURL, true));
-    }
-
-    // Taking an arbitrary node is unsafe, because owner node pointer can become stale.
-    // XSLTProcessor ensures that the stylesheet doesn't outlive its parent, in part by not exposing it to JavaScript.
-    static PassRefPtr<XSLStyleSheet> createForXSLTProcessor(Node* parentNode, const String& originalURL, const KURL& finalURL)
-    {
-        return adoptRef(new XSLStyleSheet(parentNode, originalURL, finalURL, false));
-    }
-
-    virtual ~XSLStyleSheet();
-
-    bool parseString(const String&);
+    XSLStyleSheet(Node* parentNode, const String& href = String(), bool embedded = false);
+    XSLStyleSheet(XSLImportRule* parentImport, const String& href = String());
+    ~XSLStyleSheet();
     
-    void checkLoaded();
+    virtual bool isXSLStyleSheet() const { return true; }
+
+    virtual String type() const { return "text/xml"; }
+
+    virtual bool parseString(const String &string, bool strict = true);
     
-    const KURL& finalURL() const { return m_finalURL; }
+    virtual bool isLoading();
+    virtual void checkLoaded();
 
     void loadChildSheets();
-    void loadChildSheet(const String& href);
+    void loadChildSheet(const DeprecatedString& href);
 
-    CachedResourceLoader* cachedResourceLoader();
-
-    Document* ownerDocument();
-    virtual XSLStyleSheet* parentStyleSheet() const OVERRIDE { return m_parentStyleSheet; }
-    void setParentStyleSheet(XSLStyleSheet* parent);
-
-#if USE(QXMLQUERY)
-    String sheetString() const { return m_sheetString; }
-#else
-    xmlDocPtr document();
     xsltStylesheetPtr compileStyleSheet();
-    xmlDocPtr locateStylesheetSubResource(xmlDocPtr parentDoc, const xmlChar* uri);
-#endif
+
+    DocLoader* docLoader();
+
+    Document* ownerDocument() { return m_ownerDocument; }
+    void setOwnerDocument(Document* doc) { m_ownerDocument = doc; }
+
+    xmlDocPtr document();
 
     void clearDocuments();
 
+    xmlDocPtr locateStylesheetSubResource(xmlDocPtr parentDoc, const xmlChar* uri);
+    
     void markAsProcessed();
     bool processed() const { return m_processed; }
-    
-    virtual String type() const OVERRIDE { return "text/xml"; }
-    virtual bool disabled() const OVERRIDE { return m_isDisabled; }
-    virtual void setDisabled(bool b) OVERRIDE { m_isDisabled = b; }
-    virtual Node* ownerNode() const OVERRIDE { return m_ownerNode; }
-    virtual String href() const OVERRIDE { return m_originalURL; }
-    virtual String title() const OVERRIDE { return emptyString(); }
 
-    virtual void clearOwnerNode() OVERRIDE { m_ownerNode = 0; }
-    virtual KURL baseURL() const OVERRIDE { return m_finalURL; }
-    virtual bool isLoading() const OVERRIDE;
-
-    virtual bool isXSLStyleSheet() const OVERRIDE { return true; }
-
-private:
-    XSLStyleSheet(Node* parentNode, const String& originalURL, const KURL& finalURL, bool embedded);
-#if !USE(QXMLQUERY)
-    XSLStyleSheet(XSLImportRule* parentImport, const String& originalURL, const KURL& finalURL);
-#endif
-    
-    Node* m_ownerNode;
-    String m_originalURL;
-    KURL m_finalURL;
-    bool m_isDisabled;
-
-    Vector<OwnPtr<XSLImportRule> > m_children;
-
+protected:
     Document* m_ownerDocument;
+    xmlDocPtr m_stylesheetDoc;
     bool m_embedded;
     bool m_processed;
-
-#if USE(QXMLQUERY)
-    String m_sheetString;
-#else
-    xmlDocPtr m_stylesheetDoc;
     bool m_stylesheetDocTaken;
-#endif
-    
-    XSLStyleSheet* m_parentStyleSheet;
 };
 
 } // namespace WebCore
 
-#endif // ENABLE(XSLT)
+#endif // KHTML_XSLT
 
-#endif // XSLStyleSheet_h
+#endif // XSLStyleSheet_H

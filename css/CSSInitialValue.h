@@ -1,6 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,43 +16,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSInitialValue_h
-#define CSSInitialValue_h
+#ifndef CSSInitialValue_H
+#define CSSInitialValue_H
 
 #include "CSSValue.h"
-#include <wtf/PassRefPtr.h>
 
 namespace WebCore {
 
-class CSSInitialValue : public CSSValue {
+class CSSInitialValue : public CSSValue
+{
 public:
-    static PassRefPtr<CSSInitialValue> createExplicit()
-    {
-        return adoptRef(new CSSInitialValue(/* implicit */ false));
-    }
-    static PassRefPtr<CSSInitialValue> createImplicit()
-    {
-        return adoptRef(new CSSInitialValue(/* implicit */ true));
-    }
-
-    String customCssText() const;
-
-    bool isImplicit() const { return m_isImplicit; }
-
-private:
-    CSSInitialValue(bool implicit)
-        : CSSValue(InitialClass)
-        , m_isImplicit(implicit)
-    {
-    }
-
-    bool m_isImplicit;
+    virtual unsigned short cssValueType() const;
+    virtual String cssText() const;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSInitialValue_h
+#endif

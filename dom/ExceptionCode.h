@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ *  Copyright (C) 2006 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -13,14 +13,11 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #ifndef ExceptionCode_h
 #define ExceptionCode_h
-
-// FIXME: Move this header into the files that actually need it.
-#include "ExceptionCodeDescription.h"
 
 namespace WebCore {
 
@@ -51,21 +48,9 @@ namespace WebCore {
 
         // Introduced in DOM Level 3:
         VALIDATION_ERR = 16,
-        TYPE_MISMATCH_ERR = 17,
-
-        // XMLHttpRequest extension:
-        SECURITY_ERR = 18,
-
-        // Others introduced in HTML5:
-        NETWORK_ERR = 19,
-        ABORT_ERR = 20,
-        URL_MISMATCH_ERR = 21,
-        QUOTA_EXCEEDED_ERR = 22,
-        TIMEOUT_ERR = 23,
-        INVALID_NODE_TYPE_ERR = 24,
-        DATA_CLONE_ERR = 25
+        TYPE_MISMATCH_ERR = 17
     };
 
-} // namespace WebCore
+}
 
-#endif // ExceptionCode_h
+#endif

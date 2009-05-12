@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,87 +17,74 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderListMarker_h
-#define RenderListMarker_h
+#ifndef RenderListMarker_H
+#define RenderListMarker_H
 
+#include "DeprecatedString.h"
 #include "RenderBox.h"
 
 namespace WebCore {
 
 class RenderListItem;
 
-String listMarkerText(EListStyleType, int value);
-
-// Used to render the list item's marker.
-// The RenderListMarker always has to be a child of a RenderListItem.
-class RenderListMarker : public RenderBox {
+/* used to render the lists marker.
+     This class always has to be a direct child of a RenderListItem!
+*/
+class RenderListMarker : public RenderBox
+{
 public:
-    RenderListMarker(RenderListItem*);
-    virtual ~RenderListMarker();
+    RenderListMarker(Document*);
+    ~RenderListMarker();
 
-    virtual void computePreferredLogicalWidths();
+    virtual void setStyle(RenderStyle*);
 
-    const String& text() const { return m_text; }
-    String suffix() const;
-
-    bool isInside() const;
-
-private:
     virtual const char* renderName() const { return "RenderListMarker"; }
+    // so the marker gets to layout itself. Only needed for
+    // list-style-position: inside
+
+    virtual void paint(PaintInfo&, int xoff, int yoff);
+    virtual void layout();
+    virtual void calcMinMaxWidth();
+
+    virtual void imageChanged(CachedImage*);
+
+    virtual void calcWidth();
+
+    virtual InlineBox* createInlineBox(bool, bool, bool);
+
+    virtual short lineHeight(bool b, bool isRootLineBox=false) const;
+    virtual short baselinePosition(bool b, bool isRootLineBox=false) const;
 
     virtual bool isListMarker() const { return true; }
+    
+    CachedImage* listImage() const { return m_listImage; }
+    
+    RenderListItem* listItem() { return m_listItem; }
+    void setListItem(RenderListItem* listItem) { m_listItem = listItem; }
+    
+    const DeprecatedString& text() const { return m_item; }
 
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-
-    virtual void layout();
-
-    virtual void imageChanged(WrappedImagePtr, const IntRect* = 0);
-
-    virtual InlineBox* createInlineBox();
-
-    virtual LayoutUnit lineHeight(bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
-    virtual LayoutUnit baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
-
-    bool isImage() const;
-    bool isText() const { return !isImage(); }
-
+    bool isInside() const;
+    
+    IntRect getRelativeMarkerRect();
+    
+    virtual SelectionState selectionState() const { return m_selectionState; }
     virtual void setSelectionState(SelectionState);
-    virtual LayoutRect selectionRectForRepaint(RenderBoxModelObject* repaintContainer, bool clipToVisibleContent = true);
+    virtual IntRect selectionRect();
     virtual bool canBeSelectionLeaf() const { return true; }
 
-    void updateMargins();
-
-    virtual void styleWillChange(StyleDifference, const RenderStyle* newStyle);
-    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
-
-    IntRect getRelativeMarkerRect();
-    LayoutRect localSelectionRect();
-
-    String m_text;
-    RefPtr<StyleImage> m_image;
+private:
+    DeprecatedString m_item;
+    CachedImage* m_listImage;
     RenderListItem* m_listItem;
+    SelectionState m_selectionState;
 };
 
-inline RenderListMarker* toRenderListMarker(RenderObject* object)
-{
-    ASSERT(!object || object->isListMarker());
-    return static_cast<RenderListMarker*>(object);
-}
+} //namespace
 
-inline const RenderListMarker* toRenderListMarker(const RenderObject* object)
-{
-    ASSERT(!object || object->isListMarker());
-    return static_cast<const RenderListMarker*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderListMarker(const RenderListMarker*);
-
-} // namespace WebCore
-
-#endif // RenderListMarker_h
+#endif

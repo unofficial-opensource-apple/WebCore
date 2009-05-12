@@ -1,4 +1,6 @@
 /*
+ * This file is part of the HTML rendering engine for KDE.
+ *
  * Copyright (C) 2002 Lars Knoll (knoll@kde.org)
  *           (C) 2002 Dirk Mueller (mueller@kde.org)
  *
@@ -14,14 +16,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef FixedTableLayout_h
-#define FixedTableLayout_h
+#ifndef FixedTableLayout_H
+#define FixedTableLayout_H
 
-#include "LayoutTypes.h"
 #include "Length.h"
 #include "TableLayout.h"
 #include <wtf/Vector.h>
@@ -30,19 +31,21 @@ namespace WebCore {
 
 class RenderTable;
 
-class FixedTableLayout : public TableLayout {
+class FixedTableLayout : public TableLayout
+{
 public:
     FixedTableLayout(RenderTable*);
+    ~FixedTableLayout();
 
-    virtual void computePreferredLogicalWidths(LayoutUnit& minWidth, LayoutUnit& maxWidth);
-    virtual void layout();
+    void calcMinMaxWidth();
+    void layout();
 
-private:
+protected:
     int calcWidthArray(int tableWidth);
 
     Vector<Length> m_width;
 };
 
-} // namespace WebCore
+}
 
-#endif // FixedTableLayout_h
+#endif

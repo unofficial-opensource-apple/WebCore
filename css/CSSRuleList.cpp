@@ -1,7 +1,9 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2005, 2006, 2012 Apple Computer, Inc.
+ * Copyright (C) 2002, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,15 +17,14 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "CSSRuleList.h"
 
 #include "CSSRule.h"
-#include "CSSStyleSheet.h"
+#include "StyleList.h"
 
 namespace WebCore {
 
@@ -31,24 +32,48 @@ CSSRuleList::CSSRuleList()
 {
 }
 
+CSSRuleList::CSSRuleList(StyleList* lst)
+{
+    if (lst) {
+        unsigned len = lst->length();
+        for (unsigned i = 0; i < len; ++i) {
+            StyleBase* style = lst->item(i);
+            if (style->isRule())
+                append(static_cast<CSSRule*>(style));
+        }
+    }
+}
+
 CSSRuleList::~CSSRuleList()
 {
+    CSSRule* rule;
+    while (!m_lstCSSRules.isEmpty() && (rule = m_lstCSSRules.take(0)))
+        rule->deref();
 }
 
-StaticCSSRuleList::StaticCSSRuleList() 
-    : m_refCount(1)
-{ 
-}
-
-StaticCSSRuleList::~StaticCSSRuleList()
+void CSSRuleList::deleteRule(unsigned index)
 {
+    CSSRule* rule = m_lstCSSRules.take(index);
+    if (rule)
+        rule->deref();
+    else
+        ; // ### Throw INDEX_SIZE_ERR exception here (TODO)
 }
 
-void StaticCSSRuleList::deref()
-{ 
-    ASSERT(m_refCount);
-    if (!--m_refCount)
-        delete this;
+void CSSRuleList::append(CSSRule* rule)
+{
+    insertRule(rule, m_lstCSSRules.count()) ;
 }
 
-} // namespace WebCore
+unsigned CSSRuleList::insertRule(CSSRule* rule, unsigned index)
+{
+    if (rule && m_lstCSSRules.insert(index, rule)) {
+        rule->ref();
+        return index;
+    }
+
+    // ### Should throw INDEX_SIZE_ERR exception instead! (TODO)
+    return 0;
+}
+
+}

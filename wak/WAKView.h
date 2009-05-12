@@ -1,22 +1,16 @@
 //
 //  WAKView.h
 //
-//  Copyright (C) 2005, 2006, 2007, 2008, 2009 Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
 //
-
-#ifndef WAKView_h
-#define WAKView_h
-
-#import "WAKResponder.h"
-#import "WKView.h"
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
 
-#ifndef NSRect
+#import "WAKResponder.h"
+#import "WKView.h"
+
 #define NSRect CGRect
-#endif
 #define NSPoint CGPoint
-#define NSSize CGSize
 
 extern NSString *WAKViewFrameSizeDidChangeNotification;
 extern NSString *WAKViewDidScrollNotification;
@@ -30,9 +24,6 @@ extern NSString *WAKViewDidScrollNotification;
     
     NSMutableSet *subviewReferences;    // This array is only used to keep WAKViews alive.
                                         // The actual subviews are maintained by the WKView.
-
-    BOOL _isHidden;
-    BOOL _drawsOwnDescendants;
 }
 
 + (WAKView *)focusView;
@@ -45,9 +36,7 @@ extern NSString *WAKViewDidScrollNotification;
 - (NSRect)frame;
 
 - (void)setFrame:(NSRect)frameRect;
-- (void)setFrameOrigin:(NSPoint)newOrigin;
 - (void)setFrameSize:(NSSize)newSize;
-- (void)setBoundsOrigin:(NSPoint)newOrigin;
 - (void)setBoundsSize:(NSSize)size;
 - (void)frameSizeChanged;
 
@@ -71,9 +60,7 @@ extern NSString *WAKViewDidScrollNotification;
 - (void)displayIfNeeded;
 - (void)displayRect:(NSRect)rect;
 - (void)displayRectIgnoringOpacity:(NSRect)rect;
-- (void)displayRectIgnoringOpacity:(NSRect)rect inContext:(CGContextRef)context;
 - (void)drawRect:(CGRect)rect;
-- (void)viewWillDraw;
 
 - (WAKView *)hitTest:(NSPoint)point;
 - (NSPoint)convertPoint:(NSPoint)point fromView:(WAKView *)aView;
@@ -96,11 +83,9 @@ extern NSString *WAKViewDidScrollNotification;
 - (WAKView *)previousKeyView;
 - (WAKView *)previousValidKeyView;
 
-- (void)invalidateGState;
 - (void)releaseGState;
 
 - (void)setAutoresizingMask:(unsigned int)mask;
-- (unsigned int)autoresizingMask;
 - (BOOL)inLiveResize;
 
 - (BOOL)mouse:(NSPoint)aPoint inRect:(NSRect)aRect;
@@ -112,12 +97,4 @@ extern NSString *WAKViewDidScrollNotification;
 - (void)setScale:(float)scale;
 - (float)scale;
 
-- (void)_setDrawsOwnDescendants:(BOOL)draw;
-
-- (void)_appendDescriptionToString:(NSMutableString *)info atLevel:(int)level;
-
-+ (void)_setInterpolationQuality:(int)quality;
-
 @end
-
-#endif // WAKView_h

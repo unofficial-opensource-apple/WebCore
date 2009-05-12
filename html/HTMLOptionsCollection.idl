@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,29 +13,18 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface [
-        JSGenerateToNativeObject,
-        CustomIndexedSetter
-    ] HTMLOptionsCollection : HTMLCollection {
-                 attribute long selectedIndex;
-                 attribute [Custom] unsigned long length
+    interface [LegacyParent=KJS::JSHTMLCollection, HasCustomIndexSetter] HTMLOptionsCollection : HTMLCollection {
+                 attribute          long                 selectedIndex;
+                 attribute [Custom] long                 length
                         setter raises (DOMException);
 
-        [Custom] void add(in [Optional=DefaultIsUndefined] HTMLOptionElement option, 
-                          in [Optional] unsigned long index)
+        void               add(in HTMLOptionElement option, in [Optional] unsigned long index)
              raises (DOMException);
-        [Custom] void remove(in [Optional=DefaultIsUndefined] unsigned long index);
-
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        Node item(in unsigned long index); 
-        Node namedItem(in DOMString name); 
-#endif
     };
-
 }

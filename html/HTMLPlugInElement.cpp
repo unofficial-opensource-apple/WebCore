@@ -1,4 +1,6 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
@@ -16,185 +18,134 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "HTMLPlugInElement.h"
 
-#include "Attribute.h"
-#include "Chrome.h"
-#include "ChromeClient.h"
 #include "CSSPropertyNames.h"
 #include "Document.h"
 #include "Frame.h"
-#include "FrameLoader.h"
 #include "FrameTree.h"
 #include "HTMLNames.h"
-#include "Page.h"
-#include "RenderEmbeddedObject.h"
-#include "RenderWidget.h"
-#include "Settings.h"
-#include "Widget.h"
+#include "kjs_dom.h"
+#include "kjs_proxy.h"
 
-#if ENABLE(NETSCAPE_PLUGIN_API)
-#include "npruntime_impl.h"
+#if PLATFORM(MAC)
+#include "FrameMac.h"
+#include <JavaScriptCore/npruntime_impl.h>
 #endif
+
+using KJS::ExecState;
+using KJS::JSLock;
+using KJS::JSValue;
+using KJS::Bindings::RootObject;
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
 HTMLPlugInElement::HTMLPlugInElement(const QualifiedName& tagName, Document* doc)
-    : HTMLFrameOwnerElement(tagName, doc)
-    , m_inBeforeLoadEventHandler(false)
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    , m_NPObject(0)
-#endif
-    , m_isCapturingMouseEvents(false)
+    : HTMLElement(tagName, doc)
 {
 }
 
 HTMLPlugInElement::~HTMLPlugInElement()
 {
-    ASSERT(!m_instance); // cleared in detach()
+}
 
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    if (m_NPObject) {
-        _NPN_ReleaseObject(m_NPObject);
-        m_NPObject = 0;
+String HTMLPlugInElement::align() const
+{
+    return getAttribute(alignAttr);
+}
+
+void HTMLPlugInElement::setAlign(const String& value)
+{
+    setAttribute(alignAttr, value);
+}
+
+String HTMLPlugInElement::height() const
+{
+    return getAttribute(heightAttr);
+}
+
+void HTMLPlugInElement::setHeight(const String& value)
+{
+    setAttribute(heightAttr, value);
+}
+
+String HTMLPlugInElement::name() const
+{
+    return getAttribute(nameAttr);
+}
+
+void HTMLPlugInElement::setName(const String& value)
+{
+    setAttribute(nameAttr, value);
+}
+
+String HTMLPlugInElement::width() const
+{
+    return getAttribute(widthAttr);
+}
+
+void HTMLPlugInElement::setWidth(const String& value)
+{
+    setAttribute(widthAttr, value);
+}
+
+bool HTMLPlugInElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+{
+    if (attrName == widthAttr ||
+        attrName == heightAttr ||
+        attrName == vspaceAttr ||
+        attrName == hspaceAttr) {
+            result = eUniversal;
+            return false;
     }
-#endif
+    
+    if (attrName == alignAttr) {
+        result = eReplaced; // Share with <img> since the alignment behavior is the same.
+        return false;
+    }
+    
+    return HTMLElement::mapToEntry(attrName, result);
+}
+
+void HTMLPlugInElement::parseMappedAttribute(MappedAttribute* attr)
+{
+    if (attr->name() == widthAttr)
+        addCSSLength(attr, CSS_PROP_WIDTH, attr->value());
+    else if (attr->name() == heightAttr)
+        addCSSLength(attr, CSS_PROP_HEIGHT, attr->value());
+    else if (attr->name() == vspaceAttr) {
+        addCSSLength(attr, CSS_PROP_MARGIN_TOP, attr->value());
+        addCSSLength(attr, CSS_PROP_MARGIN_BOTTOM, attr->value());
+    } else if (attr->name() == hspaceAttr) {
+        addCSSLength(attr, CSS_PROP_MARGIN_LEFT, attr->value());
+        addCSSLength(attr, CSS_PROP_MARGIN_RIGHT, attr->value());
+    } else if (attr->name() == alignAttr)
+        addHTMLAlignment(attr);
+    else
+        HTMLElement::parseMappedAttribute(attr);
+}    
+
+bool HTMLPlugInElement::checkDTD(const Node* newChild)
+{
+    return newChild->hasTagName(paramTag) || HTMLElement::checkDTD(newChild);
 }
 
 void HTMLPlugInElement::detach()
 {
-    m_instance.clear();
-
-    if (m_isCapturingMouseEvents) {
-        if (Frame* frame = document()->frame())
-            frame->eventHandler()->setCapturingMouseEventsNode(0);
-        m_isCapturingMouseEvents = false;
+    if (Frame* parentFrame = document()->frame()) {
+        Frame* contentFrame = parentFrame->tree()->child(m_frameName);
+        if (contentFrame)
+            contentFrame->disconnectOwnerElement();
     }
-
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    if (m_NPObject) {
-        _NPN_ReleaseObject(m_NPObject);
-        m_NPObject = 0;
-    }
-#endif
-
-    HTMLFrameOwnerElement::detach();
+    
+    HTMLElement::detach();
 }
 
-PassScriptInstance HTMLPlugInElement::getInstance()
-{
-    Frame* frame = document()->frame();
-    if (!frame)
-        return 0;
-
-    // If the host dynamically turns off JavaScript (or Java) we will still return
-    // the cached allocated Bindings::Instance.  Not supporting this edge-case is OK.
-    if (m_instance)
-        return m_instance;
-
-    if (Widget* widget = pluginWidget())
-        m_instance = frame->script()->createScriptInstanceForWidget(widget);
-
-    return m_instance;
-}
-
-bool HTMLPlugInElement::guardedDispatchBeforeLoadEvent(const String& sourceURL)
-{
-    // FIXME: Our current plug-in loading design can't guarantee the following
-    // assertion is true, since plug-in loading can be initiated during layout,
-    // and synchronous layout can be initiated in a beforeload event handler!
-    // See <http://webkit.org/b/71264>.
-    // ASSERT(!m_inBeforeLoadEventHandler);
-    m_inBeforeLoadEventHandler = true;
-    // static_cast is used to avoid a compile error since dispatchBeforeLoadEvent
-    // is intentionally undefined on this class.
-    bool beforeLoadAllowedLoad = static_cast<HTMLFrameOwnerElement*>(this)->dispatchBeforeLoadEvent(sourceURL);
-    m_inBeforeLoadEventHandler = false;
-    return beforeLoadAllowedLoad;
-}
-
-Widget* HTMLPlugInElement::pluginWidget()
-{
-    if (m_inBeforeLoadEventHandler) {
-        // The plug-in hasn't loaded yet, and it makes no sense to try to load if beforeload handler happened to touch the plug-in element.
-        // That would recursively call beforeload for the same element.
-        return 0;
-    }
-
-    RenderWidget* renderWidget = renderWidgetForJSBindings();
-    if (!renderWidget)
-        return 0;
-
-    return renderWidget->widget();
-}
-
-bool HTMLPlugInElement::isPresentationAttribute(const QualifiedName& name) const
-{
-    if (name == widthAttr || name == heightAttr || name == vspaceAttr || name == hspaceAttr || name == alignAttr)
-        return true;
-    return HTMLFrameOwnerElement::isPresentationAttribute(name);
-}
-
-void HTMLPlugInElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
-{
-    if (attr->name() == widthAttr)
-        addHTMLLengthToStyle(style, CSSPropertyWidth, attr->value());
-    else if (attr->name() == heightAttr)
-        addHTMLLengthToStyle(style, CSSPropertyHeight, attr->value());
-    else if (attr->name() == vspaceAttr) {
-        addHTMLLengthToStyle(style, CSSPropertyMarginTop, attr->value());
-        addHTMLLengthToStyle(style, CSSPropertyMarginBottom, attr->value());
-    } else if (attr->name() == hspaceAttr) {
-        addHTMLLengthToStyle(style, CSSPropertyMarginLeft, attr->value());
-        addHTMLLengthToStyle(style, CSSPropertyMarginRight, attr->value());
-    } else if (attr->name() == alignAttr)
-        applyAlignmentAttributeToStyle(attr, style);
-    else
-        HTMLFrameOwnerElement::collectStyleForAttribute(attr, style);
-}
-
-void HTMLPlugInElement::defaultEventHandler(Event* event)
-{
-    // Firefox seems to use a fake event listener to dispatch events to plug-in (tested with mouse events only).
-    // This is observable via different order of events - in Firefox, event listeners specified in HTML attributes fires first, then an event
-    // gets dispatched to plug-in, and only then other event listeners fire. Hopefully, this difference does not matter in practice.
-
-    // FIXME: Mouse down and scroll events are passed down to plug-in via custom code in EventHandler; these code paths should be united.
-
-    RenderObject* r = renderer();
-    if (r && r->isEmbeddedObject() && toRenderEmbeddedObject(r)->showsUnavailablePluginIndicator()) {
-        toRenderEmbeddedObject(r)->handleUnavailablePluginIndicatorEvent(event);
-        return;
-    }
-
-    if (!r || !r->isWidget())
-        return;
-    RefPtr<Widget> widget = toRenderWidget(r)->widget();
-    if (!widget)
-        return;
-    widget->handleEvent(event);
-    if (event->defaultHandled())
-        return;
-    HTMLFrameOwnerElement::defaultEventHandler(event);
-}
-
-#if ENABLE(NETSCAPE_PLUGIN_API)
-
-NPObject* HTMLPlugInElement::getNPObject()
-{
-    ASSERT(document()->frame());
-    if (!m_NPObject)
-        m_NPObject = document()->frame()->script()->createScriptObjectForPluginElement(this);
-    return m_NPObject;
-}
-
-#endif /* ENABLE(NETSCAPE_PLUGIN_API) */
 
 }

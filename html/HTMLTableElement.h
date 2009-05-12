@@ -1,10 +1,12 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,87 +20,128 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLTableElement_h
-#define HTMLTableElement_h
+#ifndef HTMLTableElement_H
+#define HTMLTableElement_H
 
 #include "HTMLElement.h"
 
 namespace WebCore {
 
 class HTMLCollection;
-class HTMLTableCaptionElement;
-class HTMLTableRowsCollection;
 class HTMLTableSectionElement;
+class HTMLTableCellElement;
+class HTMLTableCaptionElement;
 
 class HTMLTableElement : public HTMLElement {
 public:
-    static PassRefPtr<HTMLTableElement> create(Document*);
-    static PassRefPtr<HTMLTableElement> create(const QualifiedName&, Document*);
+    enum Rules {
+        None    = 0x00,
+        RGroups = 0x01,
+        CGroups = 0x02,
+        Groups  = 0x03,
+        Rows    = 0x05,
+        Cols    = 0x0a,
+        All     = 0x0f
+    };
+    enum Frame {
+        Void   = 0x00,
+        Above  = 0x01,
+        Below  = 0x02,
+        Lhs    = 0x04,
+        Rhs    = 0x08,
+        Hsides = 0x03,
+        Vsides = 0x0c,
+        Box    = 0x0f
+    };
 
-    HTMLTableCaptionElement* caption() const;
-    void setCaption(PassRefPtr<HTMLTableCaptionElement>, ExceptionCode&);
+    HTMLTableElement(Document*);
+    ~HTMLTableElement();
 
-    HTMLTableSectionElement* tHead() const;
-    void setTHead(PassRefPtr<HTMLTableSectionElement>, ExceptionCode&);
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
+    virtual int tagPriority() const { return 9; }
+    virtual bool checkDTD(const Node*);
 
-    HTMLTableSectionElement* tFoot() const;
-    void setTFoot(PassRefPtr<HTMLTableSectionElement>, ExceptionCode&);
+    HTMLTableCaptionElement* caption() const { return tCaption; }
+    Node* setCaption(HTMLTableCaptionElement*);
 
-    PassRefPtr<HTMLElement> createTHead();
+    HTMLTableSectionElement* tHead() const { return head; }
+    Node* setTHead(HTMLTableSectionElement*);
+
+    HTMLTableSectionElement* tFoot() const { return foot; }
+    Node* setTFoot(HTMLTableSectionElement*);
+
+    Node* setTBody(HTMLTableSectionElement*);
+
+    HTMLElement* createTHead();
     void deleteTHead();
-    PassRefPtr<HTMLElement> createTFoot();
+    HTMLElement* createTFoot();
     void deleteTFoot();
-    PassRefPtr<HTMLElement> createTBody();
-    PassRefPtr<HTMLElement> createCaption();
+    HTMLElement* createCaption();
     void deleteCaption();
-    PassRefPtr<HTMLElement> insertRow(int index, ExceptionCode&);
+    HTMLElement* insertRow(int index, ExceptionCode&);
     void deleteRow(int index, ExceptionCode&);
 
-    HTMLCollection* rows();
-    HTMLCollection* tBodies();
+    PassRefPtr<HTMLCollection> rows();
+    PassRefPtr<HTMLCollection> tBodies();
+
+    String align() const;
+    void setAlign(const String&);
+
+    String bgColor() const;
+    void setBgColor(const String&);
+
+    String border() const;
+    void setBorder(const String&);
+
+    String cellPadding() const;
+    void setCellPadding(const String&);
+
+    String cellSpacing() const;
+    void setCellSpacing(const String&);
+
+    String frame() const;
+    void setFrame(const String&);
 
     String rules() const;
+    void setRules(const String&);
+
     String summary() const;
+    void setSummary(const String&);
 
-    StylePropertySet* additionalCellStyle();
-    StylePropertySet* additionalGroupStyle(bool rows);
+    String width() const;
+    void setWidth(const String&);
 
-private:
-    HTMLTableElement(const QualifiedName&, Document*);
+    // overrides
+    virtual ContainerNode* addChild(PassRefPtr<Node>);
+    virtual void childrenChanged();
+    
+    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
 
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+    // Used to obtain either a solid or outset border decl.
+    virtual CSSMutableStyleDeclaration* additionalAttributeStyleDecl();
+    CSSMutableStyleDeclaration* getSharedCellDecl();
+
+    virtual void attach();
+    
     virtual bool isURLAttribute(Attribute*) const;
 
-    // Used to obtain either a solid or outset border decl and to deal with the frame and rules attributes.
-    virtual StylePropertySet* additionalAttributeStyle() OVERRIDE;
+protected:
+    HTMLTableSectionElement* head;
+    HTMLTableSectionElement* foot;
+    HTMLTableSectionElement* firstBody;
+    HTMLTableCaptionElement* tCaption;
 
-    virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
-
-    enum TableRules { UnsetRules, NoneRules, GroupsRules, RowsRules, ColsRules, AllRules };
-    enum CellBorders { NoBorders, SolidBorders, InsetBorders, SolidBordersColsOnly, SolidBordersRowsOnly };
-
-    CellBorders cellBorders() const;
-
-    PassRefPtr<StylePropertySet> createSharedCellStyle();
-
-    HTMLTableSectionElement* lastBody() const;
-
-    bool m_borderAttr;          // Sets a precise border width and creates an outset border for the table and for its cells.
-    bool m_borderColorAttr;     // Overrides the outset border and makes it solid for the table and cells instead.
-    bool m_frameAttr;           // Implies a thin border width if no border is set and then a certain set of solid/hidden borders based off the value.
-    TableRules m_rulesAttr;     // Implies a thin border width, a collapsing border model, and all borders on the table becoming set to hidden (if frame/border
-                                // are present, to none otherwise).
-
-    unsigned short m_padding;
-    OwnPtr<HTMLTableRowsCollection> m_rowsCollection;
-    RefPtr<StylePropertySet> m_sharedCellStyle;
+    bool m_noBorder     : 1;
+    bool m_solid        : 1;
+    // 14 bits unused
+    unsigned short padding;
+    friend class HTMLTableCellElement;
 };
 
 } //namespace

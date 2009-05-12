@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,20 +30,15 @@
 
 namespace WebCore {
 
-class UnlinkCommand : public CompositeEditCommand {
+class UnlinkCommand : public CompositeEditCommand
+{
 public:
-    static PassRefPtr<UnlinkCommand> create(Document* document)
-    {
-        return adoptRef(new UnlinkCommand(document));
-    }
-
-private:
     UnlinkCommand(Document*);
-
     virtual void doApply();
     virtual EditAction editingAction() const { return EditActionUnlink; }
+private:
 };
 
-} // namespace WebCore
+} // namespace khtml
 
 #endif // UnlinkCommand_h

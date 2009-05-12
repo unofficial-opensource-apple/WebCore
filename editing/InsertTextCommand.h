@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,66 +23,34 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef InsertTextCommand_h
-#define InsertTextCommand_h
+#ifndef __insert_text_command_h__
+#define __insert_text_command_h__
 
 #include "CompositeEditCommand.h"
 
 namespace WebCore {
 
-class DocumentMarkerController;
-class Text;
-
-class TextInsertionMarkerSupplier : public RefCounted<TextInsertionMarkerSupplier> {
+class InsertTextCommand : public CompositeEditCommand
+{
 public:
-    virtual ~TextInsertionMarkerSupplier() { }
-    virtual void addMarkersToTextNode(Text*, unsigned offsetOfInsertion, const String& textInserted) = 0;
-protected:
-    TextInsertionMarkerSupplier() { }
-};
-
-class InsertTextCommand : public CompositeEditCommand {
-public:
-    enum RebalanceType {
-        RebalanceLeadingAndTrailingWhitespaces,
-        RebalanceAllWhitespaces
-    };
-
-    static PassRefPtr<InsertTextCommand> create(Document* document, const String& text, bool selectInsertedText = false,
-        RebalanceType rebalanceType = RebalanceLeadingAndTrailingWhitespaces)
-    {
-        return adoptRef(new InsertTextCommand(document, text, selectInsertedText, rebalanceType));
-    }
-
-    static PassRefPtr<InsertTextCommand> createWithMarkerSupplier(Document* document, const String& text, PassRefPtr<TextInsertionMarkerSupplier> markerSupplier)
-    {
-        return adoptRef(new InsertTextCommand(document, text, markerSupplier));
-    }
-
-private:
-
-    InsertTextCommand(Document*, const String& text, bool selectInsertedText, RebalanceType);
-    InsertTextCommand(Document*, const String& text, PassRefPtr<TextInsertionMarkerSupplier>);
-
-    void deleteCharacter();
+    InsertTextCommand(Document *document);
 
     virtual void doApply();
 
-    virtual bool isInsertTextCommand() const OVERRIDE { return true; }
-
-    Position positionInsideTextNode(const Position&);
-    Position insertTab(const Position&);
+    void deleteCharacter();
+    void input(const String &text, bool selectInsertedText = false);
     
-    bool performTrivialReplace(const String&, bool selectInsertedText);
+    unsigned charactersAdded() const { return m_charactersAdded; }
+    
+private:
+    virtual bool isInsertTextCommand() const;
 
-    friend class TypingCommand;
+    Position prepareForTextInsertion(const Position& pos);
+    Position insertTab(Position pos);
 
-    String m_text;
-    bool m_selectInsertedText;
-    RebalanceType m_rebalanceType;
-    RefPtr<TextInsertionMarkerSupplier> m_markerSupplier;
+    unsigned m_charactersAdded;
 };
 
 } // namespace WebCore
 
-#endif // InsertTextCommand_h
+#endif // __insert_text_command_h__

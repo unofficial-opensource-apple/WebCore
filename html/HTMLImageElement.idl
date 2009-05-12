@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2006, 2009, 2010 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,42 +13,30 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
-
-    interface [
-        JSGenerateToNativeObject
-    ] HTMLImageElement : HTMLElement {
-        attribute [Reflect] DOMString name;
-        attribute [Reflect] DOMString align;
-        attribute [Reflect] DOMString alt;
-        attribute [Reflect] DOMString border;
-        attribute [Reflect] DOMString crossOrigin;
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLImageElement : HTMLElement {
+        attribute DOMString name;
+        attribute DOMString align;
+        attribute DOMString alt;
+        // FIXME: According to the DOM spec border should be of type DOMString
+        // see http://bugzilla.opendarwin.org/show_bug.cgi?id=8992
+        attribute long border;        
         attribute long height;
-        attribute [Reflect] long hspace;
-        attribute [Reflect] boolean isMap;
-        attribute [Reflect, URL] DOMString longDesc;
-        attribute [Reflect, URL] DOMString src;
-        attribute [Reflect] DOMString useMap;
-        attribute [Reflect] long vspace;
+        attribute long hspace;
+        attribute boolean isMap;
+        attribute DOMString longDesc;
+        attribute DOMString src;
+        attribute DOMString useMap;
+        attribute long vspace;
         attribute long width;
         
         // Extensions
         readonly attribute boolean complete;
-        attribute [Reflect,URL] DOMString lowsrc;
-        readonly attribute long naturalHeight;
-        readonly attribute long naturalWidth;
         readonly attribute long x;
         readonly attribute long y;
-
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        // Objective-C extension:
-        readonly attribute DOMString altDisplayString;
-        readonly attribute URL absoluteImageURL;
-#endif
     };
-
 }

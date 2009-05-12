@@ -1,6 +1,8 @@
 /*
+ * This file is part of the HTML widget for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,86 +16,65 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderWidget_h
-#define RenderWidget_h
+#ifndef RenderWidget_H
+#define RenderWidget_H
 
-#include "OverlapTestRequestClient.h"
 #include "RenderReplaced.h"
-#include "Widget.h"
 
 namespace WebCore {
 
-class RenderWidget : public RenderReplaced, private OverlapTestRequestClient {
+class RenderWidget : public RenderReplaced, public WidgetClient
+{
 public:
+    RenderWidget(Node*);
     virtual ~RenderWidget();
 
-    Widget* widget() const { return m_widget.get(); }
-    virtual void setWidget(PassRefPtr<Widget>);
+    virtual void setStyle(RenderStyle*);
 
-    static RenderWidget* find(const Widget*);
+    virtual void paint(PaintInfo&, int tx, int ty);
 
-    void updateWidgetPosition();
-    void widgetPositionsUpdated();
-    IntRect windowClipRect() const;
+    virtual bool isWidget() const { return true; };
 
-    void notifyWidget(WidgetNotification);
-    
-    static void suspendWidgetHierarchyUpdates();
-    static void resumeWidgetHierarchyUpdates();
+    virtual void destroy();
+    virtual void layout( );
+
+    Widget* widget() const { return m_widget; }
 
     RenderArena* ref() { ++m_refCount; return renderArena(); }
     void deref(RenderArena*);
+    
+    virtual void setSelectionState(SelectionState);
 
-protected:
-    RenderWidget(Node*);
+    virtual void updateWidgetPosition();
 
-    FrameView* frameView() const { return m_frameView; }
+    virtual void setWidget(Widget*);
 
-    void clearWidget();
-
-    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
-    virtual void layout();
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-    virtual CursorDirective getCursor(const LayoutPoint&, Cursor&) const;
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
+    using RenderReplaced::element;
 
 private:
-    virtual bool isWidget() const { return true; }
+    virtual void focusIn(Widget*);
+    virtual void focusOut(Widget*);
+    virtual void scrollToVisible(Widget*);
+    virtual Element* element(Widget*);
+    virtual bool isVisible(Widget*);
+    virtual void sendConsumedMouseUp(Widget*);
 
-    virtual void willBeDestroyed();
-    virtual void destroy();
-    virtual void setSelectionState(SelectionState);
-    virtual void setOverlapTestResult(bool);
+    void resizeWidget(Widget*, int w, int h);
 
-    bool setWidgetGeometry(const LayoutRect&);
-    bool updateWidgetGeometry();
+    virtual void deleteWidget();
 
-    RefPtr<Widget> m_widget;
-    FrameView* m_frameView;
-    IntRect m_clipRect; // The rectangle needs to remain correct after scrolling, so it is stored in content view coordinates, and not clipped to window.
+protected:
+    Widget* m_widget;
+    FrameView* m_view;
+private:
     int m_refCount;
 };
 
-inline RenderWidget* toRenderWidget(RenderObject* object)
-{
-    ASSERT(!object || object->isWidget());
-    return static_cast<RenderWidget*>(object);
 }
 
-inline const RenderWidget* toRenderWidget(const RenderObject* object)
-{
-    ASSERT(!object || object->isWidget());
-    return static_cast<const RenderWidget*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderWidget(const RenderWidget*);
-
-} // namespace WebCore
-
-#endif // RenderWidget_h
+#endif

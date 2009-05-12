@@ -1,6 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2000 Peter Kelly (pmk@post.com)
- * Copyright (C) 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,36 +16,38 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef Notation_h
-#define Notation_h
+#ifndef Notation_H
+#define Notation_H
 
+#include "CachedResourceClient.h"
 #include "ContainerNode.h"
 
 namespace WebCore {
 
-// FIXME: This class is never instantiated. Maybe it should be removed.
-
-class Notation : public ContainerNode {
+class Notation : public ContainerNode
+{
 public:
-    const String& publicId() const { return m_publicId; }
-    const String& systemId() const { return m_systemId; }
-
-private:
+    Notation(Document*);
     Notation(Document*, const String& name, const String& publicId, const String& systemId);
+
+    // DOM methods & attributes for Notation
+    String publicId() const { return m_publicId.get(); }
+    String systemId() const { return m_systemId. get(); }
 
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
     virtual PassRefPtr<Node> cloneNode(bool deep);
-    virtual bool childTypeAllowed(NodeType) const;
+    virtual bool childTypeAllowed(NodeType);
 
-    String m_name;
-    String m_publicId;
-    String m_systemId;
+private:
+    RefPtr<StringImpl> m_name;
+    RefPtr<StringImpl> m_publicId;
+    RefPtr<StringImpl> m_systemId;
 };
 
 } //namespace

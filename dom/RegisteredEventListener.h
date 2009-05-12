@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003, 2004, 2005, 2006, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,35 +18,42 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #ifndef RegisteredEventListener_h
 #define RegisteredEventListener_h
 
-#include "EventListener.h"
-#include <wtf/RefPtr.h>
+#include "AtomicString.h"
+#include "Shared.h"
 
 namespace WebCore {
 
-    class RegisteredEventListener {
-    public:
-        RegisteredEventListener(PassRefPtr<EventListener> listener, bool useCapture)
-            : listener(listener)
-            , useCapture(useCapture)
-        {
-        }
+    class EventListener;
 
-        RefPtr<EventListener> listener;
-        bool useCapture;
-    };
+    class RegisteredEventListener : public Shared<RegisteredEventListener> {
+    public:
+        RegisteredEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture);
+
+        const AtomicString& eventType() const { return m_eventType; }
+        EventListener* listener() const { return m_listener.get(); }
+        bool useCapture() const { return m_useCapture; }
+        
+        bool removed() const { return m_removed; }
+        void setRemoved(bool removed) { m_removed = removed; }
     
-    inline bool operator==(const RegisteredEventListener& a, const RegisteredEventListener& b)
-    {
-        return *a.listener == *b.listener && a.useCapture == b.useCapture;
-    }
+    private:
+        AtomicString m_eventType;
+        RefPtr<EventListener> m_listener;
+        bool m_useCapture;
+        bool m_removed;
+    };
+
+
+    bool operator==(const RegisteredEventListener&, const RegisteredEventListener&);
+    inline bool operator!=(const RegisteredEventListener& a, const RegisteredEventListener& b) { return !(a == b); }
 
 } // namespace WebCore
 

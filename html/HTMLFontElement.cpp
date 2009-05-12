@@ -1,8 +1,10 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2003, 2006, 2008, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,171 +18,145 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "HTMLFontElement.h"
 
-#include "Attribute.h"
 #include "CSSPropertyNames.h"
-#include "CSSStyleSheet.h"
 #include "CSSValueKeywords.h"
-#include "CSSValueList.h"
-#include "CSSValuePool.h"
 #include "HTMLNames.h"
-#include "HTMLParserIdioms.h"
-#include <wtf/text/StringBuilder.h>
-
-using namespace WTF;
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLFontElement::HTMLFontElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLFontElement::HTMLFontElement(Document* doc)
+    : HTMLElement(fontTag, doc)
 {
-    ASSERT(hasTagName(fontTag));
 }
 
-PassRefPtr<HTMLFontElement> HTMLFontElement::create(const QualifiedName& tagName, Document* document)
+HTMLFontElement::~HTMLFontElement()
 {
-    return adoptRef(new HTMLFontElement(tagName, document));
 }
 
-// http://www.whatwg.org/specs/web-apps/current-work/multipage/rendering.html#fonts-and-colors
-static bool parseFontSize(const String& input, int& size)
+// Allows leading spaces.
+// Allows trailing nonnumeric characters.
+// Returns 10 for any size greater than 9.
+static bool parseFontSizeNumber(const String& s, int& size)
 {
-
-    // Step 1
-    // Step 2
-    const UChar* position = input.characters();
-    const UChar* end = position + input.length();
-
-    // Step 3
-    while (position < end) {
-        if (!isHTMLSpace(*position))
-            break;
-        ++position;
+    unsigned pos = 0;
+    
+    // Skip leading spaces.
+    while (DeprecatedChar(s[pos]).isSpace())
+        ++pos;
+    
+    // Skip a plus or minus.
+    bool sawPlus = false;
+    bool sawMinus = false;
+    if (s[pos] == '+') {
+        ++pos;
+        sawPlus = true;
+    } else if (s[pos] == '-') {
+        ++pos;
+        sawMinus = true;
     }
-
-    // Step 4
-    if (position == end)
+    
+    // Parse a single digit.
+    if (!u_isdigit(s[pos]))
         return false;
-    ASSERT(position < end);
-
-    // Step 5
-    enum {
-        RelativePlus,
-        RelativeMinus,
-        Absolute
-    } mode;
-
-    switch (*position) {
-    case '+':
-        mode = RelativePlus;
-        ++position;
-        break;
-    case '-':
-        mode = RelativeMinus;
-        ++position;
-        break;
-    default:
-        mode = Absolute;
-        break;
-    }
-
-    // Step 6
-    StringBuilder digits;
-    digits.reserveCapacity(16);
-    while (position < end) {
-        if (!isASCIIDigit(*position))
-            break;
-        digits.append(*position++);
-    }
-
-    // Step 7
-    if (digits.isEmpty())
-        return false;
-
-    // Step 8
-    int value = charactersToIntStrict(digits.characters(), digits.length());
-
-    // Step 9
-    if (mode == RelativePlus)
-        value += 3;
-    else if (mode == RelativeMinus)
-        value = 3 - value;
-
-    // Step 10
-    if (value > 7)
-        value = 7;
-
-    // Step 11
-    if (value < 1)
-        value = 1;
-
-    size = value;
-    return true;
-}
-
-bool HTMLFontElement::cssValueFromFontSizeNumber(const String& s, int& size)
-{
-    int num = 0;
-    if (!parseFontSize(s, num))
-        return false;
-
-    switch (num) {
-    case 1:
-        // FIXME: The spec says that we're supposed to use CSSValueXxSmall here.
-        size = CSSValueXSmall;
-        break;
-    case 2: 
-        size = CSSValueSmall;
-        break;
-    case 3: 
-        size = CSSValueMedium;
-        break;
-    case 4: 
-        size = CSSValueLarge;
-        break;
-    case 5: 
-        size = CSSValueXLarge;
-        break;
-    case 6: 
-        size = CSSValueXxLarge;
-        break;
-    case 7:
-        size = CSSValueWebkitXxxLarge;
-        break;
-    default:
-        ASSERT_NOT_REACHED();
-    }
-    return true;
-}
-
-bool HTMLFontElement::isPresentationAttribute(const QualifiedName& name) const
-{
-    if (name == sizeAttr || name == colorAttr || name == faceAttr)
+    int num = u_charDigitValue(s[pos++]);
+    
+    // Check for an additional digit.
+    if (u_isdigit(s[pos]))
+        num = 10;
+    
+    if (sawPlus) {
+        size = num + 3;
         return true;
-    return HTMLElement::isPresentationAttribute(name);
+    }
+    
+    // Don't return 0 (which means 3) or a negative number (which means the same as 1).
+    if (sawMinus) {
+        size = num == 1 ? 2 : 1;
+        return true;
+    }
+    
+    size = num;
+    return true;
 }
 
-void HTMLFontElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
+bool HTMLFontElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+{
+    if (attrName == sizeAttr ||
+        attrName == colorAttr ||
+        attrName == faceAttr) {
+        result = eUniversal;
+        return false;
+    }
+    
+    return HTMLElement::mapToEntry(attrName, result);
+}
+
+void HTMLFontElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == sizeAttr) {
-        int size = 0;
-        if (cssValueFromFontSizeNumber(attr->value(), size))
-            addPropertyToAttributeStyle(style, CSSPropertyFontSize, size);
-    } else if (attr->name() == colorAttr)
-        addHTMLColorToStyle(style, CSSPropertyColor, attr->value());
-    else if (attr->name() == faceAttr) {
-        if (RefPtr<CSSValueList> fontFaceValue = cssValuePool().createFontFaceValue(attr->value()))
-            style->setProperty(CSSProperty(CSSPropertyFontFamily, fontFaceValue.release()));
+        int num;
+        if (parseFontSizeNumber(attr->value(), num)) {
+            int size;
+            switch (num)
+            {
+            case 2: size = CSS_VAL_SMALL; break;
+            case 0: // treat 0 the same as 3, because people expect it to be between -1 and +1
+            case 3: size = CSS_VAL_MEDIUM; break;
+            case 4: size = CSS_VAL_LARGE; break;
+            case 5: size = CSS_VAL_X_LARGE; break;
+            case 6: size = CSS_VAL_XX_LARGE; break;
+            default:
+                if (num > 6)
+                    size = CSS_VAL__WEBKIT_XXX_LARGE;
+                else
+                    size = CSS_VAL_X_SMALL;
+            }
+            addCSSProperty(attr, CSS_PROP_FONT_SIZE, size);
+        }
+    } else if (attr->name() == colorAttr) {
+        addCSSColor(attr, CSS_PROP_COLOR, attr->value());
+    } else if (attr->name() == faceAttr) {
+        addCSSProperty(attr, CSS_PROP_FONT_FAMILY, attr->value());
     } else
-        HTMLElement::collectStyleForAttribute(attr, style);
+        HTMLElement::parseMappedAttribute(attr);
+}
+
+String HTMLFontElement::color() const
+{
+    return getAttribute(colorAttr);
+}
+
+void HTMLFontElement::setColor(const String& value)
+{
+    setAttribute(colorAttr, value);
+}
+
+String HTMLFontElement::face() const
+{
+    return getAttribute(faceAttr);
+}
+
+void HTMLFontElement::setFace(const String& value)
+{
+    setAttribute(faceAttr, value);
+}
+
+String HTMLFontElement::size() const
+{
+    return getAttribute(sizeAttr);
+}
+
+void HTMLFontElement::setSize(const String& value)
+{
+    setAttribute(sizeAttr, value);
 }
 
 }

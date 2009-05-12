@@ -1,9 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
- * Copyright (C) 2012 Samsung Electronics. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,368 +18,216 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLInputElement_h
-#define HTMLInputElement_h
+#ifndef HTML_HTMLInputElement_H
+#define HTML_HTMLInputElement_H
 
-#include "HTMLTextFormControlElement.h"
+#include "HTMLGenericFormElement.h"
 
-#include "DateComponents.h"
+// FIXME: Remove these when converting the password field
+#include "RenderStyle.h"
+#include "RenderObject.h"
 
 namespace WebCore {
 
-class FileList;
-class HTMLDataListElement;
-class HTMLOptionElement;
-class Icon;
-class InputType;
-class KURL;
+class HTMLImageLoader;
 
-class HTMLInputElement : public HTMLTextFormControlElement {
+class HTMLInputElement : public HTMLGenericFormElement
+{
 public:
-    static PassRefPtr<HTMLInputElement> create(const QualifiedName&, Document*, HTMLFormElement*, bool createdByParser);
+    enum InputType {
+        TEXT,
+        PASSWORD,
+        ISINDEX,
+        CHECKBOX,
+        RADIO,
+        SUBMIT,
+        RESET,
+        FILE,
+        HIDDEN,
+        IMAGE,
+        BUTTON,
+        SEARCH,
+        RANGE
+    };
+
+    HTMLInputElement(Document*, HTMLFormElement* = 0);
+    HTMLInputElement(const QualifiedName& tagName, Document*, HTMLFormElement* = 0);
     virtual ~HTMLInputElement();
 
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(webkitspeechchange);
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
+    virtual int tagPriority() const { return 0; }
 
-    virtual HTMLInputElement* toInputElement() { return this; }
+    virtual bool isKeyboardFocusable() const;
+    virtual bool isMouseFocusable() const;
+    virtual bool isEnumeratable() const { return inputType() != IMAGE; }
+    virtual void focus();
+    virtual void dispatchFocusEvent();
+    virtual void dispatchBlurEvent();
+    virtual void updateFocusAppearance();
+    virtual void aboutToUnload();
 
-    virtual bool shouldAutocomplete() const;
+    virtual const AtomicString& name() const;
 
-    // For ValidityState
-    bool typeMismatch() const;
-    // valueMissing() ignores the specified string value for CHECKBOX and RADIO.
-    bool valueMissing(const String&) const;
-    bool patternMismatch(const String&) const;
-    bool tooLong(const String&, NeedsToCheckDirtyFlag) const;
-    bool rangeUnderflow(const String&) const;
-    bool rangeOverflow(const String&) const;
-    // Returns the minimum value for type=date, number, or range.  Don't call this for other types.
-    double minimum() const;
-    // Returns the maximum value for type=date, number, or range.  Don't call this for other types.
-    // This always returns a value which is >= minimum().
-    double maximum() const;
-    // Sets the "allowed value step" defined in the HTML spec to the specified double pointer.
-    // Returns false if there is no "allowed value step."
-    bool getAllowedValueStep(double*) const;
+    bool autoComplete() const { return m_autocomplete; }
 
-    // For ValidityState.
-    bool stepMismatch(const String&) const;
-    String minimumString() const;
-    String maximumString() const;
-    String stepBaseString() const;
-    String stepString() const;
-    String typeMismatchText() const;
-    String valueMissingText() const;
+    virtual bool isChecked() const { return checked(); }
+    virtual bool isIndeterminate() const { return indeterminate(); }
+    
+    bool readOnly() const { return isReadOnlyControl(); }
 
-    // Implementations of HTMLInputElement::stepUp() and stepDown().
-    void stepUp(int, ExceptionCode&);
-    void stepDown(int, ExceptionCode&);
-    void stepUp(ExceptionCode& ec) { stepUp(1, ec); }
-    void stepDown(ExceptionCode& ec) { stepDown(1, ec); }
-    // stepUp()/stepDown() for user-interaction.
-    bool isSteppable() const;
-    void stepUpFromRenderer(int);
+    bool isTextButton() const { return m_type == SUBMIT || m_type == RESET || m_type == BUTTON; }
+    virtual bool isRadioButton() const { return m_type == RADIO; }
+    bool isTextField() const { return m_type == TEXT || m_type == PASSWORD || m_type == SEARCH || m_type == ISINDEX; }
+    bool isSearchField() const { return m_type == SEARCH; }
+    // FIXME: When other text fields switch to the non-NSView implementation, we should add them here.
+    // Once all text fields switch over, we should merge this with isTextField.
+    bool isNonWidgetTextField() const { return m_type == TEXT || m_type == SEARCH || m_type == ISINDEX || m_type == PASSWORD; }
 
-    bool isTextButton() const;
-
-    bool isRadioButton() const;
-    bool isTextField() const;
-    bool isSearchField() const;
-    bool isInputTypeHidden() const;
-    bool isPasswordField() const;
-    bool isCheckbox() const;
-    bool isRangeControl() const;
-
-    // FIXME: It's highly likely that any call site calling this function should instead
-    // be using a different one. Many input elements behave like text fields, and in addition
-    // any unknown input type is treated as text. Consider, for example, isTextField or
-    // isTextField && !isPasswordField.
-    bool isText() const;
-
-    bool isEmailField() const;
-    bool isFileUpload() const;
-    bool isImageButton() const;
-    bool isNumberField() const;
-    bool isSubmitButton() const;
-    bool isTelephoneField() const;
-    bool isURLField() const;
-
-#if ENABLE(INPUT_SPEECH)
-    bool isSpeechEnabled() const;
-#endif
-
-    DateComponents::Type dateType() const;
-
-    HTMLElement* containerElement() const;
-    virtual HTMLElement* innerTextElement() const;
-    HTMLElement* innerBlockElement() const;
-    HTMLElement* innerSpinButtonElement() const;
-    HTMLElement* resultsButtonElement() const;
-    HTMLElement* cancelButtonElement() const;
-#if ENABLE(INPUT_SPEECH)
-    HTMLElement* speechButtonElement() const;
-#endif
-    virtual HTMLElement* placeholderElement() const;
-
-    bool checked() const { return m_isChecked; }
-    void setChecked(bool, TextFieldEventBehavior = DispatchNoEvent);
-
-    // 'indeterminate' is a state independent of the checked state that causes the control to draw in a way that hides the actual state.
-    bool indeterminate() const { return m_isIndeterminate; }
+    bool checked() const { return m_checked; }
+    void setChecked(bool, bool sendChangeEvent = false);
+    bool indeterminate() const { return m_indeterminate; }
     void setIndeterminate(bool);
-    // shouldAppearChecked is used by the rendering tree/CSS while checked() is used by JS to determine checked state
-    bool shouldAppearChecked() const;
-    virtual bool isIndeterminate() const;
-
-    int size() const;
-    bool sizeShouldIncludeDecoration(int& preferredSize) const;
-
+    int maxLength() const { return m_maxLen; }
+    int size() const { return m_size; }
+    virtual const AtomicString& type() const;
     void setType(const String&);
 
     String value() const;
-    void setValue(const String&, TextFieldEventBehavior = DispatchNoEvent);
-    void setValueForUser(const String&);
-    // Checks if the specified string would be a valid value.
-    // We should not call this for types with no string value such as CHECKBOX and RADIO.
-    bool isValidValue(const String&) const;
-    bool hasDirtyValue() const { return !m_valueIfDirty.isNull(); };
-
-    String sanitizeValue(const String&) const;
-
-    void updateInnerTextValue();
-
-    // The value which is drawn by a renderer.
-    String visibleValue() const;
-    String convertFromVisibleValue(const String&) const;
-    // Returns true if the specified string can be set as the value of HTMLInputElement.
-    bool isAcceptableValue(const String&) const;
-
-    const String& suggestedValue() const;
-    void setSuggestedValue(const String&);
-
-    double valueAsDate() const;
-    void setValueAsDate(double, ExceptionCode&);
-
-    double valueAsNumber() const;
-    void setValueAsNumber(double, ExceptionCode&, TextFieldEventBehavior = DispatchNoEvent);
-
-    virtual String placeholder() const;
-    virtual void setPlaceholder(const String&);
+    void setValue(const String&);
 
     String valueWithDefault() const;
 
     void setValueFromRenderer(const String&);
 
-    bool canHaveSelection() const;
+    virtual String stateValue() const;
+    virtual void restoreState(const String&);
 
-    virtual bool rendererIsNeeded(const NodeRenderingContext&);
+    bool canHaveSelection() const;
+    int selectionStart() const;
+    int selectionEnd() const;
+    void setSelectionStart(int);
+    void setSelectionEnd(int);
+    void select();
+    void setSelectionRange(int start, int end);
+    
+    virtual void accessKeyAction(bool sendToAnyElement);
+
+    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
+
+    virtual void copyNonAttributeProperties(const Element* source);
+
+    virtual void attach();
+    virtual bool rendererIsNeeded(RenderStyle*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     virtual void detach();
+    virtual bool appendFormData(FormDataList&, bool);
 
-    // FIXME: For isActivatedSubmit and setActivatedSubmit, we should use the NVI-idiom here by making
-    // it private virtual in all classes and expose a public method in HTMLFormControlElement to call
-    // the private virtual method.
+    virtual bool isSuccessfulSubmitButton() const;
     virtual bool isActivatedSubmit() const;
     virtual void setActivatedSubmit(bool flag);
 
+    InputType inputType() const { return static_cast<InputType>(m_type); }
+    void setInputType(const String&);
+    
+    // Report if this input type uses height & width attributes
+    bool respectHeightAndWidthAttrs() const { return inputType() == IMAGE || inputType() == HIDDEN; }
+
+    virtual void reset();
+
+    // used in case input type=image was clicked.
+    int clickX() const { return xPos; }
+    int clickY() const { return yPos; }
+
+    virtual void* preDispatchEventHandler(Event*);
+    virtual void postDispatchEventHandler(Event*, void* dataFromPreDispatch);
+    virtual void defaultEventHandler(Event*);
+
     String altText() const;
+    
+    virtual bool isURLAttribute(Attribute*) const;
 
     int maxResults() const { return m_maxResults; }
 
     String defaultValue() const;
     void setDefaultValue(const String&);
+    
+    bool defaultChecked() const;
+    void setDefaultChecked(bool);
 
-    Vector<String> acceptMIMETypes();
     String accept() const;
+    void setAccept(const String&);
+
+    String accessKey() const;
+    void setAccessKey(const String&);
+
+    String align() const;
+    void setAlign(const String&);
+
     String alt() const;
+    void setAlt(const String&);
 
     void setSize(unsigned);
 
-    KURL src() const;
+    String src() const;
+    void setSrc(const String&);
 
-    virtual int maxLength() const;
-    void setMaxLength(int, ExceptionCode&);
+    void setMaxLength(int);
 
-    bool multiple() const;
+    String useMap() const;
+    void setUseMap(const String&);
 
-    bool isAutofilled() const { return m_isAutofilled; }
-    void setAutofilled(bool = true);
-
-    FileList* files();
-    void receiveDroppedFiles(const Vector<String>&);
-    Icon* icon() const;
-    String displayString() const;
-    // These functions are used for rendering the input active during a
-    // drag-and-drop operation.
-    bool canReceiveDroppedFiles() const;
-    void setCanReceiveDroppedFiles(bool);
-
-    void addSearchResult();
-    void onSearch();
-    bool searchEventsShouldBeDispatched() const;
-
-    virtual bool willRespondToMouseClickEvents() OVERRIDE;
+    bool autofilled() const { return m_autofilled; }
+    void setAutofilled(bool b = true) { m_autofilled = b; }
     
-#if ENABLE(DATALIST)
-    HTMLElement* list() const;
-#endif
+    void cacheSelection(int s, int e) { cachedSelStart = s; cachedSelEnd = e; };
 
-    HTMLInputElement* checkedRadioButtonForGroup() const;
-    bool isInRequiredRadioButtonGroup() const;
+    virtual bool willRespondToMouseClickEvents();
+    virtual void setDisabled(bool isDisabled) { HTMLGenericFormElement::setDisabled(inputType() == FILE || isDisabled); }
 
-    void setValueInternal(const String&, TextFieldEventBehavior);
+    String constrainValue(const String& proposedValue) const;
 
-    void cacheSelectionInResponseToSetValue(int caretOffset) { cacheSelection(caretOffset, caretOffset, SelectionHasNoDirection); }
-
-#if ENABLE(INPUT_TYPE_COLOR)
-    // For test purposes.
-    void selectColorInColorChooser(const Color&);
-#endif
-
-    String defaultToolTip() const;
-
-    static const int maximumLength;
-
-    unsigned height() const;
-    unsigned width() const;
-    void setHeight(unsigned);
-    void setWidth(unsigned);
-
+    virtual void didRestoreFromCache();
+    
 protected:
-    HTMLInputElement(const QualifiedName&, Document*, HTMLFormElement*, bool createdByParser);
-    void createShadowSubtree();
-    virtual void defaultEventHandler(Event*);
+    AtomicString m_name;
 
 private:
-    enum AutoCompleteSetting { Uninitialized, On, Off };
-    enum AnyStepHandling { RejectAny, AnyIsDefaultStep };
+    void init();
+    bool storesValueSeparateFromAttribute() const;
+    String constrainValue(const String& proposedValue, int maxLen) const;
+    void recheckValue();
 
-    virtual void willChangeForm() OVERRIDE;
-    virtual void didChangeForm() OVERRIDE;
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
-    virtual void didMoveToNewDocument(Document* oldDocument) OVERRIDE;
+    String m_value;
+    int xPos;
+    short m_maxLen;
+    short m_size;
+    short yPos;
 
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
-    virtual bool isMouseFocusable() const;
-    virtual bool isEnumeratable() const;
-    virtual bool supportLabels() const OVERRIDE;
-    virtual void updateFocusAppearance(bool restorePreviousSelection);
-    virtual void aboutToUnload();
-    virtual bool shouldUseInputMethod();
-
-    virtual const AtomicString& formControlName() const;
-
-    virtual bool isTextFormControl() const { return isTextField(); }
-
-    virtual bool canTriggerImplicitSubmission() const { return isTextField(); }
-
-    virtual const AtomicString& formControlType() const;
-
-    virtual bool saveFormControlState(String& value) const;
-    virtual void restoreFormControlState(const String&);
-
-    virtual bool canStartSelection() const;
-
-    virtual void accessKeyAction(bool sendMouseEvents);
-
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
-    virtual void finishParsingChildren();
-
-    virtual void copyNonAttributeProperties(const Element* source);
-
-    virtual void attach();
-
-    virtual bool appendFormData(FormDataList&, bool);
-
-    virtual bool isSuccessfulSubmitButton() const;
-
-    virtual void reset();
-
-    virtual void* preDispatchEventHandler(Event*);
-    virtual void postDispatchEventHandler(Event*, void* dataFromPreDispatch);
-
-    virtual bool isURLAttribute(Attribute*) const;
-
-    virtual bool hasUnacceptableValue() const;
-
-    virtual bool isInRange() const;
-    virtual bool isOutOfRange() const;
-
-    virtual void documentDidResumeFromPageCache();
-
-    virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
-
-    bool needsSuspensionCallback();
-    void registerForSuspensionCallbackIfNeeded();
-    void unregisterForSuspensionCallbackIfNeeded();
-
-    bool supportsMaxLength() const { return isTextType(); }
-    bool isTextType() const;
-
-    virtual bool supportsPlaceholder() const;
-    virtual bool isPlaceholderEmpty() const OVERRIDE;
-    virtual void updatePlaceholderText();
-    virtual bool isEmptyValue() const OVERRIDE { return innerTextValue().isEmpty(); }
-    virtual bool isEmptySuggestedValue() const { return suggestedValue().isEmpty(); }
-    virtual void handleFocusEvent();
-    virtual void handleBlurEvent();
-
-    virtual bool isOptionalFormControl() const { return !isRequiredFormControl(); }
-    virtual bool isRequiredFormControl() const;
-    virtual bool recalcWillValidate() const;
-    virtual void requiredAttributeChanged() OVERRIDE;
-
-    void updateType();
-    
-    virtual void subtreeHasChanged();
-
-    bool getAllowedValueStepWithDecimalPlaces(AnyStepHandling, double*, unsigned*) const;
-
-    // Helper for stepUp()/stepDown().  Adds step value * count to the current value.
-    void applyStep(double count, AnyStepHandling, TextFieldEventBehavior, ExceptionCode&);
-    double alignValueForStep(double value, double step, unsigned currentDecimalPlaces, unsigned stepDecimalPlaces);
-
-#if ENABLE(DATALIST)
-    HTMLDataListElement* dataList() const;
-#endif
-    void parseMaxLengthAttribute(Attribute*);
-    void updateValueIfNeeded();
-
-    // Returns null if this isn't associated with any radio button group.
-    CheckedRadioButtons* checkedRadioButtons() const;
-    void addToRadioButtonGroup();
-    void removeFromRadioButtonGroup();
-
-    AtomicString m_name;
-    String m_valueIfDirty;
-    String m_suggestedValue;
-    int m_size;
-    int m_maxLength;
     short m_maxResults;
-    bool m_isChecked : 1;
-    bool m_reflectsCheckedAttribute : 1;
-    bool m_isIndeterminate : 1;
-    bool m_hasType : 1;
-    bool m_isActivatedSubmit : 1;
-    unsigned m_autocomplete : 2; // AutoCompleteSetting
-    bool m_isAutofilled : 1;
-#if ENABLE(DATALIST)
-    bool m_hasNonEmptyList : 1;
-#endif
-    bool m_stateRestored : 1;
-    bool m_parsingInProgress : 1;
-    bool m_wasModifiedByUser : 1;
-    bool m_canReceiveDroppedFiles : 1;
-    OwnPtr<InputType> m_inputType;
+
+    HTMLImageLoader* m_imageLoader;
+
+    unsigned m_type : 4; // InputType 
+    bool m_checked : 1;
+    bool m_defaultChecked : 1;
+    bool m_useDefaultChecked : 1;
+    bool m_indeterminate : 1;
+    bool m_haveType : 1;
+    bool m_activeSubmit : 1;
+    bool m_autocomplete : 1;
+    bool m_autofilled : 1;
+    bool m_inited : 1;
+    
+    int cachedSelStart;
+    int cachedSelEnd;
 };
 
 } //namespace
+
 #endif

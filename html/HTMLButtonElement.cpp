@@ -1,10 +1,11 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
- * Copyright (C) 2007 Samuel Weinig (sam@webkit.org)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,168 +19,129 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
 #include "HTMLButtonElement.h"
 
-#include "Attribute.h"
+#include "Event.h"
 #include "EventNames.h"
 #include "FormDataList.h"
 #include "HTMLFormElement.h"
 #include "HTMLNames.h"
-#include "KeyboardEvent.h"
 #include "RenderButton.h"
-#include "ScriptEventListener.h"
-#include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
+using namespace EventNames;
 using namespace HTMLNames;
 
-inline HTMLButtonElement::HTMLButtonElement(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
-    : HTMLFormControlElement(tagName, document, form)
+HTMLButtonElement::HTMLButtonElement(Document* doc, HTMLFormElement* f)
+    : HTMLGenericFormElement(buttonTag, doc, f)
     , m_type(SUBMIT)
-    , m_isActivatedSubmit(false)
+    , m_dirty(true)
+    , m_activeSubmit(false)
 {
-    ASSERT(hasTagName(buttonTag));
 }
 
-PassRefPtr<HTMLButtonElement> HTMLButtonElement::create(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
+HTMLButtonElement::~HTMLButtonElement()
 {
-    return adoptRef(new HTMLButtonElement(tagName, document, form));
 }
 
-RenderObject* HTMLButtonElement::createRenderer(RenderArena* arena, RenderStyle*)
+RenderObject* HTMLButtonElement::createRenderer(RenderArena* arena, RenderStyle* style)
 {
     return new (arena) RenderButton(this);
 }
 
-const AtomicString& HTMLButtonElement::formControlType() const
+const AtomicString& HTMLButtonElement::type() const
 {
-    switch (m_type) {
-        case SUBMIT: {
-            DEFINE_STATIC_LOCAL(const AtomicString, submit, ("submit"));
-            return submit;
-        }
-        case BUTTON: {
-            DEFINE_STATIC_LOCAL(const AtomicString, button, ("button"));
-            return button;
-        }
-        case RESET: {
-            DEFINE_STATIC_LOCAL(const AtomicString, reset, ("reset"));
-            return reset;
-        }
-    }
-
-    ASSERT_NOT_REACHED();
-    return emptyAtom;
+    return getAttribute(typeAttr);
 }
 
-bool HTMLButtonElement::isPresentationAttribute(const QualifiedName& name) const
+void HTMLButtonElement::parseMappedAttribute(MappedAttribute *attr)
 {
-    if (name == alignAttr) {
-        // Don't map 'align' attribute.  This matches what Firefox and IE do, but not Opera.
-        // See http://bugs.webkit.org/show_bug.cgi?id=12071
-        return false;
-    }
-
-    return HTMLFormControlElement::isPresentationAttribute(name);
-}
-
-void HTMLButtonElement::parseAttribute(Attribute* attr)
-{
-    if (attr->name() == typeAttr) {
-        if (equalIgnoringCase(attr->value(), "reset"))
+    if (attr->name() ==  typeAttr) {
+        if (equalIgnoringCase(attr->value(), "submit"))
+            m_type = SUBMIT;
+        else if (equalIgnoringCase(attr->value(), "reset"))
             m_type = RESET;
         else if (equalIgnoringCase(attr->value(), "button"))
             m_type = BUTTON;
-        else
-            m_type = SUBMIT;
-        setNeedsWillValidateCheck();
+    } else if (attr->name() == valueAttr) {
+        m_value = attr->value();
+        m_currValue = m_value;
+    } else if (attr->name() == accesskeyAttr) {
+        // Do nothing.
+    } else if (attr->name() == onfocusAttr) {
+        setHTMLEventListener(focusEvent, attr);
+    } else if (attr->name() == onblurAttr) {
+        setHTMLEventListener(blurEvent, attr);
     } else
-        HTMLFormControlElement::parseAttribute(attr);
+        HTMLGenericFormElement::parseMappedAttribute(attr);
 }
 
-void HTMLButtonElement::defaultEventHandler(Event* event)
+void HTMLButtonElement::defaultEventHandler(Event *evt)
 {
-    if (event->type() == eventNames().DOMActivateEvent && !disabled()) {
+    if (m_type != BUTTON && (evt->type() == DOMActivateEvent) && !disabled()) {
         if (form() && m_type == SUBMIT) {
-            m_isActivatedSubmit = true;
-            form()->prepareForSubmission(event);
-            m_isActivatedSubmit = false; // Do this in case submission was canceled.
+            m_activeSubmit = true;
+            form()->prepareSubmit();
+            m_activeSubmit = false; // in case we were canceled
         }
         if (form() && m_type == RESET)
             form()->reset();
     }
-
-    if (event->isKeyboardEvent()) {
-        if (event->type() == eventNames().keydownEvent && static_cast<KeyboardEvent*>(event)->keyIdentifier() == "U+0020") {
-            setActive(true, true);
-            // No setDefaultHandled() - IE dispatches a keypress in this case.
-            return;
-        }
-        if (event->type() == eventNames().keypressEvent) {
-            switch (static_cast<KeyboardEvent*>(event)->charCode()) {
-                case '\r':
-                    dispatchSimulatedClick(event);
-                    event->setDefaultHandled();
-                    return;
-                case ' ':
-                    // Prevent scrolling down the page.
-                    event->setDefaultHandled();
-                    return;
-            }
-        }
-        if (event->type() == eventNames().keyupEvent && static_cast<KeyboardEvent*>(event)->keyIdentifier() == "U+0020") {
-            if (active())
-                dispatchSimulatedClick(event);
-            event->setDefaultHandled();
-            return;
-        }
-    }
-
-    HTMLFormControlElement::defaultEventHandler(event);
+    HTMLGenericFormElement::defaultEventHandler(evt);
 }
 
 bool HTMLButtonElement::isSuccessfulSubmitButton() const
 {
-    // HTML spec says that buttons must have names to be considered successful.
-    // However, other browsers do not impose this constraint.
+    // HTML spec says that buttons must have names
+    // to be considered successful. However, other browsers
+    // do not impose this constraint. Therefore, we behave
+    // differently and can use different buttons than the 
+    // author intended. 
+    // Remove the name constraint for now.
+    // Was: m_type == SUBMIT && !disabled() && !name().isEmpty()
     return m_type == SUBMIT && !disabled();
 }
 
 bool HTMLButtonElement::isActivatedSubmit() const
 {
-    return m_isActivatedSubmit;
+    return m_activeSubmit;
 }
 
 void HTMLButtonElement::setActivatedSubmit(bool flag)
 {
-    m_isActivatedSubmit = flag;
+    m_activeSubmit = flag;
 }
 
-bool HTMLButtonElement::appendFormData(FormDataList& formData, bool)
+bool HTMLButtonElement::appendFormData(FormDataList& encoding, bool /*multipart*/)
 {
-    if (m_type != SUBMIT || name().isEmpty() || !m_isActivatedSubmit)
+    if (m_type != SUBMIT || name().isEmpty() || !m_activeSubmit)
         return false;
-    formData.appendData(name(), value());
+    encoding.appendData(name(), m_currValue);
     return true;
 }
 
-void HTMLButtonElement::accessKeyAction(bool sendMouseEvents)
-{
-    focus();
-    // Send the mouse button events if the caller specified sendMouseEvents
-    dispatchSimulatedClick(0, sendMouseEvents);
+void HTMLButtonElement::accessKeyAction(bool sendToAnyElement)
+{   
+    // send the mouse button events iff the
+    // caller specified sendToAnyElement
+    click(sendToAnyElement);
 }
 
-bool HTMLButtonElement::isURLAttribute(Attribute* attr) const
+String HTMLButtonElement::accessKey() const
 {
-    return attr->name() == formactionAttr || HTMLFormControlElement::isURLAttribute(attr);
+    return getAttribute(accesskeyAttr);
+}
+
+void HTMLButtonElement::setAccessKey(const String &value)
+{
+    setAttribute(accesskeyAttr, value);
 }
 
 String HTMLButtonElement::value() const
@@ -187,14 +149,16 @@ String HTMLButtonElement::value() const
     return getAttribute(valueAttr);
 }
 
-bool HTMLButtonElement::recalcWillValidate() const
+void HTMLButtonElement::setValue(const String &value)
 {
-    return m_type == SUBMIT && HTMLFormControlElement::recalcWillValidate();
+    setAttribute(valueAttr, value);
 }
+
 
 bool HTMLButtonElement::willRespondToMouseClickEvents()
 {
-    return !disabled();
+    return  !disabled();
 }
+
 
 } // namespace

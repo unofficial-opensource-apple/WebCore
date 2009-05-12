@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,32 +18,40 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLLegendElement_h
-#define HTMLLegendElement_h
+#ifndef HTML_HTMLLegendElementImpl_H
+#define HTML_HTMLLegendElementImpl_H
 
-#include "HTMLElement.h"
+#include "HTMLGenericFormElement.h"
 
 namespace WebCore {
 
-class HTMLFormControlElement;
-
-class HTMLLegendElement : public HTMLElement {
+class HTMLLegendElement : public HTMLGenericFormElement {
 public:
-    static PassRefPtr<HTMLLegendElement> create(const QualifiedName&, Document*);
+    HTMLLegendElement(Document*, HTMLFormElement* = 0);
+    virtual ~HTMLLegendElement();
 
-private:
-    HTMLLegendElement(const QualifiedName&, Document*);
+    virtual bool isFocusable() const;
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
+    virtual const AtomicString& type() const;
+    virtual void accessKeyAction(bool sendToAnyElement);
 
-    // Control in the legend's fieldset that gets focus and access key.
-    HTMLFormControlElement* associatedControl();
+    /**
+     * The first form element in the legend's fieldset 
+     */
+    Element* formElement();
 
-    virtual void accessKeyAction(bool sendMouseEvents);
-    virtual void focus(bool restorePreviousSelection = true);
+    String accessKey() const;
+    void setAccessKey(const String &);
+
+    String align() const;
+    void setAlign(const String &);
+    
+    void focus();
 };
 
 } //namespace

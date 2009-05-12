@@ -1,6 +1,7 @@
 /*
+ * This file is part of the CSS implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,23 +15,23 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef CSSHelper_h
-#define CSSHelper_h
-
-#include <wtf/Forward.h>
+#ifndef css_helper_h
+#define css_helper_h
 
 namespace WebCore {
 
-// We always assume 96 CSS pixels in a CSS inch. This is the cold hard truth of the Web.
-// At high DPI, we may scale a CSS pixel, but the ratio of the CSS pixel to the so-called
-// "absolute" CSS length units like inch and pt is always fixed and never changes.
-const float cssPixelsPerInch = 96;
+    class String;
 
-} // namespace WebCore
+    /*
+     * mostly just removes the url("...") brace
+     */
+    String parseURL(const String &url);
 
-#endif // CSSHelper_h
+}
+
+#endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,38 +23,37 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef InsertIntoTextNodeCommand_h
-#define InsertIntoTextNodeCommand_h
+#ifndef insert_into_text_node_command_h__
+#define insert_into_text_node_command_h__
 
 #include "EditCommand.h"
 
 namespace WebCore {
+    class Text;
+    class String;
+}
 
-class Text;
+namespace WebCore {
 
-class InsertIntoTextNodeCommand : public SimpleEditCommand {
+class InsertIntoTextNodeCommand : public EditCommand
+{
 public:
-    static PassRefPtr<InsertIntoTextNodeCommand> create(PassRefPtr<Text> node, unsigned offset, const String& text)
-    {
-        return adoptRef(new InsertIntoTextNodeCommand(node, offset, text));
-    }
+    InsertIntoTextNodeCommand(Document *document, Text *, int, const String &);
+    virtual ~InsertIntoTextNodeCommand() { }
+
+    virtual void doApply();
+    virtual void doUnapply();
+
+    Text *node() const { return m_node.get(); }
+    int offset() const { return m_offset; }
+    String text() const { return m_text; }
 
 private:
-    InsertIntoTextNodeCommand(PassRefPtr<Text> node, unsigned offset, const String& text);
-
-    virtual void doApply() OVERRIDE;
-    virtual void doUnapply() OVERRIDE;
-    virtual void doReapply() OVERRIDE;
-    
-#ifndef NDEBUG
-    virtual void getNodesInCommand(HashSet<Node*>&) OVERRIDE;
-#endif
-    
     RefPtr<Text> m_node;
-    unsigned m_offset;
+    int m_offset;
     String m_text;
 };
 
 } // namespace WebCore
 
-#endif // InsertIntoTextNodeCommand_h
+#endif // __insert_into_text_node_command_h__

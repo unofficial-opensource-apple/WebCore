@@ -1,9 +1,11 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann (hausmann@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,34 +19,43 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "HTMLHeadElement.h"
 
 #include "HTMLNames.h"
-#include "Text.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLHeadElement::HTMLHeadElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLHeadElement::HTMLHeadElement(Document* doc)
+    : HTMLElement(headTag, doc)
 {
-    ASSERT(hasTagName(headTag));
 }
 
-PassRefPtr<HTMLHeadElement> HTMLHeadElement::create(Document* document)
+HTMLHeadElement::~HTMLHeadElement()
 {
-    return adoptRef(new HTMLHeadElement(headTag, document));
 }
 
-PassRefPtr<HTMLHeadElement> HTMLHeadElement::create(const QualifiedName& tagName, Document* document)
+String HTMLHeadElement::profile() const
 {
-    return adoptRef(new HTMLHeadElement(tagName, document));
+    return getAttribute(profileAttr);
+}
+
+void HTMLHeadElement::setProfile(const String &value)
+{
+    setAttribute(profileAttr, value);
+}
+
+bool HTMLHeadElement::checkDTD(const Node* newChild)
+{
+    return newChild->hasTagName(titleTag) || newChild->hasTagName(isindexTag) ||
+           newChild->hasTagName(baseTag) || newChild->hasTagName(scriptTag) ||
+           newChild->hasTagName(styleTag) || newChild->hasTagName(metaTag) ||
+           newChild->hasTagName(linkTag) || newChild->isTextNode();
 }
 
 }

@@ -1,11 +1,12 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2009 Apple Inc. All rights reserved.
- * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,59 +20,45 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
 #include "RenderTableCol.h"
 
-#include "CachedImage.h"
 #include "HTMLNames.h"
 #include "HTMLTableColElement.h"
-#include "RenderTable.h"
+#include "TextStream.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
 RenderTableCol::RenderTableCol(Node* node)
-    : RenderBox(node)
-    , m_span(1)
+    : RenderContainer(node), m_span(1)
 {
     // init RenderObject attributes
     setInline(true); // our object is not Inline
     updateFromElement();
 }
 
-void RenderTableCol::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
-{
-    RenderBox::styleDidChange(diff, oldStyle);
-
-    // If border was changed, notify table.
-    if (parent()) {
-        RenderTable* table = this->table();
-        if (table && !table->selfNeedsLayout() && !table->normalChildNeedsLayout() && oldStyle && oldStyle->border() != style()->border())
-            table->invalidateCollapsedBorders();
-    }
-}
-
 void RenderTableCol::updateFromElement()
 {
-    unsigned oldSpan = m_span;
-    Node* n = node();
-    if (n && (n->hasTagName(colTag) || n->hasTagName(colgroupTag))) {
-        HTMLTableColElement* tc = static_cast<HTMLTableColElement*>(n);
+    int oldSpan = m_span;
+    Node* node = element();
+    if (node && (node->hasTagName(colTag) || node->hasTagName(colgroupTag))) {
+        HTMLTableColElement* tc = static_cast<HTMLTableColElement*>(node);
         m_span = tc->span();
     } else
         m_span = !(style() && style()->display() == TABLE_COLUMN_GROUP);
     if (m_span != oldSpan && style() && parent())
-        setNeedsLayoutAndPrefWidthsRecalc();
+        setNeedsLayoutAndMinMaxRecalc();
 }
 
 bool RenderTableCol::isChildAllowed(RenderObject* child, RenderStyle* style) const
 {
-    return child->isTableCol() && style->display() == TABLE_COLUMN;
+    return !child->isText() && style && (style->display() == TABLE_COLUMN);
 }
 
 bool RenderTableCol::canHaveChildren() const
@@ -81,39 +68,12 @@ bool RenderTableCol::canHaveChildren() const
     return style()->display() == TABLE_COLUMN_GROUP;
 }
 
-LayoutRect RenderTableCol::clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const
+#ifndef NDEBUG
+void RenderTableCol::dump(TextStream* stream, DeprecatedString ind) const
 {
-    // For now, just repaint the whole table.
-    // FIXME: Find a better way to do this, e.g., need to repaint all the cells that we
-    // might have propagated a background color or borders into.
-    // FIXME: check for repaintContainer each time here?
-
-    RenderTable* parentTable = table();
-    if (!parentTable)
-        return LayoutRect();
-    return parentTable->clippedOverflowRectForRepaint(repaintContainer);
+    *stream << " span=" << m_span;
+    RenderContainer::dump(stream, ind);
 }
-
-void RenderTableCol::imageChanged(WrappedImagePtr, const IntRect*)
-{
-    // FIXME: Repaint only the rect the image paints in.
-    repaint();
-}
-
-void RenderTableCol::computePreferredLogicalWidths()
-{
-    setPreferredLogicalWidthsDirty(false);
-
-    for (RenderObject* child = firstChild(); child; child = child->nextSibling())
-        child->setPreferredLogicalWidthsDirty(false);
-}
-
-RenderTable* RenderTableCol::table() const
-{
-    RenderObject* table = parent();
-    if (table && !table->isTable())
-        table = table->parent();
-    return table && table->isTable() ? toRenderTable(table) : 0;
-}
+#endif
 
 }

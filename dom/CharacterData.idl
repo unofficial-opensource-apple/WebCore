@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,37 +13,37 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module core {
 
-    interface CharacterData : Node {
+    interface [LegacyParent=KJS::DOMEventTargetNode] CharacterData : EventTargetNode {
 
-        attribute [TreatNullAs=NullString] DOMString data
-            setter raises(DOMException);
+        attribute DOMString data
+            setter raises (DOMException);
 
         readonly attribute unsigned long length;
         
-        [TreatReturnedNullStringAs=Null, ObjCLegacyUnnamedParameters] DOMString substringData(in [IsIndex,Optional=DefaultIsUndefined] unsigned long offset, 
-                                                                         in [IsIndex,Optional=DefaultIsUndefined] unsigned long length)
+        [ConvertNullStringTo=Null] DOMString substringData(in [IsIndex] unsigned long offset, 
+                                                           in [IsIndex] unsigned long count)
             raises(DOMException);
 
-        void appendData(in [Optional=DefaultIsUndefined] DOMString data)
+        void appendData(in DOMString arg)
             raises(DOMException);
 
-        [ObjCLegacyUnnamedParameters] void insertData(in [IsIndex,Optional=DefaultIsUndefined] unsigned long offset, 
-                                       in [Optional=DefaultIsUndefined] DOMString data)
+        void insertData(in [IsIndex] unsigned long offset, 
+                        in DOMString arg)
             raises(DOMException);
 
-        [ObjCLegacyUnnamedParameters] void deleteData(in [IsIndex,Optional=DefaultIsUndefined] unsigned long offset, 
-                                       in [IsIndex,Optional=DefaultIsUndefined] unsigned long length)
+        void deleteData(in [IsIndex] unsigned long offset, 
+                        in [IsIndex] unsigned long count)
             raises(DOMException);
 
-        [ObjCLegacyUnnamedParameters] void replaceData(in [IsIndex,Optional=DefaultIsUndefined] unsigned long offset, 
-                                        in [IsIndex,Optional=DefaultIsUndefined] unsigned long length,
-                                        in [Optional=DefaultIsUndefined] DOMString data)
+        void replaceData(in [IsIndex] unsigned long offset, 
+                         in [IsIndex] unsigned long count,
+                         in DOMString arg)
             raises(DOMException);
     
     };

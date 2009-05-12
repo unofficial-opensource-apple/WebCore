@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,76 +26,78 @@
 #include "config.h"
 #include "RenderHTMLCanvas.h"
 
-#include "CanvasRenderingContext.h"
 #include "Document.h"
-#include "Frame.h"
-#include "FrameView.h"
 #include "GraphicsContext.h"
 #include "HTMLCanvasElement.h"
 #include "HTMLNames.h"
-#include "Page.h"
-#include "PaintInfo.h"
 #include "RenderView.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-RenderHTMLCanvas::RenderHTMLCanvas(HTMLCanvasElement* element)
-    : RenderReplaced(element, element->size())
+RenderHTMLCanvas::RenderHTMLCanvas(Node* n)
+    : RenderReplaced(n)
 {
-    view()->frameView()->setIsVisuallyNonEmpty();
 }
 
-bool RenderHTMLCanvas::requiresLayer() const
+const char* RenderHTMLCanvas::renderName() const
 {
-    if (RenderReplaced::requiresLayer())
-        return true;
+    return "RenderHTMLCanvas";
+}
+
+void RenderHTMLCanvas::paint(PaintInfo& i, int tx, int ty)
+{
+    if (!shouldPaint(i, tx, ty))
+        return;
+
+    int x = tx + m_x;
+    int y = ty + m_y;
+
+    if (shouldPaintBackgroundOrBorder() && (i.phase == PaintPhaseForeground || i.phase == PaintPhaseSelection)) 
+        paintBoxDecorations(i, x, y);
+
+    if ((i.phase == PaintPhaseOutline || i.phase == PaintPhaseSelfOutline) && style()->outlineWidth() && style()->visibility() == VISIBLE)
+        paintOutline(i.p, x, y, width(), height(), style());
     
-    HTMLCanvasElement* canvas = static_cast<HTMLCanvasElement*>(node());
-    return canvas && canvas->renderingContext() && canvas->renderingContext()->isAccelerated();
-}
+    if (i.phase != PaintPhaseForeground && i.phase != PaintPhaseSelection)
+        return;
 
-void RenderHTMLCanvas::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    LayoutRect rect = contentBoxRect();
-    rect.moveBy(paintOffset);
+    if (!shouldPaintWithinRoot(i))
+        return;
 
-    if (Frame* frame = this->frame()) {
-        if (Page* page = frame->page()) {
-            if (paintInfo.phase == PaintPhaseForeground)
-                page->addRelevantRepaintedObject(this, rect);
-        }
+    bool drawSelectionTint = selectionState() != SelectionNone && !document()->printing();
+    if (i.phase == PaintPhaseSelection) {
+        if (selectionState() == SelectionNone)
+            return;
+        drawSelectionTint = false;
     }
 
-    bool useLowQualityScale = style()->imageRendering() == ImageRenderingOptimizeContrast;
-    static_cast<HTMLCanvasElement*>(node())->paint(paintInfo.context, rect, useLowQualityScale);
+    if (element() && element()->hasTagName(canvasTag))
+        static_cast<HTMLCanvasElement*>(element())->paint(i.p,
+            IntRect(x + borderLeft() + paddingLeft(), y + borderTop() + paddingTop(), contentWidth(), contentHeight()));
+
+    if (drawSelectionTint)
+        i.p->fillRect(selectionRect(), selectionBackgroundColor());
 }
 
-void RenderHTMLCanvas::canvasSizeChanged()
+void RenderHTMLCanvas::layout()
 {
-    IntSize canvasSize = static_cast<HTMLCanvasElement*>(node())->size();
-    IntSize zoomedSize(canvasSize.width() * style()->effectiveZoom(), canvasSize.height() * style()->effectiveZoom());
+    ASSERT(needsLayout());
+    ASSERT(minMaxKnown());
 
-    if (zoomedSize == intrinsicSize())
-        return;
+    IntRect oldBounds;
+    bool checkForRepaint = checkForRepaintDuringLayout();
+    if (checkForRepaint) {
+        oldBounds = getAbsoluteRepaintRect();
+        oldBounds.move(view()->layoutDelta());
+    }
+    calcWidth();
+    calcHeight();
+    if (checkForRepaint)
+        repaintAfterLayoutIfNeeded(oldBounds, oldBounds);
 
-    setIntrinsicSize(zoomedSize);
-
-    if (!parent())
-        return;
-
-    if (!preferredLogicalWidthsDirty())
-        setPreferredLogicalWidthsDirty(true);
-
-    LayoutSize oldSize = size();
-    computeLogicalWidth();
-    computeLogicalHeight();
-    if (oldSize == size())
-        return;
-
-    if (!selfNeedsLayout())
-        setNeedsLayout(true);
+    setNeedsLayout(false);
 }
 
-} // namespace WebCore
+}

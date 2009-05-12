@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2003 Apple Computer, Inc.
- * Copyright (C) Research In Motion Limited 2010. All rights reserved.
  *
  * Portions are Copyright (C) 1998 Netscape Communications Corporation.
  *
@@ -16,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Alternatively, the contents of this file may be used under the terms
  * of either the Mozilla Public License Version 1.1, found at
@@ -36,11 +35,11 @@
 #include "config.h"
 #include "RenderArena.h"
 
-#include <stdlib.h>
+#include <assert.h>
 #include <string.h>
-#include <wtf/Assertions.h>
+#include <stdlib.h>
 
-#define ROUNDUP(x, y) ((((x)+((y)-1))/(y))*(y))
+#define ROUNDUP(x,y) ((((x)+((y)-1))/(y))*(y))
 
 namespace WebCore {
 
@@ -50,24 +49,20 @@ const int signature = 0xDBA00AEA;
 const int signatureDead = 0xDBA00AED;
 
 typedef struct {
-    RenderArena* arena;
+    RenderArena *arena;
     size_t size;
     int signature;
 } RenderArenaDebugHeader;
 
-static const size_t debugHeaderSize = ARENA_ALIGN(sizeof(RenderArenaDebugHeader));
-
 #endif
 
-RenderArena::RenderArena(unsigned arenaSize)
+RenderArena::RenderArena(unsigned int arenaSize)
 {
     // Initialize the arena pool
     INIT_ARENA_POOL(&m_pool, "RenderArena", arenaSize);
 
     // Zero out the recyclers array
     memset(m_recyclers, 0, sizeof(m_recyclers));
-
-    m_totalSize = 0;
 }
 
 RenderArena::~RenderArena()
@@ -77,19 +72,15 @@ RenderArena::~RenderArena()
 
 void* RenderArena::allocate(size_t size)
 {
-    m_totalSize += size;
-
-#ifdef ADDRESS_SANITIZER
-    return ::malloc(size);
-#elif !defined(NDEBUG)
+#ifndef NDEBUG
     // Use standard malloc so that memory debugging tools work.
-    ASSERT(this);
-    void* block = ::malloc(debugHeaderSize + size);
-    RenderArenaDebugHeader* header = static_cast<RenderArenaDebugHeader*>(block);
+    assert(this);
+    void *block = ::malloc(sizeof(RenderArenaDebugHeader) + size);
+    RenderArenaDebugHeader *header = (RenderArenaDebugHeader *)block;
     header->arena = this;
     header->size = size;
     header->signature = signature;
-    return static_cast<char*>(block) + debugHeaderSize;
+    return header + 1;
 #else
     void* result = 0;
 
@@ -98,8 +89,8 @@ void* RenderArena::allocate(size_t size)
 
     // Check recyclers first
     if (size < gMaxRecycledSize) {
-        const int index = size >> 2;
-
+        const int   index = size >> 2;
+    
         result = m_recyclers[index];
         if (result) {
             // Need to move to the next object
@@ -107,12 +98,10 @@ void* RenderArena::allocate(size_t size)
             m_recyclers[index] = next;
         }
     }
-
+    
     if (!result) {
         // Allocate a new chunk from the arena
-        unsigned bytesAllocated = 0;
-        ARENA_ALLOCATE(result, &m_pool, size, &bytesAllocated);
-        m_totalAllocated += bytesAllocated;
+        ARENA_ALLOCATE(result, &m_pool, size);
     }
 
     return result;
@@ -121,31 +110,26 @@ void* RenderArena::allocate(size_t size)
 
 void RenderArena::free(size_t size, void* ptr)
 {
-    m_totalSize -= size;
-
-#ifdef ADDRESS_SANITIZER
-    ::free(ptr);
-#elif !defined(NDEBUG)
+#ifndef NDEBUG
     // Use standard free so that memory debugging tools work.
-    void* block = static_cast<char*>(ptr) - debugHeaderSize;
-    RenderArenaDebugHeader* header = static_cast<RenderArenaDebugHeader*>(block);
-    ASSERT(header->signature == signature);
-    ASSERT_UNUSED(size, header->size == size);
-    ASSERT(header->arena == this);
+    RenderArenaDebugHeader *header = (RenderArenaDebugHeader *)ptr - 1;
+    assert(header->signature == signature);
+    assert(header->size == size);
+    assert(header->arena == this);
     header->signature = signatureDead;
-    ::free(block);
+    ::free(header);
 #else
     // Ensure we have correct alignment for pointers.  Important for Tru64
     size = ROUNDUP(size, sizeof(void*));
 
     // See if it's a size that we recycle
     if (size < gMaxRecycledSize) {
-        const int index = size >> 2;
-        void* currentTop = m_recyclers[index];
+        const int   index = size >> 2;
+        void*       currentTop = m_recyclers[index];
         m_recyclers[index] = ptr;
         *((void**)ptr) = currentTop;
     }
 #endif
 }
 
-} // namespace WebCore
+}

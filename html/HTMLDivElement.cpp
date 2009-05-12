@@ -1,7 +1,9 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,15 +17,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-
 #include "config.h"
 #include "HTMLDivElement.h"
 
-#include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "HTMLNames.h"
@@ -32,42 +32,48 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLDivElement::HTMLDivElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLDivElement::HTMLDivElement(Document *doc)
+    : HTMLElement(divTag, doc)
 {
-    ASSERT(hasTagName(divTag));
 }
 
-PassRefPtr<HTMLDivElement> HTMLDivElement::create(Document* document)
+HTMLDivElement::~HTMLDivElement()
 {
-    return adoptRef(new HTMLDivElement(divTag, document));
 }
 
-PassRefPtr<HTMLDivElement> HTMLDivElement::create(const QualifiedName& tagName, Document* document)
+bool HTMLDivElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
 {
-    return adoptRef(new HTMLDivElement(tagName, document));
+    if (attrName == alignAttr) {
+        result = eBlock;
+        return false;
+    }
+    return HTMLElement::mapToEntry(attrName, result);
 }
 
-bool HTMLDivElement::isPresentationAttribute(const QualifiedName& name) const
-{
-    if (name == alignAttr)
-        return true;
-    return HTMLElement::isPresentationAttribute(name);
-}
-
-void HTMLDivElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
+void HTMLDivElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == alignAttr) {
+        String v = attr->value();
         if (equalIgnoringCase(attr->value(), "middle") || equalIgnoringCase(attr->value(), "center"))
-            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitCenter);
+           addCSSProperty(attr, CSS_PROP_TEXT_ALIGN, CSS_VAL__WEBKIT_CENTER);
         else if (equalIgnoringCase(attr->value(), "left"))
-            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitLeft);
+            addCSSProperty(attr, CSS_PROP_TEXT_ALIGN, CSS_VAL__WEBKIT_LEFT);
         else if (equalIgnoringCase(attr->value(), "right"))
-            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitRight);
+            addCSSProperty(attr, CSS_PROP_TEXT_ALIGN, CSS_VAL__WEBKIT_RIGHT);
         else
-            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, attr->value());
+            addCSSProperty(attr, CSS_PROP_TEXT_ALIGN, v);
     } else
-        HTMLElement::collectStyleForAttribute(attr, style);
+        HTMLElement::parseMappedAttribute(attr);
+}
+
+String HTMLDivElement::align() const
+{
+    return getAttribute(alignAttr);
+}
+
+void HTMLDivElement::setAlign(const String &value)
+{
+    setAttribute(alignAttr, value);
 }
 
 }

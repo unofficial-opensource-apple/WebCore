@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,72 +26,123 @@
 #import "config.h"
 #import "DOMInternal.h"
 
-#import "DOMNodeInternal.h"
-#import "Frame.h"
-#import "JSNode.h"
+#import "Document.h"
+#import "Event.h"
+#import "FrameMac.h"
+#import "Range.h"
+#import "kjs_dom.h"
+#import "kjs_proxy.h"
 #import "WebScriptObjectPrivate.h"
-#import "runtime_root.h"
+#import "XPathEvaluator.h"
 
-#define NEEDS_WRAPPER_CACHE_LOCK 1
+#import "WebCoreThread.h"
+#import "ThreadSafeWrapper.h"
+
+using namespace WebCore;
+
+using KJS::ExecState;
+using KJS::Interpreter;
+using KJS::JSObject;
+
+using KJS::Bindings::RootObject;
 
 //------------------------------------------------------------------------------------------
-// Wrapping WebCore implementation objects
-
-static NSMapTable* DOMWrapperCache;
-    
-#ifdef NEEDS_WRAPPER_CACHE_LOCK
-static Mutex& wrapperCacheLock()
-{
-    DEFINE_STATIC_LOCAL(Mutex, wrapperCacheMutex, ());
-    return wrapperCacheMutex;
-}
-#endif
-
-#if COMPILER(CLANG)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif    
-
-NSMapTable* createWrapperCache()
-{
-    // NSMapTable with zeroing weak pointers is the recommended way to build caches like this under garbage collection.
-    NSPointerFunctionsOptions keyOptions = NSPointerFunctionsOpaqueMemory | NSPointerFunctionsOpaquePersonality;
-    NSPointerFunctionsOptions valueOptions = NSPointerFunctionsZeroingWeakMemory | NSPointerFunctionsObjectPersonality;
-    return [[NSMapTable alloc] initWithKeyOptions:keyOptions valueOptions:valueOptions capacity:0];
-}
-
-#if COMPILER(CLANG)
-#pragma clang diagnostic pop
-#endif
+// Wrapping khtml implementation objects
 
 NSObject* getDOMWrapper(DOMObjectInternal* impl)
 {
-#ifdef NEEDS_WRAPPER_CACHE_LOCK
-    MutexLocker locker(wrapperCacheLock());
-#endif
-    if (!DOMWrapperCache)
+    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
+    WebThreadContext *threadContext = WebThreadCurrentContext();
+    if (!threadContext->DOMWrapperCache)
         return nil;
-    return static_cast<NSObject*>(NSMapGet(DOMWrapperCache, impl));
+    return ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->get(impl);
 }
 
 void addDOMWrapper(NSObject* wrapper, DOMObjectInternal* impl)
 {
-#ifdef NEEDS_WRAPPER_CACHE_LOCK
-    MutexLocker locker(wrapperCacheLock());
-#endif
-    if (!DOMWrapperCache)
-        DOMWrapperCache = createWrapperCache();
-    NSMapInsert(DOMWrapperCache, impl, wrapper);
+    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
+    WebThreadContext *threadContext = WebThreadCurrentContext();
+    if (!threadContext->DOMWrapperCache)
+         threadContext->DOMWrapperCache = new HashMap<DOMObjectInternal*, NSObject*>;
+    ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->set(impl, wrapper);
 }
 
 void removeDOMWrapper(DOMObjectInternal* impl)
 {
-#ifdef NEEDS_WRAPPER_CACHE_LOCK
-    MutexLocker locker(wrapperCacheLock());
-#endif
-    if (!DOMWrapperCache)
+    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
+    WebThreadContext *threadContext = WebThreadCurrentContext();
+    if (!threadContext->DOMWrapperCache)
         return;
-    NSMapRemove(DOMWrapperCache, impl);
+    ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->remove(impl);
+}
+
+//------------------------------------------------------------------------------------------
+// Exceptions
+
+NSString * const DOMException = @"DOMException";
+NSString * const DOMRangeException = @"DOMRangeException";
+NSString * const DOMEventException = @"DOMEventException";
+#if XPATH_SUPPORT
+NSString * const DOMXPathException = @"DOMXPathException";
+#endif // XPATH_SUPPORT
+
+void raiseDOMException(ExceptionCode ec)
+{
+    ASSERT(ec);
+
+    NSString *name = ::DOMException;
+
+    int code = ec;
+    if (ec >= RangeExceptionOffset && ec <= RangeExceptionMax) {
+        name = DOMRangeException;
+        code -= RangeExceptionOffset;
+    } else if (ec >= EventExceptionOffset && ec <= EventExceptionMax) {
+        name = DOMEventException;
+        code -= EventExceptionOffset;
+#if XPATH_SUPPORT
+    } else if (ec >= XPathExceptionOffset && ec <= XPathExceptionMax) {
+        name = DOMXPathException;
+        code -= XPathExceptionOffset;
+#endif // XPATH_SUPPORT
+    }
+
+    NSString *reason = [NSString stringWithFormat:@"*** Exception received from DOM API: %d", code];
+    NSException *exception = [NSException exceptionWithName:name reason:reason
+        userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithInt:code] forKey:name]];
+    [exception raise];
+}
+
+//------------------------------------------------------------------------------------------
+// String/NSString bridging
+
+String::String(NSString* str)
+{
+    if (!str)
+        return;
+
+    CFIndex size = CFStringGetLength(reinterpret_cast<CFStringRef>(str));
+    if (size == 0)
+        m_impl = StringImpl::empty();
+    else {
+        Vector<UChar, 1024> buffer(size);
+        CFStringGetCharacters(reinterpret_cast<CFStringRef>(str), CFRangeMake(0, size), buffer.data());
+        m_impl = new StringImpl(buffer.data(), size);
+    }
+}
+
+String::String(CFStringRef str)
+{
+    if (!str)
+        return;
+
+    CFIndex size = CFStringGetLength(str);
+    if (size == 0)
+        m_impl = StringImpl::empty();
+    else {
+        Vector<UChar, 1024> buffer(size);
+        CFStringGetCharacters(str, CFRangeMake(0, size), buffer.data());
+        m_impl = new StringImpl(buffer.data(), size);
+    }
 }
 
 //------------------------------------------------------------------------------------------
@@ -99,7 +150,7 @@ void removeDOMWrapper(DOMObjectInternal* impl)
 @implementation WebScriptObject (WebScriptObjectInternal)
 
 // Only called by DOMObject subclass.
-- (id)_init
+- _init
 {
     self = [super init];
 
@@ -116,7 +167,7 @@ void removeDOMWrapper(DOMObjectInternal* impl)
 
 - (void)_initializeScriptDOMNodeImp
 {
-    ASSERT(_private->isCreatedByDOMWrapper);
+    assert (_private->isCreatedByDOMWrapper);
     
     if (![self isKindOfClass:[DOMNode class]]) {
         // DOMObject can't map back to a document, and thus an interpreter,
@@ -127,25 +178,19 @@ void removeDOMWrapper(DOMObjectInternal* impl)
     
     // Extract the WebCore::Node from the ObjectiveC wrapper.
     DOMNode *n = (DOMNode *)self;
-    WebCore::Node *nodeImpl = core(n);
+    Node *nodeImpl = [n _node];
 
     // Dig up Interpreter and ExecState.
-    WebCore::Frame *frame = 0;
-    if (WebCore::Document* document = nodeImpl->document())
-        frame = document->frame();
-    if (!frame)
-        return;
-
-    // The global object which should own this node - FIXME: does this need to be isolated-world aware?
-    WebCore::JSDOMGlobalObject* globalObject = frame->script()->globalObject(WebCore::mainThreadNormalWorld());
-    JSC::ExecState *exec = globalObject->globalExec();
-
+    Frame *frame = nodeImpl->document()->frame();
+    Interpreter *interpreter = frame->jScript()->interpreter();
+    ExecState *exec = interpreter->globalExec();
+    
     // Get (or create) a cached JS object for the DOM node.
-    JSC::JSObject *scriptImp = asObject(WebCore::toJS(exec, globalObject, nodeImpl));
+    JSObject *scriptImp = static_cast<JSObject *>(toJS(exec, nodeImpl));
 
-    JSC::Bindings::RootObject* rootObject = frame->script()->bindingRootObject();
+    const RootObject *executionContext = Mac(frame)->bindingRootObject();
 
-    [self _setImp:scriptImp originRootObject:rootObject rootObject:rootObject];
+    [self _initializeWithObjectImp:scriptImp originExecutionContext:executionContext executionContext:executionContext];
 }
 
 @end

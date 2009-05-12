@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2012 Apple Computer, Inc.
+ * Copyright (C) 2002, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,80 +17,40 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSRuleList_h
-#define CSSRuleList_h
+#ifndef CSSRuleList_H
+#define CSSRuleList_H
 
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefCounted.h>
-#include <wtf/RefPtr.h>
-#include <wtf/Vector.h>
-#include <wtf/text/WTFString.h>
+#include "Shared.h"
+#include "DeprecatedPtrList.h"
 
 namespace WebCore {
 
 class CSSRule;
-class CSSStyleSheet;
+class StyleList;
 
-class CSSRuleList {
-    WTF_MAKE_NONCOPYABLE(CSSRuleList); WTF_MAKE_FAST_ALLOCATED;
+class CSSRuleList : public Shared<CSSRuleList>
+{
 public:
-    virtual ~CSSRuleList();
-
-    virtual void ref() = 0;
-    virtual void deref() = 0;
-
-    virtual unsigned length() const = 0;
-    virtual CSSRule* item(unsigned index) const = 0;
-    
-    virtual CSSStyleSheet* styleSheet() const = 0;
-    
-protected:
     CSSRuleList();
+    CSSRuleList(StyleList*);
+    ~CSSRuleList();
+
+    unsigned length() const { return m_lstCSSRules.count(); }
+    CSSRule* item (unsigned index) { return m_lstCSSRules.at(index); }
+
+    /* not part of the DOM */
+    unsigned insertRule (CSSRule* rule, unsigned index);
+    void deleteRule (unsigned index);
+    void append(CSSRule* rule);
+
+protected:
+    DeprecatedPtrList<CSSRule> m_lstCSSRules;
 };
 
-class StaticCSSRuleList : public CSSRuleList {
-public:
-    static PassRefPtr<StaticCSSRuleList> create() { return adoptRef(new StaticCSSRuleList()); }
+} // namespace
 
-    virtual void ref() { ++m_refCount; }
-    virtual void deref();
-
-    Vector<RefPtr<CSSRule> >& rules() { return m_rules; }
-    
-    virtual CSSStyleSheet* styleSheet() const { return 0; }
-
-private:    
-    StaticCSSRuleList();
-    ~StaticCSSRuleList();
-
-    virtual unsigned length() const { return m_rules.size(); }
-    virtual CSSRule* item(unsigned index) const { return index < m_rules.size() ? m_rules[index].get() : 0; }
-
-    Vector<RefPtr<CSSRule> > m_rules;
-    unsigned m_refCount;
-};
-
-// The rule owns the live list.
-template <class Rule>
-class LiveCSSRuleList : public CSSRuleList {
-public:
-    LiveCSSRuleList(Rule* rule) : m_rule(rule) { }
-    
-    virtual void ref() { m_rule->ref(); }
-    virtual void deref() { m_rule->deref(); }
-    
-private:
-    virtual unsigned length() const { return m_rule->length(); }
-    virtual CSSRule* item(unsigned index) const  { return m_rule->item(index); }
-    virtual CSSStyleSheet* styleSheet() const { return m_rule->parentStyleSheet(); }
-    
-    Rule* m_rule;
-};
-
-} // namespace WebCore
-
-#endif // CSSRuleList_h
+#endif

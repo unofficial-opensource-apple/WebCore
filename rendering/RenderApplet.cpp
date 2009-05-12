@@ -1,6 +1,8 @@
-/*
+/**
+ * This file is part of the HTML widget for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2003, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,28 +16,26 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
 #include "RenderApplet.h"
 
-#include "Frame.h"
+#include "Document.h"
 #include "HTMLAppletElement.h"
 #include "HTMLNames.h"
 #include "HTMLParamElement.h"
-#include "PluginViewBase.h"
-#include "Widget.h"
+#include "JavaAppletWidget.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
 RenderApplet::RenderApplet(HTMLAppletElement* applet, const HashMap<String, String>& args)
-    : RenderWidget(applet)
-    , m_args(args)
+    : RenderWidget(applet), m_args(args)
 {
     setInline(true);
 }
@@ -44,13 +44,20 @@ RenderApplet::~RenderApplet()
 {
 }
 
-IntSize RenderApplet::intrinsicSize() const
+int RenderApplet::intrinsicWidth() const
 {
-    // FIXME: This doesn't make sense. We can't just start returning
-    // a different size once we've created the widget and expect
-    // layout and sizing to be correct. We should remove this and
-    // pass the appropriate intrinsic size in the constructor.
-    return widget() ? IntSize(50, 50) : IntSize(150, 150);
+    if (!m_widget)
+        return 150;
+    int w = m_widget->sizeHint().width();
+    return w > 10 ? w : 50;
+}
+
+int RenderApplet::intrinsicHeight() const
+{
+    if (!m_widget)
+        return 150;
+    int h = m_widget->sizeHint().height();
+    return h > 10 ? h : 50;
 }
 
 void RenderApplet::createWidgetIfNecessary()
@@ -60,28 +67,14 @@ void RenderApplet::createWidgetIfNecessary()
 void RenderApplet::layout()
 {
     ASSERT(needsLayout());
+    ASSERT(minMaxKnown());
 
-    computeLogicalWidth();
-    computeLogicalHeight();
+    calcWidth();
+    calcHeight();
 
     // The applet's widget gets created lazily upon first layout.
     createWidgetIfNecessary();
     setNeedsLayout(false);
 }
 
-#if USE(ACCELERATED_COMPOSITING)
-bool RenderApplet::requiresLayer() const
-{
-    if (RenderWidget::requiresLayer())
-        return true;
-    
-    return allowsAcceleratedCompositing();
 }
-
-bool RenderApplet::allowsAcceleratedCompositing() const
-{
-    return widget() && widget()->isPluginViewBase() && static_cast<PluginViewBase*>(widget())->platformLayer();
-}
-#endif
-
-} // namespace WebCore

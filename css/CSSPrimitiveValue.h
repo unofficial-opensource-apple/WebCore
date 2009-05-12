@@ -1,7 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
- * Copyright (C) 2007 Alexey Proskuryakov <ap@webkit.org>
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,43 +16,29 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSPrimitiveValue_h
-#define CSSPrimitiveValue_h
+#ifndef CSSPrimitiveValue_H
+#define CSSPrimitiveValue_H
 
 #include "CSSValue.h"
-#include "Color.h"
-#include <wtf/Forward.h>
-#include <wtf/MathExtras.h>
 #include <wtf/PassRefPtr.h>
 
 namespace WebCore {
 
-class CSSCalcValue;
 class Counter;
 class DashboardRegion;
 class Pair;
-class Quad;
-class RGBColor;
-class Rect;
+class RectImpl;
 class RenderStyle;
-class CSSWrapShape;
+class StringImpl;
 
-struct Length;
+typedef int ExceptionCode;
 
-template<typename T> inline T roundForImpreciseConversion(double value)
+class CSSPrimitiveValue : public CSSValue
 {
-    // Dimension calculations are imprecise, often resulting in values of e.g.
-    // 44.99998.  We need to go ahead and round if we're really close to the
-    // next integer value.
-    value += (value < 0) ? -0.01 : +0.01;
-    return ((value > std::numeric_limits<T>::max()) || (value < std::numeric_limits<T>::min())) ? 0 : static_cast<T>(value);
-}
-
-class CSSPrimitiveValue : public CSSValue {
 public:
     enum UnitTypes {
         CSS_UNKNOWN = 0,
@@ -80,129 +67,29 @@ public:
         CSS_COUNTER = 23,
         CSS_RECT = 24,
         CSS_RGBCOLOR = 25,
-        // From CSS Values and Units. Viewport-percentage Lengths (vw/vh/vmin).
-        CSS_VW = 26,
-        CSS_VH = 27,
-        CSS_VMIN = 28,
         CSS_PAIR = 100, // We envision this being exposed as a means of getting computed style values for pairs (border-spacing/radius, background-position, etc.)
-        CSS_DASHBOARD_REGION = 101, // FIXME: Dashboard region should not be a primitive value.
-        CSS_UNICODE_RANGE = 102,
-
-        // These next types are just used internally to allow us to translate back and forth from CSSPrimitiveValues to CSSParserValues.
-        CSS_PARSER_OPERATOR = 103,
-        CSS_PARSER_INTEGER = 104,
-        CSS_PARSER_HEXCOLOR = 105,
-
-        // This is used internally for unknown identifiers
-        CSS_PARSER_IDENTIFIER = 106,
-
-        // These are from CSS3 Values and Units, but that isn't a finished standard yet
-        CSS_TURN = 107,
-        CSS_REMS = 108,
-
-        // This is used internally for counter names (as opposed to counter values)
-        CSS_COUNTER_NAME = 109,
-
-        // This is used by the CSS Exclusions draft
-        CSS_SHAPE = 110,
-
-        // Used by border images.
-        CSS_QUAD = 111,
-
-        CSS_CALC = 112,
-        CSS_CALC_PERCENTAGE_WITH_NUMBER = 113,
-        CSS_CALC_PERCENTAGE_WITH_LENGTH = 114
+        CSS_DASHBOARD_REGION = 101 // FIXME: What on earth is this doing as a primitive value? It should not be!
     };
 
-    // This enum follows the CSSParser::Units enum augmented with UNIT_FREQUENCY for frequencies.
-    enum UnitCategory {
-        UNumber,
-        UPercent,
-        ULength,
-        UAngle,
-        UTime,
-        UFrequency,
-        UViewportPercentageLength,
-        UOther
-    };
+    // FIXME: int vs. unsigned overloading is too tricky for color vs. ident
+    CSSPrimitiveValue();
+    CSSPrimitiveValue(int ident);
+    CSSPrimitiveValue(double, UnitTypes);
+    CSSPrimitiveValue(const String&, UnitTypes);
+    CSSPrimitiveValue(PassRefPtr<Counter>);
+    CSSPrimitiveValue(PassRefPtr<RectImpl>);
+    CSSPrimitiveValue(unsigned color); // RGB value
+    CSSPrimitiveValue(PassRefPtr<Pair>);
 
-    bool isAngle() const
-    {
-        return m_primitiveUnitType == CSS_DEG
-               || m_primitiveUnitType == CSS_RAD
-               || m_primitiveUnitType == CSS_GRAD
-               || m_primitiveUnitType == CSS_TURN;
-    }
-    bool isAttr() const { return m_primitiveUnitType == CSS_ATTR; }
-    bool isCounter() const { return m_primitiveUnitType == CSS_COUNTER; }
-    bool isFontIndependentLength() const { return m_primitiveUnitType >= CSS_PX && m_primitiveUnitType <= CSS_PC; }
-    bool isFontRelativeLength() const
-    {
-        return m_primitiveUnitType == CSS_EMS || m_primitiveUnitType == CSS_EXS || m_primitiveUnitType == CSS_REMS;
-    }
-    bool isIdent() const { return m_primitiveUnitType == CSS_IDENT; }
-    bool isLength() const
-    {
-        unsigned short type = primitiveType();
-        return (type >= CSS_EMS && type <= CSS_PC) || type == CSS_REMS;
-    }
-    bool isNumber() const { return primitiveType() == CSS_NUMBER; }
-    bool isPercentage() const { return primitiveType() == CSS_PERCENTAGE; }
-    bool isPx() const { return primitiveType() == CSS_PX; }
-    bool isRect() const { return m_primitiveUnitType == CSS_RECT; }
-    bool isRGBColor() const { return m_primitiveUnitType == CSS_RGBCOLOR; }
-    bool isShape() const { return m_primitiveUnitType == CSS_SHAPE; }
-    bool isString() const { return m_primitiveUnitType == CSS_STRING; }
-    bool isTime() const { return m_primitiveUnitType == CSS_S || m_primitiveUnitType == CSS_MS; }
-    bool isURI() const { return m_primitiveUnitType == CSS_URI; }
-    bool isCalculated() const { return m_primitiveUnitType == CSS_CALC; }
-    bool isCalculatedPercentageWithNumber() const { return primitiveType() == CSS_CALC_PERCENTAGE_WITH_NUMBER; }
-    bool isCalculatedPercentageWithLength() const { return primitiveType() == CSS_CALC_PERCENTAGE_WITH_LENGTH; }
-    bool isViewportPercentageLength() const { return m_primitiveUnitType >= CSS_VW && m_primitiveUnitType <= CSS_VMIN; }
+#if __APPLE__
+    CSSPrimitiveValue(PassRefPtr<DashboardRegion>); // FIXME: Why is dashboard region a primitive value? This makes no sense.
+#endif
 
-    static PassRefPtr<CSSPrimitiveValue> createIdentifier(int identifier) { return adoptRef(new CSSPrimitiveValue(identifier)); }
-    static PassRefPtr<CSSPrimitiveValue> createColor(unsigned rgbValue) { return adoptRef(new CSSPrimitiveValue(rgbValue)); }
-    static PassRefPtr<CSSPrimitiveValue> create(double value, UnitTypes type) { return adoptRef(new CSSPrimitiveValue(value, type)); }
-    static PassRefPtr<CSSPrimitiveValue> create(const String& value, UnitTypes type) { return adoptRef(new CSSPrimitiveValue(value, type)); }
-
-    template<typename T> static PassRefPtr<CSSPrimitiveValue> create(T value)
-    {
-        return adoptRef(new CSSPrimitiveValue(value));
-    }
-
-    // This value is used to handle quirky margins in reflow roots (body, td, and th) like WinIE.
-    // The basic idea is that a stylesheet can use the value __qem (for quirky em) instead of em.
-    // When the quirky value is used, if you're in quirks mode, the margin will collapse away
-    // inside a table cell.
-    static PassRefPtr<CSSPrimitiveValue> createAllowingMarginQuirk(double value, UnitTypes type)
-    {
-        CSSPrimitiveValue* quirkValue = new CSSPrimitiveValue(value, type);
-        quirkValue->m_isQuirkValue = true;
-        return adoptRef(quirkValue);
-    }
-
-    ~CSSPrimitiveValue();
+    virtual ~CSSPrimitiveValue();
 
     void cleanup();
 
-    unsigned short primitiveType() const;
-
-    double computeDegrees();
-
-    enum TimeUnit { Seconds, Milliseconds };
-    template <typename T, TimeUnit timeUnit> T computeTime()
-    {
-        if (timeUnit == Seconds && m_primitiveUnitType == CSS_S)
-            return getValue<T>();
-        if (timeUnit == Seconds && m_primitiveUnitType == CSS_MS)
-            return getValue<T>() / 1000;
-        if (timeUnit == Milliseconds && m_primitiveUnitType == CSS_MS)
-            return getValue<T>();
-        if (timeUnit == Milliseconds && m_primitiveUnitType == CSS_S)
-            return getValue<T>() * 1000;
-        ASSERT_NOT_REACHED();
-        return 0;
-    }
+    unsigned short primitiveType() const { return m_type; }
 
     /*
      * computes a length in pixels out of the given CSSValue. Need the RenderStyle to get
@@ -214,124 +101,71 @@ public:
      * this is screen/printer dependent, so we probably need a config option for this,
      * and some tool to calibrate.
      */
-    template<typename T> T computeLength(RenderStyle* currStyle, RenderStyle* rootStyle, float multiplier = 1.0f, bool computingFontSize = false);
-
-    // Converts to a Length, mapping various unit types appropriately.
-    template<int> Length convertToLength(RenderStyle* currStyle, RenderStyle* rootStyle, double multiplier = 1.0, bool computingFontSize = false);
+    int computeLengthInt(RenderStyle*);
+    int computeLengthInt(RenderStyle*, double multiplier);
+    int computeLengthIntForLength(RenderStyle*);
+    int computeLengthIntForLength(RenderStyle*, double multiplier);
+    short computeLengthShort(RenderStyle*);
+    short computeLengthShort(RenderStyle*, double multiplier);
+    double computeLengthFloat(RenderStyle*, bool applyZoomFactor = true);
 
     // use with care!!!
-    void setPrimitiveType(unsigned short type) { m_primitiveUnitType = type; }
-
-    double getDoubleValue(unsigned short unitType, ExceptionCode&) const;
-    double getDoubleValue(unsigned short unitType) const;
-    double getDoubleValue() const;
-
+    void setPrimitiveType(unsigned short type) { m_type = type; }
     void setFloatValue(unsigned short unitType, double floatValue, ExceptionCode&);
-    float getFloatValue(unsigned short unitType, ExceptionCode& ec) const { return getValue<float>(unitType, ec); }
-    float getFloatValue(unsigned short unitType) const { return getValue<float>(unitType); }
-    float getFloatValue() const { return getValue<float>(); }
-
-    int getIntValue(unsigned short unitType, ExceptionCode& ec) const { return getValue<int>(unitType, ec); }
-    int getIntValue(unsigned short unitType) const { return getValue<int>(unitType); }
-    int getIntValue() const { return getValue<int>(); }
-
-    template<typename T> inline T getValue(unsigned short unitType, ExceptionCode& ec) const { return clampTo<T>(getDoubleValue(unitType, ec)); }
-    template<typename T> inline T getValue(unsigned short unitType) const { return clampTo<T>(getDoubleValue(unitType)); }
-    template<typename T> inline T getValue() const { return clampTo<T>(getDoubleValue()); }
+    double getFloatValue(unsigned short unitType);
+    double getFloatValue() { return m_value.num; }
 
     void setStringValue(unsigned short stringType, const String& stringValue, ExceptionCode&);
-    String getStringValue(ExceptionCode&) const;
     String getStringValue() const;
-
-    Counter* getCounterValue(ExceptionCode&) const;
-    Counter* getCounterValue() const { return m_primitiveUnitType != CSS_COUNTER ? 0 : m_value.counter; }
-
-    Rect* getRectValue(ExceptionCode&) const;
-    Rect* getRectValue() const { return m_primitiveUnitType != CSS_RECT ? 0 : m_value.rect; }
-
-    Quad* getQuadValue(ExceptionCode&) const;
-    Quad* getQuadValue() const { return m_primitiveUnitType != CSS_QUAD ? 0 : m_value.quad; }
-
-    PassRefPtr<RGBColor> getRGBColorValue(ExceptionCode&) const;
-    RGBA32 getRGBA32Value() const { return m_primitiveUnitType != CSS_RGBCOLOR ? 0 : m_value.rgbcolor; }
-
-    Pair* getPairValue(ExceptionCode&) const;
-    Pair* getPairValue() const { return m_primitiveUnitType != CSS_PAIR ? 0 : m_value.pair; }
-
-    DashboardRegion* getDashboardRegionValue() const { return m_primitiveUnitType != CSS_DASHBOARD_REGION ? 0 : m_value.region; }
-
-    CSSWrapShape* getShapeValue() const { return m_primitiveUnitType != CSS_SHAPE ? 0 : m_value.shape; }
     
-    CSSCalcValue* cssCalcValue() const { return m_primitiveUnitType != CSS_CALC ? 0 : m_value.calc; }
-
-    int getIdent() const { return m_primitiveUnitType == CSS_IDENT ? m_value.ident : 0; }
-
-    template<typename T> inline operator T() const; // Defined in CSSPrimitiveValueMappings.h
-
-    String customCssText() const;
-
-    bool isQuirkValue() { return m_isQuirkValue; }
-
-    void addSubresourceStyleURLs(ListHashSet<KURL>&, const StyleSheetInternal*);
-
-    Length viewportPercentageLength();
-    
-    PassRefPtr<CSSPrimitiveValue> cloneForCSSOM() const;
-    void setCSSOMSafe() { m_isCSSOMSafe = true; }
-
-private:
-    // FIXME: int vs. unsigned overloading is too subtle to distinguish the color and identifier cases.
-    CSSPrimitiveValue(int ident);
-    CSSPrimitiveValue(unsigned color); // RGB value
-    CSSPrimitiveValue(const Length&);
-    CSSPrimitiveValue(const String&, UnitTypes);
-    CSSPrimitiveValue(double, UnitTypes);
-
-    template<typename T> CSSPrimitiveValue(T); // Defined in CSSPrimitiveValueMappings.h
-    template<typename T> CSSPrimitiveValue(T* val)
-        : CSSValue(PrimitiveClass)
-    {
-        init(PassRefPtr<T>(val));
+    Counter* getCounterValue () const {
+        return m_type != CSS_COUNTER ? 0 : m_value.counter;
     }
 
-    template<typename T> CSSPrimitiveValue(PassRefPtr<T> val)
-        : CSSValue(PrimitiveClass)
-    {
-        init(val);
+    RectImpl* getRectValue () const {
+        return m_type != CSS_RECT ? 0 : m_value.rect;
     }
 
-    static void create(int); // compile-time guard
-    static void create(unsigned); // compile-time guard
-    template<typename T> operator T*(); // compile-time guard
+    unsigned getRGBColorValue() const {
+        return m_type != CSS_RGBCOLOR ? 0 : m_value.rgbcolor;
+    }
 
-    static UnitTypes canonicalUnitTypeForCategory(UnitCategory category);
+    Pair* getPairValue() const {
+        return m_type != CSS_PAIR ? 0 : m_value.pair;
+    }
 
-    void init(PassRefPtr<Counter>);
-    void init(PassRefPtr<Rect>);
-    void init(PassRefPtr<Pair>);
-    void init(PassRefPtr<Quad>);
-    void init(PassRefPtr<DashboardRegion>); // FIXME: Dashboard region should not be a primitive value.
-    void init(PassRefPtr<CSSWrapShape>);
-    void init(PassRefPtr<CSSCalcValue>);
-    bool getDoubleValueInternal(UnitTypes targetUnitType, double* result) const;
+#if __APPLE__
+    DashboardRegion *getDashboardRegionValue () const {
+        return m_type != CSS_DASHBOARD_REGION ? 0 : m_value.region;
+    }
+#endif
 
-    double computeLengthDouble(RenderStyle* currentStyle, RenderStyle* rootStyle, float multiplier, bool computingFontSize);
+    virtual bool isPrimitiveValue() const { return true; }
+    virtual unsigned short cssValueType() const;
 
+    int getIdent();
+
+    virtual bool parseString(const String&, bool = false);
+    virtual String cssText() const;
+
+    virtual bool isQuirkValue() { return false; }
+
+protected:
+    int m_type;
     union {
         int ident;
         double num;
         StringImpl* string;
         Counter* counter;
-        Rect* rect;
-        Quad* quad;
+        RectImpl* rect;
         unsigned rgbcolor;
         Pair* pair;
+#if __APPLE__
         DashboardRegion* region;
-        CSSWrapShape* shape;
-        CSSCalcValue* calc;
+#endif
     } m_value;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSPrimitiveValue_h
+#endif

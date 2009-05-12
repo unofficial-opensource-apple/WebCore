@@ -26,14 +26,13 @@
 #include "config.h"
 #include "SystemTime.h"
 
-#include <CoreGraphics/CGEventSource.h>
 #include <CoreFoundation/CFDate.h>
 
 namespace WebCore {
 
-float userIdleTime()
+double currentTime()
 {
-    return static_cast<float>(CGEventSourceSecondsSinceLastEventType(kCGEventSourceStateCombinedSessionState, kCGAnyInputEventType));
+    return CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970;
 }
 
 }

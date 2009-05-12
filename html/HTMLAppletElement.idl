@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009, 2010 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,36 +13,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface [
-        CustomNamedSetter,
-        JSCustomGetOwnPropertySlotAndDescriptor,
-        CustomCall
-    ] HTMLAppletElement : HTMLElement {
-        attribute [Reflect] DOMString align;
-        attribute [Reflect] DOMString alt;
-        attribute [Reflect] DOMString archive;
-        attribute [Reflect] DOMString code;
-        attribute [Reflect] DOMString codeBase;
-        attribute [Reflect] DOMString height;
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-        attribute [Reflect] DOMString hspace;
-#else
-        attribute [Reflect] long hspace;
-#endif
-        attribute [Reflect] DOMString name;
-        attribute [Reflect] DOMString object;
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-        attribute [Reflect] DOMString vspace;
-#else
-        attribute [Reflect] long vspace;
-#endif
-        attribute [Reflect] DOMString width;
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLAppletElement : HTMLElement {
+        attribute DOMString align;
+        attribute DOMString alt;
+        attribute DOMString archive;
+        attribute DOMString code;
+        attribute DOMString codeBase;
+        attribute DOMString height;
+        attribute DOMString hspace;
+        attribute DOMString name;
+        attribute DOMString object;
+        attribute DOMString vspace;
+        attribute DOMString width;
     };
 
 }

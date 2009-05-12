@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,8 +13,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
@@ -26,7 +26,7 @@
 namespace WebCore {
 
 class HTMLInputElement;
-
+    
 // Each RenderFileUploadControl contains a RenderButton (for opening the file chooser), and
 // sufficient space to draw a file icon and filename. The RenderButton has a shadow node
 // associated with it to receive click/hover events.
@@ -34,45 +34,25 @@ class HTMLInputElement;
 class RenderFileUploadControl : public RenderBlock {
 public:
     RenderFileUploadControl(HTMLInputElement*);
-    virtual ~RenderFileUploadControl();
+    ~RenderFileUploadControl();
 
-    virtual bool isFileUploadControl() const { return true; }
-
-    String buttonValue();
-    String fileTextValue() const;
-    
-private:
     virtual const char* renderName() const { return "RenderFileUploadControl"; }
 
+    virtual void setStyle(RenderStyle*);
     virtual void updateFromElement();
-    virtual void computePreferredLogicalWidths();
-    virtual void paintObject(PaintInfo&, const LayoutPoint&);
+    virtual void calcMinMaxWidth();
+    virtual void paintObject(PaintInfo&, int tx, int ty);
 
-    virtual bool requiresForcedStyleRecalcPropagation() const { return true; }
+    void click();
 
+    void valueChanged();
+
+private:
     int maxFilenameWidth() const;
-    
-    virtual VisiblePosition positionForPoint(const LayoutPoint&);
+    RenderStyle* createButtonStyle(RenderStyle* parentStyle) const;
 
-    HTMLInputElement* uploadButton() const;
-
-    bool m_canReceiveDroppedFiles;
+    RefPtr<HTMLInputElement> m_button;
 };
-
-inline RenderFileUploadControl* toRenderFileUploadControl(RenderObject* object)
-{
-    ASSERT(!object || object->isFileUploadControl());
-    return static_cast<RenderFileUploadControl*>(object);
-}
-
-inline const RenderFileUploadControl* toRenderFileUploadControl(const RenderObject* object)
-{
-    ASSERT(!object || object->isFileUploadControl());
-    return static_cast<const RenderFileUploadControl*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderFileUploadControl(const RenderFileUploadControl*);
 
 } // namespace WebCore
 

@@ -1,9 +1,11 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann (hausmann@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2006, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,150 +19,103 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
 #include "HTMLFrameSetElement.h"
 
-#include "Attribute.h"
-#include "CSSPropertyNames.h"
 #include "Document.h"
 #include "Event.h"
 #include "EventNames.h"
-#include "Frame.h"
-#include "FrameLoaderClient.h"
 #include "HTMLNames.h"
 #include "Length.h"
 #include "MouseEvent.h"
-#include "NodeRenderingContext.h"
 #include "RenderFrameSet.h"
-#include "ScriptEventListener.h"
 #include "Text.h"
 
 namespace WebCore {
 
+using namespace EventNames;
 using namespace HTMLNames;
 
-HTMLFrameSetElement::HTMLFrameSetElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLFrameSetElement::HTMLFrameSetElement(Document *doc)
+    : HTMLElement(framesetTag, doc)
+    , m_rows(0)
+    , m_cols(0)
     , m_totalRows(1)
     , m_totalCols(1)
-    , m_border(6)
-    , m_borderSet(false)
-    , m_borderColorSet(false)
-    , m_frameborder(true)
-    , m_frameborderSet(false)
-    , m_noresize(false)
+    , m_border(4)
+    , frameborder(true)
+    , frameBorderSet(false)
+    , noresize(false)
 {
-    ASSERT(hasTagName(framesetTag));
-    
-    setHasCustomWillOrDidRecalcStyle();
 }
 
-PassRefPtr<HTMLFrameSetElement> HTMLFrameSetElement::create(const QualifiedName& tagName, Document* document)
+HTMLFrameSetElement::~HTMLFrameSetElement()
 {
-    return adoptRef(new HTMLFrameSetElement(tagName, document));
+    if (m_rows)
+        delete [] m_rows;
+    if (m_cols)
+        delete [] m_cols;
 }
 
-bool HTMLFrameSetElement::isPresentationAttribute(const QualifiedName& name) const
+bool HTMLFrameSetElement::checkDTD(const Node* newChild)
 {
-    if (name == bordercolorAttr)
-        return true;
-    return HTMLElement::isPresentationAttribute(name);
+    // FIXME: Old code had adjacent double returns and seemed to want to do something with NOFRAMES (but didn't).
+    // What is the correct behavior?
+    if (newChild->isTextNode())
+        return static_cast<const Text*>(newChild)->containsOnlyWhitespace();
+    return newChild->hasTagName(framesetTag) || newChild->hasTagName(frameTag);
 }
 
-void HTMLFrameSetElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
-{
-    if (attr->name() == bordercolorAttr)
-        addHTMLColorToStyle(style, CSSPropertyBorderColor, attr->value());
-    else
-        HTMLElement::collectStyleForAttribute(attr, style);
-}
-
-void HTMLFrameSetElement::parseAttribute(Attribute* attr)
+void HTMLFrameSetElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == rowsAttr) {
         if (!attr->isNull()) {
-            m_rowLengths = newLengthArray(attr->value().string(), m_totalRows);
-            setNeedsStyleRecalc();
+            if (m_rows) delete [] m_rows;
+            m_rows = attr->value().toLengthArray(m_totalRows);
+            setChanged();
         }
     } else if (attr->name() == colsAttr) {
         if (!attr->isNull()) {
-            m_colLengths = newLengthArray(attr->value().string(), m_totalCols);
-            setNeedsStyleRecalc();
+            delete [] m_cols;
+            m_cols = attr->value().toLengthArray(m_totalCols);
+            setChanged();
         }
     } else if (attr->name() == frameborderAttr) {
-        if (!attr->isNull()) {
-            // false or "no" or "0"..
-            if (attr->value().toInt() == 0) {
-                m_frameborder = false;
-                m_border = 0;
-            }
-            m_frameborderSet = true;
-        } else {
-            m_frameborder = false;
-            m_frameborderSet = false;
+        // false or "no" or "0"..
+        if (attr->value().toInt() == 0) {
+            frameborder = false;
+            m_border = 0;
         }
+        frameBorderSet = true;
     } else if (attr->name() == noresizeAttr) {
-        m_noresize = true;
+        noresize = true;
     } else if (attr->name() == borderAttr) {
-        if (!attr->isNull()) {
-            m_border = attr->value().toInt();
-            if (!m_border)
-                m_frameborder = false;
-            m_borderSet = true;
-        } else
-            m_borderSet = false;
-    } else if (attr->name() == bordercolorAttr)
-        m_borderColorSet = !attr->isEmpty();
-    else if (attr->name() == onloadAttr)
-        document()->setWindowAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onbeforeunloadAttr)
-        document()->setWindowAttributeEventListener(eventNames().beforeunloadEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onunloadAttr)
-        document()->setWindowAttributeEventListener(eventNames().unloadEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onblurAttr)
-        document()->setWindowAttributeEventListener(eventNames().blurEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onfocusAttr)
-        document()->setWindowAttributeEventListener(eventNames().focusEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onfocusinAttr)
-        document()->setWindowAttributeEventListener(eventNames().focusinEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onfocusoutAttr)
-        document()->setWindowAttributeEventListener(eventNames().focusoutEvent, createAttributeEventListener(document()->frame(), attr));
-#if ENABLE(ORIENTATION_EVENTS)
-    else if (attr->name() == onorientationchangeAttr)
-        document()->setWindowAttributeEventListener(eventNames().orientationchangeEvent, createAttributeEventListener(document()->frame(), attr));
-#endif
-    else if (attr->name() == onhashchangeAttr)
-        document()->setWindowAttributeEventListener(eventNames().hashchangeEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onresizeAttr)
-        document()->setWindowAttributeEventListener(eventNames().resizeEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onscrollAttr)
-        document()->setWindowAttributeEventListener(eventNames().scrollEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onstorageAttr)
-        document()->setWindowAttributeEventListener(eventNames().storageEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == ononlineAttr)
-        document()->setWindowAttributeEventListener(eventNames().onlineEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onofflineAttr)
-        document()->setWindowAttributeEventListener(eventNames().offlineEvent, createAttributeEventListener(document()->frame(), attr));
-    else if (attr->name() == onpopstateAttr)
-        document()->setWindowAttributeEventListener(eventNames().popstateEvent, createAttributeEventListener(document()->frame(), attr));
-    else
-        HTMLElement::parseAttribute(attr);
+        m_border = attr->value().toInt();
+        if(!m_border)
+            frameborder = false;
+    } else if (attr->name() == onloadAttr) {
+        document()->setHTMLWindowEventListener(loadEvent, attr);
+    } else if (attr->name() == onbeforeunloadAttr) {
+        document()->setHTMLWindowEventListener(beforeunloadEvent, attr);
+    } else if (attr->name() == onunloadAttr) {
+        document()->setHTMLWindowEventListener(unloadEvent, attr);
+    } else
+        HTMLElement::parseMappedAttribute(attr);
 }
 
-bool HTMLFrameSetElement::rendererIsNeeded(const NodeRenderingContext& context)
+bool HTMLFrameSetElement::rendererIsNeeded(RenderStyle *style)
 {
-    // For compatibility, frames render even when display: none is set.
-    // However, we delay creating a renderer until stylesheets have loaded. 
-    return context.style()->isStyleAvailable();
+    // Ignore display: none but do pay attention if a stylesheet has caused us to delay our loading.
+    return style->isStyleAvailable();
 }
 
 RenderObject *HTMLFrameSetElement::createRenderer(RenderArena *arena, RenderStyle *style)
 {
-    if (style->hasContent())
+    if (style->contentData())
         return RenderObject::createObject(this, style);
     
     return new (arena) RenderFrameSet(this);
@@ -168,23 +123,16 @@ RenderObject *HTMLFrameSetElement::createRenderer(RenderArena *arena, RenderStyl
 
 void HTMLFrameSetElement::attach()
 {
-    // Inherit default settings from parent frameset
-    // FIXME: This is not dynamic.
-    for (ContainerNode* node = parentNode(); node; node = node->parentNode()) {
+    // inherit default settings from parent frameset
+    HTMLElement* node = static_cast<HTMLElement*>(parentNode());
+    while (node) {
         if (node->hasTagName(framesetTag)) {
             HTMLFrameSetElement* frameset = static_cast<HTMLFrameSetElement*>(node);
-            if (!m_frameborderSet)
-                m_frameborder = frameset->hasFrameBorder();
-            if (m_frameborder) {
-                if (!m_borderSet)
-                    m_border = frameset->border();
-                if (!m_borderColorSet)
-                    m_borderColorSet = frameset->hasBorderColor();
-            }
-            if (!m_noresize)
-                m_noresize = frameset->noResize();
+            if(!frameBorderSet)  frameborder = frameset->frameBorder();
+            if(!noresize)  noresize = frameset->noResize();
             break;
         }
+        node = static_cast<HTMLElement*>(node->parentNode());
     }
 
     HTMLElement::attach();
@@ -192,42 +140,41 @@ void HTMLFrameSetElement::attach()
 
 void HTMLFrameSetElement::defaultEventHandler(Event* evt)
 {
-    if (evt->isMouseEvent() && !m_noresize && renderer() && renderer()->isFrameSet()) {
-        if (toRenderFrameSet(renderer())->userResize(static_cast<MouseEvent*>(evt))) {
-            evt->setDefaultHandled();
-            return;
-        }
+    if (evt->isMouseEvent() && !noresize && renderer()) {
+        static_cast<RenderFrameSet*>(renderer())->userResize(static_cast<MouseEvent*>(evt));
+        evt->setDefaultHandled();
     }
+
     HTMLElement::defaultEventHandler(evt);
 }
 
-bool HTMLFrameSetElement::willRecalcStyle(StyleChange)
+void HTMLFrameSetElement::recalcStyle(StyleChange ch)
 {
-    if (needsStyleRecalc() && renderer()) {
+    if (changed() && renderer()) {
         renderer()->setNeedsLayout(true);
-        clearNeedsStyleRecalc();
+        setChanged(false);
     }
-    return true;
+    HTMLElement::recalcStyle(ch);
 }
 
-Node::InsertionNotificationRequest HTMLFrameSetElement::insertedInto(Node* insertionPoint)
+String HTMLFrameSetElement::cols() const
 {
-    HTMLElement::insertedInto(insertionPoint);
-    if (insertionPoint->inDocument()) {
-        if (Frame* frame = document()->frame())
-            frame->loader()->client()->dispatchDidBecomeFrameset(document()->isFrameSet());
-    }
-
-    return InsertionDone;
+    return getAttribute(colsAttr);
 }
 
-void HTMLFrameSetElement::removedFrom(Node* insertionPoint)
+void HTMLFrameSetElement::setCols(const String &value)
 {
-    HTMLElement::removedFrom(insertionPoint);
-    if (insertionPoint->inDocument()) {
-        if (Frame* frame = document()->frame())
-            frame->loader()->client()->dispatchDidBecomeFrameset(document()->isFrameSet());
-    }
+    setAttribute(colsAttr, value);
 }
 
-} // namespace WebCore
+String HTMLFrameSetElement::rows() const
+{
+    return getAttribute(rowsAttr);
+}
+
+void HTMLFrameSetElement::setRows(const String &value)
+{
+    setAttribute(rowsAttr, value);
+}
+
+}

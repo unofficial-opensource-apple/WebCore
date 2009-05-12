@@ -20,16 +20,13 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef Logging_h
-#define Logging_h
+#ifndef Logging_H
+#define Logging_H
 
 #include <wtf/Assertions.h>
-#include <wtf/Forward.h>
-
-#if !LOG_DISABLED
 
 #ifndef LOG_CHANNEL_PREFIX
 #define LOG_CHANNEL_PREFIX Log
@@ -38,41 +35,15 @@
 namespace WebCore {
 
     extern WTFLogChannel LogNotYetImplemented;
+
     extern WTFLogChannel LogFrames;
     extern WTFLogChannel LogLoading;
     extern WTFLogChannel LogPopupBlocking;
     extern WTFLogChannel LogEvents;
     extern WTFLogChannel LogEditing;
-    extern WTFLogChannel LogLiveConnect;
+    extern WTFLogChannel LogTextConversion;
     extern WTFLogChannel LogIconDatabase;
-    extern WTFLogChannel LogSQLDatabase;
-    extern WTFLogChannel LogSpellingAndGrammar;
-    extern WTFLogChannel LogBackForward;
-    extern WTFLogChannel LogHistory;
-    extern WTFLogChannel LogPageCache;
-    extern WTFLogChannel LogPlatformLeaks;
-    extern WTFLogChannel LogResourceLoading;
-    extern WTFLogChannel LogNetwork;
-    extern WTFLogChannel LogFTP;
-    extern WTFLogChannel LogThreading;
-    extern WTFLogChannel LogStorageAPI;
-    extern WTFLogChannel LogMedia;
-    extern WTFLogChannel LogPlugins;
-    extern WTFLogChannel LogArchives;
-    extern WTFLogChannel LogProgress;
-    extern WTFLogChannel LogFileAPI;
-    extern WTFLogChannel LogWebAudio;
-    extern WTFLogChannel LogCompositing;
 
-#if ENABLE(DISK_IMAGE_CACHE)
-    extern WTFLogChannel LogDiskImageCache;
-#endif
-    extern WTFLogChannel LogMemoryPressure;
-
-    void initializeLoggingChannelsIfNecessary();
-    WTFLogChannel* getChannelFromName(const String& channelName);
 }
 
-#endif // !LOG_DISABLED
-
-#endif // Logging_h
+#endif

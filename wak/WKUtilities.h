@@ -1,14 +1,12 @@
 //
 //  WKUtilities.h
 //
-//  Copyright (C) 2005, 2006, 2007, 2009 Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
 //
 
-#ifndef WKUtilities_h
-#define WKUtilities_h
+#import <CoreGraphics/CoreGraphics.h>
 
 #import "WKTypes.h"
-#import <CoreGraphics/CoreGraphics.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,5 +52,3 @@ WKClassInfo *WKGetClassInfo (WKObjectRef object);
 #ifdef __cplusplus
 }
 #endif
-
-#endif // WKUtilities_h

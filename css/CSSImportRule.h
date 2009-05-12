@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,95 +17,50 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSImportRule_h
-#define CSSImportRule_h
+#ifndef CSSImportRule_H
+#define CSSImportRule_H
 
 #include "CSSRule.h"
-#include "CachedResourceHandle.h"
-#include "CachedStyleSheetClient.h"
+#include "CachedResourceClient.h"
 #include "PlatformString.h"
-#include "StyleRule.h"
 
 namespace WebCore {
 
 class CachedCSSStyleSheet;
 class MediaList;
-class MediaQuerySet;
-class StyleSheetInternal;
 
-class StyleRuleImport : public StyleRuleBase {
+class CSSImportRule : public CSSRule, public CachedResourceClient
+{
 public:
-    static PassRefPtr<StyleRuleImport> create(const String& href, PassRefPtr<MediaQuerySet>);
-
-    ~StyleRuleImport();
-    
-    StyleSheetInternal* parentStyleSheet() const { return m_parentStyleSheet; }
-    void setParentStyleSheet(StyleSheetInternal* sheet) { ASSERT(sheet); m_parentStyleSheet = sheet; }
-    void clearParentStyleSheet() { m_parentStyleSheet = 0; }
+    CSSImportRule(StyleBase* parent, const String& href, MediaList*);
+    virtual ~CSSImportRule();
 
     String href() const { return m_strHref; }
-    StyleSheetInternal* styleSheet() const { return m_styleSheet.get(); }
+    MediaList* media() const { return m_lstMedia.get(); }
+    CSSStyleSheet* styleSheet() const { return m_styleSheet.get(); }
 
+    virtual bool isImportRule() { return true; }
+    virtual String cssText() const;
+  
     bool isLoading() const;
-    MediaQuerySet* mediaQueries() { return m_mediaQueries.get(); }
 
-    void requestStyleSheet();
+    // from CachedResourceClient
+    virtual void setStyleSheet(const String& url, const String& sheet);
 
-private:
-    // NOTE: We put the CachedStyleSheetClient in a member instead of inheriting from it
-    // to avoid adding a vptr to StyleRuleImport.
-    class ImportedStyleSheetClient : public CachedStyleSheetClient {
-    public:
-        ImportedStyleSheetClient(StyleRuleImport* ownerRule) : m_ownerRule(ownerRule) { }
-        virtual ~ImportedStyleSheetClient() { }
-        virtual void setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet* sheet)
-        {
-            m_ownerRule->setCSSStyleSheet(href, baseURL, charset, sheet);
-        }
-    private:
-        StyleRuleImport* m_ownerRule;
-    };
+    virtual void insertedIntoParent();
 
-    void setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet*);
-    friend class ImportedStyleSheetClient;
-
-    StyleRuleImport(const String& href, PassRefPtr<MediaQuerySet>);
-
-    StyleSheetInternal* m_parentStyleSheet;
-
-    ImportedStyleSheetClient m_styleSheetClient;
+protected:
     String m_strHref;
-    RefPtr<MediaQuerySet> m_mediaQueries;
-    RefPtr<StyleSheetInternal> m_styleSheet;
-    CachedResourceHandle<CachedCSSStyleSheet> m_cachedSheet;
+    RefPtr<MediaList> m_lstMedia;
+    RefPtr<CSSStyleSheet> m_styleSheet;
+    CachedCSSStyleSheet* m_cachedSheet;
     bool m_loading;
 };
 
-class CSSImportRule : public CSSRule {
-public:
-    static PassRefPtr<CSSImportRule> create(StyleRuleImport* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSImportRule(rule, sheet)); }
-    
-    ~CSSImportRule();
+} // namespace
 
-    String href() const { return m_importRule->href(); }
-    MediaList* media() const;
-    CSSStyleSheet* styleSheet() const;
-    
-    String cssText() const;
-
-private:
-    CSSImportRule(StyleRuleImport*, CSSStyleSheet*);
-
-    RefPtr<StyleRuleImport> m_importRule;
-
-    mutable RefPtr<MediaList> m_mediaCSSOMWrapper;
-    mutable RefPtr<CSSStyleSheet> m_styleSheetCSSOMWrapper;
-};
-
-} // namespace WebCore
-
-#endif // CSSImportRule_h
+#endif

@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,44 +17,34 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSFontFaceRule_h
-#define CSSFontFaceRule_h
+#ifndef CSSFontFaceRule_H
+#define CSSFontFaceRule_H
 
 #include "CSSRule.h"
-#include "PropertySetCSSStyleDeclaration.h"
-#include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
-class CSSStyleDeclaration;
-class StyleRuleFontFace;
-class StyleRuleCSSStyleDeclaration;
+class CSSMutableStyleDeclaration;
 
-class CSSFontFaceRule : public CSSRule {
+class CSSFontFaceRule : public CSSRule
+{
 public:
-    static PassRefPtr<CSSFontFaceRule> create(StyleRuleFontFace* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSFontFaceRule(rule, sheet)); }
+    CSSFontFaceRule(StyleBase* parent);
+    virtual ~CSSFontFaceRule();
 
-    ~CSSFontFaceRule();
+    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
 
-    CSSStyleDeclaration* style() const;
+    virtual bool isFontFaceRule() { return true; }
 
-    String cssText() const;
-
-    void reattach(StyleRuleFontFace*);
-
-private:
-    CSSFontFaceRule(StyleRuleFontFace*, CSSStyleSheet* parent);
-
-    RefPtr<StyleRuleFontFace> m_fontFaceRule;
-    
-    mutable RefPtr<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;
+protected:
+    RefPtr<CSSMutableStyleDeclaration> m_style;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSFontFaceRule_h
+#endif

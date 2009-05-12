@@ -1,4 +1,6 @@
 /**
+* This file is part of the html renderer for KDE.
+ *
  * Copyright (C) 2003, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -13,48 +15,38 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
-#ifndef EllipsisBox_h
-#define EllipsisBox_h
 
 #include "InlineBox.h"
 
 namespace WebCore {
 
-class HitTestRequest;
-class HitTestResult;
-
-class EllipsisBox : public InlineBox {
+class EllipsisBox : public InlineBox
+{
 public:
-    EllipsisBox(RenderObject* obj, const AtomicString& ellipsisStr, InlineFlowBox* parent,
-                int width, int height, int y, bool firstLine, bool isVertical, InlineBox* markupBox)
-        : InlineBox(obj, FloatPoint(0, y), width, firstLine, true, false, false, isVertical, 0, 0, parent)
-        , m_height(height)
+    EllipsisBox(RenderObject* obj, const AtomicString& ellipsisStr, InlineFlowBox* p,
+                int w, int y, int h, int b, bool firstLine, InlineBox* markupBox)
+        : InlineBox(obj)
         , m_str(ellipsisStr)
-        , m_markupBox(markupBox)
-        , m_selectionState(RenderObject::SelectionNone)
     {
+        m_parent = p;
+        m_width = w;
+        m_y = y;
+        m_height = h;
+        m_baseline = b;
+        m_firstLine = firstLine;
+        m_constructed = true;
+        m_markupBox = markupBox;
     }
-
-    virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom);
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom);
-    void setSelectionState(RenderObject::SelectionState s) { m_selectionState = s; }
-    IntRect selectionRect();
+    
+    virtual void paint(RenderObject::PaintInfo& i, int _tx, int _ty);
+    virtual bool nodeAtPoint(RenderObject::NodeInfo& info, int _x, int _y, int _tx, int _ty);
 
 private:
-    virtual int height() const { return m_height; }
-    virtual RenderObject::SelectionState selectionState() { return m_selectionState; }
-    void paintSelection(GraphicsContext*, const LayoutPoint&, RenderStyle*, const Font&);
-
-    int m_height;
     AtomicString m_str;
     InlineBox* m_markupBox;
-    RenderObject::SelectionState m_selectionState;
 };
 
-} // namespace WebCore
-
-#endif // EllipsisBox_h
+}

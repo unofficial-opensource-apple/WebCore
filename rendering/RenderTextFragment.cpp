@@ -1,7 +1,9 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999 Lars Knoll (knoll@kde.org)
  * (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,111 +17,49 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
 #include "RenderTextFragment.h"
 
-#include "RenderBlock.h"
-#include "Text.h"
+using namespace WebCore;
 
 namespace WebCore {
 
-RenderTextFragment::RenderTextFragment(Node* node, StringImpl* str, int startOffset, int length)
-    : RenderText(node, str ? str->substring(startOffset, length) : PassRefPtr<StringImpl>(0))
-    , m_start(startOffset)
-    , m_end(length)
-    , m_firstLetter(0)
+RenderTextFragment::RenderTextFragment(Node* node, StringImpl* str, int startOffset, int length, RenderObject* firstLetter)
+    : RenderText(node, str ? str->substring(startOffset, length) : 0), m_start(startOffset), m_end(length), m_firstLetter(firstLetter)
 {
 }
 
 RenderTextFragment::RenderTextFragment(Node* node, StringImpl* str)
-    : RenderText(node, str)
-    , m_start(0)
-    , m_end(str ? str->length() : 0)
-    , m_contentString(str)
-    , m_firstLetter(0)
+    : RenderText(node, str), m_start(0), m_end(str ? str->length() : 0), m_generatedContentStr(str), m_firstLetter(0)
 {
 }
 
-RenderTextFragment::~RenderTextFragment()
+bool RenderTextFragment::isTextFragment() const
 {
+    return true;
 }
 
-PassRefPtr<StringImpl> RenderTextFragment::originalText() const
+PassRefPtr<StringImpl> RenderTextFragment::originalString() const
 {
-    Node* e = node();
-    RefPtr<StringImpl> result = ((e && e->isTextNode()) ? toText(e)->dataImpl() : contentString());
-    if (!result)
-        return 0;
-    return result->substring(start(), end());
+    StringImpl* result = 0;
+    if (element())
+        result = element()->string();
+    else
+        result = contentString();
+    if (result && (start() > 0 || start() < result->length()))
+        result = result->substring(start(), end());
+    return result;
 }
 
-void RenderTextFragment::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
+void RenderTextFragment::destroy()
 {
-    RenderText::styleDidChange(diff, oldStyle);
-
-    if (RenderBlock* block = blockForAccompanyingFirstLetter()) {
-        block->style()->removeCachedPseudoStyle(FIRST_LETTER);
-        block->updateFirstLetter();
-    }
+    if (firstLetter())
+        firstLetter()->destroy();
+    RenderText::destroy();
 }
-
-void RenderTextFragment::willBeDestroyed()
-{
-    if (m_firstLetter)
-        m_firstLetter->destroy();
-    RenderText::willBeDestroyed();
 }
-
-void RenderTextFragment::setText(PassRefPtr<StringImpl> text, bool force)
-{
-    RenderText::setText(text, force);
-
-    m_start = 0;
-    m_end = textLength();
-    if (m_firstLetter) {
-        ASSERT(!m_contentString);
-        m_firstLetter->destroy();
-        m_firstLetter = 0;
-        if (Node* t = node()) {
-            ASSERT(!t->renderer());
-            t->setRenderer(this);
-        }
-    }
-}
-
-void RenderTextFragment::transformText()
-{
-    // Don't reset first-letter here because we are only transforming the truncated fragment.
-    if (RefPtr<StringImpl> textToTransform = originalText())
-        RenderText::setText(textToTransform.release(), true);
-}
-
-UChar RenderTextFragment::previousCharacter() const
-{
-    if (start()) {
-        Node* e = node();
-        StringImpl* original = ((e && e->isTextNode()) ? toText(e)->dataImpl() : contentString());
-        if (original && start() <= original->length())
-            return (*original)[start() - 1];
-    }
-
-    return RenderText::previousCharacter();
-}
-
-RenderBlock* RenderTextFragment::blockForAccompanyingFirstLetter() const
-{
-    if (!m_firstLetter)
-        return 0;
-    for (RenderObject* block = m_firstLetter->parent(); block; block = block->parent()) {
-        if (block->style()->hasPseudoStyle(FIRST_LETTER) && block->canHaveChildren() && block->isRenderBlock())
-            return toRenderBlock(block);
-    }
-    return 0;
-}
-
-} // namespace WebCore

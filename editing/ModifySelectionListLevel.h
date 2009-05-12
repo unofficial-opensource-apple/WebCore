@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,70 +23,62 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ModifySelectionListLevel_h
-#define ModifySelectionListLevel_h
+#ifndef __modify_selection_list_level_h__
+#define __modify_selection_list_level_h__
 
 #include "CompositeEditCommand.h"
 
 namespace WebCore {
 
-// ModifySelectionListLevelCommand provides functions useful for both increasing and decreasing the list level.
-// It is the base class of IncreaseSelectionListLevelCommand and DecreaseSelectionListLevelCommand.
+// ModifySelectionListLevelCommand provides functions useful for both increasing and decreasing the list
+// level.  So, it is the base class of IncreaseSelectionListLevelCommand and DecreaseSelectionListLevelCommand.
 // It is not used on its own.
-class ModifySelectionListLevelCommand : public CompositeEditCommand {
-protected:
-    ModifySelectionListLevelCommand(Document*);
+class ModifySelectionListLevelCommand : public CompositeEditCommand
+{
+public:
+    ModifySelectionListLevelCommand(Document* document);
     
-    void appendSiblingNodeRange(Node* startNode, Node* endNode, Element* newParent);
+private:
+    virtual bool preservesTypingStyle() const;
+    
+protected:
+    void appendSiblingNodeRange(Node* startNode, Node* endNode, Node* newParent);
     void insertSiblingNodeRangeBefore(Node* startNode, Node* endNode, Node* refNode);
     void insertSiblingNodeRangeAfter(Node* startNode, Node* endNode, Node* refNode);
-
-private:
-    virtual bool preservesTypingStyle() const;    
 };
 
-// IncreaseSelectionListLevelCommand moves the selected list items one level deeper.
-class IncreaseSelectionListLevelCommand : public ModifySelectionListLevelCommand {
+// IncreaseSelectionListLevelCommand moves the selected list items one level deeper
+typedef enum EListType { InheritedListType, OrderedList, UnorderedList };
+
+class IncreaseSelectionListLevelCommand : public ModifySelectionListLevelCommand
+{
 public:
     static bool canIncreaseSelectionListLevel(Document*);
-    static PassRefPtr<Node> increaseSelectionListLevel(Document*);
-    static PassRefPtr<Node> increaseSelectionListLevelOrdered(Document*);
-    static PassRefPtr<Node> increaseSelectionListLevelUnordered(Document*);
+    static Node* increaseSelectionListLevel(Document*);
+    static Node* increaseSelectionListLevelOrdered(Document*);
+    static Node* increaseSelectionListLevelUnordered(Document*);
 
-private:
-    enum Type { InheritedListType, OrderedList, UnorderedList };
-    static PassRefPtr<Node> increaseSelectionListLevel(Document*, Type);
-
-    static PassRefPtr<IncreaseSelectionListLevelCommand> create(Document* document, Type type)
-    {
-        return adoptRef(new IncreaseSelectionListLevelCommand(document, type));
-    }
-    
-    IncreaseSelectionListLevelCommand(Document*, Type);
-
+    IncreaseSelectionListLevelCommand(Document* document, EListType);
+    Node*       listElement();
     virtual void doApply();
 
-    Type m_listType;
-    RefPtr<Node> m_listElement;
+private:
+    EListType   m_listType;
+    Node*       m_listElement;
 };
 
-// DecreaseSelectionListLevelCommand moves the selected list items one level shallower.
-class DecreaseSelectionListLevelCommand : public ModifySelectionListLevelCommand {
+// DecreaseSelectionListLevelCommand moves the selected list items one level shallower
+class DecreaseSelectionListLevelCommand : public ModifySelectionListLevelCommand
+{
 public:
     static bool canDecreaseSelectionListLevel(Document*);
     static void decreaseSelectionListLevel(Document*);
 
-private:
-    static PassRefPtr<DecreaseSelectionListLevelCommand> create(Document* document)
-    {
-        return adoptRef(new DecreaseSelectionListLevelCommand(document));
-    }
-
-    DecreaseSelectionListLevelCommand(Document*);
+    DecreaseSelectionListLevelCommand(Document* document);
 
     virtual void doApply();
 };
 
 } // namespace WebCore
 
-#endif // ModifySelectionListLevel_h
+#endif // __modify_selection_list_level_h__

@@ -1,8 +1,7 @@
 /*
- *  Copyright (C) 2004, 2006, 2008 Apple Inc. All rights reserved.
- *  Copyright (C) 2005-2007 Alexey Proskuryakov <ap@webkit.org>
- *  Copyright (C) 2007, 2008 Julien Chaffraix <jchaffraix@webkit.org>
- *  Copyright (C) 2008, 2011 Google Inc. All rights reserved.
+ *  This file is part of the KDE libraries
+ *  Copyright (C) 2004, 2006 Apple Computer, Inc.
+ *  Copyright (C) 2005, 2006 Alexey Proskuryakov <ap@nypop.com>
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -16,364 +15,249 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #include "config.h"
-#include "XMLHttpRequest.h"
+#include "xmlhttprequest.h"
 
-#include "Blob.h"
-#include "BlobData.h"
-#include "ContentSecurityPolicy.h"
-#include "CrossOriginAccessControl.h"
-#include "DOMFormData.h"
+#include "Cache.h"
 #include "DOMImplementation.h"
+#include "Decoder.h"
 #include "Event.h"
-#include "EventException.h"
 #include "EventListener.h"
 #include "EventNames.h"
 #include "ExceptionCode.h"
-#include "File.h"
+#include "FormData.h"
+#include "Frame.h"
 #include "HTMLDocument.h"
-#include "HTTPParsers.h"
-#include "HTTPValidation.h"
-#include "InspectorInstrumentation.h"
-#include "MemoryCache.h"
-#include "ResourceError.h"
-#include "ResourceRequest.h"
-#include "ScriptCallStack.h"
-#include "ScriptProfile.h"
-#include "SecurityOrigin.h"
-#include "Settings.h"
-#include "SharedBuffer.h"
-#include "TextResourceDecoder.h"
-#include "ThreadableLoader.h"
-#include "XMLHttpRequestException.h"
-#include "XMLHttpRequestProgressEvent.h"
-#include "XMLHttpRequestUpload.h"
-#include "markup.h"
-#include <wtf/ArrayBuffer.h>
-#include <wtf/RefCountedLeakCounter.h>
-#include <wtf/StdLibExtras.h>
-#include <wtf/UnusedParam.h>
-#include <wtf/text/CString.h>
-
-#if USE(JSC)
-#include "JSDOMBinding.h"
-#include "JSDOMWindow.h"
-#include <heap/Strong.h>
-#include <runtime/JSLock.h>
-#endif
+#include "LoaderFunctions.h"
+#include "Page.h"
+#include "PlatformString.h"
+#include "RegularExpression.h"
+#include "TextEncoding.h"
+#include "TransferJob.h"
+#include "kjs_binding.h"
+#include <kjs/protect.h>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
-DEFINE_DEBUG_ONLY_GLOBAL(WTF::RefCountedLeakCounter, xmlHttpRequestCounter, ("XMLHttpRequest"));
+using namespace EventNames;
 
-struct XMLHttpRequestStaticData {
-    WTF_MAKE_NONCOPYABLE(XMLHttpRequestStaticData); WTF_MAKE_FAST_ALLOCATED;
-public:
-    XMLHttpRequestStaticData();
-    String m_proxyHeaderPrefix;
-    String m_secHeaderPrefix;
-    HashSet<String, CaseFoldingHash> m_forbiddenRequestHeaders;
-};
+typedef HashSet<XMLHttpRequest*> RequestsSet;
 
-XMLHttpRequestStaticData::XMLHttpRequestStaticData()
-    : m_proxyHeaderPrefix("proxy-")
-    , m_secHeaderPrefix("sec-")
+static HashMap<Document*, RequestsSet*>& requestsByDocument()
 {
-    m_forbiddenRequestHeaders.add("accept-charset");
-    m_forbiddenRequestHeaders.add("accept-encoding");
-    m_forbiddenRequestHeaders.add("access-control-request-headers");
-    m_forbiddenRequestHeaders.add("access-control-request-method");
-    m_forbiddenRequestHeaders.add("connection");
-    m_forbiddenRequestHeaders.add("content-length");
-    m_forbiddenRequestHeaders.add("content-transfer-encoding");
-    m_forbiddenRequestHeaders.add("cookie");
-    m_forbiddenRequestHeaders.add("cookie2");
-    m_forbiddenRequestHeaders.add("date");
-    m_forbiddenRequestHeaders.add("expect");
-    m_forbiddenRequestHeaders.add("host");
-    m_forbiddenRequestHeaders.add("keep-alive");
-    m_forbiddenRequestHeaders.add("origin");
-    m_forbiddenRequestHeaders.add("referer");
-    m_forbiddenRequestHeaders.add("te");
-    m_forbiddenRequestHeaders.add("trailer");
-    m_forbiddenRequestHeaders.add("transfer-encoding");
-    m_forbiddenRequestHeaders.add("upgrade");
-    m_forbiddenRequestHeaders.add("user-agent");
-    m_forbiddenRequestHeaders.add("via");
+    static HashMap<Document*, RequestsSet*> map;
+    return map;
 }
 
-static bool isSetCookieHeader(const AtomicString& name)
+static void addToRequestsByDocument(Document* doc, XMLHttpRequest* req)
 {
-    return equalIgnoringCase(name, "set-cookie") || equalIgnoringCase(name, "set-cookie2");
-}
+    ASSERT(doc);
+    ASSERT(req);
 
-static void replaceCharsetInMediaType(String& mediaType, const String& charsetValue)
-{
-    unsigned int pos = 0, len = 0;
-
-    findCharsetInMediaType(mediaType, pos, len);
-
-    if (!len) {
-        // When no charset found, do nothing.
-        return;
+    RequestsSet* requests = requestsByDocument().get(doc);
+    if (!requests) {
+        requests = new RequestsSet;
+        requestsByDocument().set(doc, requests);
     }
 
-    // Found at least one existing charset, replace all occurrences with new charset.
-    while (len) {
-        mediaType.replace(pos, len, charsetValue);
-        unsigned int start = pos + charsetValue.length();
-        findCharsetInMediaType(mediaType, pos, len, start);
+    ASSERT(!requests->contains(req));
+    requests->add(req);
+}
+
+static void removeFromRequestsByDocument(Document* doc, XMLHttpRequest* req)
+{
+    ASSERT(doc);
+    ASSERT(req);
+
+    RequestsSet* requests = requestsByDocument().get(doc);
+    ASSERT(requests);
+    ASSERT(requests->contains(req));
+    requests->remove(req);
+    if (requests->isEmpty()) {
+        requestsByDocument().remove(doc);
+        delete requests;
     }
 }
 
-static const XMLHttpRequestStaticData* staticData = 0;
-
-static const XMLHttpRequestStaticData* createXMLHttpRequestStaticData()
+static inline String getMIMEType(const String& contentTypeString)
 {
-    staticData = new XMLHttpRequestStaticData;
-    return staticData;
+    String mimeType;
+    unsigned length = contentTypeString.length();
+    for (unsigned offset = 0; offset < length; offset++) {
+        UChar c = contentTypeString[offset];
+        if (c == ';')
+            break;
+        else if (DeprecatedChar(c).isSpace()) // FIXME: This seems wrong, " " is an invalid MIME type character according to RFC 2045.  bug 8644
+            continue;
+        // FIXME: This is a very slow way to build a string, given WebCore::String's implementation.
+        mimeType += String(&c, 1);
+    }
+    return mimeType;
 }
 
-static const XMLHttpRequestStaticData* initializeXMLHttpRequestStaticData()
+static String getCharset(const String& contentTypeString)
 {
-    // Uses dummy to avoid warnings about an unused variable.
-    AtomicallyInitializedStatic(const XMLHttpRequestStaticData*, dummy = createXMLHttpRequestStaticData());
-    return dummy;
+    int pos = 0;
+    int length = (int)contentTypeString.length();
+    
+    while (pos < length) {
+        pos = contentTypeString.find("charset", pos, false);
+        if (pos <= 0)
+            return String();
+        
+        // is what we found a beginning of a word?
+        if (contentTypeString[pos-1] > ' ' && contentTypeString[pos-1] != ';') {
+            pos += 7;
+            continue;
+        }
+        
+        pos += 7;
+
+        // skip whitespace
+        while (pos != length && contentTypeString[pos] <= ' ')
+            ++pos;
+    
+        if (contentTypeString[pos++] != '=') // this "charset" substring wasn't a parameter name, but there may be others
+            continue;
+
+        while (pos != length && (contentTypeString[pos] <= ' ' || contentTypeString[pos] == '"' || contentTypeString[pos] == '\''))
+            ++pos;
+
+        // we don't handle spaces within quoted parameter values, because charset names cannot have any
+        int endpos = pos;
+        while (pos != length && contentTypeString[endpos] > ' ' && contentTypeString[endpos] != '"' && contentTypeString[endpos] != '\'' && contentTypeString[endpos] != ';')
+            ++endpos;
+    
+        return contentTypeString.substring(pos, endpos-pos);
+    }
+    
+    return String();
 }
 
-static void logConsoleError(ScriptExecutionContext* context, const String& message)
+static bool canSetRequestHeader(const String& name)
 {
-    if (!context)
-        return;
-    // FIXME: It's not good to report the bad usage without indicating what source line it came from.
-    // We should pass additional parameters so we can tell the console where the mistake occurred.
-    context->addConsoleMessage(JSMessageSource, LogMessageType, ErrorMessageLevel, message);
+    static HashSet<StringImpl*, CaseInsensitiveHash > forbiddenHeaders;
+    
+    if (forbiddenHeaders.isEmpty()) {
+        forbiddenHeaders.add(new StringImpl("accept-charset"));
+        forbiddenHeaders.add(new StringImpl("accept-encoding"));
+        forbiddenHeaders.add(new StringImpl("content-length"));
+        forbiddenHeaders.add(new StringImpl("expect"));
+        forbiddenHeaders.add(new StringImpl("date"));
+        forbiddenHeaders.add(new StringImpl("host"));
+        forbiddenHeaders.add(new StringImpl("keep-alive"));
+        forbiddenHeaders.add(new StringImpl("referer"));
+        forbiddenHeaders.add(new StringImpl("te"));
+        forbiddenHeaders.add(new StringImpl("trailer"));
+        forbiddenHeaders.add(new StringImpl("transfer-encoding"));
+        forbiddenHeaders.add(new StringImpl("upgrade"));
+        forbiddenHeaders.add(new StringImpl("via"));
+    }
+
+    return !forbiddenHeaders.contains(name.impl());
 }
 
-PassRefPtr<XMLHttpRequest> XMLHttpRequest::create(ScriptExecutionContext* context, PassRefPtr<SecurityOrigin> securityOrigin)
+// Determines if a string is a valid token, as defined by
+// "token" in section 2.2 of RFC 2616.
+static bool isValidToken(const String& name)
 {
-    RefPtr<XMLHttpRequest> xmlHttpRequest(adoptRef(new XMLHttpRequest(context, securityOrigin)));
-    xmlHttpRequest->suspendIfNeeded();
-
-    return xmlHttpRequest.release();
+    unsigned length = name.length();
+    for (unsigned i = 0; i < length; i++) {
+        UniChar c = name[i];
+        
+        if (c >= 127 || c <= 32)
+            return false;
+        
+        if (c == '(' || c == ')' || c == '<' || c == '>' || c == '@' ||
+            c == ',' || c == ';' || c == ':' || c == '\\' || c == '\"' ||
+            c == '/' || c == '[' || c == ']' || c == '?' || c == '=' ||
+            c == '{' || c == '}')
+            return false;
+    }
+    
+    return true;
 }
-
-XMLHttpRequest::XMLHttpRequest(ScriptExecutionContext* context, PassRefPtr<SecurityOrigin> securityOrigin)
-    : ActiveDOMObject(context, this)
-    , m_async(true)
-    , m_includeCredentials(false)
-    , m_state(UNSENT)
-    , m_createdDocument(false)
-    , m_error(false)
-    , m_uploadEventsAllowed(true)
-    , m_uploadComplete(false)
-    , m_sameOriginRequest(true)
-    , m_receivedLength(0)
-    , m_lastSendLineNumber(0)
-    , m_exceptionCode(0)
-    , m_progressEventThrottle(this)
-    , m_responseTypeCode(ResponseTypeDefault)
-    , m_securityOrigin(securityOrigin)
+    
+static bool isValidHeaderValue(const String& name)
 {
-    initializeXMLHttpRequestStaticData();
-#ifndef NDEBUG
-    xmlHttpRequestCounter.increment();
-#endif
+    // FIXME: This should really match name against 
+    // field-value in section 4.2 of RFC 2616.
+    
+    return !name.contains('\r') && !name.contains('\n');
 }
-
-XMLHttpRequest::~XMLHttpRequest()
-{
-#ifndef NDEBUG
-    xmlHttpRequestCounter.decrement();
-#endif
-}
-
-Document* XMLHttpRequest::document() const
-{
-    ASSERT(scriptExecutionContext()->isDocument());
-    return static_cast<Document*>(scriptExecutionContext());
-}
-
-SecurityOrigin* XMLHttpRequest::securityOrigin() const
-{
-    return m_securityOrigin ? m_securityOrigin.get() : scriptExecutionContext()->securityOrigin();
-}
-
-#if ENABLE(DASHBOARD_SUPPORT)
-bool XMLHttpRequest::usesDashboardBackwardCompatibilityMode() const
-{
-    if (scriptExecutionContext()->isWorkerContext())
-        return false;
-    Settings* settings = document()->settings();
-    return settings && settings->usesDashboardBackwardCompatibilityMode();
-}
-#endif
-
-XMLHttpRequest::State XMLHttpRequest::readyState() const
+    
+XMLHttpRequestState XMLHttpRequest::getReadyState() const
 {
     return m_state;
 }
 
-String XMLHttpRequest::responseText(ExceptionCode& ec)
+String XMLHttpRequest::getResponseText() const
 {
-    if (m_responseTypeCode != ResponseTypeDefault && m_responseTypeCode != ResponseTypeText) {
-        ec = INVALID_STATE_ERR;
-        return "";
-    }
-    return m_responseBuilder.toStringPreserveCapacity();
+    return m_response;
 }
 
-Document* XMLHttpRequest::responseXML(ExceptionCode& ec)
+Document* XMLHttpRequest::getResponseXML() const
 {
-    if (m_responseTypeCode != ResponseTypeDefault && m_responseTypeCode != ResponseTypeDocument) {
-        ec = INVALID_STATE_ERR;
-        return 0;
-    }
-
-    if (m_error || m_state != DONE)
+    if (m_state != Completed)
         return 0;
 
     if (!m_createdDocument) {
-        bool isHTML = equalIgnoringCase(responseMIMEType(), "text/html");
-
-        // The W3C spec requires the final MIME type to be some valid XML type, or text/html.
-        // If it is text/html, then the responseType of "document" must have been supplied explicitly.
-        if ((m_response.isHTTP() && !responseIsXML() && !isHTML)
-            || (isHTML && m_responseTypeCode == ResponseTypeDefault)
-            || scriptExecutionContext()->isWorkerContext()) {
-            m_responseDocument = 0;
-        } else {
-            if (isHTML)
-                m_responseDocument = HTMLDocument::create(0, m_url);
-            else
-                m_responseDocument = Document::create(0, m_url);
-            // FIXME: Set Last-Modified.
-            m_responseDocument->setContent(m_responseBuilder.toStringPreserveCapacity());
-            m_responseDocument->setSecurityOrigin(securityOrigin());
-            if (!m_responseDocument->wellFormed())
-                m_responseDocument = 0;
+        if (responseIsXML()) {
+            m_responseXML = m_doc->implementation()->createDocument();
+            m_responseXML->open();
+            m_responseXML->write(m_response);
+            m_responseXML->finishParsing();
+            m_responseXML->close();
         }
         m_createdDocument = true;
     }
 
-    return m_responseDocument.get();
+    return m_responseXML.get();
 }
 
-#if ENABLE(XHR_RESPONSE_BLOB)
-Blob* XMLHttpRequest::responseBlob(ExceptionCode& ec)
+EventListener* XMLHttpRequest::onReadyStateChangeListener() const
 {
-    if (m_responseTypeCode != ResponseTypeBlob) {
-        ec = INVALID_STATE_ERR;
-        return 0;
-    }
-    // We always return null before DONE.
-    if (m_state != DONE)
-        return 0;
-
-    if (!m_responseBlob.get()) {
-        // FIXME: This causes two (or more) unnecessary copies of the data.
-        // Chromium stores blob data in the browser process, so we're pulling the data
-        // from the network only to copy it into the renderer to copy it back to the browser.
-        // Ideally we'd get the blob/file-handle from the ResourceResponse directly
-        // instead of copying the bytes. Embedders who store blob data in the
-        // same process as WebCore would at least to teach BlobData to take
-        // a SharedBuffer, even if they don't get the Blob from the network layer directly.
-        OwnPtr<BlobData> blobData = BlobData::create();
-        // If we errored out or got no data, we still return a blob, just an empty one.
-        if (m_binaryResponseBuilder.get()) {
-            RefPtr<RawData> rawData = RawData::create();
-            size_t size = m_binaryResponseBuilder->size();
-            rawData->mutableData()->append(m_binaryResponseBuilder->data(), size);
-            blobData->appendData(rawData, 0, BlobDataItem::toEndOfFile);
-            blobData->setContentType(responseMIMEType()); // responseMIMEType defaults to text/xml which may be incorrect.
-            m_binaryResponseBuilder.clear();
-        }
-        m_responseBlob = Blob::create(blobData.release(), m_binaryResponseBuilder.get() ? m_binaryResponseBuilder->size() : 0);
-    }
-
-    return m_responseBlob.get();
+    return m_onReadyStateChangeListener.get();
 }
-#endif
 
-ArrayBuffer* XMLHttpRequest::responseArrayBuffer(ExceptionCode& ec)
+void XMLHttpRequest::setOnReadyStateChangeListener(EventListener* eventListener)
 {
-    if (m_responseTypeCode != ResponseTypeArrayBuffer) {
-        ec = INVALID_STATE_ERR;
-        return 0;
-    }
-
-    if (m_state != DONE)
-        return 0;
-
-    if (!m_responseArrayBuffer.get() && m_binaryResponseBuilder.get() && m_binaryResponseBuilder->size() > 0) {
-        m_responseArrayBuffer = ArrayBuffer::create(const_cast<char*>(m_binaryResponseBuilder->data()), static_cast<unsigned>(m_binaryResponseBuilder->size()));
-        m_binaryResponseBuilder.clear();
-    }
-
-    return m_responseArrayBuffer.get();
+    m_onReadyStateChangeListener = eventListener;
 }
 
-void XMLHttpRequest::setResponseType(const String& responseType, ExceptionCode& ec)
+EventListener* XMLHttpRequest::onLoadListener() const
 {
-    if (m_state >= LOADING) {
-        ec = INVALID_STATE_ERR;
-        return;
-    }
-
-    // Newer functionality is not available to synchronous requests in window contexts, as a spec-mandated 
-    // attempt to discourage synchronous XHR use. responseType is one such piece of functionality.
-    // We'll only disable this functionality for HTTP(S) requests since sync requests for local protocols
-    // such as file: and data: still make sense to allow.
-    if (!m_async && scriptExecutionContext()->isDocument() && m_url.protocolIsInHTTPFamily()) {
-        logConsoleError(scriptExecutionContext(), "XMLHttpRequest.responseType cannot be changed for synchronous HTTP(S) requests made from the window context.");
-        ec = INVALID_ACCESS_ERR;
-        return;
-    }
-
-    if (responseType == "")
-        m_responseTypeCode = ResponseTypeDefault;
-    else if (responseType == "text")
-        m_responseTypeCode = ResponseTypeText;
-    else if (responseType == "document")
-        m_responseTypeCode = ResponseTypeDocument;
-    else if (responseType == "blob") {
-#if ENABLE(XHR_RESPONSE_BLOB)
-        m_responseTypeCode = ResponseTypeBlob;
-#endif
-    } else if (responseType == "arraybuffer") {
-        m_responseTypeCode = ResponseTypeArrayBuffer;
-    } else
-        ec = SYNTAX_ERR;
+    return m_onLoadListener.get();
 }
 
-String XMLHttpRequest::responseType()
+void XMLHttpRequest::setOnLoadListener(EventListener* eventListener)
 {
-    switch (m_responseTypeCode) {
-    case ResponseTypeDefault:
-        return "";
-    case ResponseTypeText:
-        return "text";
-    case ResponseTypeDocument:
-        return "document";
-    case ResponseTypeBlob:
-        return "blob";
-    case ResponseTypeArrayBuffer:
-        return "arraybuffer";
-    }
-    return "";
+    m_onLoadListener = eventListener;
 }
 
-XMLHttpRequestUpload* XMLHttpRequest::upload()
+XMLHttpRequest::XMLHttpRequest(Document *d)
+    : m_doc(d)
+    , m_async(true)
+    , m_job(0)
+    , m_state(Uninitialized)
+    , m_createdDocument(false)
+    , m_aborted(false)
 {
-    if (!m_upload)
-        m_upload = XMLHttpRequestUpload::create(this);
-    return m_upload.get();
+    ASSERT(m_doc);
+    addToRequestsByDocument(m_doc, this);
 }
 
-void XMLHttpRequest::changeState(State newState)
+XMLHttpRequest::~XMLHttpRequest()
+{
+    if (m_doc)
+        removeFromRequestsByDocument(m_doc, this);
+}
+
+void XMLHttpRequest::changeState(XMLHttpRequestState newState)
 {
     if (m_state != newState) {
         m_state = newState;
@@ -383,821 +267,406 @@ void XMLHttpRequest::changeState(State newState)
 
 void XMLHttpRequest::callReadyStateChangeListener()
 {
-    if (!scriptExecutionContext())
-        return;
-
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willChangeXHRReadyState(scriptExecutionContext(), this);
-
-    if (m_async || (m_state <= OPENED || m_state == DONE))
-        m_progressEventThrottle.dispatchReadyStateChangeEvent(XMLHttpRequestProgressEvent::create(eventNames().readystatechangeEvent), m_state == DONE ? FlushProgressEvent : DoNotFlushProgressEvent);
-
-    InspectorInstrumentation::didChangeXHRReadyState(cookie);
-
-    if (m_state == DONE && !m_error) {
-        InspectorInstrumentationCookie cookie = InspectorInstrumentation::willLoadXHR(scriptExecutionContext(), this);
-        m_progressEventThrottle.dispatchEvent(XMLHttpRequestProgressEvent::create(eventNames().loadEvent));
-        InspectorInstrumentation::didLoadXHR(cookie);
-        m_progressEventThrottle.dispatchEvent(XMLHttpRequestProgressEvent::create(eventNames().loadendEvent));
-    }
-}
-
-void XMLHttpRequest::setWithCredentials(bool value, ExceptionCode& ec)
-{
-    if (m_state > OPENED || m_loader) {
-        ec = INVALID_STATE_ERR;
-        return;
-    }
-
-    m_includeCredentials = value;
-}
-
-#if ENABLE(XHR_RESPONSE_BLOB)
-void XMLHttpRequest::setAsBlob(bool value, ExceptionCode& ec)
-{
-    if (m_state != OPENED || m_loader) {
-        ec = INVALID_STATE_ERR;
-        return;
+    if (m_doc && m_doc->frame() && m_onReadyStateChangeListener) {
+        ExceptionCode ec;
+        RefPtr<Event> ev = m_doc->createEvent("HTMLEvents", ec);
+        ev->initEvent(readystatechangeEvent, true, true);
+        m_onReadyStateChangeListener->handleEvent(ev.get(), true);
     }
     
-    m_responseTypeCode = value ? ResponseTypeBlob : ResponseTypeDefault;
-}
-#endif
-
-bool XMLHttpRequest::isAllowedHTTPMethod(const String& method)
-{
-    return !equalIgnoringCase(method, "TRACE")
-        && !equalIgnoringCase(method, "TRACK")
-        && !equalIgnoringCase(method, "CONNECT");
-}
-
-String XMLHttpRequest::uppercaseKnownHTTPMethod(const String& method)
-{
-    if (equalIgnoringCase(method, "COPY") || equalIgnoringCase(method, "DELETE") || equalIgnoringCase(method, "GET")
-        || equalIgnoringCase(method, "HEAD") || equalIgnoringCase(method, "INDEX") || equalIgnoringCase(method, "LOCK")
-        || equalIgnoringCase(method, "M-POST") || equalIgnoringCase(method, "MKCOL") || equalIgnoringCase(method, "MOVE")
-        || equalIgnoringCase(method, "OPTIONS") || equalIgnoringCase(method, "POST") || equalIgnoringCase(method, "PROPFIND")
-        || equalIgnoringCase(method, "PROPPATCH") || equalIgnoringCase(method, "PUT") || equalIgnoringCase(method, "UNLOCK")) {
-        return method.upper();
+    if (m_doc && m_doc->frame() && m_state == Completed && m_onLoadListener) {
+        ExceptionCode ec;
+        RefPtr<Event> ev = m_doc->createEvent("HTMLEvents", ec);
+        ev->initEvent(loadEvent, true, true);
+        m_onLoadListener->handleEvent(ev.get(), true);
     }
-    return method;
 }
 
-bool XMLHttpRequest::isAllowedHTTPHeader(const String& name)
+bool XMLHttpRequest::urlMatchesDocumentDomain(const KURL& url) const
 {
-    initializeXMLHttpRequestStaticData();
-    return !staticData->m_forbiddenRequestHeaders.contains(name) && !name.startsWith(staticData->m_proxyHeaderPrefix, false)
-        && !name.startsWith(staticData->m_secHeaderPrefix, false);
-}
+  KURL documentURL(m_doc->URL());
 
-void XMLHttpRequest::open(const String& method, const KURL& url, ExceptionCode& ec)
-{
-    open(method, url, true, ec);
-}
+    // a local file can load anything
+    if (documentURL.protocol().lower() == "file")
+        return true;
 
-void XMLHttpRequest::open(const String& method, const KURL& url, bool async, ExceptionCode& ec)
-{
-    internalAbort();
-    State previousState = m_state;
-    m_state = UNSENT;
-    m_error = false;
-    m_uploadComplete = false;
+    // but a remote document can only load from the same port on the server
+    if (documentURL.protocol().lower() == url.protocol().lower()
+            && documentURL.host().lower() == url.host().lower()
+            && documentURL.port() == url.port())
+        return true;
 
-    // clear stuff from possible previous load
-    clearResponse();
-    clearRequest();
-
-    ASSERT(m_state == UNSENT);
-
-    if (!isValidHTTPToken(method)) {
-        ec = SYNTAX_ERR;
-        return;
-    }
-
-    if (!isAllowedHTTPMethod(method)) {
-        ec = SECURITY_ERR;
-        return;
-    }
-
-    if (!scriptExecutionContext()->contentSecurityPolicy()->allowConnectFromSource(url)) {
-        // FIXME: Should this be throwing an exception?
-        ec = SECURITY_ERR;
-        return;
-    }
-
-    // Newer functionality is not available to synchronous requests in window contexts, as a spec-mandated 
-    // attempt to discourage synchronous XHR use. responseType is one such piece of functionality.
-    // We'll only disable this functionality for HTTP(S) requests since sync requests for local protocols
-    // such as file: and data: still make sense to allow.
-    if (!async && scriptExecutionContext()->isDocument() && url.protocolIsInHTTPFamily() && m_responseTypeCode != ResponseTypeDefault) {
-        logConsoleError(scriptExecutionContext(), "Synchronous HTTP(S) requests made from the window context cannot have XMLHttpRequest.responseType set.");
-        ec = INVALID_ACCESS_ERR;
-        return;
-    }
-
-    m_method = uppercaseKnownHTTPMethod(method);
-
-    m_url = url;
-
-    m_async = async;
-
-    ASSERT(!m_loader);
-
-    // Check previous state to avoid dispatching readyState event
-    // when calling open several times in a row.
-    if (previousState != OPENED)
-        changeState(OPENED);
-    else
-        m_state = OPENED;
-}
-
-void XMLHttpRequest::open(const String& method, const KURL& url, bool async, const String& user, ExceptionCode& ec)
-{
-    KURL urlWithCredentials(url);
-    urlWithCredentials.setUser(user);
-
-    open(method, urlWithCredentials, async, ec);
+    return false;
 }
 
 void XMLHttpRequest::open(const String& method, const KURL& url, bool async, const String& user, const String& password, ExceptionCode& ec)
 {
-    KURL urlWithCredentials(url);
-    urlWithCredentials.setUser(user);
-    urlWithCredentials.setPass(password);
+    abort();
+    m_aborted = false;
 
-    open(method, urlWithCredentials, async, ec);
-}
+    // clear stuff from possible previous load
+    m_requestHeaders = DeprecatedString();
+    m_responseHeaders = String();
+    m_response = DeprecatedString();
+    m_createdDocument = false;
+    m_responseXML = 0;
 
-bool XMLHttpRequest::initSend(ExceptionCode& ec)
-{
-    if (!scriptExecutionContext())
-        return false;
+    changeState(Uninitialized);
 
-    if (m_state != OPENED || m_loader) {
-        ec = INVALID_STATE_ERR;
-        return false;
-    }
-
-    m_error = false;
-    return true;
-}
-
-void XMLHttpRequest::send(ExceptionCode& ec)
-{
-    send(String(), ec);
-}
-
-void XMLHttpRequest::send(Document* document, ExceptionCode& ec)
-{
-    ASSERT(document);
-
-    if (!initSend(ec))
+    if (m_aborted)
         return;
 
-    if (m_method != "GET" && m_method != "HEAD" && m_url.protocolIsInHTTPFamily()) {
-        String contentType = getRequestHeader("Content-Type");
-        if (contentType.isEmpty()) {
-#if ENABLE(DASHBOARD_SUPPORT)
-            if (usesDashboardBackwardCompatibilityMode())
-                setRequestHeaderInternal("Content-Type", "application/x-www-form-urlencoded");
-            else
-#endif
-                // FIXME: this should include the charset used for encoding.
-                setRequestHeaderInternal("Content-Type", "application/xml");
-        }
+    if (!urlMatchesDocumentDomain(url))
+        return;
 
-        // FIXME: According to XMLHttpRequest Level 2, this should use the Document.innerHTML algorithm
-        // from the HTML5 specification to serialize the document.
-        String body = createMarkup(document);
-
-        // FIXME: this should use value of document.inputEncoding to determine the encoding to use.
-        TextEncoding encoding = UTF8Encoding();
-        m_requestEntityBody = FormData::create(encoding.encode(body.characters(), body.length(), EntitiesForUnencodables));
-        if (m_upload)
-            m_requestEntityBody->setAlwaysStream(true);
+    if (!isValidToken(method)) {
+        ec = SYNTAX_ERR;
+        return;
     }
+    
+    m_url = url;
 
-    createRequest(ec);
+    if (!user.isNull())
+        m_url.setUser(user.deprecatedString());
+
+    if (!password.isNull())
+        m_url.setPass(password.deprecatedString());
+
+    // Method names are case sensitive. But since Firefox uppercases method names it knows, we'll do the same.
+    String methodUpper(method.upper());
+    if (methodUpper == "CONNECT" || methodUpper == "COPY" || methodUpper == "DELETE" || methodUpper == "GET" || methodUpper == "HEAD"
+        || methodUpper == "INDEX" || methodUpper == "LOCK" || methodUpper == "M-POST" || methodUpper == "MKCOL" || methodUpper == "MOVE" 
+        || methodUpper == "OPTIONS" || methodUpper == "POST" || methodUpper == "PROPFIND" || methodUpper == "PROPPATCH" || methodUpper == "PUT" 
+        || methodUpper == "TRACE" || methodUpper == "UNLOCK")
+        m_method = methodUpper.deprecatedString();
+    else
+        m_method = method.deprecatedString();
+
+    m_async = async;
+
+    changeState(Loading);
 }
 
 void XMLHttpRequest::send(const String& body, ExceptionCode& ec)
 {
-    if (!initSend(ec))
+    if (!m_doc)
         return;
 
-    if (!body.isNull() && m_method != "GET" && m_method != "HEAD" && m_url.protocolIsInHTTPFamily()) {
+    if (m_state != Loading)
+        return;
+  
+    // FIXME: Should this abort instead if we already have a m_job going?
+    if (m_job)
+        return;
+
+    m_aborted = false;
+
+    if (!body.isNull() && m_method != "GET" && m_method != "HEAD" && (m_url.protocol().lower() == "http" || m_url.protocol().lower() == "https")) {
         String contentType = getRequestHeader("Content-Type");
-        if (contentType.isEmpty()) {
-#if ENABLE(DASHBOARD_SUPPORT)
-            if (usesDashboardBackwardCompatibilityMode())
-                setRequestHeaderInternal("Content-Type", "application/x-www-form-urlencoded");
-            else
-#endif
-                setRequestHeaderInternal("Content-Type", "application/xml");
-        } else {
-            replaceCharsetInMediaType(contentType, "UTF-8");
-            m_requestHeaders.set("Content-Type", contentType);
-        }
-
-        m_requestEntityBody = FormData::create(UTF8Encoding().encode(body.characters(), body.length(), EntitiesForUnencodables));
-        if (m_upload)
-            m_requestEntityBody->setAlwaysStream(true);
-    }
-
-    createRequest(ec);
-}
-
-void XMLHttpRequest::send(Blob* body, ExceptionCode& ec)
-{
-    if (!initSend(ec))
-        return;
-
-    if (m_method != "GET" && m_method != "HEAD" && m_url.protocolIsInHTTPFamily()) {
-        // FIXME: Should we set a Content-Type if one is not set.
-        // FIXME: add support for uploading bundles.
-        m_requestEntityBody = FormData::create();
-        if (body->isFile())
-            m_requestEntityBody->appendFile(static_cast<File*>(body)->path());
-#if ENABLE(BLOB)
+        String charset;
+        if (contentType.isEmpty())
+            setRequestHeader("Content-Type", "application/xml", ec);
         else
-            m_requestEntityBody->appendBlob(body->url());
-#endif
-    }
+            charset = getCharset(contentType);
+      
+        if (charset.isEmpty())
+            charset = "UTF-8";
+      
+        TextEncoding m_encoding = TextEncoding(charset.deprecatedString().latin1());
+        if (!m_encoding.isValid())   // FIXME: report an error?
+            m_encoding = TextEncoding(UTF8Encoding);
 
-    createRequest(ec);
-}
-
-void XMLHttpRequest::send(DOMFormData* body, ExceptionCode& ec)
-{
-    if (!initSend(ec))
-        return;
-
-    if (m_method != "GET" && m_method != "HEAD" && m_url.protocolIsInHTTPFamily()) {
-        m_requestEntityBody = FormData::createMultiPart(*(static_cast<FormDataList*>(body)), body->encoding(), document());
-
-        // We need to ask the client to provide the generated file names if needed. When FormData fills the element
-        // for the file, it could set a flag to use the generated file name, i.e. a package file on Mac.
-        m_requestEntityBody->generateFiles(document());
-
-        String contentType = getRequestHeader("Content-Type");
-        if (contentType.isEmpty()) {
-            contentType = "multipart/form-data; boundary=";
-            contentType += m_requestEntityBody->boundary().data();
-            setRequestHeaderInternal("Content-Type", contentType);
-        }
-    }
-
-    createRequest(ec);
-}
-
-void XMLHttpRequest::send(ArrayBuffer* body, ExceptionCode& ec)
-{
-    if (!initSend(ec))
-        return;
-
-    if (m_method != "GET" && m_method != "HEAD" && m_url.protocolIsInHTTPFamily()) {
-        m_requestEntityBody = FormData::create(body->data(), body->byteLength());
-        if (m_upload)
-            m_requestEntityBody->setAlwaysStream(true);
-    }
-
-    createRequest(ec);
-}
-
-void XMLHttpRequest::createRequest(ExceptionCode& ec)
-{
-#if ENABLE(BLOB)
-    // Only GET request is supported for blob URL.
-    if (m_url.protocolIs("blob") && m_method != "GET") {
-        ec = XMLHttpRequestException::NETWORK_ERR;
-        return;
-    }
-#endif
-
-    // The presence of upload event listeners forces us to use preflighting because POSTing to an URL that does not
-    // permit cross origin requests should look exactly like POSTing to an URL that does not respond at all.
-    // Also, only async requests support upload progress events.
-    bool uploadEvents = false;
-    if (m_async) {
-        m_progressEventThrottle.dispatchEvent(XMLHttpRequestProgressEvent::create(eventNames().loadstartEvent));
-        if (m_requestEntityBody && m_upload) {
-            uploadEvents = m_upload->hasEventListeners();
-            m_upload->dispatchEvent(XMLHttpRequestProgressEvent::create(eventNames().loadstartEvent));
-        }
-    }
-
-    m_sameOriginRequest = securityOrigin()->canRequest(m_url);
-
-    // We also remember whether upload events should be allowed for this request in case the upload listeners are
-    // added after the request is started.
-    m_uploadEventsAllowed = m_sameOriginRequest || uploadEvents || !isSimpleCrossOriginAccessRequest(m_method, m_requestHeaders);
-
-    ResourceRequest request(m_url);
-    request.setHTTPMethod(m_method);
-#if PLATFORM(CHROMIUM) || PLATFORM(BLACKBERRY)
-    request.setTargetType(ResourceRequest::TargetIsXHR);
-#endif
-
-    if (m_requestEntityBody) {
-        ASSERT(m_method != "GET");
-        ASSERT(m_method != "HEAD");
-        request.setHTTPBody(m_requestEntityBody.release());
-    }
-
-    if (m_requestHeaders.size() > 0)
-        request.addHTTPHeaderFields(m_requestHeaders);
-
-    ThreadableLoaderOptions options;
-    options.sendLoadCallbacks = SendCallbacks;
-    options.sniffContent = DoNotSniffContent;
-    options.preflightPolicy = uploadEvents ? ForcePreflight : ConsiderPreflight;
-    options.allowCredentials = (m_sameOriginRequest || m_includeCredentials) ? AllowStoredCredentials : DoNotAllowStoredCredentials;
-    options.crossOriginRequestPolicy = UseAccessControl;
-    options.securityOrigin = securityOrigin();
-
-    m_exceptionCode = 0;
-    m_error = false;
-
-    if (m_async) {
-        if (m_upload)
-            request.setReportUploadProgress(true);
-
-        // ThreadableLoader::create can return null here, for example if we're no longer attached to a page.
-        // This is true while running onunload handlers.
-        // FIXME: Maybe we need to be able to send XMLHttpRequests from onunload, <http://bugs.webkit.org/show_bug.cgi?id=10904>.
-        // FIXME: Maybe create() can return null for other reasons too?
-        m_loader = ThreadableLoader::create(scriptExecutionContext(), this, request, options);
-        if (m_loader) {
-            // Neither this object nor the JavaScript wrapper should be deleted while
-            // a request is in progress because we need to keep the listeners alive,
-            // and they are referenced by the JavaScript wrapper.
-            setPendingActivity(this);
-        }
+        m_job = new TransferJob(m_async ? this : 0, m_method, m_url, m_encoding.fromUnicode(body.deprecatedString()));
     } else {
-        InspectorInstrumentation::willLoadXHRSynchronously(scriptExecutionContext());
-        ThreadableLoader::loadResourceSynchronously(scriptExecutionContext(), request, *this, options);
-        InspectorInstrumentation::didLoadXHRSynchronously(scriptExecutionContext());
+        // FIXME: HEAD requests just crash; see <rdar://4460899> and the commented out tests in http/tests/xmlhttprequest/methods.html.
+        if (m_method == "HEAD")
+            m_method = "GET";
+        m_job = new TransferJob(m_async ? this : 0, m_method, m_url);
     }
 
-    if (!m_exceptionCode && m_error)
-        m_exceptionCode = XMLHttpRequestException::NETWORK_ERR;
-    ec = m_exceptionCode;
+    if (m_requestHeaders.length())
+        m_job->addMetaData("customHTTPHeader", m_requestHeaders);
+
+    if (!m_async) {
+        Vector<char> data;
+        KURL finalURL;
+        DeprecatedString headers;
+
+        {
+            // avoid deadlock in case the loader wants to use JS on a background thread
+            KJS::JSLock::DropAllLocks dropLocks;
+            data = ServeSynchronousRequest(cache()->loader(), m_doc->docLoader(), m_job, finalURL, headers);
+        }
+
+        m_job = 0;
+        processSyncLoadResults(data, finalURL, headers);
+    
+        return;
+    }
+
+    // Neither this object nor the JavaScript wrapper should be deleted while
+    // a request is in progress because we need to keep the listeners alive,
+    // and they are referenced by the JavaScript wrapper.
+    ref();
+    {
+        KJS::JSLock lock;
+        gcProtectNullTolerant(KJS::ScriptInterpreter::getDOMObject(this));
+    }
+  
+    m_job->start(m_doc->docLoader());
 }
 
 void XMLHttpRequest::abort()
 {
-    // internalAbort() calls dropProtection(), which may release the last reference.
-    RefPtr<XMLHttpRequest> protect(this);
+    bool hadJob = m_job;
 
-    bool sendFlag = m_loader;
-
-    internalAbort();
-
-    clearResponseBuffers();
-
-    // Clear headers as required by the spec
-    m_requestHeaders.clear();
-
-    if ((m_state <= OPENED && !sendFlag) || m_state == DONE)
-        m_state = UNSENT;
-    else {
-        ASSERT(!m_loader);
-        changeState(DONE);
-        m_state = UNSENT;
+    if (hadJob) {
+        m_job->kill();
+        m_job = 0;
     }
-
-    m_progressEventThrottle.dispatchEventAndLoadEnd(XMLHttpRequestProgressEvent::create(eventNames().abortEvent));
-    if (!m_uploadComplete) {
-        m_uploadComplete = true;
-        if (m_upload && m_uploadEventsAllowed)
-            m_upload->dispatchEventAndLoadEnd(XMLHttpRequestProgressEvent::create(eventNames().abortEvent));
-    }
-}
-
-void XMLHttpRequest::internalAbort()
-{
-    bool hadLoader = m_loader;
-
-    m_error = true;
-
-    // FIXME: when we add the support for multi-part XHR, we will have to think be careful with this initialization.
-    m_receivedLength = 0;
-
-    if (hadLoader) {
-        m_loader->cancel();
-        m_loader = 0;
-    }
-
     m_decoder = 0;
+    m_aborted = true;
 
-    if (hadLoader)
-        dropProtection();
-}
-
-void XMLHttpRequest::clearResponse()
-{
-    m_response = ResourceResponse();
-    clearResponseBuffers();
-}
-
-void XMLHttpRequest::clearResponseBuffers()
-{
-    m_responseBuilder.clear();
-    m_createdDocument = false;
-    m_responseDocument = 0;
-#if ENABLE(XHR_RESPONSE_BLOB)
-    m_responseBlob = 0;
-#endif
-    m_binaryResponseBuilder.clear();
-    m_responseArrayBuffer.clear();
-}
-
-void XMLHttpRequest::clearRequest()
-{
-    m_requestHeaders.clear();
-    m_requestEntityBody = 0;
-}
-
-void XMLHttpRequest::genericError()
-{
-    clearResponse();
-    clearRequest();
-    m_error = true;
-
-    changeState(DONE);
-}
-
-void XMLHttpRequest::networkError()
-{
-    genericError();
-    m_progressEventThrottle.dispatchEventAndLoadEnd(XMLHttpRequestProgressEvent::create(eventNames().errorEvent));
-    if (!m_uploadComplete) {
-        m_uploadComplete = true;
-        if (m_upload && m_uploadEventsAllowed)
-            m_upload->dispatchEventAndLoadEnd(XMLHttpRequestProgressEvent::create(eventNames().errorEvent));
-    }
-    internalAbort();
-}
-
-void XMLHttpRequest::abortError()
-{
-    genericError();
-    m_progressEventThrottle.dispatchEventAndLoadEnd(XMLHttpRequestProgressEvent::create(eventNames().abortEvent));
-    if (!m_uploadComplete) {
-        m_uploadComplete = true;
-        if (m_upload && m_uploadEventsAllowed)
-            m_upload->dispatchEventAndLoadEnd(XMLHttpRequestProgressEvent::create(eventNames().abortEvent));
+    if (hadJob) {
+        {
+            KJS::JSLock lock;
+            gcUnprotectNullTolerant(KJS::ScriptInterpreter::getDOMObject(this));
+        }
+        deref();
     }
 }
 
-void XMLHttpRequest::dropProtection()
-{
-#if USE(JSC)
-    // The XHR object itself holds on to the responseText, and
-    // thus has extra cost even independent of any
-    // responseText or responseXML objects it has handed
-    // out. But it is protected from GC while loading, so this
-    // can't be recouped until the load is done, so only
-    // report the extra cost at that point.
-    JSC::JSGlobalData* globalData = scriptExecutionContext()->globalData();
-    JSC::JSLockHolder lock(globalData);
-    globalData->heap.reportExtraMemoryCost(m_responseBuilder.length() * 2);
-#endif
-
-    unsetPendingActivity(this);
-}
-
-void XMLHttpRequest::overrideMimeType(const String& override)
+void XMLHttpRequest::overrideMIMEType(const String& override)
 {
     m_mimeTypeOverride = override;
 }
 
-void XMLHttpRequest::setRequestHeader(const AtomicString& name, const String& value, ExceptionCode& ec)
+void XMLHttpRequest::setRequestHeader(const String& name, const String& value, ExceptionCode& ec)
 {
-    if (m_state != OPENED || m_loader) {
-#if ENABLE(DASHBOARD_SUPPORT)
-        if (usesDashboardBackwardCompatibilityMode())
-            return;
-#endif
-
-        ec = INVALID_STATE_ERR;
-        return;
-    }
-
-    if (!isValidHTTPToken(name) || !isValidHTTPHeaderValue(value)) {
+    if (!isValidToken(name) || !isValidHeaderValue(value)) {
         ec = SYNTAX_ERR;
         return;
     }
-
-    // A privileged script (e.g. a Dashboard widget) can set any headers.
-    if (!securityOrigin()->canLoadLocalResources() && !isAllowedHTTPHeader(name)) {
-        logConsoleError(scriptExecutionContext(), "Refused to set unsafe header \"" + name + "\"");
+       
+    if (!canSetRequestHeader(name)) {
+        if (m_doc && m_doc->frame() && m_doc->frame()->page())
+            m_doc->frame()->page()->chrome()->addMessageToConsole(JSMessageSource, ErrorMessageLevel, "Refused to set unsafe header " + name, 1, String());
         return;
     }
-
-    setRequestHeaderInternal(name, value);
-}
-
-void XMLHttpRequest::setRequestHeaderInternal(const AtomicString& name, const String& value)
-{
-    HTTPHeaderMap::AddResult result = m_requestHeaders.add(name, value);
-    if (!result.isNewEntry)
-        result.iterator->second += ", " + value;
-}
-
-String XMLHttpRequest::getRequestHeader(const AtomicString& name) const
-{
-    return m_requestHeaders.get(name);
-}
-
-String XMLHttpRequest::getAllResponseHeaders(ExceptionCode& ec) const
-{
-    if (m_state < HEADERS_RECEIVED) {
-        ec = INVALID_STATE_ERR;
-        return "";
-    }
-
-    StringBuilder stringBuilder;
-
-    HTTPHeaderSet accessControlExposeHeaderSet;
-    parseAccessControlExposeHeadersAllowList(m_response.httpHeaderField("Access-Control-Expose-Headers"), accessControlExposeHeaderSet);
-    HTTPHeaderMap::const_iterator end = m_response.httpHeaderFields().end();
-    for (HTTPHeaderMap::const_iterator it = m_response.httpHeaderFields().begin(); it!= end; ++it) {
-        // Hide Set-Cookie header fields from the XMLHttpRequest client for these reasons:
-        //     1) If the client did have access to the fields, then it could read HTTP-only
-        //        cookies; those cookies are supposed to be hidden from scripts.
-        //     2) There's no known harm in hiding Set-Cookie header fields entirely; we don't
-        //        know any widely used technique that requires access to them.
-        //     3) Firefox has implemented this policy.
-        if (isSetCookieHeader(it->first) && !securityOrigin()->canLoadLocalResources())
-            continue;
-
-        if (!m_sameOriginRequest && !isOnAccessControlResponseHeaderWhitelist(it->first) && !accessControlExposeHeaderSet.contains(it->first))
-            continue;
-
-        stringBuilder.append(it->first);
-        stringBuilder.append(':');
-        stringBuilder.append(' ');
-        stringBuilder.append(it->second);
-        stringBuilder.append('\r');
-        stringBuilder.append('\n');
-    }
-
-    return stringBuilder.toString();
-}
-
-String XMLHttpRequest::getResponseHeader(const AtomicString& name, ExceptionCode& ec) const
-{
-    if (m_state < HEADERS_RECEIVED) {
-        ec = INVALID_STATE_ERR;
-        return String();
-    }
-
-    // See comment in getAllResponseHeaders above.
-    if (isSetCookieHeader(name) && !securityOrigin()->canLoadLocalResources()) {
-        logConsoleError(scriptExecutionContext(), "Refused to get unsafe header \"" + name + "\"");
-        return String();
-    }
     
-    HTTPHeaderSet accessControlExposeHeaderSet;
-    parseAccessControlExposeHeadersAllowList(m_response.httpHeaderField("Access-Control-Expose-Headers"), accessControlExposeHeaderSet);
-
-    if (!m_sameOriginRequest && !isOnAccessControlResponseHeaderWhitelist(name) && !accessControlExposeHeaderSet.contains(name)) {
-        logConsoleError(scriptExecutionContext(), "Refused to get unsafe header \"" + name + "\"");
-        return String();
-    }
-    return m_response.httpHeaderField(name);
+    if (m_requestHeaders.length() > 0)
+        m_requestHeaders += "\r\n";
+    m_requestHeaders += name.deprecatedString();
+    m_requestHeaders += ": ";
+    m_requestHeaders += value.deprecatedString();
 }
 
-String XMLHttpRequest::responseMIMEType() const
+DeprecatedString XMLHttpRequest::getRequestHeader(const DeprecatedString& name) const
 {
-    String mimeType = extractMIMETypeFromMediaType(m_mimeTypeOverride);
-    if (mimeType.isEmpty()) {
-        if (m_response.isHTTP())
-            mimeType = extractMIMETypeFromMediaType(m_response.httpHeaderField("Content-Type"));
-        else
-            mimeType = m_response.mimeType();
-    }
-    if (mimeType.isEmpty())
-        mimeType = "text/xml";
+    return getSpecificHeader(m_requestHeaders, name);
+}
 
-    return mimeType;
+String XMLHttpRequest::getAllResponseHeaders() const
+{
+    if (m_responseHeaders.isEmpty())
+        return String();
+
+    int endOfLine = m_responseHeaders.find("\n");
+    if (endOfLine == -1)
+        return String();
+
+    return m_responseHeaders.substring(endOfLine + 1) + "\n";
+}
+
+String XMLHttpRequest::getResponseHeader(const String& name) const
+{
+    return getSpecificHeader(m_responseHeaders.deprecatedString(), name.deprecatedString());
+}
+
+DeprecatedString XMLHttpRequest::getSpecificHeader(const DeprecatedString& headers, const DeprecatedString& name)
+{
+    if (headers.isEmpty())
+        return DeprecatedString();
+
+    RegularExpression headerLinePattern(name + ":", false);
+
+    int matchLength;
+    int headerLinePos = headerLinePattern.match(headers, 0, &matchLength);
+    while (headerLinePos != -1) {
+        if (headerLinePos == 0 || headers[headerLinePos-1] == '\n')
+            break;
+        headerLinePos = headerLinePattern.match(headers, headerLinePos + 1, &matchLength);
+    }
+    if (headerLinePos == -1)
+        return DeprecatedString();
+    
+    int endOfLine = headers.find("\n", headerLinePos + matchLength);
+    return headers.mid(headerLinePos + matchLength, endOfLine - (headerLinePos + matchLength)).stripWhiteSpace();
 }
 
 bool XMLHttpRequest::responseIsXML() const
 {
-    // FIXME: Remove the lower() call when DOMImplementation.isXMLMIMEType() is modified
-    //        to do case insensitive MIME type matching.
-    return DOMImplementation::isXMLMIMEType(responseMIMEType().lower());
+    String mimeType = getMIMEType(m_mimeTypeOverride);
+    if (mimeType.isEmpty())
+        mimeType = getMIMEType(getResponseHeader("Content-Type"));
+    if (mimeType.isEmpty())
+        mimeType = "text/xml";
+    return DOMImplementation::isXMLMIMEType(mimeType);
 }
 
-int XMLHttpRequest::status(ExceptionCode& ec) const
+int XMLHttpRequest::getStatus() const
 {
-    if (m_response.httpStatusCode())
-        return m_response.httpStatusCode();
+    if (m_responseHeaders.isEmpty())
+        return -1;
+  
+    int endOfLine = m_responseHeaders.find("\n");
+    String firstLine = endOfLine == -1 ? m_responseHeaders : m_responseHeaders.substring(0, endOfLine);
+    int codeStart = firstLine.find(" ");
+    int codeEnd = firstLine.find(" ", codeStart + 1);
+    if (codeStart == -1 || codeEnd == -1)
+        return -1;
+  
+    String number = firstLine.substring(codeStart + 1, codeEnd - (codeStart + 1));
+    bool ok = false;
+    int code = number.toInt(&ok);
+    if (!ok)
+        return -1;
+    return code;
+}
 
-    if (m_state == OPENED) {
-        // Firefox only raises an exception in this state; we match it.
-        // Note the case of local file requests, where we have no HTTP response code! Firefox never raises an exception for those, but we match HTTP case for consistency.
-        ec = INVALID_STATE_ERR;
+String XMLHttpRequest::getStatusText() const
+{
+    if (m_responseHeaders.isEmpty())
+        return String();
+  
+    int endOfLine = m_responseHeaders.find("\n");
+    String firstLine = endOfLine == -1 ? m_responseHeaders : m_responseHeaders.substring(0, endOfLine);
+    int codeStart = firstLine.find(" ");
+    int codeEnd = firstLine.find(" ", codeStart + 1);
+    if (codeStart == -1 || codeEnd == -1)
+        return String();
+  
+    return firstLine.substring(codeEnd + 1, endOfLine - (codeEnd + 1)).deprecatedString().stripWhiteSpace();
+}
+
+void XMLHttpRequest::processSyncLoadResults(const Vector<char>& data, const KURL& finalURL, const DeprecatedString& headers)
+{
+    if (!urlMatchesDocumentDomain(finalURL)) {
+        abort();
+        return;
     }
 
-    return 0;
-}
-
-String XMLHttpRequest::statusText(ExceptionCode& ec) const
-{
-    if (!m_response.httpStatusText().isNull())
-        return m_response.httpStatusText();
-
-    if (m_state == OPENED) {
-        // See comments in status() above.
-        ec = INVALID_STATE_ERR;
-    }
-
-    return String();
-}
-
-void XMLHttpRequest::didFail(const ResourceError& error)
-{
-
-    // If we are already in an error state, for instance we called abort(), bail out early.
-    if (m_error)
+    m_responseHeaders = headers;
+    changeState(Loaded);
+    if (m_aborted)
         return;
 
-    if (error.isCancellation()) {
-        m_exceptionCode = XMLHttpRequestException::ABORT_ERR;
-        abortError();
-        return;
-    }
+    const char* bytes = static_cast<const char*>(data.data());
+    int len = static_cast<int>(data.size());
 
-    // Network failures are already reported to Web Inspector by ResourceLoader.
-    if (error.domain() == errorDomainWebKitInternal)
-        logConsoleError(scriptExecutionContext(), "XMLHttpRequest cannot load " + error.failingURL() + ". " + error.localizedDescription());
-
-    m_exceptionCode = XMLHttpRequestException::NETWORK_ERR;
-    networkError();
-}
-
-void XMLHttpRequest::didFailRedirectCheck()
-{
-    networkError();
-}
-
-void XMLHttpRequest::didFinishLoading(unsigned long identifier, double)
-{
-    if (m_error)
+    receivedData(0, bytes, len);
+    if (m_aborted)
         return;
 
-    if (m_state < HEADERS_RECEIVED)
-        changeState(HEADERS_RECEIVED);
+    receivedAllData(0);
+}
+
+void XMLHttpRequest::receivedAllData(TransferJob*)
+{
+    if (m_responseHeaders.isEmpty() && m_job)
+        m_responseHeaders = m_job->queryMetaData("HTTP-Headers");
+
+    if (m_state < Loaded)
+        changeState(Loaded);
 
     if (m_decoder)
-        m_responseBuilder.append(m_decoder->flush());
+        m_response += m_decoder->flush();
 
-    m_responseBuilder.shrinkToFit();
+    bool hadJob = m_job;
+    m_job = 0;
 
-    InspectorInstrumentation::resourceRetrievedByXMLHttpRequest(scriptExecutionContext(), identifier, m_responseBuilder.toStringPreserveCapacity(), m_url, m_lastSendURL, m_lastSendLineNumber);
-
-    bool hadLoader = m_loader;
-    m_loader = 0;
-
-    changeState(DONE);
+    changeState(Completed);
     m_decoder = 0;
 
-    if (hadLoader)
-        dropProtection();
-}
-
-void XMLHttpRequest::didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent)
-{
-    if (!m_upload)
-        return;
-
-    if (m_uploadEventsAllowed)
-        m_upload->dispatchEvent(XMLHttpRequestProgressEvent::create(eventNames().progressEvent, true, bytesSent, totalBytesToBeSent));
-
-    if (bytesSent == totalBytesToBeSent && !m_uploadComplete) {
-        m_uploadComplete = true;
-        if (m_uploadEventsAllowed)
-            m_upload->dispatchEventAndLoadEnd(XMLHttpRequestProgressEvent::create(eventNames().loadEvent));
+    if (hadJob) {
+        {
+            KJS::JSLock lock;
+            gcUnprotectNullTolerant(KJS::ScriptInterpreter::getDOMObject(this));
+        }
+        deref();
     }
 }
 
-void XMLHttpRequest::didReceiveResponse(unsigned long identifier, const ResourceResponse& response)
+void XMLHttpRequest::receivedRedirect(TransferJob*, const KURL& m_url)
 {
-    InspectorInstrumentation::didReceiveXHRResponse(scriptExecutionContext(), identifier);
-
-    m_response = response;
-    m_responseEncoding = extractCharsetFromMediaType(m_mimeTypeOverride);
-    if (m_responseEncoding.isEmpty())
-        m_responseEncoding = response.textEncodingName();
+    if (!urlMatchesDocumentDomain(m_url))
+        abort();
 }
 
-void XMLHttpRequest::didReceiveData(const char* data, int len)
+void XMLHttpRequest::receivedData(TransferJob*, const char *data, int len)
 {
-    if (m_error)
-        return;
+    if (m_responseHeaders.isEmpty() && m_job)
+        m_responseHeaders = m_job->queryMetaData("HTTP-Headers");
 
-    if (m_state < HEADERS_RECEIVED)
-        changeState(HEADERS_RECEIVED);
-
-    bool useDecoder = m_responseTypeCode == ResponseTypeDefault || m_responseTypeCode == ResponseTypeText || m_responseTypeCode == ResponseTypeDocument;
-
-    if (useDecoder && !m_decoder) {
-        if (!m_responseEncoding.isEmpty())
-            m_decoder = TextResourceDecoder::create("text/plain", m_responseEncoding);
-        // allow TextResourceDecoder to look inside the m_response if it's XML or HTML
-        else if (responseIsXML()) {
-            m_decoder = TextResourceDecoder::create("application/xml");
-            // Don't stop on encoding errors, unlike it is done for other kinds of XML resources. This matches the behavior of previous WebKit versions, Firefox and Opera.
-            m_decoder->useLenientXMLDecoding();
-        } else if (equalIgnoringCase(responseMIMEType(), "text/html"))
-            m_decoder = TextResourceDecoder::create("text/html", "UTF-8");
+    if (m_state < Loaded)
+        changeState(Loaded);
+  
+    if (!m_decoder) {
+        m_encoding = getCharset(m_mimeTypeOverride);
+        if (m_encoding.isEmpty())
+            m_encoding = getCharset(getResponseHeader("Content-Type"));
+        if (m_encoding.isEmpty() && m_job)
+            m_encoding = m_job->queryMetaData("charset");
+    
+        m_decoder = new Decoder;
+        if (!m_encoding.isEmpty())
+            m_decoder->setEncodingName(m_encoding.deprecatedString().latin1(), Decoder::EncodingFromHTTPHeader);
         else
-            m_decoder = TextResourceDecoder::create("text/plain", "UTF-8");
+            // only allow Decoder to look inside the m_response if it's XML
+            m_decoder->setEncodingName("UTF-8", responseIsXML() ? Decoder::DefaultEncoding : Decoder::EncodingFromHTTPHeader);
     }
-
-    if (!len)
+    if (len == 0)
         return;
 
     if (len == -1)
         len = strlen(data);
 
-    if (useDecoder)
-        m_responseBuilder.append(m_decoder->decode(data, len));
-    else if (m_responseTypeCode == ResponseTypeArrayBuffer
-#if ENABLE(XHR_RESPONSE_BLOB)
-             || m_responseTypeCode == ResponseTypeBlob
-#endif
-             ) {
-        // Buffer binary data.
-        if (!m_binaryResponseBuilder)
-            m_binaryResponseBuilder = SharedBuffer::create();
-        m_binaryResponseBuilder->append(data, len);
-    }
+    DeprecatedString decoded = m_decoder->decode(data, len);
 
-    if (!m_error) {
-        long long expectedLength = m_response.expectedContentLength();
-        m_receivedLength += len;
+    m_response += decoded;
 
-        if (m_async) {
-            bool lengthComputable = expectedLength > 0 && m_receivedLength <= expectedLength;
-            unsigned long long total = lengthComputable ? expectedLength : 0;
-            m_progressEventThrottle.dispatchProgressEvent(lengthComputable, m_receivedLength, total);
-        }
-
-        if (m_state != LOADING)
-            changeState(LOADING);
+    if (!m_aborted) {
+        if (m_state != Interactive)
+            changeState(Interactive);
         else
             // Firefox calls readyStateChanged every time it receives data, 4449442
             callReadyStateChangeListener();
     }
 }
 
-bool XMLHttpRequest::canSuspend() const
+void XMLHttpRequest::cancelRequests(Document* m_doc)
 {
-    return !m_loader;
+    RequestsSet* requests = requestsByDocument().get(m_doc);
+    if (!requests)
+        return;
+    RequestsSet copy = *requests;
+    RequestsSet::const_iterator end = copy.end();
+    for (RequestsSet::const_iterator it = copy.begin(); it != end; ++it)
+        (*it)->abort();
 }
 
-void XMLHttpRequest::suspend(ReasonForSuspension)
+void XMLHttpRequest::detachRequests(Document* m_doc)
 {
-    m_progressEventThrottle.suspend();
+    RequestsSet* requests = requestsByDocument().get(m_doc);
+    if (!requests)
+        return;
+    requestsByDocument().remove(m_doc);
+    RequestsSet::const_iterator end = requests->end();
+    for (RequestsSet::const_iterator it = requests->begin(); it != end; ++it) {
+        (*it)->m_doc = 0;
+        (*it)->abort();
+    }
+    delete requests;
 }
 
-void XMLHttpRequest::resume()
-{
-    m_progressEventThrottle.resume();
-}
-
-void XMLHttpRequest::stop()
-{
-    internalAbort();
-}
-
-void XMLHttpRequest::contextDestroyed()
-{
-    ASSERT(!m_loader);
-    ActiveDOMObject::contextDestroyed();
-}
-
-const AtomicString& XMLHttpRequest::interfaceName() const
-{
-    return eventNames().interfaceForXMLHttpRequest;
-}
-
-ScriptExecutionContext* XMLHttpRequest::scriptExecutionContext() const
-{
-    return ActiveDOMObject::scriptExecutionContext();
-}
-
-EventTargetData* XMLHttpRequest::eventTargetData()
-{
-    return &m_eventTargetData;
-}
-
-EventTargetData* XMLHttpRequest::ensureEventTargetData()
-{
-    return &m_eventTargetData;
-}
-
-} // namespace WebCore
+} // end namespace

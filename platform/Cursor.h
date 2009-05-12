@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,153 +23,49 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef Cursor_h
-#define Cursor_h
+#ifndef CURSOR_H
+#define CURSOR_H
 
-#include "Image.h"
-#include "IntPoint.h"
-#include <wtf/RefPtr.h>
-
-#if PLATFORM(WIN)
-typedef struct HICON__* HICON;
-typedef HICON HCURSOR;
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefCounted.h>
-#elif PLATFORM(MAC)
-#include <wtf/RetainPtr.h>
-#elif PLATFORM(GTK)
-#include "GRefPtrGtk.h"
-#elif PLATFORM(QT)
-#include <QCursor>
-#elif PLATFORM(CHROMIUM)
-#include "PlatformCursor.h"
-#elif PLATFORM(BLACKBERRY)
-#include <BlackBerryPlatformCursor.h>
+#ifdef WIN32
+#include <windows.h>
+#elif PLATFORM(GDK)
+#include <gdk/gdk.h>
 #endif
 
-
-#if PLATFORM(WX)
-class wxCursor;
-#endif
-
-#if PLATFORM(WIN)
-typedef struct HICON__ *HICON;
-typedef HICON HCURSOR;
-#endif
-
-#if PLATFORM(WIN) || PLATFORM(MAC) || PLATFORM(GTK) || PLATFORM(QT) || PLATFORM(EFL)
-#define WTF_USE_LAZY_NATIVE_CURSOR 1
-#endif
 
 namespace WebCore {
 
     class Image;
 
-    typedef void* PlatformCursor;
 
     class Cursor {
     public:
-        enum Type {
-            Pointer,
-            Cross,
-            Hand,
-            IBeam,
-            Wait,
-            Help,
-            EastResize,
-            NorthResize,
-            NorthEastResize,
-            NorthWestResize,
-            SouthResize,
-            SouthEastResize,
-            SouthWestResize,
-            WestResize,
-            NorthSouthResize,
-            EastWestResize,
-            NorthEastSouthWestResize,
-            NorthWestSouthEastResize,
-            ColumnResize,
-            RowResize,
-            MiddlePanning,
-            EastPanning,
-            NorthPanning,
-            NorthEastPanning,
-            NorthWestPanning,
-            SouthPanning,
-            SouthEastPanning,
-            SouthWestPanning,
-            WestPanning,
-            Move,
-            VerticalText,
-            Cell,
-            ContextMenu,
-            Alias,
-            Progress,
-            NoDrop,
-            Copy,
-            None,
-            NotAllowed,
-            ZoomIn,
-            ZoomOut,
-            Grab,
-            Grabbing,
-            Custom
-        };
-
-        static const Cursor& fromType(Cursor::Type);
-
-        Cursor()
-        {
-        }
+        Cursor() {}
 
     };
-
-    IntPoint determineHotSpot(Image*, const IntPoint& specifiedHotSpot);
+    inline Cursor pointerCursor() { return Cursor(); }
+    inline Cursor crossCursor() { return Cursor(); }
+    inline Cursor handCursor() { return Cursor(); }
+    inline Cursor moveCursor() { return Cursor(); }
+    inline Cursor iBeamCursor() { return Cursor(); }
+    inline Cursor waitCursor() { return Cursor(); }
+    inline Cursor helpCursor() { return Cursor(); }
     
-    const Cursor& pointerCursor();
-    const Cursor& crossCursor();
-    const Cursor& handCursor();
-    const Cursor& moveCursor();
-    const Cursor& iBeamCursor();
-    const Cursor& waitCursor();
-    const Cursor& helpCursor();
-    const Cursor& eastResizeCursor();
-    const Cursor& northResizeCursor();
-    const Cursor& northEastResizeCursor();
-    const Cursor& northWestResizeCursor();
-    const Cursor& southResizeCursor();
-    const Cursor& southEastResizeCursor();
-    const Cursor& southWestResizeCursor();
-    const Cursor& westResizeCursor();
-    const Cursor& northSouthResizeCursor();
-    const Cursor& eastWestResizeCursor();
-    const Cursor& northEastSouthWestResizeCursor();
-    const Cursor& northWestSouthEastResizeCursor();
-    const Cursor& columnResizeCursor();
-    const Cursor& rowResizeCursor();
-    const Cursor& middlePanningCursor();
-    const Cursor& eastPanningCursor();
-    const Cursor& northPanningCursor();
-    const Cursor& northEastPanningCursor();
-    const Cursor& northWestPanningCursor();
-    const Cursor& southPanningCursor();
-    const Cursor& southEastPanningCursor();
-    const Cursor& southWestPanningCursor();
-    const Cursor& westPanningCursor();
-    const Cursor& verticalTextCursor();
-    const Cursor& cellCursor();
-    const Cursor& contextMenuCursor();
-    const Cursor& noDropCursor();
-    const Cursor& notAllowedCursor();
-    const Cursor& progressCursor();
-    const Cursor& aliasCursor();
-    const Cursor& zoomInCursor();
-    const Cursor& zoomOutCursor();
-    const Cursor& copyCursor();
-    const Cursor& noneCursor();
-    const Cursor& grabCursor();
-    const Cursor& grabbingCursor();
+    inline Cursor eastResizeCursor() { return Cursor(); }
+    inline Cursor northResizeCursor() { return Cursor(); }
+    inline Cursor northEastResizeCursor() { return Cursor(); }
+    inline Cursor northWestResizeCursor() { return Cursor(); }
+    inline Cursor southResizeCursor() { return Cursor(); }
+    inline Cursor southEastResizeCursor() { return Cursor(); }
+    inline Cursor southWestResizeCursor() { return Cursor(); }
+    inline Cursor westResizeCursor() { return Cursor(); }
 
-} // namespace WebCore
+    inline Cursor northSouthResizeCursor() { return Cursor(); }
+    inline Cursor eastWestResizeCursor() { return Cursor(); }
+    inline Cursor northEastSouthWestResizeCursor() { return Cursor(); }
+    inline Cursor northWestSouthEastResizeCursor() { return Cursor(); }
+    inline Cursor columnResizeCursor() { return Cursor(); }
+    inline Cursor rowResizeCursor() { return Cursor(); }
+}
 
-#endif // Cursor_h
+#endif

@@ -1,6 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006, 2008, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,46 +16,54 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef StyleSheet_h
-#define StyleSheet_h
+#ifndef StyleSheet_H
+#define StyleSheet_H
 
-#include "CSSParserMode.h"
-#include "KURLHash.h"
+#include "StyleList.h"
 #include "PlatformString.h"
-#include <wtf/ListHashSet.h>
-#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
-class CSSImportRule;
-class MediaList;
 class Node;
-class StyleRuleImport;
-class StyleSheet;
+class CachedCSSStyleSheet;
+class MediaList;
 
-class StyleSheet : public RefCounted<StyleSheet> {
+class StyleSheet : public StyleList {
 public:
+    StyleSheet(Node* ownerNode, String href = String());
+    StyleSheet(StyleSheet* parentSheet, String href = String());
+    StyleSheet(StyleBase* owner, String href = String());
+    StyleSheet(CachedCSSStyleSheet*, String href = String());
     virtual ~StyleSheet();
 
-    virtual bool disabled() const = 0;
-    virtual void setDisabled(bool) = 0;
-    virtual Node* ownerNode() const = 0;
-    virtual StyleSheet* parentStyleSheet() const { return 0; }
-    virtual String href() const = 0;
-    virtual String title() const = 0;
-    virtual MediaList* media() const { return 0; }
-    virtual String type() const = 0;
+    virtual bool isStyleSheet() const { return true; }
 
-    virtual CSSImportRule* ownerRule() const { return 0; }
-    virtual void clearOwnerNode() = 0;
-    virtual KURL baseURL() const = 0;
-    virtual bool isLoading() const = 0;
-    virtual bool isCSSStyleSheet() const { return false; }
-    virtual bool isXSLStyleSheet() const { return false; }
+    virtual String type() const { return String(); }
+
+    bool disabled() const { return m_disabled; }
+    void setDisabled(bool disabled) { m_disabled = disabled; styleSheetChanged(); }
+
+    Node* ownerNode() const { return m_parentNode; }
+    StyleSheet *parentStyleSheet() const;
+    String href() const { return m_strHref; }
+    String title() const { return m_strTitle; }
+    MediaList* media() const { return m_media.get(); }
+    void setMedia(MediaList*);
+
+    virtual bool isLoading() { return false; }
+
+    virtual void styleSheetChanged() { }
+    
+protected:
+    Node* m_parentNode;
+    String m_strHref;
+    String m_strTitle;
+    RefPtr<MediaList> m_media;
+    bool m_disabled;
 };
 
 } // namespace

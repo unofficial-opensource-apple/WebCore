@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,40 +23,26 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef InsertParagraphSeparatorCommand_h
-#define InsertParagraphSeparatorCommand_h
+#ifndef insert_paragraph_separator_command_h__
+#define insert_paragraph_separator_command_h__
 
 #include "CompositeEditCommand.h"
 
 namespace WebCore {
 
-class EditingStyle;
-
 class InsertParagraphSeparatorCommand : public CompositeEditCommand {
 public:
-    static PassRefPtr<InsertParagraphSeparatorCommand> create(Document* document, bool useDefaultParagraphElement = false, bool pasteBlockqutoeIntoUnquotedArea = false)
-    {
-        return adoptRef(new InsertParagraphSeparatorCommand(document, useDefaultParagraphElement, pasteBlockqutoeIntoUnquotedArea));
-    }
-
-private:
-    InsertParagraphSeparatorCommand(Document*, bool useDefaultParagraphElement, bool pasteBlockqutoeIntoUnquotedArea);
+    InsertParagraphSeparatorCommand(Document*);
 
     virtual void doApply();
 
+private:
     void calculateStyleBeforeInsertion(const Position&);
-    void applyStyleAfterInsertion(Node* originalEnclosingBlock);
-    void getAncestorsInsideBlock(const Node* insertionNode, Element* outerBlock, Vector<Element*>& ancestors);
-    PassRefPtr<Element> cloneHierarchyUnderNewBlock(const Vector<Element*>& ancestors, PassRefPtr<Element> blockToInsert);
-
-    bool shouldUseDefaultParagraphElement(Node*) const;
+    void applyStyleAfterInsertion();
 
     virtual bool preservesTypingStyle() const;
 
-    RefPtr<EditingStyle> m_style;
-
-    bool m_mustUseDefaultParagraphElement;
-    bool m_pasteBlockqutoeIntoUnquotedArea;
+    RefPtr<CSSMutableStyleDeclaration> m_style;
 };
 
 }

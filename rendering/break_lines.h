@@ -1,4 +1,6 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2005 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -13,29 +15,22 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef break_lines_h
-#define break_lines_h
-
-#include <wtf/unicode/Unicode.h>
+#include <unicode/umachine.h>
 
 namespace WebCore {
 
-class LazyLineBreakIterator;
+    int nextBreakablePosition(const UChar*, int pos, int len, bool breakNBSP = false);
 
-int nextBreakablePosition(LazyLineBreakIterator&, int pos, bool breakNBSP = false);
+    inline bool isBreakable(const UChar* str, int pos, int len, int& nextBreakable, bool breakNBSP = false)
+    {
+        if (pos > nextBreakable)
+            nextBreakable = nextBreakablePosition(str, pos, len, breakNBSP);
+        return pos == nextBreakable;
+    }
 
-inline bool isBreakable(LazyLineBreakIterator& lazyBreakIterator, int pos, int& nextBreakable, bool breakNBSP = false)
-{
-    if (pos > nextBreakable)
-        nextBreakable = nextBreakablePosition(lazyBreakIterator, pos, breakNBSP);
-    return pos == nextBreakable;
 }
-
-} // namespace WebCore
-
-#endif // break_lines_h

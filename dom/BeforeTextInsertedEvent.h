@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
  
-#ifndef BeforeTextInsertedEvent_h
-#define BeforeTextInsertedEvent_h
+#ifndef BEFORETEXTINSERTEDEVENTIMPL_H
+#define BEFORETEXTINSERTEDEVENTIMPL_H
 
 #include "Event.h"
 
@@ -32,22 +32,14 @@ namespace WebCore {
 
 class BeforeTextInsertedEvent : public Event {
 public:
-    virtual ~BeforeTextInsertedEvent();
+    BeforeTextInsertedEvent(const String&);
 
-    static PassRefPtr<BeforeTextInsertedEvent> create(const String& text)
-    {
-        return adoptRef(new BeforeTextInsertedEvent(text));
-    }
-
-    virtual const AtomicString& interfaceName() const;
     virtual bool isBeforeTextInsertedEvent() const { return true; }
-
+  
     const String& text() const { return m_text; }
     void setText(const String& s) { m_text = s; }
 
 private:
-    BeforeTextInsertedEvent(const String&);
-
     String m_text;
 };
 

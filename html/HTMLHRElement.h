@@ -1,7 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,32 +16,42 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLHRElement_h
-#define HTMLHRElement_h
+#ifndef HTMLHRElement_H
+#define HTMLHRElement_H
 
 #include "HTMLElement.h"
 
 namespace WebCore {
 
-class HTMLHRElement : public HTMLElement {
+class HTMLHRElement : public HTMLElement
+{
 public:
-    static PassRefPtr<HTMLHRElement> create(Document*);
-    static PassRefPtr<HTMLHRElement> create(const QualifiedName&, Document*);
+    HTMLHRElement(Document*);
+    ~HTMLHRElement();
+    
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
+    virtual int tagPriority() const { return 0; }
+    
+    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
 
-    virtual bool canContainRangeEndPoint() const { return hasChildNodes(); }
+    String align() const;
+    void setAlign(const String&);
 
-private:
-    HTMLHRElement(const QualifiedName&, Document*);
+    bool noShade() const;
+    void setNoShade(bool);
 
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+    String size() const;
+    void setSize(const String&);
+
+    String width() const;
+    void setWidth(const String&);
 };
 
-} // namespace WebCore
-
-#endif // HTMLHRElement_h
+}; //namespace
+#endif

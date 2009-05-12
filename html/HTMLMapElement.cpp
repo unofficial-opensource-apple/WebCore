@@ -1,7 +1,9 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,22 +17,16 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "HTMLMapElement.h"
 
-#include "Attribute.h"
 #include "Document.h"
 #include "HTMLAreaElement.h"
 #include "HTMLCollection.h"
-#include "HTMLImageElement.h"
 #include "HTMLNames.h"
-#include "HitTestResult.h"
-#include "IntSize.h"
-#include "RenderObject.h"
 
 using namespace std;
 
@@ -38,111 +34,68 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLMapElement::HTMLMapElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLMapElement::HTMLMapElement(Document *doc)
+    : HTMLElement(mapTag, doc)
 {
-    ASSERT(hasTagName(mapTag));
-}
-
-PassRefPtr<HTMLMapElement> HTMLMapElement::create(Document* document)
-{
-    return adoptRef(new HTMLMapElement(mapTag, document));
-}
-
-PassRefPtr<HTMLMapElement> HTMLMapElement::create(const QualifiedName& tagName, Document* document)
-{
-    return adoptRef(new HTMLMapElement(tagName, document));
 }
 
 HTMLMapElement::~HTMLMapElement()
 {
+    document()->removeImageMap(this);
 }
 
-bool HTMLMapElement::mapMouseEvent(LayoutPoint location, const LayoutSize& size, HitTestResult& result)
+bool HTMLMapElement::checkDTD(const Node* newChild)
 {
-    HTMLAreaElement* defaultArea = 0;
+    // FIXME: This seems really odd, allowing only blocks inside map elements.
+    return newChild->hasTagName(areaTag) || newChild->hasTagName(scriptTag) || inBlockTagList(newChild);
+}
+
+bool HTMLMapElement::mapMouseEvent(int x, int y, const IntSize& size, RenderObject::NodeInfo& info)
+{
     Node *node = this;
-    while ((node = node->traverseNextNode(this))) {
-        if (node->hasTagName(areaTag)) {
-            HTMLAreaElement* areaElt = static_cast<HTMLAreaElement*>(node);
-            if (areaElt->isDefault()) {
-                if (!defaultArea)
-                    defaultArea = areaElt;
-            } else if (areaElt->mapMouseEvent(location, size, result))
+    while ((node = node->traverseNextNode(this)))
+        if (node->hasTagName(areaTag))
+            if (static_cast<HTMLAreaElement*>(node)->mapMouseEvent(x, y, size, info))
                 return true;
-        }
-    }
-    
-    if (defaultArea) {
-        result.setInnerNode(defaultArea);
-        result.setURLElement(defaultArea);
-    }
-    return defaultArea;
+    return false;
 }
 
-HTMLImageElement* HTMLMapElement::imageElement()
+void HTMLMapElement::parseMappedAttribute(MappedAttribute* attr)
 {
-    HTMLCollection* coll = document()->images();
-    for (Node* curr = coll->firstItem(); curr; curr = coll->nextItem()) {
-        if (!curr->hasTagName(imgTag))
-            continue;
-        
-        // The HTMLImageElement's useMap() value includes the '#' symbol at the beginning,
-        // which has to be stripped off.
-        HTMLImageElement* imageElement = static_cast<HTMLImageElement*>(curr);
-        String useMapName = imageElement->getAttribute(usemapAttr).string().substring(1);
-        if (equalIgnoringCase(useMapName, m_name))
-            return imageElement;
-    }
-    
-    return 0;    
-}
-
-void HTMLMapElement::parseAttribute(Attribute* attribute)
-{
-    // FIXME: This logic seems wrong for XML documents.
-    // Either the id or name will be used depending on the order the attributes are parsed.
-
-    const QualifiedName& attrName = attribute->name();
-    if (isIdAttributeName(attrName) || attrName == nameAttr) {
-        if (isIdAttributeName(attrName)) {
+    const QualifiedName& attrName = attr->name();
+    if (attrName == idAttr || attrName == nameAttr) {
+        Document* doc = document();
+        if (attrName == idAttr) {
             // Call base class so that hasID bit gets set.
-            HTMLElement::parseAttribute(attribute);
-            if (document()->isHTMLDocument())
+            HTMLElement::parseMappedAttribute(attr);
+            if (doc->htmlMode() != Document::XHtml)
                 return;
         }
-        if (inDocument())
-            treeScope()->removeImageMap(this);
-        String mapName = attribute->value();
-        if (mapName[0] == '#')
-            mapName = mapName.substring(1);
-        m_name = document()->isHTMLDocument() ? mapName.lower() : mapName;
-        if (inDocument())
-            treeScope()->addImageMap(this);
-
-        return;
-    }
-
-    HTMLElement::parseAttribute(attribute);
+        doc->removeImageMap(this);
+        m_name = attr->value();
+        if (m_name[0] == '#') {
+            String mapName(m_name.domString().copy());
+            mapName.remove(0, 1);
+            m_name = mapName;
+        }
+        doc->addImageMap(this);
+    } else
+        HTMLElement::parseMappedAttribute(attr);
 }
 
-HTMLCollection* HTMLMapElement::areas()
+PassRefPtr<HTMLCollection> HTMLMapElement::areas()
 {
-    return ensureCachedHTMLCollection(MapAreas);
+    return new HTMLCollection(this, HTMLCollection::MapAreas);
 }
 
-Node::InsertionNotificationRequest HTMLMapElement::insertedInto(Node* insertionPoint)
+String HTMLMapElement::name() const
 {
-    if (insertionPoint->inDocument())
-        treeScope()->addImageMap(this);
-    return HTMLElement::insertedInto(insertionPoint);
+    return getAttribute(nameAttr);
 }
 
-void HTMLMapElement::removedFrom(Node* insertionPoint)
+void HTMLMapElement::setName(const String& value)
 {
-    if (insertionPoint->inDocument())
-        treeScope()->removeImageMap(this);
-    HTMLElement::removedFrom(insertionPoint);
+    setAttribute(nameAttr, value);
 }
 
 }

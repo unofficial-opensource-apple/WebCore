@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,73 +17,70 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLPlugInElement_h
-#define HTMLPlugInElement_h
+#ifndef HTMLPlugInElement_H
+#define HTMLPlugInElement_H
 
-#include "HTMLFrameOwnerElement.h"
-#include "ScriptInstance.h"
-
-#if ENABLE(NETSCAPE_PLUGIN_API)
-struct NPObject;
+#include "HTMLElement.h"
+#if PLATFORM(MAC)
+#include <JavaScriptCore/runtime.h>
+#include <JavaScriptCore/npruntime.h>
 #endif
 
 namespace WebCore {
 
-class RenderEmbeddedObject;
-class RenderWidget;
-class Widget;
-
-class HTMLPlugInElement : public HTMLFrameOwnerElement {
+class HTMLPlugInElement : public HTMLElement
+{
 public:
-    virtual ~HTMLPlugInElement();
-
-    virtual bool willRespondToMouseMoveEvents() OVERRIDE { return false; }
-    virtual bool willRespondToMouseClickEvents() OVERRIDE { return true; }
-
-    PassScriptInstance getInstance();
-
-    Widget* pluginWidget();
-
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    NPObject* getNPObject();
-#endif
-
-    bool isCapturingMouseEvents() const { return m_isCapturingMouseEvents; }
-    void setIsCapturingMouseEvents(bool capturing) { m_isCapturingMouseEvents = capturing; }
-
-    bool canContainRangeEndPoint() const { return false; }
-
-protected:
     HTMLPlugInElement(const QualifiedName& tagName, Document*);
+    HTMLPlugInElement::~HTMLPlugInElement();
+
+    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
 
     virtual void detach();
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+    
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
+    virtual bool checkDTD(const Node* newChild);
 
-    bool m_inBeforeLoadEventHandler;
-    // Subclasses should use guardedDispatchBeforeLoadEvent instead of calling dispatchBeforeLoadEvent directly.
-    bool guardedDispatchBeforeLoadEvent(const String& sourceURL);
+    String align() const;
+    void setAlign(const String&);
+    
+    String height() const;
+    void setHeight(const String&);
+    
+    String name() const;
+    void setName(const String&);
+    
+    String width() const;
+    void setWidth(const String&);
 
-private:
-    bool dispatchBeforeLoadEvent(const String& sourceURL); // Not implemented, generates a compile error if subclasses call this by mistake.
-
-    virtual void defaultEventHandler(Event*);
-
-    virtual RenderWidget* renderWidgetForJSBindings() = 0;
-
-private:
-    mutable ScriptInstance m_instance;
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    NPObject* m_NPObject;
+    virtual bool willRespondToMouseMoveEvents() { return false; }
+    virtual bool willRespondToMouseDragEvents() { return false; }
+    virtual bool willRespondToMouseClickEvents() { return true; }
+    
+#if PLATFORM(MAC)
+    virtual KJS::Bindings::Instance* getInstance() const = 0;
 #endif
-    bool m_isCapturingMouseEvents;
+
+    void setFrameName(const AtomicString& frameName) { m_frameName = frameName; }
+private:
+#if PLATFORM(MAC)
+#endif
+
+protected:
+    String oldNameAttr;
+#if PLATFORM(MAC)
+    mutable RefPtr<KJS::Bindings::Instance> m_instance;
+#endif
+private:
+    AtomicString m_frameName;
 };
 
-} // namespace WebCore
+}
 
-#endif // HTMLPlugInElement_h
+#endif

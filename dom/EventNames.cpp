@@ -1,4 +1,6 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2005 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
@@ -13,28 +15,37 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
 #include "config.h"
+
+#if AVOID_STATIC_CONSTRUCTORS
+#define DOM_EVENT_NAMES_HIDE_GLOBALS 1
+#endif
+
 #include "EventNames.h"
+#include "StaticConstructors.h"
 
-namespace WebCore {
+namespace WebCore { namespace EventNames {
 
-#define INITIALIZE_EVENT_NAME(name) \
-    , name##Event(#name)
+#define DEFINE_EVENT_GLOBAL(name) \
+    DEFINE_GLOBAL(AtomicString, name##Event, #name)
+DOM_EVENT_NAMES_FOR_EACH(DEFINE_EVENT_GLOBAL)
 
-#define INITIALIZE_EVENT_INTERFACE(name) \
-    , interfaceFor##name(#name)
-
-EventNames::EventNames()
-    : dummy(0)
-DOM_EVENT_NAMES_FOR_EACH(INITIALIZE_EVENT_NAME)
-DOM_EVENT_INTERFACES_FOR_EACH(INITIALIZE_EVENT_INTERFACE)
-DOM_EVENT_TARGET_INTERFACES_FOR_EACH(INITIALIZE_EVENT_INTERFACE)
+void init()
 {
+    static bool initialized;
+    if (!initialized) {
+        // Use placement new to initialize the globals.
+        
+        AtomicString::init();
+        #define INITIALIZE_GLOBAL(name) new ((void*)&name##Event) AtomicString(#name);
+        DOM_EVENT_NAMES_FOR_EACH(INITIALIZE_GLOBAL)
+        initialized = true;
+    }
 }
 
-}
+} }

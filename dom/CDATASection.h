@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,32 +17,36 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef CDATASection_h
-#define CDATASection_h
+#ifndef DOM_CDATASectionImpl_h
+#define DOM_CDATASectionImpl_h
 
 #include "Text.h"
 
 namespace WebCore {
 
-class CDATASection : public Text {
+class CDATASection : public Text
+{
+// ### should these have id==ID_TEXT
 public:
-    static PassRefPtr<CDATASection> create(Document*, const String&);
-
-private:
-    CDATASection(Document*, const String&);
+    CDATASection(Document *impl, const String &_text);
+    CDATASection(Document *impl);
+    virtual ~CDATASection();
 
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
     virtual PassRefPtr<Node> cloneNode(bool deep);
-    virtual bool childTypeAllowed(NodeType) const;
-    virtual PassRefPtr<Text> virtualCreate(const String&);
+    virtual bool childTypeAllowed(NodeType);
+    virtual String toString() const;
+
+protected:
+    virtual Text* createNew(StringImpl*);
 };
 
 } // namespace WebCore
 
-#endif // CDATASection_h
+#endif // DOM_CDATASectionImpl_h

@@ -1,5 +1,9 @@
 /*
- * Copyright (C) 2003, 2009 Apple Inc. All rights reserved.
+ * This file is part of the DOM implementation for KDE.
+ *
+ * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
+ *           (C) 1999 Antti Koivisto (koivisto@kde.org)
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,28 +17,28 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef EditingText_h
-#define EditingText_h
+#ifndef DOM_EditingTextImpl_h
+#define DOM_EditingTextImpl_h
 
 #include "Text.h"
 
 namespace WebCore {
 
-class EditingText : public Text {
+class EditingText : public Text
+{
 public:
-    static PassRefPtr<EditingText> create(Document*, const String&);
+    EditingText(Document *impl, const String &text);
+    EditingText(Document *impl);
+    virtual ~EditingText();
 
-private:
-    virtual bool rendererIsNeeded(const NodeRenderingContext&);
-
-    EditingText(Document*, const String&);
+    virtual bool rendererIsNeeded(RenderStyle *);
 };
 
 } // namespace WebCore
 
-#endif // EditingText_h
+#endif // DOM_EditingTextImpl_h

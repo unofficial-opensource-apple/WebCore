@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,77 +18,58 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef DOMImplementation_h
-#define DOMImplementation_h
+#ifndef DOM_DOMImplementationImpl_h
+#define DOM_DOMImplementationImpl_h
 
-#include "Document.h"
-#include "MediaPlayer.h"
+#include "Shared.h"
 #include <wtf/Forward.h>
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
 class CSSStyleSheet;
 class Document;
 class DocumentType;
-class Frame;
+class FrameView;
 class HTMLDocument;
-class KURL;
-class RegularExpression;
+class String;
+class TextDocument;
 
 typedef int ExceptionCode;
 
-class DOMImplementation {
+class DOMImplementation : public Shared<DOMImplementation> {
 public:
-    static PassOwnPtr<DOMImplementation> create(Document* document) { return adoptPtr(new DOMImplementation(document)); }
-    
-    void ref() { m_document->ref(); }
-    void deref() { m_document->deref(); }
-    Document* document() { return m_document; }
+    virtual ~DOMImplementation(); 
 
     // DOM methods & attributes for DOMImplementation
-    static bool hasFeature(const String& feature, const String& version);
-    PassRefPtr<DocumentType> createDocumentType(const String& qualifiedName, const String& publicId, const String& systemId, ExceptionCode&);
+    bool hasFeature(const String& feature, const String& version) const;
+    PassRefPtr<DocumentType> createDocumentType(const String& qualifiedName, const String& publicId, const String &systemId, ExceptionCode&);
     PassRefPtr<Document> createDocument(const String& namespaceURI, const String& qualifiedName, DocumentType*, ExceptionCode&);
 
-    DOMImplementation* getInterface(const String& feature);
+    DOMImplementation* getInterface(const String& feature) const;
 
     // From the DOMImplementationCSS interface
-    static PassRefPtr<CSSStyleSheet> createCSSStyleSheet(const String& title, const String& media, ExceptionCode&);
+    PassRefPtr<CSSStyleSheet> createCSSStyleSheet(const String& title, const String& media, ExceptionCode&);
 
     // From the HTMLDOMImplementation interface
     PassRefPtr<HTMLDocument> createHTMLDocument(const String& title);
 
     // Other methods (not part of DOM)
-    static PassRefPtr<Document> createDocument(const String& MIMEType, Frame*, const KURL&, bool inViewSourceMode);
+    PassRefPtr<Document> createDocument(FrameView* = 0);
+    PassRefPtr<HTMLDocument> createHTMLDocument(FrameView* = 0);
 
-    static bool isXMLMIMEType(const String& MIMEType);
-    static bool isTextMIMEType(const String& MIMEType);
+    // Returns the static instance of this class - only one instance of this class should
+    // ever be present, and is used as a factory method for creating Document objects
+    static DOMImplementation* instance();
 
-private:
-    DOMImplementation(Document*);
-
-    Document* m_document;
+    static bool isXMLMIMEType(const String& mimeType);
+    static bool isTextMIMEType(const String& mimeType);
 };
 
-class XMLMIMETypeRegExp {
-public:
-    XMLMIMETypeRegExp();
-    ~XMLMIMETypeRegExp();
-    bool isXMLMIMEType(const String& mimeType);
-
-    WTF_MAKE_NONCOPYABLE(XMLMIMETypeRegExp);
-private:
-    OwnPtr<RegularExpression> m_regex;
-};
-
-
-} // namespace WebCore
+} //namespace
 
 #endif

@@ -2,7 +2,6 @@
  * CSS Media Query
  *
  * Copyright (C) 2006 Kimmo Kinnunen <kimmo.t.kinnunen@nokia.com>.
- * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,50 +22,48 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
 #include "config.h"
 #include "MediaQueryExp.h"
 
-#include "CSSParser.h"
+#include "cssparser.h"
 #include "CSSPrimitiveValue.h"
 #include "CSSValueList.h"
-#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
-inline MediaQueryExp::MediaQueryExp(const AtomicString& mediaFeature, CSSParserValueList* valueList)
+MediaQueryExp::MediaQueryExp(const AtomicString& mediaFeature, ValueList* valueList)
     : m_mediaFeature(mediaFeature)
     , m_value(0)
-    , m_isValid(true)
 {
     if (valueList) {
         if (valueList->size() == 1) {
-            CSSParserValue* value = valueList->current();
+            Value* value = valueList->current();
 
             if (value->id != 0)
-                m_value = CSSPrimitiveValue::createIdentifier(value->id);
+                m_value = new CSSPrimitiveValue(value->id);
             else if (value->unit == CSSPrimitiveValue::CSS_STRING)
-                m_value = CSSPrimitiveValue::create(value->string, (CSSPrimitiveValue::UnitTypes) value->unit);
+                m_value = new CSSPrimitiveValue(domString(value->string), (CSSPrimitiveValue::UnitTypes) value->unit);
             else if (value->unit >= CSSPrimitiveValue::CSS_NUMBER &&
                       value->unit <= CSSPrimitiveValue::CSS_KHZ)
-                m_value = CSSPrimitiveValue::create(value->fValue, (CSSPrimitiveValue::UnitTypes) value->unit);
+                m_value = new CSSPrimitiveValue(value->fValue, (CSSPrimitiveValue::UnitTypes) value->unit);
 
             valueList->next();
         } else if (valueList->size() > 1) {
             // create list of values
             // currently accepts only <integer>/<integer>
 
-            RefPtr<CSSValueList> list = CSSValueList::createCommaSeparated();
-            CSSParserValue* value = valueList->current();
+            CSSValueList* list = new CSSValueList();
+            Value* value = 0;
             bool isValid = true;
 
-            while (value && isValid) {
-                if (value->unit == CSSParserValue::Operator && value->iValue == '/')
-                    list->append(CSSPrimitiveValue::create("/", CSSPrimitiveValue::CSS_STRING));
+            while ((value = valueList->current()) && isValid) {
+                if (value->unit == Value::Operator && value->iValue == '/')
+                    list->append(new CSSPrimitiveValue("/", CSSPrimitiveValue::CSS_STRING));
                 else if (value->unit == CSSPrimitiveValue::CSS_NUMBER)
-                    list->append(CSSPrimitiveValue::create(value->fValue, CSSPrimitiveValue::CSS_NUMBER));
+                    list->append(new CSSPrimitiveValue(value->fValue, CSSPrimitiveValue::CSS_NUMBER));
                 else
                     isValid = false;
 
@@ -74,38 +71,16 @@ inline MediaQueryExp::MediaQueryExp(const AtomicString& mediaFeature, CSSParserV
             }
 
             if (isValid)
-                m_value = list.release();
+                m_value = list;
+            else
+                delete list;
         }
-        m_isValid = m_value;
     }
-}
-
-
-PassOwnPtr<MediaQueryExp> MediaQueryExp::create(const AtomicString& mediaFeature, CSSParserValueList* values)
-{
-    return adoptPtr(new MediaQueryExp(mediaFeature, values));
 }
 
 MediaQueryExp::~MediaQueryExp()
 {
-}
-
-String MediaQueryExp::serialize() const
-{
-    if (!m_serializationCache.isNull())
-        return m_serializationCache;
-
-    StringBuilder result;
-    result.append("(");
-    result.append(m_mediaFeature.lower());
-    if (m_value) {
-        result.append(": ");
-        result.append(m_value->cssText());
-    }
-    result.append(")");
-
-    const_cast<MediaQueryExp*>(this)->m_serializationCache = result.toString();
-    return m_serializationCache;
+    delete m_value;
 }
 
 } // namespace

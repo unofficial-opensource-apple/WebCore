@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef CSSUnknownRule_h
-#define CSSUnknownRule_h
+#ifndef CSSUnknownRule_H
+#define CSSUnknownRule_H
 
 #include "CSSRule.h"
 
@@ -28,9 +30,11 @@ namespace WebCore {
 
 class CSSUnknownRule : public CSSRule {
 public:
-    CSSUnknownRule() : CSSRule(0, CSSRule::UNKNOWN_RULE) { }
+    CSSUnknownRule(StyleBase* parent) : CSSRule(parent) { }
+
+    virtual bool isUnknownRule() { return true; }
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // CSSUnknownRule_h
+#endif

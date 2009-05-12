@@ -1,6 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006 Apple Inc.
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,39 +13,30 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
- */ 
-
-#if defined(HAVE_CONFIG_H) && HAVE_CONFIG_H
-#ifdef BUILDING_WITH_CMAKE
-#include "cmakeconfig.h"
-#else
-#include "autotoolsconfig.h"
-#endif
-#endif
+ */
 
 #include <wtf/Platform.h>
 
-#if OS(WINDOWS) && !OS(WINCE) && !PLATFORM(QT) && !PLATFORM(CHROMIUM) && !PLATFORM(GTK) && !PLATFORM(WX)
-#include <WebCore/WebCoreHeaderDetection.h>
-#endif
+#define KHTML_NO_XBL 1
 
-#include <wtf/ExportMacros.h>
-#include "PlatformExportMacros.h"
-
-#if PLATFORM(QT) && USE(V8)
-#include <JavaScriptCore/runtime/JSExportMacros.h>
-#else
-#include <runtime/JSExportMacros.h>
-#endif
-
-#ifdef __APPLE__
+#if __APPLE__
 #define HAVE_FUNC_USLEEP 1
-#endif /* __APPLE__ */
 
-#if OS(WINDOWS)
+#ifndef CGFLOAT_DEFINED
+#if __LP64__
+typedef double CGFloat;
+#else
+typedef float CGFloat;
+#endif
+#define CGFLOAT_DEFINED 1
+#endif
+
+#endif
+
+#if WIN32
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0500
@@ -56,23 +46,17 @@
 #define WINVER 0x0500
 #endif
 
-// If we don't define these, they get defined in windef.h.
-// We want to use std::min and std::max.
-#ifndef max
-#define max max
-#endif
-#ifndef min
-#define min min
-#endif
+// Hack to match configuration of JavaScriptCore.
+// Maybe there's a better way to do this.
+#define USE_SYSTEM_MALLOC 1
 
-// CURL needs winsock, so don't prevent inclusion of it
-#if !USE(CURL)
-#ifndef _WINSOCKAPI_
-#define _WINSOCKAPI_ // Prevent inclusion of winsock.h in windows.h
-#endif
-#endif
+// FIXME: Should probably just dump this eventually, but it's needed for now.
+// We get this from some system place on OS X; probably better not to use it
+// in WebCore code.
 
-#endif /* OS(WINDOWS) */
+#include <assert.h>
+
+#endif
 
 #ifdef __cplusplus
 
@@ -82,84 +66,19 @@
 #undef delete
 #include <wtf/FastMalloc.h>
 
-#include <ciso646>
-
 #endif
 
-// On MSW, wx headers need to be included before windows.h is.
-// The only way we can always ensure this is if we include wx here.
-#if PLATFORM(WX)
-#include <wx/defs.h>
-#endif
-
-// this breaks compilation of <QFontDatabase>, at least, so turn it off for now
-// Also generates errors on wx on Windows, presumably because these functions
-// are used from wx headers. On GTK+ for Mac many GTK+ files include <libintl.h>
-// or <glib/gi18n-lib.h>, which in turn include <xlocale/_ctype.h> which uses
-// isacii(). 
-#if !PLATFORM(QT) && !PLATFORM(WX) && !PLATFORM(CHROMIUM) && !(OS(DARWIN) && PLATFORM(GTK)) && !OS(QNX) && !defined(_LIBCPP_VERSION)
-#include <wtf/DisallowCType.h>
-#endif
-
-#if COMPILER(MSVC)
-#define SKIP_STATIC_CONSTRUCTORS_ON_MSVC 1
-#else
-#define SKIP_STATIC_CONSTRUCTORS_ON_GCC 1
-#endif
-
-#if PLATFORM(WIN)
-#if PLATFORM(WIN_CAIRO)
-#undef WTF_USE_CG
-#define WTF_USE_CAIRO 1
-#define WTF_USE_CURL 1
-#ifndef _WINSOCKAPI_
-#define _WINSOCKAPI_ // Prevent inclusion of winsock.h in windows.h
-#endif
-#elif !OS(WINCE)
-#define WTF_USE_CG 1
-#undef WTF_USE_CAIRO
-#undef WTF_USE_CURL
-#endif
+#if !defined(WIN32) // can't get this to compile on Visual C++ yet
+#define AVOID_STATIC_CONSTRUCTORS 1
 #endif
 
 
-#if PLATFORM(CHROMIUM)
+#define roundf(f) ((float)((int)((f) + (f > 0 ? 0.5f : -0.5 ))))
+#define lroundf(f) ((long int)((int)((f) + (f > 0 ? 0.5f : -0.5 ))))
 
-// Chromium uses this file instead of JavaScriptCore/config.h to compile
-// JavaScriptCore/wtf (chromium doesn't compile the rest of JSC). Therefore,
-// this define is required.
-#define WTF_CHANGES 1
+#define floorf(f) ((float)((int)(f >= 0 ? f : f + 1.0)))
+#define lfloorf(f) ((long int)((int)(f >= 0 ? f : f + 1.0)))
 
-#define WTF_USE_GOOGLEURL 1
-
-#endif /* PLATFORM(CHROMIUM) */
-
-#if USE(CG)
-#ifndef CGFLOAT_DEFINED
-#ifdef __LP64__
-typedef double CGFloat;
-#else
-typedef float CGFloat;
-#endif
-#define CGFLOAT_DEFINED 1
-#endif
-#endif /* USE(CG) */
-
-#if PLATFORM(WIN) && USE(CG)
-#define WTF_USE_SAFARI_THEME 1
-#endif
-
-// CoreAnimation is available to IOS, Mac and Windows if using CG
-#define WTF_USE_CA 1
-
-#if PLATFORM(QT) && USE(V8) && defined(Q_WS_X11)
-/* protect ourselves from evil X11 defines */
-#include <bridge/npruntime_internal.h>
-#endif
-
-// FIXME: Move this to JavaScriptCore/wtf/Platform.h, which is where we define WTF_USE_AVFOUNDATION on the Mac.
-// https://bugs.webkit.org/show_bug.cgi?id=67334
-#if PLATFORM(WIN) && HAVE(AVCF)
-#define WTF_USE_AVFOUNDATION 1
-#endif
+#define ceilf(f)  ((float)((int)(f > 0 ? (f) + 1.0 - __FLT_EPSILON__ : f)))
+#define lceilf(f)  ((long int)((int)(f > 0 ? (f) + 1.0 - __FLT_EPSILON__ : f)))
 

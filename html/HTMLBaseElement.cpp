@@ -1,8 +1,10 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,63 +18,80 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "HTMLBaseElement.h"
 
-#include "Attribute.h"
 #include "Document.h"
+#include "Frame.h"
 #include "HTMLNames.h"
+#include "csshelper.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-inline HTMLBaseElement::HTMLBaseElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+HTMLBaseElement::HTMLBaseElement(Document *doc)
+    : HTMLElement(baseTag, doc)
 {
-    ASSERT(hasTagName(baseTag));
 }
 
-PassRefPtr<HTMLBaseElement> HTMLBaseElement::create(const QualifiedName& tagName, Document* document)
+HTMLBaseElement::~HTMLBaseElement()
 {
-    return adoptRef(new HTMLBaseElement(tagName, document));
 }
 
-void HTMLBaseElement::parseAttribute(Attribute* attribute)
+void HTMLBaseElement::parseMappedAttribute(MappedAttribute *attr)
 {
-    if (attribute->name() == hrefAttr || attribute->name() == targetAttr)
-        document()->processBaseElement();
-    else
-        HTMLElement::parseAttribute(attribute);
+    if (attr->name() == hrefAttr) {
+        m_href = parseURL(attr->value());
+        process();
+    } else if (attr->name() == targetAttr) {
+        m_target = attr->value();
+        process();
+    } else
+        HTMLElement::parseMappedAttribute(attr);
 }
 
-Node::InsertionNotificationRequest HTMLBaseElement::insertedInto(Node* insertionPoint)
+void HTMLBaseElement::insertedIntoDocument()
 {
-    HTMLElement::insertedInto(insertionPoint);
-    if (insertionPoint->inDocument())
-        document()->processBaseElement();
-    return InsertionDone;
+    HTMLElement::insertedIntoDocument();
+    process();
 }
 
-void HTMLBaseElement::removedFrom(Node* insertionPoint)
+void HTMLBaseElement::removedFromDocument()
 {
-    HTMLElement::removedFrom(insertionPoint);
-    if (insertionPoint->inDocument())
-        document()->processBaseElement();
+    HTMLElement::removedFromDocument();
+
+    // Since the document doesn't have a base element...
+    // (This will break in the case of multiple base elements, but that's not valid anyway (?))
+    document()->setBaseURL(DeprecatedString::null);
+    document()->setBaseTarget(DeprecatedString::null);
 }
 
-bool HTMLBaseElement::isURLAttribute(Attribute* attribute) const
+void HTMLBaseElement::process()
 {
-    return attribute->name() == hrefAttr || HTMLElement::isURLAttribute(attribute);
+    if (!inDocument())
+        return;
+
+    if (!m_href.isEmpty() && document()->frame())
+        document()->setBaseURL(KURL(document()->frame()->url(), m_href.deprecatedString()).url());
+
+    if (!m_target.isEmpty())
+        document()->setBaseTarget(m_target.deprecatedString());
+
+    // ### should changing a document's base URL dynamically automatically update all images, stylesheets etc?
 }
 
-String HTMLBaseElement::target() const
+void HTMLBaseElement::setHref(const String &value)
 {
-    return fastGetAttribute(targetAttr);
+    setAttribute(hrefAttr, value);
+}
+
+void HTMLBaseElement::setTarget(const String &value)
+{
+    setAttribute(targetAttr, value);
 }
 
 }

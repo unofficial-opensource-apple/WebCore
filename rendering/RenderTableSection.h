@@ -1,10 +1,12 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,237 +20,125 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef RenderTableSection_h
-#define RenderTableSection_h
+#ifndef RenderTableSection_H
+#define RenderTableSection_H
 
 #include "RenderTable.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
-enum CollapsedBorderSide {
-    CBSBefore,
-    CBSAfter,
-    CBSStart,
-    CBSEnd
-};
-
-// Helper class for paintObject.
-class CellSpan {
-public:
-    CellSpan(unsigned start, unsigned end)
-        : m_start(start)
-        , m_end(end)
-    {
-    }
-
-    unsigned start() const { return m_start; }
-    unsigned end() const { return m_end; }
-
-private:
-    unsigned m_start;
-    unsigned m_end;
-};
-
 class RenderTableCell;
-class RenderTableRow;
 
-class RenderTableSection : public RenderBox {
+class RenderTableSection : public RenderContainer
+{
 public:
     RenderTableSection(Node*);
-    virtual ~RenderTableSection();
+    ~RenderTableSection();
+    virtual void destroy();
 
-    const RenderObjectChildList* children() const { return &m_children; }
-    RenderObjectChildList* children() { return &m_children; }
+    virtual void setStyle(RenderStyle*);
 
-    virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0);
+    virtual const char *renderName() const { return "RenderTableSection"; }
 
-    virtual LayoutUnit firstLineBoxBaseline() const;
-
-    void addCell(RenderTableCell*, RenderTableRow* row);
-
-    void setCellLogicalWidths();
-    int calcRowLogicalHeight();
-    void layoutRows();
-
-    RenderTable* table() const { return toRenderTable(parent()); }
-
-    struct CellStruct {
-        Vector<RenderTableCell*, 1> cells; 
-        bool inColSpan; // true for columns after the first in a colspan
-
-        CellStruct()
-            : inColSpan(false)
-        {
-        }
-
-        RenderTableCell* primaryCell()
-        {
-            return hasCells() ? cells[cells.size() - 1] : 0;
-        }
-
-        const RenderTableCell* primaryCell() const
-        {
-            return hasCells() ? cells[cells.size() - 1] : 0;
-        }
-
-        bool hasCells() const { return cells.size() > 0; }
-    };
-
-    typedef Vector<CellStruct> Row;
-
-    struct RowStruct {
-        RowStruct()
-            : rowRenderer(0)
-            , baseline()
-        {
-        }
-
-        Row row;
-        RenderTableRow* rowRenderer;
-        LayoutUnit baseline;
-        Length logicalHeight;
-    };
-
-    CellStruct& cellAt(unsigned row,  unsigned col) { return m_grid[row].row[col]; }
-    const CellStruct& cellAt(unsigned row, unsigned col) const { return m_grid[row].row[col]; }
-    RenderTableCell* primaryCellAt(unsigned row, unsigned col)
-    {
-        CellStruct& c = m_grid[row].row[col];
-        return c.primaryCell();
-    }
-
-    void appendColumn(unsigned pos);
-    void splitColumn(unsigned pos, unsigned first);
-
-    int calcOuterBorderBefore() const;
-    int calcOuterBorderAfter() const;
-    int calcOuterBorderStart() const;
-    int calcOuterBorderEnd() const;
-    void recalcOuterBorder();
-
-    int outerBorderBefore() const { return m_outerBorderBefore; }
-    int outerBorderAfter() const { return m_outerBorderAfter; }
-    int outerBorderStart() const { return m_outerBorderStart; }
-    int outerBorderEnd() const { return m_outerBorderEnd; }
-
-    unsigned numRows() const { return m_grid.size(); }
-    unsigned numColumns() const;
-    void recalcCells();
-    void recalcCellsIfNeeded()
-    {
-        if (m_needsCellRecalc)
-            recalcCells();
-    }
-
-    bool needsCellRecalc() const { return m_needsCellRecalc; }
-    void setNeedsCellRecalc();
-
-    LayoutUnit getBaseline(unsigned row) { return m_grid[row].baseline; }
-
-    void rowLogicalHeightChanged(unsigned rowIndex);
-
-    void removeCachedCollapsedBorders(const RenderTableCell*);
-    void setCachedCollapsedBorder(const RenderTableCell*, CollapsedBorderSide, CollapsedBorderValue);
-    CollapsedBorderValue& cachedCollapsedBorder(const RenderTableCell*, CollapsedBorderSide);
-
-    // distributeExtraLogicalHeightToRows methods return the *consumed* extra logical height.
-    // FIXME: We may want to introduce a structure holding the in-flux layout information.
-    int distributeExtraLogicalHeightToRows(int extraLogicalHeight);
-
-    static RenderTableSection* createAnonymousWithParentRenderer(const RenderObject*);
-    virtual RenderBox* createAnonymousBoxWithSameTypeAs(const RenderObject* parent) const OVERRIDE
-    {
-        return createAnonymousWithParentRenderer(parent);
-    }
-
-protected:
-    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
-
-private:
-    virtual RenderObjectChildList* virtualChildren() { return children(); }
-    virtual const RenderObjectChildList* virtualChildren() const { return children(); }
-
-    virtual const char* renderName() const { return isAnonymous() ? "RenderTableSection (anonymous)" : "RenderTableSection"; }
-
+    // overrides
+    virtual void addChild(RenderObject *child, RenderObject *beforeChild = 0);
     virtual bool isTableSection() const { return true; }
 
-    virtual void willBeDestroyed();
+    virtual short lineHeight(bool) const { return 0; }
+    virtual void position(int, int, int, int, int, bool, bool, int) {}
 
-    virtual void layout();
+#ifndef NDEBUG
+    virtual void dump(TextStream *stream, DeprecatedString ind = "") const;
+#endif
 
-    virtual void removeChild(RenderObject* oldChild);
+    void addCell(RenderTableCell *cell, RenderObject* row);
 
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-    virtual void paintCell(RenderTableCell*, PaintInfo&, const LayoutPoint&);
-    virtual void paintObject(PaintInfo&, const LayoutPoint&);
+    void setCellWidths();
+    void calcRowHeight();
+    int layoutRows(int height);
 
-    virtual void imageChanged(WrappedImagePtr, const IntRect* = 0);
+    RenderTable *table() const { return static_cast<RenderTable *>(parent()); }
 
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
+    struct CellStruct {
+        RenderTableCell *cell;
+        bool inColSpan; // true for columns after the first in a colspan
+    };
+    typedef Vector<CellStruct> Row;
+    struct RowStruct {
+        Row* row;
+        RenderObject* rowRenderer;
+        int baseLine;
+        Length height;
+    };
 
-    void ensureRows(unsigned);
+    CellStruct& cellAt(int row,  int col) {
+        return (*grid[row].row)[col];
+    }
+    const CellStruct& cellAt(int row, int col) const {
+        return (*grid[row].row)[col];
+    }
 
-    void distributeExtraLogicalHeightToPercentRows(int& extraLogicalHeight, int totalPercent);
-    void distributeExtraLogicalHeightToAutoRows(int& extraLogicalHeight, unsigned autoRowsCount);
-    void distributeRemainingExtraLogicalHeight(int& extraLogicalHeight);
+    virtual int overflowWidth(bool includeInterior = true) const { return (!includeInterior && hasOverflowClip()) ? m_width : m_overflowWidth; }
+    virtual int overflowLeft(bool includeInterior = true) const { return (!includeInterior && hasOverflowClip()) ? 0 : m_overflowLeft; }
 
-    bool hasOverflowingCell() const { return m_overflowingCells.size() || m_forceSlowPaintPathWithOverflowingCell; }
+    virtual int lowestPosition(bool includeOverflowInterior, bool includeSelf) const;
+    virtual int rightmostPosition(bool includeOverflowInterior, bool includeSelf) const;
+    virtual int leftmostPosition(bool includeOverflowInterior, bool includeSelf) const;
 
-    CellSpan fullTableRowSpan() const { return CellSpan(0, m_grid.size()); }
-    CellSpan fullTableColumnSpan() const { return CellSpan(0, table()->columns().size()); }
+    int calcOuterBorderTop() const;
+    int calcOuterBorderBottom() const;
+    int calcOuterBorderLeft(bool rtl) const;
+    int calcOuterBorderRight(bool rtl) const;
+    void recalcOuterBorder();
 
-    CellSpan dirtiedRows(const LayoutRect& repaintRect) const;
-    CellSpan dirtiedColumns(const LayoutRect& repaintRect) const;
+    int outerBorderTop() const { return m_outerBorderTop; }
+    int outerBorderBottom() const { return m_outerBorderBottom; }
+    int outerBorderLeft() const { return m_outerBorderLeft; }
+    int outerBorderRight() const { return m_outerBorderRight; }
 
-    RenderObjectChildList m_children;
+    virtual void paint(PaintInfo& i, int tx, int ty);
 
-    Vector<RowStruct> m_grid;
-    Vector<int> m_rowPos;
+    int numRows() const { return gridRows; }
+    int numColumns() const;
+    int getBaseline(int row) {return grid[row].baseLine;}
+
+    void setNeedCellRecalc() {
+        needCellRecalc = true;
+        table()->setNeedSectionRecalc();
+    }
+
+    virtual RenderObject* removeChildNode(RenderObject* child);
+
+    virtual bool nodeAtPoint(NodeInfo& info, int x, int y, int tx, int ty, HitTestAction action);
+
+    // this gets a cell grid data structure. changing the number of
+    // columns is done by the table
+    Vector<RowStruct> grid;
+    int gridRows;
+    Vector<int> rowPos;
 
     // the current insertion position
-    unsigned m_cCol;
-    unsigned m_cRow;
+    int cCol;
+    int cRow;
+    bool needCellRecalc;
 
-    int m_outerBorderStart;
-    int m_outerBorderEnd;
-    int m_outerBorderBefore;
-    int m_outerBorderAfter;
-
-    bool m_needsCellRecalc;
-
-    // This HashSet holds the overflowing cells for faster painting.
-    // If we have more than gMaxAllowedOverflowingCellRatio * total cells, it will be empty
-    // and m_forceSlowPaintPathWithOverflowingCell will be set to save memory.
-    HashSet<RenderTableCell*> m_overflowingCells;
-    bool m_forceSlowPaintPathWithOverflowingCell;
-
-    bool m_hasMultipleCellLevels;
-
-    // This map holds the collapsed border values for cells with collapsed borders.
-    // It is held at RenderTableSection level to spare memory consumption by table cells.
-    HashMap<pair<const RenderTableCell*, int>, CollapsedBorderValue > m_cellsCollapsedBorders;
+    void recalcCells();
+protected:
+    bool ensureRows(int numRows);
+    void clearGrid();
+    int m_outerBorderLeft;
+    int m_outerBorderRight;
+    int m_outerBorderTop;
+    int m_outerBorderBottom;
+    int m_overflowLeft;
+    int m_overflowWidth;
+    bool m_hasOverflowingCell;
 };
 
-inline RenderTableSection* toRenderTableSection(RenderObject* object)
-{
-    ASSERT(!object || object->isTableSection());
-    return static_cast<RenderTableSection*>(object);
 }
-
-inline const RenderTableSection* toRenderTableSection(const RenderObject* object)
-{
-    ASSERT(!object || object->isTableSection());
-    return static_cast<const RenderTableSection*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderTableSection(const RenderTableSection*);
-
-} // namespace WebCore
-
-#endif // RenderTableSection_h
+#endif

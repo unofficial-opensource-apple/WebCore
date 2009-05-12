@@ -1,7 +1,5 @@
 /*
- * Copyright (C) 2006, 2010 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
- * Copyright (C) 2011 Motorola Mobility, Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,56 +13,33 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface HTMLTextAreaElement : HTMLElement {
-        attribute [Reflect] boolean autofocus;
-        attribute long cols;
-        attribute [Reflect] DOMString dirName;
-        attribute [Reflect] boolean disabled;
-        readonly attribute HTMLFormElement form;
-        attribute long maxLength setter raises(DOMException);
-        attribute [TreatNullAs=NullString] DOMString name;
-        attribute [Reflect] DOMString placeholder;
-        attribute [Reflect] boolean readOnly;
-        attribute [Reflect] boolean required;
-        attribute long rows;
-        attribute [Reflect] DOMString wrap;
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLTextAreaElement : HTMLElement {
+                 attribute  DOMString            defaultValue;
+        readonly attribute  HTMLFormElement      form;
+                 attribute  DOMString            accessKey;
+                 attribute  long                 cols;
+                 attribute  boolean              disabled;
+                 attribute  DOMString            name;
+                 attribute  boolean              readOnly;
+                 attribute  long                 rows;
+                 attribute  long                 tabIndex;
+        readonly attribute  DOMString            type;
+                 attribute  DOMString            value;
+        
+        [Disabled] void     blur();
+        void     focus();
+        void     select();
 
-        readonly attribute DOMString type;
-        attribute [TreatNullAs=NullString] DOMString defaultValue;
-        attribute [TreatNullAs=NullString] DOMString value;
-        readonly attribute unsigned long textLength;
-
-        readonly attribute boolean willValidate;
-        readonly attribute ValidityState validity;
-        readonly attribute DOMString validationMessage;
-        boolean checkValidity();
-        void setCustomValidity(in [TreatNullAs=NullString, TreatUndefinedAs=NullString] DOMString error);
-
-        readonly attribute NodeList labels;
-
-        void select();
-        attribute long selectionStart;
-        attribute long selectionEnd;
-        attribute DOMString selectionDirection;
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
+       // WinIE & FireFox extension:
+                 attribute long selectionStart;
+                 attribute long selectionEnd;
         void setSelectionRange(in long start, in long end);
-#else
-        void setSelectionRange(in [Optional=DefaultIsUndefined] long start,
-                               in [Optional=DefaultIsUndefined] long end,
-                               in [Optional] DOMString direction);
-#endif
-
-        attribute boolean autocorrect;
-        attribute [TreatNullAs=NullString] DOMString       autocapitalize;
-
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        attribute [Reflect] DOMString accessKey;
-#endif
     };
+
 }

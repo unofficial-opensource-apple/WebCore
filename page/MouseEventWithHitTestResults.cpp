@@ -13,29 +13,41 @@
 
    You should have received a copy of the GNU Library General Public License
    along with this library; see the file COPYING.LIB.  If not, write to
-   the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301, USA.
+   the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+   Boston, MA 02111-1307, USA.
 */
 
 #include "config.h"
 #include "MouseEventWithHitTestResults.h"
 
-#include "Element.h"
-#include "Node.h"
-
 // Would TargetedMouseEvent be a better name?
 
 namespace WebCore {
 
-MouseEventWithHitTestResults::MouseEventWithHitTestResults(const PlatformMouseEvent& event, const HitTestResult& hitTestResult)
-    : m_event(event)
-    , m_hitTestResult(hitTestResult)
+static inline Element* targetElement(Node* node)
 {
+    if (!node)
+        return 0;
+    Node* parent = node->parent();
+    if (!parent || !parent->isElementNode())
+        return 0;
+    return static_cast<Element*>(parent);
 }
 
-bool MouseEventWithHitTestResults::isOverLink() const
+MouseEventWithHitTestResults::MouseEventWithHitTestResults(const PlatformMouseEvent& event,
+        PassRefPtr<Node> node, bool isOverLink)
+    : m_event(event)
+    , m_targetNode(node)
+    , m_targetElement(targetElement(m_targetNode.get()))
+    , m_isOverLink(isOverLink)
 {
-    return m_hitTestResult.URLElement() && m_hitTestResult.URLElement()->isLink();
+}
+        
+Node* MouseEventWithHitTestResults::targetNode() const
+{
+    if (m_targetElement && !m_targetNode->inDocument() && m_targetElement->inDocument())
+        return m_targetElement.get();
+    return m_targetNode.get();
 }
 
 }

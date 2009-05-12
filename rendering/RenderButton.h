@@ -1,4 +1,6 @@
 /*
+ * This file is part of the html renderer for KDE.
+ *
  * Copyright (C) 2005 Apple Computer
  *
  * This library is free software; you can redistribute it and/or
@@ -13,86 +15,49 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderButton_h
-#define RenderButton_h
+#ifndef RenderButton_H
+#define RenderButton_H
 
-#include "RenderDeprecatedFlexibleBox.h"
-#include "Timer.h"
-#include <wtf/OwnPtr.h>
+#include "RenderFlexibleBox.h"
 
 namespace WebCore {
-
-class RenderTextFragment;
 
 // RenderButtons are just like normal flexboxes except that they will generate an anonymous block child.
 // For inputs, they will also generate an anonymous RenderText and keep its style and content up
 // to date as the button changes.
-class RenderButton : public RenderDeprecatedFlexibleBox {
+class RenderButton : public RenderFlexibleBox
+{
 public:
-    explicit RenderButton(Node*);
-    virtual ~RenderButton();
-
-    virtual const char* renderName() const { return "RenderButton"; }
-    virtual bool isRenderButton() const { return true; }
-
-    virtual bool canBeSelectionLeaf() const OVERRIDE { return node() && node()->rendererIsEditable(); }
+    RenderButton(Node*);
 
     virtual void addChild(RenderObject* newChild, RenderObject *beforeChild = 0);
-    virtual void removeChild(RenderObject*);
-    virtual void removeLeftoverAnonymousBlock(RenderBlock*) { }
+    virtual void removeChild(RenderObject* oldChild);
+    virtual void removeLeftoverAnonymousBoxes() {}
     virtual bool createsAnonymousWrapper() const { return true; }
 
-    void setupInnerStyle(RenderStyle*);
+    virtual void setStyle(RenderStyle*);
     virtual void updateFromElement();
 
-    virtual void updateBeforeAfterContent(PseudoId);
+    virtual void updatePseudoChild(RenderStyle::PseudoId);
 
-    virtual bool canHaveGeneratedChildren() const OVERRIDE;
-    virtual bool hasControlClip() const { return true; }
-    virtual LayoutRect controlClipRect(const LayoutPoint&) const;
+    virtual void paintObject(PaintInfo&, int tx, int ty);
+
+    virtual const char* renderName() const { return "RenderButton"; }
 
     void setText(const String&);
-    String text() const;
+    
+    virtual void layout();
 
-    virtual void layout() OVERRIDE;
-
-private:
-    virtual void styleWillChange(StyleDifference, const RenderStyle* newStyle);
-    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
-
-    virtual bool hasLineIfEmpty() const { return true; }
-
-    virtual bool requiresForcedStyleRecalcPropagation() const { return true; }
-
-    void timerFired(Timer<RenderButton>*);
-
-    RenderTextFragment* m_buttonText;
+protected:
+    RenderText* m_buttonText;
     RenderBlock* m_inner;
-
-    OwnPtr<Timer<RenderButton> > m_timer;
-    bool m_default;
 };
 
-inline RenderButton* toRenderButton(RenderObject* object)
-{ 
-    ASSERT(!object || object->isRenderButton());
-    return static_cast<RenderButton*>(object);
 }
 
-inline const RenderButton* toRenderButton(const RenderObject* object)
-{ 
-    ASSERT(!object || object->isRenderButton());
-    return static_cast<const RenderButton*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderButton(const RenderButton*);
-
-} // namespace WebCore
-
-#endif // RenderButton_h
+#endif

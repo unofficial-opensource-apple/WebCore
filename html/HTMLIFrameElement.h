@@ -1,8 +1,10 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2004, 2006, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,47 +18,62 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef HTMLIFrameElement_h
-#define HTMLIFrameElement_h
+#ifndef HTMLIFrameElement_H
+#define HTMLIFrameElement_H
 
-#include "HTMLFrameElementBase.h"
+#include "HTMLFrameElement.h"
 
 namespace WebCore {
 
-class HTMLIFrameElement : public HTMLFrameElementBase {
+class HTMLIFrameElement : public HTMLFrameElement
+{
 public:
-    static PassRefPtr<HTMLIFrameElement> create(const QualifiedName&, Document*);
+    HTMLIFrameElement(Document *doc);
+    ~HTMLIFrameElement();
 
-    bool shouldDisplaySeamlessly() const;
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
+    virtual int tagPriority() const { return 1; }
 
-private:
-    HTMLIFrameElement(const QualifiedName&, Document*);
+    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
+    virtual void parseMappedAttribute(MappedAttribute*);
 
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const OVERRIDE { return false; }
-
-    virtual void parseAttribute(Attribute*) OVERRIDE;
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
-
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
+    virtual void insertedIntoDocument();
+    virtual void removedFromDocument();
+    virtual void willRemove();
     
-    virtual bool rendererIsNeeded(const NodeRenderingContext&);
-    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-       
-#if ENABLE(MICRODATA)
-    virtual String itemValueText() const OVERRIDE;
-    virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;
-#endif
+    virtual void attach();
+    virtual void detach();
+    virtual bool rendererIsNeeded(RenderStyle*);
+    virtual RenderObject *createRenderer(RenderArena*, RenderStyle*);
+    virtual void recalcStyle(StyleChange);
+    
+    virtual bool isURLAttribute(Attribute*) const;
 
-    AtomicString m_name;
+    String align() const;
+    void setAlign(const String&);
+
+    String height() const;
+    void setHeight(const String&);
+
+    String width() const;
+    void setWidth(const String&);
+
+    virtual String src() const;
+
+protected:
+    virtual void openURL();
+
+    bool needWidgetUpdate;
+
+ private:
+    String oldNameAttr;
 };
 
-} // namespace WebCore
+} //namespace
 
-#endif // HTMLIFrameElement_h
+#endif

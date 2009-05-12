@@ -1,5 +1,11 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * This file is part of the DOM implementation for KDE.
+ *
+ * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
+ *           (C) 1999 Antti Koivisto (koivisto@kde.org)
+ *           (C) 2001 Dirk Mueller (mueller@kde.org)
+ * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,74 +19,55 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef FormDataList_h
-#define FormDataList_h
+#ifndef HTML_FormDataList_h
+#define HTML_FormDataList_h
 
-#include "Blob.h"
+#include "PlatformString.h"
 #include "TextEncoding.h"
-#include <wtf/Forward.h>
-#include <wtf/text/CString.h>
+#include "DeprecatedValueList.h"
 
 namespace WebCore {
 
-class FormDataList {
-public:
-    class Item {
-    public:
-        Item() { }
-        Item(const WTF::CString& data) : m_data(data) { }
-        Item(PassRefPtr<Blob> blob, const String& filename) : m_blob(blob), m_filename(filename) { }
+struct FormDataListItem {
+    FormDataListItem(const DeprecatedCString &data) : m_data(data) { }
+    FormDataListItem(const DeprecatedString &path) : m_path(path) { }
 
-        const WTF::CString& data() const { return m_data; }
-        Blob* blob() const { return m_blob.get(); }
-        const String& filename() const { return m_filename; }
-
-    private:
-        WTF::CString m_data;
-        RefPtr<Blob> m_blob;
-        String m_filename;
-    };
-
-    FormDataList(const TextEncoding&);
-
-    void appendData(const String& key, const String& value)
-    {
-        appendString(key);
-        appendString(value);
-    }
-    void appendData(const String& key, const CString& value)
-    {
-        appendString(key);
-        appendString(value);
-    }
-    void appendData(const String& key, int value)
-    {
-        appendString(key);
-        appendString(String::number(value));
-    }
-    void appendBlob(const String& key, PassRefPtr<Blob> blob, const String& filename = String())
-    {
-        appendString(key);
-        appendBlob(blob, filename);
-    }
-
-    const Vector<Item>& items() const { return m_items; }
-    const TextEncoding& encoding() const { return m_encoding; }
-
-private:
-    void appendString(const CString&);
-    void appendString(const String&);
-    void appendBlob(PassRefPtr<Blob>, const String& filename);
-
-    TextEncoding m_encoding;
-    Vector<Item> m_items;
+    DeprecatedString m_path;
+    DeprecatedCString m_data;
 };
 
-} // namespace WebCore
+class FormDataList {
+public:
+    FormDataList(const TextEncoding&);
 
-#endif // FormDataList_h
+    void appendData(const String &key, const String &value)
+        { appendString(key.deprecatedString()); appendString(value.deprecatedString()); }
+    void appendData(const String &key, const DeprecatedString &value)
+        { appendString(key.deprecatedString()); appendString(value); }
+    void appendData(const String &key, const DeprecatedCString &value)
+        { appendString(key.deprecatedString()); appendString(value); }
+    void appendData(const String &key, int value)
+        { appendString(key.deprecatedString()); appendString(DeprecatedString::number(value)); }
+    void appendFile(const String &key, const String &filename);
+
+    DeprecatedValueListConstIterator<FormDataListItem> begin() const
+        { return m_list.begin(); }
+    DeprecatedValueListConstIterator<FormDataListItem> end() const
+        { return m_list.end(); }
+
+private:
+    void appendString(const DeprecatedCString &s);
+    void appendString(const DeprecatedString &s);
+
+    TextEncoding m_encoding;
+    DeprecatedValueList<FormDataListItem> m_list;
+};
+
+};
+
+#endif

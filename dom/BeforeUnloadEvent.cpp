@@ -1,4 +1,6 @@
 /**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
@@ -16,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 #include "config.h"
@@ -27,12 +29,10 @@
 
 namespace WebCore {
 
-BeforeUnloadEvent::BeforeUnloadEvent()
-    : Event(eventNames().beforeunloadEvent, false, true)
-{
-}
+using namespace EventNames;
 
-BeforeUnloadEvent::~BeforeUnloadEvent()
+BeforeUnloadEvent::BeforeUnloadEvent()
+    : Event(beforeunloadEvent, false, true)
 {
 }
 
@@ -43,7 +43,7 @@ bool BeforeUnloadEvent::storesResultAsString() const
 
 void BeforeUnloadEvent::storeResult(const String& s)
 {
-    m_result = s;
+    m_result = s.impl();
 }
 
 } // namespace WebCore

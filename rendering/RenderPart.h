@@ -1,7 +1,9 @@
 /*
+ * This file is part of the KDE project.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,52 +17,47 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef RenderPart_h
-#define RenderPart_h
+#ifndef RenderPart_H
+#define RenderPart_H
 
 #include "RenderWidget.h"
 
 namespace WebCore {
 
-// Renderer for frames via RenderFrameBase, and plug-ins via RenderEmbeddedObject.
+class Frame;
+class HTMLElement;
+
 class RenderPart : public RenderWidget {
 public:
-    RenderPart(Element*);
+    RenderPart(HTMLElement*);
     virtual ~RenderPart();
+    
+    virtual const char* renderName() const { return "RenderPart"; }
 
-    virtual void setWidget(PassRefPtr<Widget>);
+    void setWidget(Widget*);
+
+    // FIXME: This should not be necessary.
+    // Remove this once WebKit knows to properly schedule layouts using WebCore when objects resize.
+    void updateWidgetPosition();
+
+    bool hasFallbackContent() const { return m_hasFallbackContent; }
+
     virtual void viewCleared();
 
-#if USE(ACCELERATED_COMPOSITING)
-    bool requiresAcceleratedCompositing() const;
-#endif
-
-    virtual bool needsPreferredWidthsRecalculation() const;
-    virtual RenderBox* embeddedContentBox() const;
-
 protected:
-#if USE(ACCELERATED_COMPOSITING)
-    virtual bool requiresLayer() const;
-#endif
+    bool m_hasFallbackContent;
 
 private:
-    virtual bool isRenderPart() const { return true; }
-    virtual const char* renderName() const { return "RenderPart"; }
+    virtual void deleteWidget();
+
+    Frame* m_frame;
+    bool m_disconnectOwnerElementWhenDestroyed;
 };
-
-inline RenderPart* toRenderPart(RenderObject* object)
-{
-    ASSERT(!object || object->isRenderPart());
-    return static_cast<RenderPart*>(object);
-}
-
-// This will catch anyone doing an unnecessary cast.
-void toRenderPart(const RenderPart*);
 
 }
 

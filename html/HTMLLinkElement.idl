@@ -1,7 +1,5 @@
 /*
- * Copyright (C) 2006, 2010 Apple Inc. All rights reserved.
- * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
- * Copyright (C) 2011 Google Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,33 +13,25 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
 module html {
 
-    interface HTMLLinkElement : HTMLElement {
-        attribute [Reflect] boolean disabled;
-        attribute [Reflect] DOMString charset;
-        attribute [Reflect, URL] DOMString href;
-        attribute [Reflect] DOMString hreflang;
-        attribute [Reflect] DOMString media;
-        attribute [Reflect] DOMString rel;
-        attribute [Reflect] DOMString rev;
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-        attribute [Custom] DOMSettableTokenList sizes;
-#endif
-        attribute [Reflect] DOMString target;
-        attribute [Reflect] DOMString type;
-
+    interface [LegacyParent=KJS::JSHTMLElement] HTMLLinkElement : HTMLElement {
+        attribute  boolean              disabled;
+        attribute  DOMString            charset;
+        attribute  DOMString            href;
+        attribute  DOMString            hreflang;
+        attribute  DOMString            media;
+        attribute  DOMString            rel;
+        attribute  DOMString            rev;
+        attribute  DOMString            target;
+        attribute  DOMString            type;
+        
         // DOM Level 2 Style
-        readonly attribute StyleSheet sheet;
-
-#if defined(LANGUAGE_OBJECTIVE_C) && LANGUAGE_OBJECTIVE_C
-        // Objective-C extension:
-        readonly attribute URL absoluteLinkURL;
-#endif
+        readonly attribute StyleSheet   sheet;
     };
 
 }

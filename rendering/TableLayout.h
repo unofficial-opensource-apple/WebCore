@@ -1,4 +1,6 @@
 /*
+ * This file is part of the HTML rendering engine for KDE.
+ *
  * Copyright (C) 2002 Lars Knoll (knoll@kde.org)
  *           (C) 2002 Dirk Mueller (mueller@kde.org)
  *
@@ -14,39 +16,30 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef TableLayout_h
-#define TableLayout_h
-
-#include <wtf/FastAllocBase.h>
-#include <wtf/Noncopyable.h>
+#ifndef TableLayout_H
+#define TableLayout_H
 
 namespace WebCore {
 
 class RenderTable;
 
-class TableLayout {
-    WTF_MAKE_NONCOPYABLE(TableLayout); WTF_MAKE_FAST_ALLOCATED;
+class TableLayout
+{
 public:
-    TableLayout(RenderTable* table)
-        : m_table(table)
-    {
-    }
+    TableLayout(RenderTable* t) : m_table(t) {}
+    virtual ~TableLayout() {};
 
-    virtual ~TableLayout() { }
-
-    virtual void computePreferredLogicalWidths(LayoutUnit& minWidth, LayoutUnit& maxWidth) = 0;
+    virtual void calcMinMaxWidth() = 0;
     virtual void layout() = 0;
 
 protected:
-    const static int tableMaxWidth = 15000;
-
     RenderTable* m_table;
 };
 
-} // namespace WebCore
+}
 
-#endif // TableLayout_h
+#endif

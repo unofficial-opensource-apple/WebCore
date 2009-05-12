@@ -1,10 +1,12 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,50 +20,35 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "HTMLTableCellElement.h"
 
-#include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "HTMLNames.h"
 #include "HTMLTableElement.h"
 #include "RenderTableCell.h"
 
-using std::max;
-using std::min;
-
 namespace WebCore {
-
-// Clamp rowspan at 8k to match Firefox.
-static const int maxRowspan = 8190;
 
 using namespace HTMLNames;
 
-inline HTMLTableCellElement::HTMLTableCellElement(const QualifiedName& tagName, Document* document)
-    : HTMLTablePartElement(tagName, document)
+HTMLTableCellElement::HTMLTableCellElement(const QualifiedName& tagName, Document *doc)
+    : HTMLTablePartElement(tagName, doc)
+    , _row(-1)
+    , _col(-1)
+    , rSpan(1)
+    , cSpan(1)
+    , rowHeight(0)
+    , m_solid(false)
 {
 }
 
-PassRefPtr<HTMLTableCellElement> HTMLTableCellElement::create(const QualifiedName& tagName, Document* document)
+HTMLTableCellElement::~HTMLTableCellElement()
 {
-    return adoptRef(new HTMLTableCellElement(tagName, document));
-}
-
-int HTMLTableCellElement::colSpan() const
-{
-    const AtomicString& colSpanValue = fastGetAttribute(colspanAttr);
-    return max(1, colSpanValue.toInt());
-}
-
-int HTMLTableCellElement::rowSpan() const
-{
-    const AtomicString& rowSpanValue = fastGetAttribute(rowspanAttr);
-    return max(1, min(rowSpanValue.toInt(), maxRowspan));
 }
 
 int HTMLTableCellElement::cellIndex() const
@@ -75,55 +62,71 @@ int HTMLTableCellElement::cellIndex() const
     return index;
 }
 
-bool HTMLTableCellElement::isPresentationAttribute(const QualifiedName& name) const
+bool HTMLTableCellElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
 {
-    if (name == nowrapAttr || name == widthAttr || name == heightAttr)
-        return true;
-    return HTMLTablePartElement::isPresentationAttribute(name);
+    if (attrName == nowrapAttr) {
+        result = eUniversal;
+        return false;
+    }
+    
+    if (attrName == widthAttr ||
+        attrName == heightAttr) {
+        result = eCell; // Because of the quirky behavior of ignoring 0 values, cells are special.
+        return false;
+    }
+
+    return HTMLTablePartElement::mapToEntry(attrName, result);
 }
 
-void HTMLTableCellElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
+void HTMLTableCellElement::parseMappedAttribute(MappedAttribute *attr)
 {
-    if (attr->name() == nowrapAttr) {
-        addPropertyToAttributeStyle(style, CSSPropertyWhiteSpace, CSSValueWebkitNowrap);
+    if (attr->name() == rowspanAttr) {
+        rSpan = !attr->isNull() ? attr->value().toInt() : 1;
+        if (rSpan < 1) rSpan = 1;
+        if (renderer() && renderer()->isTableCell())
+            static_cast<RenderTableCell*>(renderer())->updateFromElement();
+    } else if (attr->name() == colspanAttr) {
+        cSpan = !attr->isNull() ? attr->value().toInt() : 1;
+        if (cSpan < 1) cSpan = 1;
+        if (renderer() && renderer()->isTableCell())
+            static_cast<RenderTableCell*>(renderer())->updateFromElement();
+    } else if (attr->name() == nowrapAttr) {
+        if (!attr->isNull())
+            addCSSProperty(attr, CSS_PROP_WHITE_SPACE, CSS_VAL__WEBKIT_NOWRAP);
     } else if (attr->name() == widthAttr) {
         if (!attr->value().isEmpty()) {
             int widthInt = attr->value().toInt();
             if (widthInt > 0) // width="0" is ignored for compatibility with WinIE.
-                addHTMLLengthToStyle(style, CSSPropertyWidth, attr->value());
+                addCSSLength(attr, CSS_PROP_WIDTH, attr->value());
         }
     } else if (attr->name() == heightAttr) {
         if (!attr->value().isEmpty()) {
             int heightInt = attr->value().toInt();
             if (heightInt > 0) // height="0" is ignored for compatibility with WinIE.
-                addHTMLLengthToStyle(style, CSSPropertyHeight, attr->value());
+                addCSSLength(attr, CSS_PROP_HEIGHT, attr->value());
         }
     } else
-        HTMLTablePartElement::collectStyleForAttribute(attr, style);
+        HTMLTablePartElement::parseMappedAttribute(attr);
 }
 
-void HTMLTableCellElement::parseAttribute(Attribute* attr)
+// used by table cells to share style decls created by the enclosing table.
+CSSMutableStyleDeclaration* HTMLTableCellElement::additionalAttributeStyleDecl()
 {
-    if (attr->name() == rowspanAttr) {
-        if (renderer() && renderer()->isTableCell())
-            toRenderTableCell(renderer())->colSpanOrRowSpanChanged();
-    } else if (attr->name() == colspanAttr) {
-        if (renderer() && renderer()->isTableCell())
-            toRenderTableCell(renderer())->colSpanOrRowSpanChanged();
-    } else
-        HTMLTablePartElement::parseAttribute(attr);
-}
+    Node* p = parentNode();
+    while (p && !p->hasTagName(tableTag))
+        p = p->parentNode();
 
-StylePropertySet* HTMLTableCellElement::additionalAttributeStyle()
-{
-    if (HTMLTableElement* table = findParentTable())
-        return table->additionalCellStyle();
+    if (p) {
+        HTMLTableElement* table = static_cast<HTMLTableElement*>(p);
+        return table->getSharedCellDecl();
+    }
+
     return 0;
 }
 
 bool HTMLTableCellElement::isURLAttribute(Attribute *attr) const
 {
-    return attr->name() == backgroundAttr || HTMLTablePartElement::isURLAttribute(attr);
+    return attr->name() == backgroundAttr;
 }
 
 String HTMLTableCellElement::abbr() const
@@ -131,9 +134,59 @@ String HTMLTableCellElement::abbr() const
     return getAttribute(abbrAttr);
 }
 
+void HTMLTableCellElement::setAbbr(const String &value)
+{
+    setAttribute(abbrAttr, value);
+}
+
+String HTMLTableCellElement::align() const
+{
+    return getAttribute(alignAttr);
+}
+
+void HTMLTableCellElement::setAlign(const String &value)
+{
+    setAttribute(alignAttr, value);
+}
+
 String HTMLTableCellElement::axis() const
 {
     return getAttribute(axisAttr);
+}
+
+void HTMLTableCellElement::setAxis(const String &value)
+{
+    setAttribute(axisAttr, value);
+}
+
+String HTMLTableCellElement::bgColor() const
+{
+    return getAttribute(bgcolorAttr);
+}
+
+void HTMLTableCellElement::setBgColor(const String &value)
+{
+    setAttribute(bgcolorAttr, value);
+}
+
+String HTMLTableCellElement::ch() const
+{
+    return getAttribute(charAttr);
+}
+
+void HTMLTableCellElement::setCh(const String &value)
+{
+    setAttribute(charAttr, value);
+}
+
+String HTMLTableCellElement::chOff() const
+{
+    return getAttribute(charoffAttr);
+}
+
+void HTMLTableCellElement::setChOff(const String &value)
+{
+    setAttribute(charoffAttr, value);
 }
 
 void HTMLTableCellElement::setColSpan(int n)
@@ -146,6 +199,31 @@ String HTMLTableCellElement::headers() const
     return getAttribute(headersAttr);
 }
 
+void HTMLTableCellElement::setHeaders(const String &value)
+{
+    setAttribute(headersAttr, value);
+}
+
+String HTMLTableCellElement::height() const
+{
+    return getAttribute(heightAttr);
+}
+
+void HTMLTableCellElement::setHeight(const String &value)
+{
+    setAttribute(heightAttr, value);
+}
+
+bool HTMLTableCellElement::noWrap() const
+{
+    return !getAttribute(nowrapAttr).isNull();
+}
+
+void HTMLTableCellElement::setNoWrap(bool b)
+{
+    setAttribute(nowrapAttr, b ? "" : 0);
+}
+
 void HTMLTableCellElement::setRowSpan(int n)
 {
     setAttribute(rowspanAttr, String::number(n));
@@ -156,43 +234,29 @@ String HTMLTableCellElement::scope() const
     return getAttribute(scopeAttr);
 }
 
-void HTMLTableCellElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) const
+void HTMLTableCellElement::setScope(const String &value)
 {
-    HTMLTablePartElement::addSubresourceAttributeURLs(urls);
-
-    addSubresourceURL(urls, document()->completeURL(getAttribute(backgroundAttr)));
+    setAttribute(scopeAttr, value);
 }
 
-HTMLTableCellElement* HTMLTableCellElement::cellAbove() const
+String HTMLTableCellElement::vAlign() const
 {
-    RenderObject* cellRenderer = renderer();
-    if (!cellRenderer)
-        return 0;
-    if (!cellRenderer->isTableCell())
-        return 0;
-
-    RenderTableCell* tableCellRenderer = toRenderTableCell(cellRenderer);
-    RenderTableCell* cellAboveRenderer = tableCellRenderer->table()->cellAbove(tableCellRenderer);
-    if (!cellAboveRenderer)
-        return 0;
-
-    return static_cast<HTMLTableCellElement*>(cellAboveRenderer->node());
+    return getAttribute(valignAttr);
 }
 
-#ifndef NDEBUG
-
-HTMLTableCellElement* toHTMLTableCellElement(Node* node)
+void HTMLTableCellElement::setVAlign(const String &value)
 {
-    ASSERT(!node || node->hasTagName(HTMLNames::tdTag) || node->hasTagName(HTMLNames::thTag));
-    return static_cast<HTMLTableCellElement*>(node);
+    setAttribute(valignAttr, value);
 }
 
-const HTMLTableCellElement* toHTMLTableCellElement(const Node* node)
+String HTMLTableCellElement::width() const
 {
-    ASSERT(!node || node->hasTagName(HTMLNames::tdTag) || node->hasTagName(HTMLNames::thTag));
-    return static_cast<const HTMLTableCellElement*>(node);
+    return getAttribute(widthAttr);
 }
 
-#endif
+void HTMLTableCellElement::setWidth(const String &value)
+{
+    setAttribute(widthAttr, value);
+}
 
-} // namespace WebCore
+}

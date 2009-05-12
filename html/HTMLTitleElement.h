@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,35 +17,34 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-#ifndef HTMLTitleElement_h
-#define HTMLTitleElement_h
+#ifndef HTMLTitleElement_H
+#define HTMLTitleElement_H
 
 #include "HTMLElement.h"
-#include "StringWithDirection.h"
 
 namespace WebCore {
 
-class HTMLTitleElement : public HTMLElement {
+class HTMLTitleElement : public HTMLElement
+{
 public:
-    static PassRefPtr<HTMLTitleElement> create(const QualifiedName&, Document*);
+    HTMLTitleElement(Document*);
+    ~HTMLTitleElement();
+
+    virtual bool checkDTD(const Node* newChild) { return newChild->isTextNode(); }
+
+    virtual void insertedIntoDocument();
+    virtual void removedFromDocument();
+    virtual void childrenChanged();
 
     String text() const;
     void setText(const String&);
 
-    StringWithDirection textWithDirection();
-
-private:
-    HTMLTitleElement(const QualifiedName&, Document*);
-
-    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
-    virtual void removedFrom(Node*) OVERRIDE;
-    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
-
-    StringWithDirection m_title;
+protected:
+    String m_title;
 };
 
 } //namespace

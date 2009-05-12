@@ -1,6 +1,8 @@
-/*
+/**
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 2000 Peter Kelly (pmk@post.com)
- * Copyright (C) 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,28 +16,29 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
-
 #include "config.h"
 #include "Notation.h"
 
-#include "Document.h"
-
 namespace WebCore {
 
-Notation::Notation(Document* document, const String& name, const String& publicId, const String& systemId)
-    : ContainerNode(document)
-    , m_name(name)
-    , m_publicId(publicId)
-    , m_systemId(systemId)
+Notation::Notation(Document* doc) : ContainerNode(doc)
+{
+}
+
+Notation::Notation(Document* doc, const String& name, const String& publicId, const String& systemId)
+    : ContainerNode(doc)
+    , m_name(name.impl())
+    , m_publicId(publicId.impl())
+    , m_systemId(systemId.impl())
 {
 }
 
 String Notation::nodeName() const
 {
-    return m_name;
+    return m_name.get();
 }
 
 Node::NodeType Notation::nodeType() const
@@ -49,7 +52,8 @@ PassRefPtr<Node> Notation::cloneNode(bool /*deep*/)
     return 0;
 }
 
-bool Notation::childTypeAllowed(NodeType) const
+// DOM Section 1.1.1
+bool Notation::childTypeAllowed(NodeType)
 {
     return false;
 }

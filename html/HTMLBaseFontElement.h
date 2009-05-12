@@ -1,7 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,26 +17,35 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-
-#ifndef HTMLBaseFontElement_h
-#define HTMLBaseFontElement_h
+#ifndef HTMLBaseFontElementImpl_H
+#define HTMLBaseFontElementImpl_H
 
 #include "HTMLElement.h"
 
 namespace WebCore {
 
-class HTMLBaseFontElement : public HTMLElement {
+class HTMLBaseFontElement : public HTMLElement
+{
 public:
-    static PassRefPtr<HTMLBaseFontElement> create(const QualifiedName&, Document*);
+    HTMLBaseFontElement(Document *doc);
 
-private:
-    HTMLBaseFontElement(const QualifiedName&, Document*);
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
+    virtual int tagPriority() const { return 0; }
+
+    String color() const;
+    void setColor(const String &);
+
+    String face() const;
+    void setFace(const String &);
+
+    String size() const;
+    void setSize(const String &);
 };
 
-} // namespace
+} //namespace
 
 #endif

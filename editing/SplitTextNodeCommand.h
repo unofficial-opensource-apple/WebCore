@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,34 +23,30 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef SplitTextNodeCommand_h
-#define SplitTextNodeCommand_h
+#ifndef __split_text_node_command_h__
+#define __split_text_node_command_h__
 
 #include "EditCommand.h"
 
 namespace WebCore {
+    class Text;
+}
 
-class Text;
+namespace WebCore {
 
-class SplitTextNodeCommand : public SimpleEditCommand {
+class SplitTextNodeCommand : public EditCommand
+{
 public:
-    static PassRefPtr<SplitTextNodeCommand> create(PassRefPtr<Text> node, int offset)
-    {
-        return adoptRef(new SplitTextNodeCommand(node, offset));
-    }
+    SplitTextNodeCommand(Document *, Text *, int);
+    virtual ~SplitTextNodeCommand() { }
+
+    virtual void doApply();
+    virtual void doUnapply();
+
+    Text *node() const { return m_text2.get(); }
+    int offset() const { return m_offset; }
 
 private:
-    SplitTextNodeCommand(PassRefPtr<Text>, int offset);
-
-    virtual void doApply() OVERRIDE;
-    virtual void doUnapply() OVERRIDE;
-    virtual void doReapply() OVERRIDE;
-    void insertText1AndTrimText2();
-    
-#ifndef NDEBUG
-    virtual void getNodesInCommand(HashSet<Node*>&) OVERRIDE;
-#endif
-
     RefPtr<Text> m_text1;
     RefPtr<Text> m_text2;
     unsigned m_offset;
@@ -58,4 +54,4 @@ private:
 
 } // namespace WebCore
 
-#endif // SplitTextNodeCommand_h
+#endif // __split_text_node_command_h__

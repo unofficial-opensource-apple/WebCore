@@ -1,8 +1,9 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,150 +17,90 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  *
  */
-
-#ifndef HTMLAnchorElement_h
-#define HTMLAnchorElement_h
+#ifndef HTMLAnchorElement_H
+#define HTMLAnchorElement_H
 
 #include "HTMLElement.h"
-#include "HTMLNames.h"
-#include "LinkHash.h"
 
 namespace WebCore {
 
-// Link relation bitmask values.
-// FIXME: Uncomment as the various link relations are implemented.
-enum {
-//     RelationAlternate   = 0x00000001,
-//     RelationArchives    = 0x00000002,
-//     RelationAuthor      = 0x00000004,
-//     RelationBoomark     = 0x00000008,
-//     RelationExternal    = 0x00000010,
-//     RelationFirst       = 0x00000020,
-//     RelationHelp        = 0x00000040,
-//     RelationIndex       = 0x00000080,
-//     RelationLast        = 0x00000100,
-//     RelationLicense     = 0x00000200,
-//     RelationNext        = 0x00000400,
-//     RelationNoFolow    = 0x00000800,
-    RelationNoReferrer     = 0x00001000,
-//     RelationPrev        = 0x00002000,
-//     RelationSearch      = 0x00004000,
-//     RelationSidebar     = 0x00008000,
-//     RelationTag         = 0x00010000,
-//     RelationUp          = 0x00020000,
-};
+class String;
 
-class HTMLAnchorElement : public HTMLElement {
+class HTMLAnchorElement : public HTMLElement
+{
 public:
-    static PassRefPtr<HTMLAnchorElement> create(Document*);
-    static PassRefPtr<HTMLAnchorElement> create(const QualifiedName&, Document*);
-
-    virtual ~HTMLAnchorElement();
-
-    KURL href() const;
-    void setHref(const AtomicString&);
-
-    const AtomicString& name() const;
-
-    String hash() const;
-    void setHash(const String&);
-
-    String host() const;
-    void setHost(const String&);
-
-    String hostname() const;
-    void setHostname(const String&);
-
-    String pathname() const;
-    void setPathname(const String&);
-
-    String port() const;
-    void setPort(const String&);
-
-    String protocol() const;
-    void setProtocol(const String&);
-
-    String search() const;
-    void setSearch(const String&);
-
-    String origin() const;
-
-    String text();
-
-    String toString() const;
-
-    bool isLiveLink() const;
-    virtual bool willRespondToMouseClickEvents() OVERRIDE;
-
-    bool hasRel(uint32_t relation) const;
-    void setRel(const String&);
-    
-    LinkHash visitedLinkHash() const;
-    void invalidateCachedVisitedLinkHash() { m_cachedVisitedLinkHash = 0; }
-
-protected:
+    HTMLAnchorElement(Document*);
     HTMLAnchorElement(const QualifiedName&, Document*);
+    ~HTMLAnchorElement();
 
-    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
+    virtual int tagPriority() const { return 1; }
 
-private:
     virtual bool supportsFocus() const;
     virtual bool isMouseFocusable() const;
-    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
+    virtual bool isKeyboardFocusable() const;
+    virtual bool isFocusable() const;
+    virtual void parseMappedAttribute(MappedAttribute*);
     virtual void defaultEventHandler(Event*);
     virtual void setActive(bool active = true, bool pause = false);
-    virtual void accessKeyAction(bool sendMouseEvents);
+    virtual void accessKeyAction(bool fullAction);
     virtual bool isURLAttribute(Attribute*) const;
-    virtual bool canStartSelection() const;
-    virtual String target() const;
-    virtual short tabIndex() const;
-    virtual bool draggable() const;
 
-    void sendPings(const KURL& destinationURL);
+    String accessKey() const;
+    void setAccessKey(const String&);
 
-    void handleClick(Event*);
+    String charset() const;
+    void setCharset(const String&);
 
-    enum EventType {
-        MouseEventWithoutShiftKey,
-        MouseEventWithShiftKey,
-        NonMouseEvent,
-    };
-    static EventType eventType(Event*);
-    bool treatLinkAsLiveForEventType(EventType) const;
+    String coords() const;
+    void setCoords(const String&);
 
-#if ENABLE(MICRODATA)
-    virtual String itemValueText() const OVERRIDE;
-    virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;
-#endif
+    String href() const;
+    void setHref(const String&);
 
-    Element* rootEditableElementForSelectionOnMouseDown() const;
-    void setRootEditableElementForSelectionOnMouseDown(Element*);
-    void clearRootEditableElementForSelectionOnMouseDown();
+    String hreflang() const;
+    void setHreflang(const String&);
 
-    bool m_hasRootEditableElementForSelectionOnMouseDown : 1;
-    bool m_wasShiftKeyDownOnMouseDown : 1;
-    uint32_t m_linkRelations : 30;
-    mutable LinkHash m_cachedVisitedLinkHash;
+    String name() const;
+    void setName(const String&);
+
+    String rel() const;
+    void setRel(const String&);
+
+    String rev() const;
+    void setRev(const String&);
+
+    String shape() const;
+    void setShape(const String&);
+
+    int tabIndex() const;
+    void setTabIndex(int);
+
+    String target() const;
+    void setTarget(const String&);
+
+    String type() const;
+    void setType(const String&);
+
+    String hash() const;
+    String host() const;
+    String hostname() const;
+    String pathname() const;
+    String port() const;
+    String protocol() const;
+    String search() const;
+    String text() const;
+    
+    virtual bool willRespondToMouseClickEvents();
+    
+protected:
+    bool m_hasTarget : 1;
 };
 
-inline LinkHash HTMLAnchorElement::visitedLinkHash() const
-{
-    if (!m_cachedVisitedLinkHash)
-        m_cachedVisitedLinkHash = WebCore::visitedLinkHash(document()->baseURL(), fastGetAttribute(HTMLNames::hrefAttr));
-    return m_cachedVisitedLinkHash; 
-}
+} //namespace
 
-// Functions shared with the other anchor elements (i.e., SVG).
-
-bool isEnterKeyKeydownEvent(Event*);
-bool isMiddleMouseButtonEvent(Event*);
-bool isLinkClick(Event*);
-void handleLinkClick(Event*, Document*, const String& url, const String& target, bool hideReferrer = false);
-
-} // namespace WebCore
-
-#endif // HTMLAnchorElement_h
+#endif

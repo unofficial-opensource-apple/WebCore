@@ -1,6 +1,8 @@
 /*
+ * This file is part of the DOM implementation for KDE.
+ *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,60 +16,35 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA 02110-1301, USA.
+ * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ * Boston, MA 02111-1307, USA.
  */
 
-#ifndef StyleSheetList_h
-#define StyleSheetList_h
+#ifndef StyleSheetList_H
+#define StyleSheetList_H
 
-#include <wtf/Forward.h>
-#include <wtf/RefCounted.h>
-#include <wtf/PassRefPtr.h>
-#include <wtf/Vector.h>
+#include "Shared.h"
+#include "DeprecatedPtrList.h"
 
 namespace WebCore {
 
-class Document;
-class HTMLStyleElement;
 class StyleSheet;
 
-typedef Vector<RefPtr<StyleSheet> > StyleSheetVector;
-
-class StyleSheetList : public RefCounted<StyleSheetList> {
+class StyleSheetList : public Shared<StyleSheetList>
+{
 public:
-    static PassRefPtr<StyleSheetList> create(Document* doc) { return adoptRef(new StyleSheetList(doc)); }
     ~StyleSheetList();
 
-    void documentDestroyed();
-
+    // the following two ignore implicit stylesheets
     unsigned length() const;
     StyleSheet* item(unsigned index);
 
-    HTMLStyleElement* getNamedItem(const String&) const;
+    void add(StyleSheet*);
+    void remove(StyleSheet*);
 
-    const StyleSheetVector& vector() const
-    {
-        return m_sheets;
-    }
-
-    void swap(StyleSheetVector& sheets)
-    {
-        m_sheets.swap(sheets);
-    }
-
-    Document* document()
-    {
-        return m_doc;
-    }
-
-private:
-    StyleSheetList(Document*);
-
-    Document* m_doc;
-    StyleSheetVector m_sheets;
+    DeprecatedPtrList<StyleSheet> styleSheets;
 };
 
-} // namespace WebCore
+} // namespace
 
-#endif // StyleSheetList_h
+#endif
