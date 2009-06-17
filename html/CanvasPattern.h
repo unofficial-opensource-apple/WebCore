@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,49 +23,38 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef HTMLImagePattern_h
-#define HTMLImagePattern_h
+#ifndef CanvasPattern_h
+#define CanvasPattern_h
 
-#include "CachedResourceClient.h"
-#include "Shared.h"
-
-#if __APPLE__
-#include <CoreGraphics/CoreGraphics.h>
-#endif
+#include "Pattern.h"
+#include <wtf/PassRefPtr.h>
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
-    class CachedImage;
+    class Image;
     class String;
 
     typedef int ExceptionCode;
 
-    class CanvasPattern : public Shared<CanvasPattern>, CachedResourceClient {
+    class CanvasPattern : public RefCounted<CanvasPattern> {
     public:
         static void parseRepetitionType(const String&, bool& repeatX, bool& repeatY, ExceptionCode&);
 
-#if __APPLE__
-        CanvasPattern(CGImageRef, bool repeatX, bool repeatY);
-#endif
-        CanvasPattern(CachedImage*, bool repeatX, bool repeatY);
-        ~CanvasPattern();
+        static PassRefPtr<CanvasPattern> create(Image* image, bool repeatX, bool repeatY, bool originClean)
+        {
+            return adoptRef(new CanvasPattern(image, repeatX, repeatY, originClean));
+        }
 
-#if __APPLE__
-        CGImageRef platformImage() const { return m_platformImage; }
-#endif
-        CachedImage* cachedImage() const { return m_cachedImage; }
+        Pattern* pattern() const { return m_pattern.get(); }
 
-#if __APPLE__
-        CGPatternRef createPattern(const CGAffineTransform&);
-#endif
+        bool originClean() const { return m_originClean; }
 
     private:
-#if __APPLE__
-        const CGImageRef m_platformImage;
-#endif
-        CachedImage* const m_cachedImage;
-        const bool m_repeatX;
-        const bool m_repeatY;
+        CanvasPattern(Image*, bool repeatX, bool repeatY, bool originClean);
+
+        RefPtr<Pattern> m_pattern;
+        bool m_originClean;
     };
 
 } // namespace WebCore

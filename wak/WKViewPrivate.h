@@ -21,7 +21,6 @@ WKScrollViewRef _WKViewParentScrollView(WKViewRef view);
 void _WKViewAdjustScrollers(WKViewRef view);
 void _WKViewDraw(CGContextRef context, WKViewRef view, CGRect dirtyRect, bool onlyDrawVisibleRect);
 void _WKViewSetViewContext (WKViewRef view, WKViewContext *context);
-void _WKViewSetVisibleSizeOverrideEnabled (WKViewRef view, bool flag);
 
 #ifdef __cplusplus
 }

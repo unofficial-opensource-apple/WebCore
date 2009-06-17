@@ -1,6 +1,4 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * Copyright (C) 2004, 2006 Apple Computer, Inc.
  *
@@ -16,19 +14,17 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "MediaList.h"
 
-#include "CSSRule.h"
+#include "CSSImportRule.h"
+#include "CSSParser.h"
 #include "CSSStyleSheet.h"
-#include "DeprecatedStringList.h"
 #include "ExceptionCode.h"
 #include "MediaQuery.h"
-#include "cssparser.h"
-
 
 namespace WebCore {
 
@@ -84,13 +80,12 @@ MediaList::MediaList(CSSStyleSheet* parentSheet, const String& media, bool fallb
         setMediaText("invalid", ec);
 }
 
-MediaList::MediaList(CSSRule* parentRule, const String& media, bool fallbackToDescriptor)
+MediaList::MediaList(CSSImportRule* parentRule, const String& media)
     : StyleBase(parentRule)
-    , m_fallback(fallbackToDescriptor)
+    , m_fallback(false)
 {
     ExceptionCode ec = 0;
     setMediaText(media, ec);
-    //FIXME: parsing can fail.
     if (ec)
         setMediaText("invalid", ec);
 }
@@ -98,16 +93,6 @@ MediaList::MediaList(CSSRule* parentRule, const String& media, bool fallbackToDe
 MediaList::~MediaList()
 {
     deleteAllValues(m_queries);
-}
-
-CSSStyleSheet *MediaList::parentStyleSheet() const
-{
-    return parent()->isCSSStyleSheet() ? static_cast<CSSStyleSheet*>(parent()) : 0;
-}
-
-CSSRule *MediaList::parentRule() const
-{
-    return parent()->isRule() ? static_cast<CSSRule*>(parent()) : 0;
 }
 
 static String parseMediaDescriptor(const String& s)
@@ -133,15 +118,15 @@ static String parseMediaDescriptor(const String& s)
 
 void MediaList::deleteMedium(const String& oldMedium, ExceptionCode& ec)
 {
-    MediaList tempMediaList;
+    RefPtr<MediaList> tempMediaList = MediaList::create();
     CSSParser p(true);
 
     MediaQuery* oldQuery = 0;
     bool deleteOldQuery = false;
 
-    if (p.parseMediaQuery(&tempMediaList, oldMedium)) {
-        if (tempMediaList.m_queries.size() > 0)
-            oldQuery = tempMediaList.m_queries[0];
+    if (p.parseMediaQuery(tempMediaList.get(), oldMedium)) {
+        if (tempMediaList->m_queries.size() > 0)
+            oldQuery = tempMediaList->m_queries[0];
     } else if (m_fallback) {
         String medium = parseMediaDescriptor(oldMedium);
         if (!medium.isNull()) {
@@ -166,6 +151,9 @@ void MediaList::deleteMedium(const String& oldMedium, ExceptionCode& ec)
         if (deleteOldQuery)
             delete oldQuery;
     }
+    
+    if (!ec)
+        notifyChanged();
 }
 
 String MediaList::mediaText() const
@@ -186,18 +174,20 @@ String MediaList::mediaText() const
 
 void MediaList::setMediaText(const String& value, ExceptionCode& ec)
 {
-    MediaList tempMediaList;
+    RefPtr<MediaList> tempMediaList = MediaList::create();
     CSSParser p(true);
 
-    DeprecatedStringList list = DeprecatedStringList::split(',', value.deprecatedString());
-    for (DeprecatedStringList::Iterator it = list.begin(); it != list.end(); ++it) {
+    Vector<String> list;
+    value.split(',', list);
+    Vector<String>::const_iterator end = list.end();
+    for (Vector<String>::const_iterator it = list.begin(); it != end; ++it) {
         String medium = (*it).stripWhiteSpace();
         if (!medium.isEmpty()) {
-            if (!p.parseMediaQuery(&tempMediaList, medium)) {
+            if (!p.parseMediaQuery(tempMediaList.get(), medium)) {
                 if (m_fallback) {
                     String mediaDescriptor = parseMediaDescriptor(medium);
                     if (!mediaDescriptor.isNull())
-                        tempMediaList.m_queries.append(new MediaQuery(MediaQuery::None, mediaDescriptor, 0));
+                        tempMediaList->m_queries.append(new MediaQuery(MediaQuery::None, mediaDescriptor, 0));
                 } else {
                     ec = SYNTAX_ERR;
                     return;
@@ -210,17 +200,18 @@ void MediaList::setMediaText(const String& value, ExceptionCode& ec)
     }
     // ",,,," falls straight through, but is not valid unless fallback
     if (!m_fallback && list.begin() == list.end()) {
-        String s = value.deprecatedString().stripWhiteSpace();
+        String s = value.stripWhiteSpace();
         if (!s.isEmpty()) {
             ec = SYNTAX_ERR;
             return;
-            }
+        }
     }
     
     ec = 0;
     deleteAllValues(m_queries);
-    m_queries = tempMediaList.m_queries;
-    tempMediaList.m_queries.clear();
+    m_queries = tempMediaList->m_queries;
+    tempMediaList->m_queries.clear();
+    notifyChanged();
 }
 
 String MediaList::item(unsigned index) const
@@ -246,11 +237,22 @@ void MediaList::appendMedium(const String& newMedium, ExceptionCode& ec)
             ec = 0;
         }
     }
+    
+    if (!ec)
+        notifyChanged();
 }
 
 void MediaList::appendMediaQuery(MediaQuery* mediaQuery)
 {
     m_queries.append(mediaQuery);
+}
+
+void MediaList::notifyChanged()
+{
+    for (StyleBase* p = parent(); p; p = p->parent()) {
+        if (p->isCSSStyleSheet())
+            return static_cast<CSSStyleSheet*>(p)->styleSheetChanged();
+    }
 }
 
 }

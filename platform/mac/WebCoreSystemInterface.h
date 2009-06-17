@@ -1,5 +1,5 @@
 /*
- * Copyright 2006 Apple Computer, Inc. All rights reserved.
+ * Copyright 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,38 +26,92 @@
 #ifndef WebCoreSystemInterface_h
 #define WebCoreSystemInterface_h
 
-typedef signed char BOOL;
+#include <objc/objc.h>
 
-#ifndef CGGEOMETRY_H_
-typedef struct CGRect CGRect;
-#endif
+
 #include <GraphicsServices/GraphicsServices.h>
 
-#ifndef __OBJC__
-class NSImage;
-class NSMenu;
-class NSString;
-class NSView;
+#ifdef __OBJC__
+@class NSButtonCell;
+@class NSData;
+@class NSEvent;
+@class NSFont;
+@class NSMutableURLRequest;
+@class NSURLRequest;
+@class QTMovie;
+@class QTMovieView;
+#else
+typedef struct NSArray NSArray;
+typedef struct NSButtonCell NSButtonCell;
+typedef struct NSData NSData;
+typedef struct NSDate NSDate;
+typedef struct NSEvent NSEvent;
+typedef struct NSFont NSFont;
+typedef struct NSImage NSImage;
+typedef struct NSMenu NSMenu;
+typedef struct NSMutableURLRequest NSMutableURLRequest;
+typedef struct NSURLRequest NSURLRequest;
+typedef struct NSString NSString;
+typedef struct NSTextFieldCell NSTextFieldCell;
+typedef struct NSURLConnection NSURLConnection;
+typedef struct NSURLResponse NSURLResponse;
+typedef struct NSView NSView;
+typedef struct objc_object *id;
+typedef struct QTMovie QTMovie;
+typedef struct QTMovieView QTMovieView;
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define GLYPH_VECTOR_SIZE (50 * 32)
-
 // In alphabetical order.
 
+extern void (*wkAdvanceDefaultButtonPulseAnimation)(NSButtonCell *);
 extern BOOL (*wkCGContextGetShouldSmoothFonts)(CGContextRef);
+extern CFReadStreamRef (*wkCreateCustomCFReadStream)(void *(*formCreate)(CFReadStreamRef, void *), 
+    void (*formFinalize)(CFReadStreamRef, void *), 
+    Boolean (*formOpen)(CFReadStreamRef, CFStreamError *, Boolean *, void *), 
+    CFIndex (*formRead)(CFReadStreamRef, UInt8 *, CFIndex, CFStreamError *, Boolean *, void *), 
+    Boolean (*formCanRead)(CFReadStreamRef, void *), 
+    void (*formClose)(CFReadStreamRef, void *), 
+    void (*formSchedule)(CFReadStreamRef, CFRunLoopRef, CFStringRef, void *), 
+    void (*formUnschedule)(CFReadStreamRef, CFRunLoopRef, CFStringRef, void *),
+    void *context);
+extern id (*wkCreateNSURLConnectionDelegateProxy)(void);
+extern BOOL (*wkGetGlyphTransformedAdvances)(GSFontRef font, CGAffineTransform *m, CGGlyph *glyph, CGSize *advance);
+extern NSString* (*wkGetMIMETypeForExtension)(NSString*);
+extern NSDate *(*wkGetNSURLResponseLastModifiedDate)(NSURLResponse *response);
+extern void (*wkSetNSURLConnectionDefersCallbacks)(NSURLConnection *, BOOL);
+extern void (*wkSetNSURLRequestShouldContentSniff)(NSMutableURLRequest *, BOOL);
+extern void (*wkSetPatternBaseCTM)(CGContextRef, CGAffineTransform);
+extern void (*wkSetPatternPhaseInUserSpace)(CGContextRef, CGPoint);
+extern void (*wkSetUpFontCache)();
+extern void (*wkSignalCFReadStreamEnd)(CFReadStreamRef stream);
+extern void (*wkSignalCFReadStreamError)(CFReadStreamRef stream, CFStreamError *error);
+extern void (*wkSignalCFReadStreamHasBytes)(CFReadStreamRef stream);
+extern unsigned (*wkInitializeMaximumHTTPConnectionCountPerHost)(unsigned preferredConnectionCount);
+
+#ifndef BUILDING_ON_TIGER
+extern void (*wkGetGlyphsForCharacters)(CGFontRef, const UniChar[], CGGlyph[], size_t);
+#else
+#define GLYPH_VECTOR_SIZE (50 * 32)
+
 extern void (*wkClearGlyphVector)(void* glyphs);
 extern OSStatus (*wkConvertCharToGlyphs)(void* styleGroup, const UniChar*, unsigned numCharacters, void* glyphs);
-extern BOOL (*wkGetGlyphTransformedAdvances)(GSFontRef font, CGAffineTransform *m, CGGlyph *glyph, CGSize *advance);
+extern CFStringRef (*wkCopyFullFontName)(CGFontRef font);
+extern OSStatus (*wkGetATSStyleGroup)(ATSUStyle, void** styleGroup);
+extern CGFontRef (*wkGetCGFontFromNSFont)(NSFont*);
+extern void (*wkGetFontMetrics)(CGFontRef, int* ascent, int* descent, int* lineGap, unsigned* unitsPerEm);
+extern void* wkGetGlyphsForCharacters;
 extern int (*wkGetGlyphVectorNumGlyphs)(void* glyphVector);
 extern size_t (*wkGetGlyphVectorRecordSize)(void* glyphVector);
-extern void (*wkSetPatternPhaseInUserSpace)(CGContextRef, CGPoint point);
-extern void (*wkSetUpFontCache)(size_t);
+extern OSStatus (*wkInitializeGlyphVector)(int count, void* glyphs);
+extern void (*wkReleaseStyleGroup)(void* group);
+extern BOOL (*wkSupportsMultipartXMixedReplace)(NSMutableURLRequest *);
+#endif
 
-extern void (*wkAssistControl)(id anAssistedControl);
+extern BOOL (*wkUseSharedMediaUI)();
 
 #ifdef __cplusplus
 }

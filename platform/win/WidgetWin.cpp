@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,133 +27,73 @@
 #include "Widget.h"
 
 #include "Cursor.h"
+#include "Document.h"
+#include "Element.h"
 #include "GraphicsContext.h"
 #include "FrameWin.h"
 #include "IntRect.h"
-#include "Font.h"
+#include "FrameView.h"
+#include <winsock2.h>
+#include <windows.h>
 
 namespace WebCore {
 
-HINSTANCE Widget::instanceHandle = 0;
-
-class WidgetPrivate
+Widget::Widget(PlatformWidget widget)
 {
-public:
-    HWND windowHandle;
-    Font font;
-    WidgetClient* client;
-};
-
-Widget::Widget()
-    : data(new WidgetPrivate)
-{
-    data->windowHandle = 0;
-    data->client = 0;
-}
-
-Widget::Widget(HWND hWnd)
-    : data(new WidgetPrivate)
-{
-    data->windowHandle = hWnd;
+    init(widget);
 }
 
 Widget::~Widget() 
 {
-    delete data;
-}
-
-HWND Widget::windowHandle() const
-{
-    return data->windowHandle;
-}
-
-void Widget::setWindowHandle(HWND hWnd)
-{
-    data->windowHandle = hWnd;
-}
-
-void Widget::setClient(WidgetClient* c)
-{
-    data->client = c;
-}
-
-WidgetClient* Widget::client() const
-{
-    return data->client;
-}
-
-IntRect Widget::frameGeometry() const
-{
-    RECT frame;
-    if (GetWindowRect(data->windowHandle, &frame)) {
-        if (HWND parent = GetParent(data->windowHandle))
-            MapWindowPoints(NULL, parent, (LPPOINT)&frame, 2);
-        return frame;
-    }
-    
-    return IntRect();
-}
-
-bool Widget::hasFocus() const
-{
-    return (data->windowHandle == GetForegroundWindow());
-}
-
-void Widget::setFocus()
-{
-    SetFocus(data->windowHandle);
-}
-
-void Widget::clearFocus()
-{
-    FrameWin::clearDocumentFocus(this);
-    SetFocus(0);
-}
-
-const Font& Widget::font() const
-{
-    return data->font;
-}
-
-void Widget::setFont(const Font& font)
-{
-    data->font = font;
-}
-
-void Widget::setCursor(const Cursor& cursor)
-{
-    // SetCursor only works until the next event is recieved.
-    // However, we call this method on every mouse-moved,
-    // so this should work well enough for our purposes.
-    if (HCURSOR c = cursor.impl())
-        SetCursor(c);
+    ASSERT(!parent());
 }
 
 void Widget::show()
 {
-    ShowWindow(data->windowHandle, SW_SHOWNA);
 }
 
 void Widget::hide()
 {
-    ShowWindow(data->windowHandle, SW_HIDE);
 }
 
-void Widget::setFrameGeometry(const IntRect &rect)
+HCURSOR lastSetCursor = 0;
+bool ignoreNextSetCursor = false;
+
+void Widget::setCursor(const Cursor& cursor)
 {
-    MoveWindow(data->windowHandle, rect.x(), rect.y(), rect.width(), rect.height(), false);
+    // This is set by PluginViewWin so it can ignore set setCursor call made by
+    // EventHandler.cpp.
+    if (ignoreNextSetCursor) {
+        ignoreNextSetCursor = false;
+        return;
+    }
+
+    if (HCURSOR c = cursor.impl()->nativeCursor()) {
+        lastSetCursor = c;
+        SetCursor(c);
+    }
 }
 
-IntPoint Widget::mapFromGlobal(const IntPoint &p) const
+void Widget::paint(GraphicsContext*, const IntRect&)
 {
-    POINT point = p;
-    ScreenToClient(data->windowHandle, &point);
-    return point;
 }
 
-float Widget::scaleFactor() const
+void Widget::setFocus()
 {
-    return 1.0f;
 }
 
+void Widget::setIsSelected(bool)
+{
 }
+
+IntRect Widget::frameRect() const
+{
+    return m_frame;
+}
+
+void Widget::setFrameRect(const IntRect& rect)
+{
+    m_frame = rect;
+}
+
+} // namespace WebCore

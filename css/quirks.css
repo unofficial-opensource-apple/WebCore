@@ -16,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -45,4 +45,10 @@ table {
 /* This will apply only to text fields, since all other inputs already use border box sizing */
 input:not([type=image]), textarea {
     -webkit-box-sizing: border-box;
+}
+
+/* Set margin-bottom for form element in quirks mode. */
+/* Compatible with Gecko. (Doing this only for quirks mode is a fix for bug 17696.) */
+form {
+    margin-bottom: 1em
 }

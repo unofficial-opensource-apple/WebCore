@@ -1,8 +1,6 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,13 +14,14 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSStyleSheet_H
-#define CSSStyleSheet_H
+#ifndef CSSStyleSheet_h
+#define CSSStyleSheet_h
 
+#include "CSSRuleList.h"
 #include "StyleSheet.h"
 
 namespace WebCore {
@@ -30,32 +29,47 @@ namespace WebCore {
 class CSSNamespace;
 class CSSParser;
 class CSSRule;
-class CSSRuleList;
 class DocLoader;
 class Document;
 
 typedef int ExceptionCode;
 
-class CSSStyleSheet : public StyleSheet
-{
+class CSSStyleSheet : public StyleSheet {
 public:
-    CSSStyleSheet(Node* parentNode, String href = String(), bool _implicit = false);
-    CSSStyleSheet(CSSStyleSheet* parentSheet, String href = String());
-    CSSStyleSheet(CSSRule* ownerRule, String href = String());
-    
-    ~CSSStyleSheet();
-    
-    virtual bool isCSSStyleSheet() const { return true; }
+    static PassRefPtr<CSSStyleSheet> create()
+    {
+        return adoptRef(new CSSStyleSheet(static_cast<CSSStyleSheet*>(0), String(), String()));
+    }
+    static PassRefPtr<CSSStyleSheet> create(Node* ownerNode)
+    {
+        return adoptRef(new CSSStyleSheet(ownerNode, String(), String()));
+    }
+    static PassRefPtr<CSSStyleSheet> create(Node* ownerNode, const String& href)
+    {
+        return adoptRef(new CSSStyleSheet(ownerNode, href, String()));
+    }
+    static PassRefPtr<CSSStyleSheet> create(Node* ownerNode, const String& href, const String& charset)
+    {
+        return adoptRef(new CSSStyleSheet(ownerNode, href, charset));
+    }
+    static PassRefPtr<CSSStyleSheet> create(CSSRule* ownerRule, const String& href, const String& charset)
+    {
+        return adoptRef(new CSSStyleSheet(ownerRule, href, charset));
+    }
 
-    virtual String type() const { return "text/css"; }
-
+    virtual ~CSSStyleSheet();
+    
     CSSRule* ownerRule() const;
-    CSSRuleList* cssRules();
+    PassRefPtr<CSSRuleList> cssRules(bool omitCharsetRules = false);
     unsigned insertRule(const String& rule, unsigned index, ExceptionCode&);
     void deleteRule(unsigned index, ExceptionCode&);
-    unsigned addRule(const String& selector, const String& style, int index, ExceptionCode&);
+
+    // IE Extensions
+    PassRefPtr<CSSRuleList> rules() { return cssRules(true); }
+    int addRule(const String& selector, const String& style, int index, ExceptionCode&);
+    int addRule(const String& selector, const String& style, ExceptionCode&);
     void removeRule(unsigned index, ExceptionCode& ec) { deleteRule(index, ec); }
-    
+
     void addNamespace(CSSParser*, const AtomicString& prefix, const AtomicString& uri);
     const AtomicString& determineNamespace(const AtomicString& prefix);
     
@@ -66,14 +80,32 @@ public:
     virtual bool isLoading();
 
     virtual void checkLoaded();
-    DocLoader* docLoader();
-    Document* doc() { return m_doc; }
-    bool implicit() { return m_implicit; }
 
-protected:
+    Document* doc() { return m_doc; }
+
+    const String& charset() const { return m_charset; }
+
+    bool loadCompleted() const { return m_loadCompleted; }
+
+    virtual KURL completeURL(const String& url) const;
+    virtual void addSubresourceStyleURLs(ListHashSet<KURL>&);
+
+    void setStrictParsing(bool b) { m_strictParsing = b; }
+    bool useStrictParsing() const { return m_strictParsing; }
+
+private:
+    CSSStyleSheet(Node* ownerNode, const String& href, const String& charset);
+    CSSStyleSheet(CSSStyleSheet* parentSheet, const String& href, const String& charset);
+    CSSStyleSheet(CSSRule* ownerRule, const String& href, const String& charset);
+    
+    virtual bool isCSSStyleSheet() const { return true; }
+    virtual String type() const { return "text/css"; }
+
     Document* m_doc;
-    bool m_implicit;
     CSSNamespace* m_namespaces;
+    String m_charset;
+    bool m_loadCompleted : 1;
+    bool m_strictParsing : 1;
 };
 
 } // namespace

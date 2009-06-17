@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  * Copyright (C) 2004, 2006 Apple Computer, Inc.
@@ -17,13 +15,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLParamElement_H
-#define HTMLParamElement_H
+#ifndef HTMLParamElement_h
+#define HTMLParamElement_h
 
 #include "HTMLElement.h"
 
@@ -33,7 +31,7 @@ class HTMLParamElement : public HTMLElement
 {
     friend class HTMLAppletElement;
 public:
-    HTMLParamElement(Document*);
+    HTMLParamElement(const QualifiedName&, Document*);
     ~HTMLParamElement();
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
@@ -54,6 +52,8 @@ public:
 
     String valueType() const;
     void setValueType(const String&);
+
+    virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
  protected:
     AtomicString m_name;

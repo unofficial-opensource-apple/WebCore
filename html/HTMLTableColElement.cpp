@@ -20,8 +20,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "HTMLTableColElement.h"
@@ -29,6 +29,7 @@
 #include "CSSPropertyNames.h"
 #include "HTMLNames.h"
 #include "RenderTableCol.h"
+#include "HTMLTableElement.h"
 #include "Text.h"
 
 namespace WebCore {
@@ -38,7 +39,7 @@ using namespace HTMLNames;
 HTMLTableColElement::HTMLTableColElement(const QualifiedName& tagName, Document *doc)
     : HTMLTablePartElement(tagName, doc)
 {
-    _span = (tagName.matches(colgroupTag) ? 0 : 1);
+    _span = 1;
 }
 
 HTMLTagStatus HTMLTableColElement::endTagRequirement() const
@@ -79,9 +80,22 @@ void HTMLTableColElement::parseMappedAttribute(MappedAttribute *attr)
             static_cast<RenderTableCol*>(renderer())->updateFromElement();
     } else if (attr->name() == widthAttr) {
         if (!attr->value().isEmpty())
-            addCSSLength(attr, CSS_PROP_WIDTH, attr->value());
+            addCSSLength(attr, CSSPropertyWidth, attr->value());
     } else
         HTMLTablePartElement::parseMappedAttribute(attr);
+}
+
+// used by table columns and column groups to share style decls created by the enclosing table.
+void HTMLTableColElement::additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>& results)
+{
+    if (!hasLocalName(colgroupTag))
+        return;
+    Node* p = parentNode();
+    while (p && !p->hasTagName(tableTag))
+        p = p->parentNode();
+    if (!p)
+        return;
+    static_cast<HTMLTableElement*>(p)->addSharedGroupDecls(false, results);
 }
 
 String HTMLTableColElement::align() const

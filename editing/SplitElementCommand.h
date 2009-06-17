@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,23 +23,26 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef __split_element_command_h__
-#define __split_element_command_h__
+#ifndef SplitElementCommand_h
+#define SplitElementCommand_h
 
 #include "EditCommand.h"
 
 namespace WebCore {
 
-class SplitElementCommand : public EditCommand
-{
+class SplitElementCommand : public SimpleEditCommand {
 public:
-    SplitElementCommand(Document *, Element *element, Node *atChild);
-    virtual ~SplitElementCommand() { }
+    static PassRefPtr<SplitElementCommand> create(PassRefPtr<Element> element, PassRefPtr<Node> splitPointChild)
+    {
+        return adoptRef(new SplitElementCommand(element, splitPointChild));
+    }
+
+private:
+    SplitElementCommand(PassRefPtr<Element>, PassRefPtr<Node> splitPointChild);
 
     virtual void doApply();
     virtual void doUnapply();
 
-private:
     RefPtr<Element> m_element1;
     RefPtr<Element> m_element2;
     RefPtr<Node> m_atChild;
@@ -47,4 +50,4 @@ private:
 
 } // namespace WebCore
 
-#endif // __split_element_command_h__
+#endif // SplitElementCommand_h

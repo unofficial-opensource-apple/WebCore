@@ -1,10 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,24 +16,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLIFrameElement_H
-#define HTMLIFrameElement_H
+#ifndef HTMLIFrameElement_h
+#define HTMLIFrameElement_h
 
-#include "HTMLFrameElement.h"
+#include "HTMLFrameElementBase.h"
 
 namespace WebCore {
 
-class HTMLIFrameElement : public HTMLFrameElement
-{
+class HTMLIFrameElement : public HTMLFrameElementBase {
 public:
-    HTMLIFrameElement(Document *doc);
-    ~HTMLIFrameElement();
+    HTMLIFrameElement(const QualifiedName&, Document*, bool createdByParser);
 
+    virtual bool isKeyboardFocusable(KeyboardEvent*) const { return false; }
+    
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
     virtual int tagPriority() const { return 1; }
 
@@ -44,13 +42,11 @@ public:
 
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
-    virtual void willRemove();
     
     virtual void attach();
-    virtual void detach();
+
     virtual bool rendererIsNeeded(RenderStyle*);
-    virtual RenderObject *createRenderer(RenderArena*, RenderStyle*);
-    virtual void recalcStyle(StyleChange);
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     
     virtual bool isURLAttribute(Attribute*) const;
 
@@ -63,17 +59,10 @@ public:
     String width() const;
     void setWidth(const String&);
 
-    virtual String src() const;
-
-protected:
-    virtual void openURL();
-
-    bool needWidgetUpdate;
-
- private:
-    String oldNameAttr;
+private:
+    AtomicString m_name;
 };
 
-} //namespace
+} // namespace WebCore
 
-#endif
+#endif // HTMLIFrameElement_h

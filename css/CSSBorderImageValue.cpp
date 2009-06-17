@@ -1,8 +1,6 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,20 +14,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "CSSBorderImageValue.h"
 
-#include "CSSImageValue.h"
 #include "PlatformString.h"
-#include "RectImpl.h"
+#include "Rect.h"
 
 namespace WebCore {
 
-CSSBorderImageValue::CSSBorderImageValue(PassRefPtr<CSSImageValue> image,
-    PassRefPtr<RectImpl> imageRect, int horizontalRule, int verticalRule)
+CSSBorderImageValue::CSSBorderImageValue(PassRefPtr<CSSValue> image, PassRefPtr<Rect> imageRect, int horizontalRule, int verticalRule)
     : m_image(image)
     , m_imageSliceRect(imageRect)
     , m_horizontalSizeRule(horizontalRule)
@@ -42,7 +39,7 @@ String CSSBorderImageValue::cssText() const
     // Image first.
     String text(m_image->cssText());
     text += " ";
-    
+
     // Now the rect, but it isn't really a rect, so we dump manually
     text += m_imageSliceRect->top()->cssText();
     text += " ";
@@ -51,14 +48,19 @@ String CSSBorderImageValue::cssText() const
     text += m_imageSliceRect->bottom()->cssText();
     text += " ";
     text += m_imageSliceRect->left()->cssText();
-    
+
     // Now the keywords.
     text += " ";
-    text += CSSPrimitiveValue(m_horizontalSizeRule).cssText();
+    text += CSSPrimitiveValue::createIdentifier(m_horizontalSizeRule)->cssText();
     text += " ";
-    text += CSSPrimitiveValue(m_verticalSizeRule).cssText();
+    text += CSSPrimitiveValue::createIdentifier(m_verticalSizeRule)->cssText();
 
     return text;
 }
 
+void CSSBorderImageValue::addSubresourceStyleURLs(ListHashSet<KURL>& urls, const CSSStyleSheet* styleSheet)
+{
+    m_image->addSubresourceStyleURLs(urls, styleSheet);
 }
+
+} // namespace WebCore

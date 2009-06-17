@@ -1,10 +1,8 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2003, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,9 +16,10 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "HTMLFontElement.h"
 
@@ -28,17 +27,16 @@
 #include "CSSValueKeywords.h"
 #include "HTMLNames.h"
 
+using namespace WTF;
+
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLFontElement::HTMLFontElement(Document* doc)
-    : HTMLElement(fontTag, doc)
+HTMLFontElement::HTMLFontElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
 {
-}
-
-HTMLFontElement::~HTMLFontElement()
-{
+    ASSERT(hasTagName(fontTag));
 }
 
 // Allows leading spaces.
@@ -49,7 +47,7 @@ static bool parseFontSizeNumber(const String& s, int& size)
     unsigned pos = 0;
     
     // Skip leading spaces.
-    while (DeprecatedChar(s[pos]).isSpace())
+    while (isSpaceOrNewline(s[pos]))
         ++pos;
     
     // Skip a plus or minus.
@@ -64,12 +62,12 @@ static bool parseFontSizeNumber(const String& s, int& size)
     }
     
     // Parse a single digit.
-    if (!u_isdigit(s[pos]))
+    if (!isASCIIDigit(s[pos]))
         return false;
-    int num = u_charDigitValue(s[pos++]);
+    int num = s[pos++] - '0';
     
     // Check for an additional digit.
-    if (u_isdigit(s[pos]))
+    if (isASCIIDigit(s[pos]))
         num = 10;
     
     if (sawPlus) {
@@ -99,32 +97,48 @@ bool HTMLFontElement::mapToEntry(const QualifiedName& attrName, MappedAttributeE
     return HTMLElement::mapToEntry(attrName, result);
 }
 
+bool HTMLFontElement::cssValueFromFontSizeNumber(const String& s, int& size)
+{
+    int num;
+    if (!parseFontSizeNumber(s, num))
+        return false;
+        
+    switch (num) {
+        case 2: 
+            size = CSSValueSmall; 
+            break;
+        case 0: // treat 0 the same as 3, because people expect it to be between -1 and +1
+        case 3: 
+            size = CSSValueMedium; 
+            break;
+        case 4: 
+            size = CSSValueLarge; 
+            break;
+        case 5: 
+            size = CSSValueXLarge; 
+            break;
+        case 6: 
+            size = CSSValueXxLarge; 
+            break;
+        default:
+            if (num > 6)
+                size = CSSValueWebkitXxxLarge;
+            else
+                size = CSSValueXSmall;
+    }
+    return true;
+}
+
 void HTMLFontElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == sizeAttr) {
-        int num;
-        if (parseFontSizeNumber(attr->value(), num)) {
-            int size;
-            switch (num)
-            {
-            case 2: size = CSS_VAL_SMALL; break;
-            case 0: // treat 0 the same as 3, because people expect it to be between -1 and +1
-            case 3: size = CSS_VAL_MEDIUM; break;
-            case 4: size = CSS_VAL_LARGE; break;
-            case 5: size = CSS_VAL_X_LARGE; break;
-            case 6: size = CSS_VAL_XX_LARGE; break;
-            default:
-                if (num > 6)
-                    size = CSS_VAL__WEBKIT_XXX_LARGE;
-                else
-                    size = CSS_VAL_X_SMALL;
-            }
-            addCSSProperty(attr, CSS_PROP_FONT_SIZE, size);
-        }
+        int size;
+        if (cssValueFromFontSizeNumber(attr->value(), size))
+            addCSSProperty(attr, CSSPropertyFontSize, size);
     } else if (attr->name() == colorAttr) {
-        addCSSColor(attr, CSS_PROP_COLOR, attr->value());
+        addCSSColor(attr, CSSPropertyColor, attr->value());
     } else if (attr->name() == faceAttr) {
-        addCSSProperty(attr, CSS_PROP_FONT_FAMILY, attr->value());
+        addCSSProperty(attr, CSSPropertyFontFamily, attr->value());
     } else
         HTMLElement::parseMappedAttribute(attr);
 }

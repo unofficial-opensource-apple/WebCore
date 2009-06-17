@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
@@ -19,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -32,10 +30,11 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLIsIndexElement::HTMLIsIndexElement(Document *doc, HTMLFormElement *f)
-    : HTMLInputElement(isindexTag, doc, f)
+HTMLIsIndexElement::HTMLIsIndexElement(const QualifiedName& tagName, Document *doc, HTMLFormElement *f)
+    : HTMLInputElement(tagName, doc, f)
 {
-    m_name = "isindex";
+    ASSERT(hasTagName(isindexTag));
+    setDefaultName(isindexTag.localName());
 }
 
 void HTMLIsIndexElement::parseMappedAttribute(MappedAttribute* attr)
@@ -45,7 +44,7 @@ void HTMLIsIndexElement::parseMappedAttribute(MappedAttribute* attr)
     else
         // don't call HTMLInputElement::parseMappedAttribute here, as it would
         // accept attributes this element does not support
-        HTMLGenericFormElement::parseMappedAttribute(attr);
+        HTMLFormControlElement::parseMappedAttribute(attr);
 }
 
 String HTMLIsIndexElement::prompt() const

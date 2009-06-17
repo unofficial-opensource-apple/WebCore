@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,119 +23,74 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef replace_selection_command_h__
-#define replace_selection_command_h__
+#ifndef ReplaceSelectionCommand_h
+#define ReplaceSelectionCommand_h
 
 #include "CompositeEditCommand.h"
-#include <wtf/HashMap.h>
-#include <wtf/Vector.h>
 
 namespace WebCore {
 
 class DocumentFragment;
+class ReplacementFragment;
 
-enum EFragmentType { EmptyFragment, SingleTextNodeFragment, TreeFragment };
-
-class RenderingInfo : public Shared<RenderingInfo> {
+class ReplaceSelectionCommand : public CompositeEditCommand {
 public:
-    RenderingInfo(PassRefPtr<CSSMutableStyleDeclaration>, bool);
-    
-    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
-    bool isBlockFlow() const { return m_isBlockFlow; }
+    static PassRefPtr<ReplaceSelectionCommand> create(Document* document, PassRefPtr<DocumentFragment> fragment,
+        bool selectReplacement = true, bool smartReplace = false, bool matchStyle = false, bool preventNesting = true, bool movingParagraph = false,
+        EditAction action = EditActionPaste)
+    {
+        return adoptRef(new ReplaceSelectionCommand(document, fragment, selectReplacement, smartReplace, matchStyle, preventNesting, movingParagraph, action));
+    }
+
 private:
-    RefPtr<CSSMutableStyleDeclaration> m_style;
-    bool m_isBlockFlow;
-};
+    ReplaceSelectionCommand(Document*, PassRefPtr<DocumentFragment>,
+        bool selectReplacement, bool smartReplace, bool matchStyle, bool preventNesting, bool movingParagraph, EditAction);
 
-typedef Vector<RefPtr<Node> > NodeVector;
-typedef HashMap<Node*, RefPtr<RenderingInfo> > RenderingInfoMap;
-
-// --- ReplacementFragment helper class
-
-class ReplacementFragment : Noncopyable
-{
-public:
-    ReplacementFragment(Document*, DocumentFragment*, bool matchStyle, const Selection&);
-
-    Node* firstChild() const;
-    Node* lastChild() const;
-
-    Node* mergeStartNode() const;
-
-    const RenderingInfoMap& renderingInfo() const { return m_renderingInfo; }
-    const NodeVector& nodes() const { return m_nodes; }
-
-    bool isEmpty() const;
-
-    bool hasMoreThanOneBlock() const { return m_hasMoreThanOneBlock; }
-    bool hasInterchangeNewlineAtStart() const { return m_hasInterchangeNewlineAtStart; }
-    bool hasInterchangeNewlineAtEnd() const { return m_hasInterchangeNewlineAtEnd; }
-    
-    bool isBlockFlow(Node*) const;
-    
-    void removeNode(PassRefPtr<Node>);
-
-private:    
-    static bool isInterchangeNewlineNode(const Node*);
-    static bool isInterchangeConvertedSpaceSpan(const Node*);
-    
-    PassRefPtr<Node> insertFragmentForTestRendering(Node* context);
-    void saveRenderingInfo(Node*);
-    void computeStylesUsingTestRendering(Node*);
-    void removeUnrenderedNodes(Node*);
-    void restoreTestRenderingNodesToFragment(Node*);
-    int renderedBlocks(Node*);
-    void removeStyleNodes();
-
-    Node* enclosingBlock(Node*) const;
-    void removeNodePreservingChildren(Node*);
-    void insertNodeBefore(Node* node, Node* refNode);
-
-    RefPtr<Document> m_document;
-    RefPtr<DocumentFragment> m_fragment;
-    RenderingInfoMap m_renderingInfo;
-    NodeVector m_nodes;
-    bool m_matchStyle;
-    bool m_hasInterchangeNewlineAtStart;
-    bool m_hasInterchangeNewlineAtEnd;
-    bool m_hasMoreThanOneBlock;
-};
-
-class ReplaceSelectionCommand : public CompositeEditCommand
-{
-public:
-    ReplaceSelectionCommand(Document *document, DocumentFragment *fragment, bool selectReplacement=true, bool smartReplace=false, bool matchStyle=false, bool forceMergeStart=false, EditAction action=EditActionPaste);
-    virtual ~ReplaceSelectionCommand();
-    
     virtual void doApply();
     virtual EditAction editingAction() const;
 
-private:
-    void completeHTMLReplacement(const Position &lastPositionToSelect);
+    void completeHTMLReplacement(const Position& lastPositionToSelect);
 
-    void insertNodeAfterAndUpdateNodesInserted(Node *insertChild, Node *refChild);
-    void insertNodeAtAndUpdateNodesInserted(Node *insertChild, Node *refChild, int offset);
-    void insertNodeBeforeAndUpdateNodesInserted(Node *insertChild, Node *refChild);
+    void insertNodeAfterAndUpdateNodesInserted(PassRefPtr<Node> insertChild, Node* refChild);
+    void insertNodeAtAndUpdateNodesInserted(PassRefPtr<Node>, const Position&);
+    void insertNodeBeforeAndUpdateNodesInserted(PassRefPtr<Node> insertChild, Node* refChild);
 
-    void updateNodesInserted(Node *);
-    void fixupNodeStyles(const NodeVector&, const RenderingInfoMap&);
-    bool shouldRemoveEndBR(Node*);
+    void updateNodesInserted(Node*);
+    bool shouldRemoveEndBR(Node*, const VisiblePosition&);
     
-    bool shouldMergeStart(const ReplacementFragment&, const Selection&);
-    bool shouldMergeEnd(const VisiblePosition&, bool selectionEndWasEndOfParagraph);
+    bool shouldMergeStart(bool, bool);
+    bool shouldMergeEnd(bool selectEndWasEndOfParagraph);
+    bool shouldMerge(const VisiblePosition&, const VisiblePosition&);
+    
+    void mergeEndIfNeeded();
+    
+    void removeUnrenderedTextNodesAtEnds();
+    
+    void negateStyleRulesThatAffectAppearance();
+    void handleStyleSpans();
+    void handlePasteAsQuotationNode();
+    
+    virtual void removeNodePreservingChildren(Node*);
+    virtual void removeNodeAndPruneAncestors(Node*);
+    
+    VisiblePosition positionAtStartOfInsertedContent();
+    VisiblePosition positionAtEndOfInsertedContent();
+    
+    bool performTrivialReplace(const ReplacementFragment&);
 
     RefPtr<Node> m_firstNodeInserted;
-    RefPtr<Node> m_lastNodeInserted;
-    RefPtr<Node> m_lastTopNodeInserted;
+    RefPtr<Node> m_lastLeafInserted;
     RefPtr<CSSMutableStyleDeclaration> m_insertionStyle;
     bool m_selectReplacement;
     bool m_smartReplace;
     bool m_matchStyle;
     RefPtr<DocumentFragment> m_documentFragment;
-    bool m_forceMergeStart;
+    bool m_preventNesting;
+    bool m_movingParagraph;
     EditAction m_editAction;
+    bool m_shouldMergeEnd;
 };
 
 } // namespace WebCore
 
-#endif // __replace_selection_command_h__
+#endif // ReplaceSelectionCommand_h

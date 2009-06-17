@@ -1,7 +1,7 @@
 /*
  * This file is part of the WebKit project.
  *
- * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2006, 2008 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,13 +15,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef RenderThemeWin_H
-#define RenderThemeWin_H
+#ifndef RenderThemeWin_h
+#define RenderThemeWin_h
 
 #include "RenderTheme.h"
 
@@ -34,24 +34,37 @@ typedef HINSTANCE HMODULE;
 namespace WebCore {
 
 struct ThemeData {
-    ThemeData() :m_part(0), m_state(0) {}
+    ThemeData() :m_part(0), m_state(0), m_classicState(0) {}
+    ThemeData(int part, int state)
+        : m_part(part)
+        , m_state(state)
+        , m_classicState(0)
+    { }
 
     unsigned m_part;
     unsigned m_state;
+    unsigned m_classicState;
 };
 
 class RenderThemeWin : public RenderTheme {
 public:
     RenderThemeWin();
     ~RenderThemeWin();
-       
+
+    virtual String extraDefaultStyleSheet();
+    virtual String extraQuirksStyleSheet();
+
     // A method asking if the theme's controls actually care about redrawing when hovered.
-    virtual bool supportsHover(const RenderStyle*) const { return true; }
+    virtual bool supportsHover(const RenderStyle*) const;
 
     virtual Color platformActiveSelectionBackgroundColor() const;
     virtual Color platformInactiveSelectionBackgroundColor() const;
     virtual Color platformActiveSelectionForegroundColor() const;
     virtual Color platformInactiveSelectionForegroundColor() const;
+
+    // System fonts.
+    virtual void systemFont(int propId, FontDescription&) const;
+    virtual Color systemColor(int cssValueId) const;
 
     virtual bool paintCheckbox(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
     { return paintButton(o, i, r); }
@@ -59,33 +72,76 @@ public:
 
     virtual bool paintRadio(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
     { return paintButton(o, i, r); }
-    virtual void setRadioSize(RenderStyle*) const;
+    virtual void setRadioSize(RenderStyle* style) const
+    { return setCheckboxSize(style); }
 
-    virtual void adjustButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
     virtual bool paintButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
 
-    virtual void adjustTextFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
     virtual bool paintTextField(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
 
-    virtual void adjustTextAreaStyle(CSSStyleSelector*, RenderStyle*, WebCore::Element*) const;
-    virtual bool paintTextArea(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+    virtual bool paintTextArea(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+    { return paintTextField(o, i, r); }
 
+    virtual void adjustMenuListStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const;
     virtual bool paintMenuList(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
-    virtual void adjustMenuListStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
-    virtual RenderPopupMenu* createPopupMenu(RenderArena*, Document*, RenderMenuList*);
+    virtual void adjustMenuListButtonStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const;
+
+    virtual bool paintMenuListButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+
+    virtual bool paintSliderTrack(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r);
+    virtual bool paintSliderThumb(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r);
+    virtual void adjustSliderThumbSize(RenderObject*) const;
+
+    virtual void adjustButtonInnerStyle(RenderStyle*) const;
+
+    virtual void adjustSearchFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual bool paintSearchField(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+
+    virtual void adjustSearchFieldCancelButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual bool paintSearchFieldCancelButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+
+    virtual void adjustSearchFieldDecorationStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual bool paintSearchFieldDecoration(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return false; }
+
+    virtual void adjustSearchFieldResultsDecorationStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual bool paintSearchFieldResultsDecoration(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+
+    virtual void adjustSearchFieldResultsButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual bool paintSearchFieldResultsButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+
+    virtual void themeChanged();
+
+    virtual void adjustButtonStyle(CSSStyleSelector*, RenderStyle* style, Element*) const {}
+    virtual void adjustTextFieldStyle(CSSStyleSelector*, RenderStyle* style, Element*) const {}
+    virtual void adjustTextAreaStyle(CSSStyleSelector*, RenderStyle* style, Element*) const {}
+
+    static void setWebKitIsBeingUnloaded();
+
+    virtual bool supportsFocusRing(const RenderStyle*) const;
 
 private:
     void addIntrinsicMargins(RenderStyle*) const;
     void close();
 
     unsigned determineState(RenderObject*);
-    bool supportsFocus(EAppearance);
+    unsigned determineClassicState(RenderObject*);
+    unsigned determineSliderThumbState(RenderObject*);
+    unsigned determineButtonState(RenderObject*);
+
+    bool supportsFocus(ControlPart) const;
 
     ThemeData getThemeData(RenderObject*);
-    
-    HMODULE m_themeDLL;
+    ThemeData getClassicThemeData(RenderObject* o);
+
+    HANDLE buttonTheme() const;
+    HANDLE textFieldTheme() const;
+    HANDLE menuListTheme() const;
+    HANDLE sliderTheme() const;
+
     mutable HANDLE m_buttonTheme;
     mutable HANDLE m_textFieldTheme;
+    mutable HANDLE m_menuListTheme;
+    mutable HANDLE m_sliderTheme;
 };
 
 };

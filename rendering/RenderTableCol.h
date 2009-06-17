@@ -7,6 +7,7 @@
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,12 +21,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderTableCol_H
-#define RenderTableCol_H
+#ifndef RenderTableCol_h
+#define RenderTableCol_h
 
 #include "RenderContainer.h"
 
@@ -38,16 +39,15 @@ public:
 
     virtual const char* renderName() const { return "RenderTableCol"; }
     virtual bool isTableCol() const { return true; }
-    virtual short lineHeight(bool) const { return 0; }
+    virtual int lineHeight(bool) const { return 0; }
     virtual void updateFromElement();
-    
+
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
     virtual bool canHaveChildren() const;
-    virtual bool requiresLayer() { return false; }
+    virtual bool requiresLayer() const { return false; }
 
-#ifndef NDEBUG
-    virtual void dump(TextStream*, DeprecatedString) const;
-#endif
+    virtual IntRect clippedOverflowRectForRepaint(RenderBox* repaintContainer);
+    virtual void imageChanged(WrappedImagePtr, const IntRect* = 0);
 
     int span() const { return m_span; }
     void setSpan(int s) { m_span = s; }

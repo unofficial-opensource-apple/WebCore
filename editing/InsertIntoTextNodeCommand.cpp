@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,46 +29,29 @@
 #include "Text.h"
 #include "RenderText.h"
 
-#define SHOULD_MAKE_LAST_CHARACTER_INSECURE 0
-
 namespace WebCore {
 
-InsertIntoTextNodeCommand::InsertIntoTextNodeCommand(Document *document, Text *node, int offset, const String &text)
-    : EditCommand(document), m_node(node), m_offset(offset)
+InsertIntoTextNodeCommand::InsertIntoTextNodeCommand(PassRefPtr<Text> node, unsigned offset, const String& text)
+    : SimpleEditCommand(node->document())
+    , m_node(node)
+    , m_offset(offset)
+    , m_text(text)
 {
     ASSERT(m_node);
-    ASSERT(m_offset >= 0);
-    ASSERT(!text.isEmpty());
-    
-    m_text = text.copy(); // make a copy to ensure that the string never changes
+    ASSERT(m_offset <= m_node->length());
+    ASSERT(!m_text.isEmpty());
 }
 
 void InsertIntoTextNodeCommand::doApply()
 {
-    ASSERT(m_node);
-    ASSERT(m_offset >= 0);
-    ASSERT(!m_text.isEmpty());
-
-    ExceptionCode ec = 0;
-#if SHOULD_MAKE_LAST_CHARACTER_INSECURE
-    RenderText::makeLastCharacterInsecure();
-#endif
+    ExceptionCode ec;
     m_node->insertData(m_offset, m_text, ec);
-#if SHOULD_MAKE_LAST_CHARACTER_INSECURE
-    RenderText::makeLastCharacterSecure();
-#endif
-    ASSERT(ec == 0);
 }
 
 void InsertIntoTextNodeCommand::doUnapply()
 {
-    ASSERT(m_node);
-    ASSERT(m_offset >= 0);
-    ASSERT(!m_text.isEmpty());
-
-    ExceptionCode ec = 0;
+    ExceptionCode ec;
     m_node->deleteData(m_offset, m_text.length(), ec);
-    ASSERT(ec == 0);
 }
 
 } // namespace WebCore

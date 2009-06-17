@@ -1,4 +1,3 @@
-// -*- c-basic-offset: 4 -*-
 /*
  * Copyright (C) 2006 Apple Computer, Inc.
  *
@@ -14,8 +13,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
@@ -23,24 +22,15 @@
 
 #include "Frame.h"
 #include "Page.h"
-#include <wtf/Vector.h>
+#include "PageGroup.h"
 #include <stdarg.h>
+#include <wtf/Platform.h>
+#include <wtf/StringExtras.h>
+#include <wtf/Vector.h>
 
 using std::swap;
 
 namespace WebCore {
-
-// This belongs in some header file where multiple clients can share it.
-#if WIN32
-int snprintf(char* str, size_t size, const char* format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    int result = vsnprintf_s(str, size, _TRUNCATE, format, args);
-    va_end(args);
-    return result;
-}
-#endif
 
 FrameTree::~FrameTree()
 {
@@ -58,8 +48,21 @@ void FrameTree::setName(const AtomicString& name)
     m_name = parent()->tree()->uniqueChildName(name);
 }
 
+void FrameTree::clearName()
+{
+    m_name = AtomicString();
+}
+
+Frame* FrameTree::parent(bool checkForDisconnectedFrame) const 
+{ 
+    if (checkForDisconnectedFrame && m_thisFrame->isDisconnected())
+        return 0;
+    return m_parent;
+}
+
 void FrameTree::appendChild(PassRefPtr<Frame> child)
 {
+    ASSERT(child->page() == m_thisFrame->page());
     child->tree()->m_parent = m_thisFrame;
 
     Frame* oldLast = m_lastChild;
@@ -80,7 +83,7 @@ void FrameTree::removeChild(Frame* child)
 {
     child->tree()->m_parent = 0;
     child->setView(0);
-    if (child->ownerElement() && child->page())
+    if (child->ownerElement())
         child->page()->decrementFrameCount();
     child->pageDestroyed();
 
@@ -91,7 +94,8 @@ void FrameTree::removeChild(Frame* child)
     RefPtr<Frame>& newLocationForNext = m_firstChild == child ? m_firstChild : child->tree()->m_previousSibling->tree()->m_nextSibling;
     Frame*& newLocationForPrevious = m_lastChild == child ? m_lastChild : child->tree()->m_nextSibling->tree()->m_previousSibling;
     swap(newLocationForNext, child->tree()->m_nextSibling);
-    swap(newLocationForPrevious, child->tree()->m_previousSibling);
+    // For some inexplicable reason, the following line does not compile without the explicit std:: namepsace
+    std::swap(newLocationForPrevious, child->tree()->m_previousSibling);
 
     child->tree()->m_previousSibling = 0;
     child->tree()->m_nextSibling = 0;
@@ -126,7 +130,7 @@ AtomicString FrameTree::uniqueChildName(const AtomicString& requestedName) const
     String name;
     name += framePathPrefix;
     if (frame)
-        name += frame->tree()->name().domString().substring(framePathPrefixLength,
+        name += frame->tree()->name().string().substring(framePathPrefixLength,
             frame->tree()->name().length() - framePathPrefixLength - framePathSuffixLength);
     for (int i = chain.size() - 1; i >= 0; --i) {
         frame = chain[i];
@@ -170,7 +174,7 @@ Frame* FrameTree::find(const AtomicString& name) const
         return m_thisFrame;
     
     if (name == "_top")
-        return m_thisFrame->page()->mainFrame();
+        return top();
     
     if (name == "_parent")
         return parent() ? parent() : m_thisFrame;
@@ -186,28 +190,37 @@ Frame* FrameTree::find(const AtomicString& name) const
 
     // Search the entire tree for this page next.
     Page* page = m_thisFrame->page();
+
+    // The frame could have been detached from the page, so check it.
+    if (!page)
+        return 0;
+
     for (Frame* frame = page->mainFrame(); frame; frame = frame->tree()->traverseNext())
         if (frame->tree()->name() == name)
             return frame;
 
-    // Search the entire tree for all other pages in this namespace.
-    const HashSet<Page*>* pages = page->frameNamespace();
-    if (pages) {
-        HashSet<Page*>::const_iterator end = pages->end();
-        for (HashSet<Page*>::const_iterator it = pages->begin(); it != end; ++it) {
-            Page* otherPage = *it;
-            if (otherPage != page)
-                for (Frame* frame = otherPage->mainFrame(); frame; frame = frame->tree()->traverseNext())
-                    if (frame->tree()->name() == name)
-                        return frame;
+    // Search the entire tree of each of the other pages in this namespace.
+    // FIXME: Is random order OK?
+    const HashSet<Page*>& pages = page->group().pages();
+    HashSet<Page*>::const_iterator end = pages.end();
+    for (HashSet<Page*>::const_iterator it = pages.begin(); it != end; ++it) {
+        Page* otherPage = *it;
+        if (otherPage != page) {
+            for (Frame* frame = otherPage->mainFrame(); frame; frame = frame->tree()->traverseNext()) {
+                if (frame->tree()->name() == name)
+                    return frame;
+            }
         }
     }
 
     return 0;
 }
 
-bool FrameTree::isDescendantOf(Frame* ancestor) const
+bool FrameTree::isDescendantOf(const Frame* ancestor) const
 {
+    if (!ancestor)
+        return false;
+
     if (m_thisFrame->page() != ancestor->page())
         return false;
 
@@ -217,7 +230,7 @@ bool FrameTree::isDescendantOf(Frame* ancestor) const
     return false;
 }
 
-Frame* FrameTree::traverseNext(Frame* stayWithin) const
+Frame* FrameTree::traverseNext(const Frame* stayWithin) const
 {
     Frame* child = firstChild();
     if (child) {
@@ -287,4 +300,15 @@ Frame* FrameTree::deepLastChild() const
     return result;
 }
 
+Frame* FrameTree::top(bool checkForDisconnectedFrame) const
+{
+    Frame* frame = m_thisFrame;
+    for (Frame* parent = m_thisFrame; parent; parent = parent->tree()->parent()) {
+        frame = parent;
+        if (checkForDisconnectedFrame && frame->isDisconnected())
+            return frame;
+    }
+    return frame;
 }
+
+} // namespace WebCore

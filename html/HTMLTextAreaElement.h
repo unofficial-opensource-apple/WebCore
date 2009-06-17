@@ -1,10 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,40 +16,41 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTML_HTMLTextAreaElementImpl_H
-#define HTML_HTMLTextAreaElementImpl_H
+#ifndef HTMLTextAreaElement_h
+#define HTMLTextAreaElement_h
 
-#include "HTMLGenericFormElement.h"
+#include "HTMLFormControlElement.h"
 
 namespace WebCore {
 
-class HTMLTextAreaElement : public HTMLGenericFormElement {
-public:
-    enum WrapMethod { ta_NoWrap, ta_Virtual, ta_Physical };
+class Selection;
 
-    HTMLTextAreaElement(Document*, HTMLFormElement* = 0);
-    ~HTMLTextAreaElement();
+class HTMLTextAreaElement : public HTMLFormControlElementWithState {
+public:
+    HTMLTextAreaElement(const QualifiedName&, Document*, HTMLFormElement* = 0);
 
     virtual bool checkDTD(const Node* newChild) { return newChild->isTextNode(); }
 
     int cols() const { return m_cols; }
     int rows() const { return m_rows; }
 
-    WrapMethod wrap() const { return m_wrap; }
+    bool shouldWrapText() const { return m_wrap != NoWrap; }
 
     virtual bool isEnumeratable() const { return true; }
 
     virtual const AtomicString& type() const;
 
-    virtual String stateValue() const;
+    virtual bool saveState(String& value) const;
     virtual void restoreState(const String&);
 
     bool readOnly() const { return isReadOnlyControl(); }
+
+    virtual bool isTextControl() const { return true; }
 
     int selectionStart();
     int selectionEnd();
@@ -62,16 +61,15 @@ public:
     void select();
     void setSelectionRange(int, int);
 
-    virtual void childrenChanged();
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
     virtual void parseMappedAttribute(MappedAttribute*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     virtual bool appendFormData(FormDataList&, bool);
     virtual void reset();
     virtual void defaultEventHandler(Event*);
     virtual bool isMouseFocusable() const;
-    virtual bool isKeyboardFocusable() const;
-    virtual void focus();
-    virtual void updateFocusAppearance();
+    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
+    virtual void updateFocusAppearance(bool restorePreviousSelection);
 
     String value() const;
     void setValue(const String&);
@@ -82,25 +80,30 @@ public:
     
     virtual void accessKeyAction(bool sendToAnyElement);
     
-    String accessKey() const;
+    const AtomicString& accessKey() const;
     void setAccessKey(const String&);
 
     void setCols(int);
     void setRows(int);
     
-    void cacheSelection(int s, int e) { cachedSelStart = s; cachedSelEnd = e; };
+    void cacheSelection(int s, int e) { m_cachedSelectionStart = s; m_cachedSelectionEnd = e; };
+    Selection selection() const;
 
     virtual bool willRespondToMouseClickEvents();
 
+    virtual bool shouldUseInputMethod() const;
+
 private:
+    enum WrapMethod { NoWrap, SoftWrap, HardWrap };
+
     void updateValue() const;
 
     int m_rows;
     int m_cols;
     WrapMethod m_wrap;
     mutable String m_value;
-    int cachedSelStart;
-    int cachedSelEnd;
+    int m_cachedSelectionStart;
+    int m_cachedSelectionEnd;
 };
 
 } //namespace

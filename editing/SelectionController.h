@@ -29,6 +29,7 @@
 #include "IntRect.h"
 #include "Selection.h"
 #include "Range.h"
+#include <wtf/Noncopyable.h>
 
 namespace WebCore {
 
@@ -37,150 +38,164 @@ class GraphicsContext;
 class RenderObject;
 class VisiblePosition;
 
-class SelectionController
-{
+class SelectionController : Noncopyable {
 public:
-    enum EAlter { MOVE, EXTEND };
+    enum EAlteration { MOVE, EXTEND };
     enum EDirection { FORWARD, BACKWARD, RIGHT, LEFT };
-#define SEL_DEFAULT_AFFINITY DOWNSTREAM
 
-    SelectionController();
-    SelectionController(const Selection&);
-    SelectionController(const Range*, EAffinity);
-    SelectionController(const VisiblePosition&);
-    SelectionController(const VisiblePosition&, const VisiblePosition&);
-    SelectionController(const Position&, EAffinity);
-    SelectionController(const Position&, const Position&, EAffinity);
-    SelectionController(const SelectionController&);
-    
-    SelectionController& operator=(const SelectionController&);
-    SelectionController& operator=(const VisiblePosition& r) { moveTo(r); return *this; }
+    SelectionController(Frame* = 0, bool isDragCaretController = false);
 
-    Element* rootEditableElement() const { return selection().rootEditableElement(); }
-    bool isContentEditable() const { return selection().isContentEditable(); }
-    bool isContentRichlyEditable() const { return selection().isContentRichlyEditable(); }
-
-    void moveTo(const Range*, EAffinity);
-    void moveTo(const VisiblePosition&);
-    void moveTo(const VisiblePosition&, const VisiblePosition&);
-    void moveTo(const Position&, EAffinity);
-    void moveTo(const Position&, const Position&, EAffinity);
-    void moveTo(const SelectionController&);
+    Element* rootEditableElement() const { return m_sel.rootEditableElement(); }
+    bool isContentEditable() const { return m_sel.isContentEditable(); }
+    bool isContentRichlyEditable() const { return m_sel.isContentRichlyEditable(); }
+    Node* shadowTreeRootNode() const { return m_sel.shadowTreeRootNode(); }
+     
+    void moveTo(const Range*, EAffinity, bool userTriggered = false);
+    void moveTo(const VisiblePosition&, bool userTriggered = false);
+    void moveTo(const VisiblePosition&, const VisiblePosition&, bool userTriggered = false);
+    void moveTo(const Position&, EAffinity, bool userTriggered = false);
+    void moveTo(const Position&, const Position&, EAffinity, bool userTriggered = false);
 
     const Selection& selection() const { return m_sel; }
-    void setSelection(const Selection&);
+    void setSelection(const Selection&, bool closeTyping = true, bool clearTypingStyle = true, bool userTriggered = false);
+    bool setSelectedRange(Range*, EAffinity, bool closeTyping);
+    void selectAll();
+    void clear();
+    
+    // Call this after doing user-triggered selections to make it easy to delete the frame you entirely selected.
+    void selectFrameElementInParentIfFullySelected();
+
+    bool contains(const IntPoint&);
 
     Selection::EState state() const { return m_sel.state(); }
 
     EAffinity affinity() const { return m_sel.affinity(); }
 
-    bool modify(EAlter, EDirection, TextGranularity);
-    bool modify(EAlter, int verticalDistance);
+    bool modify(EAlteration, EDirection, TextGranularity, bool userTriggered = false);
+    bool modify(EAlteration, int verticalDistance, bool userTriggered = false);
     bool expandUsingGranularity(TextGranularity);
 
-    void clear();
-
-    void setBase(const VisiblePosition& );
-    void setBase(const Position&, EAffinity);
-    void setExtent(const VisiblePosition&);
-    void setExtent(const Position&, EAffinity);
+    void setBase(const VisiblePosition&, bool userTriggered = false);
+    void setBase(const Position&, EAffinity, bool userTriggered = false);
+    void setExtent(const VisiblePosition&, bool userTriggered = false);
+    void setExtent(const Position&, EAffinity, bool userTriggered = false);
 
     Position base() const { return m_sel.base(); }
     Position extent() const { return m_sel.extent(); }
     Position start() const { return m_sel.start(); }
     Position end() const { return m_sel.end(); }
 
-    IntRect caretRect() const;
+    // Return the renderer that is responsible for painting the caret (in the selection start node)
+    RenderObject* caretRenderer() const;
+
+    // Caret rect local to the caret's renderer
+    IntRect localCaretRect() const;
+    // Bounds of (possibly transformed) caret in absolute coords
+    IntRect absoluteCaretBounds();
     void setNeedsLayout(bool flag = true);
 
-    void clearModifyBias() { m_modifyBiasSet = false; }
-    void setModifyBias(EAlter, EDirection);
+    void setLastChangeWasHorizontalExtension(bool b) { m_lastChangeWasHorizontalExtension = b; }
+    void willBeModified(EAlteration, EDirection);
     
     bool isNone() const { return m_sel.isNone(); }
     bool isCaret() const { return m_sel.isCaret(); }
     bool isRange() const { return m_sel.isRange(); }
     bool isCaretOrRange() const { return m_sel.isCaretOrRange(); }
-
+    bool isInPasswordField() const;
+    
     PassRefPtr<Range> toRange() const { return m_sel.toRange(); }
 
     void debugRenderer(RenderObject*, bool selected) const;
     
-    Frame* frame() const;
-    
     void nodeWillBeRemoved(Node*);
 
-    // Safari Selection Object API
-    Node* baseNode() const { return m_sel.base().node(); }
-    Node* extentNode() const { return m_sel.extent().node(); }
-    int baseOffset() const { return m_sel.base().offset(); }
-    int extentOffset() const { return m_sel.extent().offset(); }
-    String type() const;
-    void setBaseAndExtent(Node* baseNode, int baseOffset, Node* extentNode, int extentOffset);
-    void setPosition(Node*, int offset);
-    bool modify(const String& alterString, const String& directionString, const String& granularityString);
-    
-    // Mozilla Selection Object API
-    // In FireFox, anchor/focus are the equal to the start/end of the selection,
-    // but reflect the direction in which the selection was made by the user.  That does
-    // not mean that they are base/extent, since the base/extent don't reflect
-    // expansion.
-    Node* anchorNode() const { return m_sel.isBaseFirst() ? m_sel.start().node() : m_sel.end().node(); }
-    int anchorOffset() const { return m_sel.isBaseFirst() ? m_sel.start().offset() : m_sel.end().offset(); }
-    Node* focusNode() const { return m_sel.isBaseFirst() ? m_sel.end().node() : m_sel.start().node(); }
-    int focusOffset() const { return m_sel.isBaseFirst() ? m_sel.end().offset() : m_sel.start().offset(); }
-    bool isCollapsed() const { return !isRange(); }
-    String toString() const;
-    void collapse(Node*, int offset);
-    void collapseToEnd();
-    void collapseToStart();
-    void extend(Node*, int offset);
-    PassRefPtr<Range> getRangeAt(int index) const;
-    //void deleteFromDocument();
-    //bool containsNode(Node *node, bool entirelyContained);
-    //int rangeCount() const;
-    //void addRange(const Range *);
-    //void selectAllChildren(const Node *);
-    //void removeRange(const Range *);
-    //void removeAllRanges();
-    
-    // Microsoft Selection Object API
-    void empty();
-    //void clear();
-    //TextRange *createRange();
-    
-    void needsCaretRepaint();
-    void paintCaret(GraphicsContext*, const IntRect &rect);
+    bool recomputeCaretRect(); // returns true if caret rect moved
+    void invalidateCaretRect();
+    void paintCaret(GraphicsContext*, int tx, int ty, const IntRect& clipRect);
+
+    // Used to suspend caret blinking while the mouse is down.
+    void setCaretBlinkingSuspended(bool suspended) { m_isCaretBlinkingSuspended = suspended; }
+    bool isCaretBlinkingSuspended() const { return m_isCaretBlinkingSuspended; }
+
+    // Focus
+    void setFocused(bool);
+    bool isFocusedAndActive() const;
+    void pageActivationChanged();
 
 #ifndef NDEBUG
     void formatForDebugger(char* buffer, unsigned length) const;
     void showTreeForThis() const;
 #endif
+    
+public:
+    void expandSelectionToElementContainingCaretSelection();
+    PassRefPtr<Range> elementRangeContainingCaretSelection() const;
+    void expandSelectionToWordContainingCaretSelection();
+    PassRefPtr<Range> wordRangeContainingCaretSelection();
+    void expandSelectionToStartOfWordContainingCaretSelection();
+    UChar characterInRelationToCaretSelection(int amount) const;
+    UChar characterBeforeCaretSelection() const;
+    UChar characterAfterCaretSelection() const;
+    int wordOffsetInRange(const Range *range) const;
+    bool spaceFollowsWordInRange(const Range * range) const;
+    bool selectionAtDocumentStart() const;
+    bool selectionAtSentenceStart() const;
+    bool selectionAtWordStart() const;
+    bool rangeAtSentenceStart(const Range *range) const;
+    PassRefPtr<Range> rangeByMovingCurrentSelection(int amount) const;
+    PassRefPtr<Range> rangeByExtendingCurrentSelection(int amount) const;
+    void selectRangeOnElement(unsigned int location, unsigned int length, Node* node);
+    bool selectionIsCaretInDisplayBlockElementAtOffset(int offset) const;
+    void suppressCloseTyping() { ++m_closeTypingSuppressions; }
+    void restoreCloseTyping() { --m_closeTypingSuppressions; }
+private:
+    static Selection wordSelectionContainingCaretSelection(const Selection&);
+    bool _selectionAtSentenceStart(const Selection& sel) const;
+    PassRefPtr<Range> _rangeByAlteringCurrentSelection(EAlteration alteration, int amount) const;
 
 private:
     enum EPositionType { START, END, BASE, EXTENT };
 
     VisiblePosition modifyExtendingRightForward(TextGranularity);
-    VisiblePosition modifyMovingRightForward(TextGranularity);
+    VisiblePosition modifyMovingRight(TextGranularity);
+    VisiblePosition modifyMovingForward(TextGranularity);
     VisiblePosition modifyExtendingLeftBackward(TextGranularity);
-    VisiblePosition modifyMovingLeftBackward(TextGranularity);
+    VisiblePosition modifyMovingLeft(TextGranularity);
+    VisiblePosition modifyMovingBackward(TextGranularity);
 
     void layout();
     IntRect caretRepaintRect() const;
 
-    int xPosForVerticalArrowNavigation(EPositionType, bool recalc = false) const;
+    int xPosForVerticalArrowNavigation(EPositionType);
+    
+#if PLATFORM(MAC)
+    void notifyAccessibilityForSelectionChange();
+#else
+    void notifyAccessibilityForSelectionChange() {};
+#endif
+
+    void focusedOrActiveStateChanged();
+    bool caretRendersInsideNode(Node*) const;
+    
+    IntRect absoluteBoundsForLocalRect(const IntRect&) const;
+
+    Frame* m_frame;
+    int m_xPosForVerticalArrowNavigation;
 
     Selection m_sel;
 
-    IntRect m_caretRect;            // caret coordinates, size, and position
-    
-    // m_caretPositionOnLayout stores the scroll offset on the previous call to SelectionController::layout().
-    // When asked for caretRect(), we correct m_caretRect for offset due to scrolling since the last layout().
-    // This is faster than doing another layout().
-    IntPoint m_caretPositionOnLayout;
+    IntRect m_caretRect;        // caret rect in coords local to the renderer responsible for painting the caret
+    IntRect m_absCaretBounds;   // absolute bounding rect for the caret
+    IntRect m_absoluteCaretRepaintBounds;
     
     bool m_needsLayout : 1;       // true if the caret and expectedVisible rectangles need to be calculated
-    bool m_modifyBiasSet : 1;     // true if the selection has been horizontally 
-                                  // modified with EAlter::EXTEND
+    bool m_absCaretBoundsDirty: 1;
+    bool m_lastChangeWasHorizontalExtension : 1;
+    bool m_isDragCaretController : 1;
+    bool m_isCaretBlinkingSuspended : 1;
+    bool m_focused : 1;
+
+    int m_closeTypingSuppressions;
 };
 
 inline bool operator==(const SelectionController& a, const SelectionController& b)

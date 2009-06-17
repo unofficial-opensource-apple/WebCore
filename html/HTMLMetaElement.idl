@@ -13,17 +13,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 module html {
 
-    interface [LegacyParent=KJS::JSHTMLElement] HTMLMetaElement : HTMLElement {
-        attribute  DOMString    content;
-        attribute  DOMString    httpEquiv;
-        attribute  DOMString    name;
-        attribute  DOMString    scheme;
+    interface [
+        GenerateConstructor,
+        InterfaceUUID=65e3374d-4789-4c81-983b-1b5a29d2c075,
+        ImplementationUUID=a9ac9c73-055d-4c00-bd02-1fa215ae32f1
+    ] HTMLMetaElement : HTMLElement {
+        attribute  [ConvertNullToNullString] DOMString    content;
+        attribute  [ConvertNullToNullString] DOMString    httpEquiv;
+        attribute  [ConvertNullToNullString] DOMString    name;
+        attribute  [ConvertNullToNullString] DOMString    scheme;
     };
 
 }

@@ -2,7 +2,7 @@
  * This file is part of the DOM implementation for KDE.
  *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,20 +16,43 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "CSSValueList.h"
 
+#include "CSSParserValues.h"
 #include "PlatformString.h"
 
 namespace WebCore {
 
+CSSValueList::CSSValueList(bool isSpaceSeparated)
+    : m_isSpaceSeparated(isSpaceSeparated)
+{
+}
+
+CSSValueList::CSSValueList(CSSParserValueList* list)
+    : m_isSpaceSeparated(true)
+{
+    if (list) {
+        unsigned s = list->size();
+        for (unsigned i = 0; i < s; ++i) {
+            CSSParserValue* v = list->valueAt(i);
+            append(v->createCSSValue());
+        }
+    }
+}
+
 CSSValueList::~CSSValueList()
 {
-    for (CSSValue *val = m_values.first(); val; val = m_values.next())
-        val->deref();
+}
+
+CSSValue* CSSValueList::item(unsigned index)
+{
+    if (index >= m_values.size())
+        return 0;
+    return m_values[index].get();
 }
 
 unsigned short CSSValueList::cssValueType() const
@@ -39,20 +62,48 @@ unsigned short CSSValueList::cssValueType() const
 
 void CSSValueList::append(PassRefPtr<CSSValue> val)
 {
-    m_values.append(val.release());
+    m_values.append(val);
+}
+
+void CSSValueList::prepend(PassRefPtr<CSSValue> val)
+{
+    m_values.prepend(val);
 }
 
 String CSSValueList::cssText() const
 {
     String result = "";
 
-    for (DeprecatedPtrListIterator<CSSValue> iterator(m_values); iterator.current(); ++iterator) {
-        if (!result.isEmpty())
-            result += ", ";
-        result += iterator.current()->cssText();
+    unsigned size = m_values.size();
+    for (unsigned i = 0; i < size; i++) {
+        if (!result.isEmpty()) {
+            if (m_isSpaceSeparated)
+                result += " ";
+            else
+                result += ", ";
+        }
+        result += m_values[i]->cssText();
     }
-    
+
     return result;
 }
 
+CSSParserValueList* CSSValueList::createParserValueList() const
+{
+    unsigned s = m_values.size();
+    if (!s)
+        return 0;
+    CSSParserValueList* result = new CSSParserValueList;
+    for (unsigned i = 0; i < s; ++i)
+        result->addValue(m_values[i]->parserValue());
+    return result;
 }
+
+void CSSValueList::addSubresourceStyleURLs(ListHashSet<KURL>& urls, const CSSStyleSheet* styleSheet)
+{
+    size_t size = m_values.size();
+    for (size_t i = 0; i < size; ++i)
+        m_values[i]->addSubresourceStyleURLs(urls, styleSheet);
+}
+
+} // namespace WebCore

@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  * Copyright (C) 2004 Apple Computer, Inc.
@@ -17,22 +15,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLMapElement_H
-#define HTMLMapElement_H
+#ifndef HTMLMapElement_h
+#define HTMLMapElement_h
 
 #include "HTMLElement.h"
-#include "RenderObject.h" // for RenderObject::NodeInfo
 
 namespace WebCore {
 
+class IntSize;
+class HitTestResult;
+
 class HTMLMapElement : public HTMLElement {
 public:
-    HTMLMapElement(Document*);
+    HTMLMapElement(const QualifiedName&, Document*);
     ~HTMLMapElement();
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
@@ -43,7 +43,7 @@ public:
 
     virtual void parseMappedAttribute(MappedAttribute*);
 
-    bool mapMouseEvent(int x, int y, const IntSize&, RenderObject::NodeInfo&);
+    bool mapMouseEvent(int x, int y, const IntSize&, HitTestResult&);
 
     PassRefPtr<HTMLCollection> areas();
 

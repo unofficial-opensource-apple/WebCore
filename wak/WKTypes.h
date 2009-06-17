@@ -11,7 +11,6 @@ typedef struct _WKObject WKObject;
 typedef struct _WKObject *WKObjectRef;
 typedef struct WKControl* WKControlRef;
 typedef struct WKClipView* WKClipViewRef;
-typedef struct WKScrollerView* WKScrollerViewRef;
 typedef struct WKScrollView* WKScrollViewRef;
 typedef struct WKWindow* WKWindowRef;
 typedef struct WKView* WKViewRef;

@@ -1,10 +1,8 @@
 /*
-    This file is part of the KDE libraries
-
     Copyright (C) 1998 Lars Knoll (knoll@mpi-hd.mpg.de)
     Copyright (C) 2001 Dirk Mueller (mueller@kde.org)
     Copyright (C) 2002 Waldo Bastian (bastian@kde.org)
-    Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+    Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -18,8 +16,8 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
-    Boston, MA 02111-1307, USA.
+    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301, USA.
 
     This class provides all functionality needed for loading images, style sheets and html
     pages from the web. It has a memory cache for these objects.
@@ -30,14 +28,14 @@
 
 namespace WebCore {
 
-CachedResourceClientWalker::CachedResourceClientWalker(const HashSet<CachedResourceClient*>& set)
+CachedResourceClientWalker::CachedResourceClientWalker(const HashCountedSet<CachedResourceClient*>& set)
     : m_clientSet(set), m_clientVector(set.size()), m_index(0)
 {
-    typedef HashSet<CachedResourceClient*>::const_iterator Iterator;
+    typedef HashCountedSet<CachedResourceClient*>::const_iterator Iterator;
     Iterator end = set.end();
     size_t clientIndex = 0;
     for (Iterator current = set.begin(); current != end; ++current)
-        m_clientVector[clientIndex++] = *current;
+        m_clientVector[clientIndex++] = current->first;
 }
 
 CachedResourceClient* CachedResourceClientWalker::next()

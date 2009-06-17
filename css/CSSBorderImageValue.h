@@ -1,8 +1,6 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,12 +14,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSBorderImageValue_H
-#define CSSBorderImageValue_H
+#ifndef CSSBorderImageValue_h
+#define CSSBorderImageValue_h
 
 #include "CSSValue.h"
 #include <wtf/PassRefPtr.h>
@@ -29,30 +27,36 @@
 
 namespace WebCore {
 
-class CSSImageValue;
-class RectImpl;
+class Rect;
 
-class CSSBorderImageValue : public CSSValue
-{
+class CSSBorderImageValue : public CSSValue {
 public:
-    CSSBorderImageValue();
-    CSSBorderImageValue(PassRefPtr<CSSImageValue>, PassRefPtr<RectImpl>, int horizontalRule, int verticalRule);
+    static PassRefPtr<CSSBorderImageValue> create(PassRefPtr<CSSValue> image, PassRefPtr<Rect> sliceRect, int horizontalRule, int verticalRule)
+    {
+        return adoptRef(new CSSBorderImageValue(image, sliceRect, horizontalRule, verticalRule));
+    }
 
     virtual String cssText() const;
 
-public:
+    CSSValue* imageValue() const { return m_image.get(); }
+
+    virtual void addSubresourceStyleURLs(ListHashSet<KURL>&, const CSSStyleSheet*);
+
     // The border image.
-    RefPtr<CSSImageValue> m_image;
+    RefPtr<CSSValue> m_image;
 
     // These four values are used to make "cuts" in the image.  They can be numbers
     // or percentages.
-    RefPtr<RectImpl> m_imageSliceRect;
-    
+    RefPtr<Rect> m_imageSliceRect;
+
     // Values for how to handle the scaling/stretching/tiling of the image slices.
     int m_horizontalSizeRule; // Rule for how to adjust the widths of the top/middle/bottom
     int m_verticalSizeRule; // Rule for how to adjust the heights of the left/middle/right
+
+private:
+    CSSBorderImageValue(PassRefPtr<CSSValue> image, PassRefPtr<Rect> sliceRect, int horizontalRule, int verticalRule);
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSBorderImageValue_h

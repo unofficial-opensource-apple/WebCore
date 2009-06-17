@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,30 +23,30 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef __insert_node_before_command_h__
-#define __insert_node_before_command_h__
+#ifndef InsertNodeBeforeCommand_h
+#define InsertNodeBeforeCommand_h
 
 #include "EditCommand.h"
 
 namespace WebCore {
 
-class InsertNodeBeforeCommand : public EditCommand
-{
+class InsertNodeBeforeCommand : public SimpleEditCommand {
 public:
-    InsertNodeBeforeCommand(Document *, Node *insertChild, Node *refChild);
-    virtual ~InsertNodeBeforeCommand() { }
+    static PassRefPtr<InsertNodeBeforeCommand> create(PassRefPtr<Node> childToInsert, PassRefPtr<Node> childToInsertBefore)
+    {
+        return adoptRef(new InsertNodeBeforeCommand(childToInsert, childToInsertBefore));
+    }
+
+private:
+    InsertNodeBeforeCommand(PassRefPtr<Node> childToInsert, PassRefPtr<Node> childToInsertBefore);
 
     virtual void doApply();
     virtual void doUnapply();
 
-    Node *insertChild() const { return m_insertChild.get(); }
-    Node *refChild() const { return m_refChild.get(); }
-
-private:
     RefPtr<Node> m_insertChild;
     RefPtr<Node> m_refChild; 
 };
 
 } // namespace WebCore
 
-#endif // __insert_node_before_command_h__
+#endif // InsertNodeBeforeCommand_h

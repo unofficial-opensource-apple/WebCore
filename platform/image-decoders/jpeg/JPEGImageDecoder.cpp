@@ -18,7 +18,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  *
  * Alternatively, the contents of this file may be used under the terms
  * of either the Mozilla Public License Version 1.1, found at
@@ -38,10 +38,33 @@
 #include "config.h"
 #include "JPEGImageDecoder.h"
 #include <assert.h>
+#include <stdio.h>
+
+#if PLATFORM(CAIRO) || PLATFORM(QT) || PLATFORM(WX)
+
+#if COMPILER(MSVC)
+// Remove warnings from warning level 4.
+#pragma warning(disable : 4611) // warning C4611: interaction between '_setjmp' and C++ object destruction is non-portable
+
+// if ADDRESS_TAG_BIT is dfined, INT32 has been declared as a typedef in the PlatformSDK (BaseTsd.h),
+// so we need to stop jpeglib.h from trying to #define it 
+// see here for more info: http://www.cygwin.com/ml/cygwin/2004-07/msg01051.html
+# if defined(ADDRESS_TAG_BIT) && !defined(XMD_H)
+#  define XMD_H
+#  define VTK_JPEG_XMD_H
+# endif
+#endif // COMPILER(MSVC)
 
 extern "C" {
 #include "jpeglib.h"
 }
+
+#if COMPILER(MSVC)
+# if defined(VTK_JPEG_XMD_H)
+#  undef VTK_JPEG_XMD_H
+#  undef XMD_H
+# endif
+#endif // COMPILER(MSVC)
 
 #include <setjmp.h>
 
@@ -98,7 +121,7 @@ public:
         /* Allocate and initialize JPEG decompression object */
         jpeg_create_decompress(&m_info);
   
-        decoder_source_mgr* src;
+        decoder_source_mgr* src = 0;
         if (!m_info.src) {
             src = (decoder_source_mgr*)fastCalloc(sizeof(decoder_source_mgr), 1);
             if (!src) {
@@ -126,7 +149,7 @@ public:
     void close() {
         decoder_source_mgr* src = (decoder_source_mgr*)m_info.src;
         if (src)
-            free(src);
+            fastFree(src);
         m_info.src = 0;
 
         jpeg_destroy_decompress(&m_info);
@@ -391,7 +414,7 @@ JPEGImageDecoder::~JPEGImageDecoder()
 }
 
 // Take the data and store it.
-void JPEGImageDecoder::setData(const Vector<char>& data, bool allDataReceived)
+void JPEGImageDecoder::setData(SharedBuffer* data, bool allDataReceived)
 {
     if (m_failed)
         return;
@@ -441,7 +464,7 @@ void JPEGImageDecoder::decode(bool sizeOnly) const
     if (m_failed)
         return;
 
-    m_failed = !m_reader->decode(m_data, sizeOnly);
+    m_failed = !m_reader->decode(m_data->buffer(), sizeOnly);
 
     if (m_failed || (!m_frameBufferCache.isEmpty() && m_frameBufferCache[0].status() == RGBA32Buffer::FrameComplete)) {
         delete m_reader;
@@ -504,3 +527,5 @@ void JPEGImageDecoder::jpegComplete()
 }
 
 }
+
+#endif // PLATFORM(CAIRO)

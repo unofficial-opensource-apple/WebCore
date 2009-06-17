@@ -1,9 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
+ * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,21 +16,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HTMLAnchorElement_H
-#define HTMLAnchorElement_H
+
+#ifndef HTMLAnchorElement_h
+#define HTMLAnchorElement_h
 
 #include "HTMLElement.h"
 
 namespace WebCore {
 
-class String;
-
-class HTMLAnchorElement : public HTMLElement
-{
+class HTMLAnchorElement : public HTMLElement {
 public:
     HTMLAnchorElement(Document*);
     HTMLAnchorElement(const QualifiedName&, Document*);
@@ -42,7 +39,7 @@ public:
 
     virtual bool supportsFocus() const;
     virtual bool isMouseFocusable() const;
-    virtual bool isKeyboardFocusable() const;
+    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
     virtual bool isFocusable() const;
     virtual void parseMappedAttribute(MappedAttribute*);
     virtual void defaultEventHandler(Event*);
@@ -50,41 +47,42 @@ public:
     virtual void accessKeyAction(bool fullAction);
     virtual bool isURLAttribute(Attribute*) const;
 
-    String accessKey() const;
-    void setAccessKey(const String&);
+    virtual bool canStartSelection() const;
 
-    String charset() const;
-    void setCharset(const String&);
+    const AtomicString& accessKey() const;
+    void setAccessKey(const AtomicString&);
 
-    String coords() const;
-    void setCoords(const String&);
+    const AtomicString& charset() const;
+    void setCharset(const AtomicString&);
 
-    String href() const;
-    void setHref(const String&);
+    const AtomicString& coords() const;
+    void setCoords(const AtomicString&);
 
-    String hreflang() const;
-    void setHreflang(const String&);
+    KURL href() const;
+    void setHref(const AtomicString&);
 
-    String name() const;
-    void setName(const String&);
+    const AtomicString& hreflang() const;
+    void setHreflang(const AtomicString&);
 
-    String rel() const;
-    void setRel(const String&);
+    const AtomicString& name() const;
+    void setName(const AtomicString&);
 
-    String rev() const;
-    void setRev(const String&);
+    const AtomicString& rel() const;
+    void setRel(const AtomicString&);
 
-    String shape() const;
-    void setShape(const String&);
+    const AtomicString& rev() const;
+    void setRev(const AtomicString&);
 
-    int tabIndex() const;
-    void setTabIndex(int);
+    const AtomicString& shape() const;
+    void setShape(const AtomicString&);
 
-    String target() const;
-    void setTarget(const String&);
+    virtual short tabIndex() const;
 
-    String type() const;
-    void setType(const String&);
+    virtual String target() const;
+    void setTarget(const AtomicString&);
+
+    const AtomicString& type() const;
+    void setType(const AtomicString&);
 
     String hash() const;
     String host() const;
@@ -95,12 +93,16 @@ public:
     String search() const;
     String text() const;
     
+    String toString() const;
+
+    bool isLiveLink() const;
     virtual bool willRespondToMouseClickEvents();
-    
-protected:
-    bool m_hasTarget : 1;
+
+private:
+    Element* m_rootEditableElementForSelectionOnMouseDown;
+    bool m_wasShiftKeyDownOnMouseDown;
 };
 
-} //namespace
+} // namespace WebCore
 
-#endif
+#endif // HTMLAnchorElement_h

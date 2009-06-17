@@ -17,12 +17,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HTMLTitleElement_H
-#define HTMLTitleElement_H
+#ifndef HTMLTitleElement_h
+#define HTMLTitleElement_h
 
 #include "HTMLElement.h"
 
@@ -31,14 +31,14 @@ namespace WebCore {
 class HTMLTitleElement : public HTMLElement
 {
 public:
-    HTMLTitleElement(Document*);
+    HTMLTitleElement(const QualifiedName&, Document*);
     ~HTMLTitleElement();
 
     virtual bool checkDTD(const Node* newChild) { return newChild->isTextNode(); }
 
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
-    virtual void childrenChanged();
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
     String text() const;
     void setText(const String&);

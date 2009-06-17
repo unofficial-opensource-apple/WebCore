@@ -16,12 +16,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSProperty_H
-#define CSSProperty_H
+#ifndef CSSProperty_h
+#define CSSProperty_h
 
 #include "CSSValue.h"
 #include <wtf/PassRefPtr.h>
@@ -39,19 +39,20 @@ public:
         , m_value(value)
     {
     }
-    
-    CSSProperty &operator=(const CSSProperty& o)
+
+    CSSProperty& operator=(const CSSProperty& other)
     {
-        m_id = o.m_id;
-        m_shorthandID = o.m_shorthandID;
-        m_important = o.m_important;
-        m_value = o.m_value;
+        m_id = other.m_id;
+        m_shorthandID = other.m_shorthandID;
+        m_important = other.m_important;
+        m_implicit = other.m_implicit;
+        m_value = other.m_value;
         return *this;
     }
-    
+
     int id() const { return m_id; }
     int shorthandID() const { return m_shorthandID; }
-    
+
     bool isImportant() const { return m_important; }
     bool isImplicit() const { return m_implicit; }
 
@@ -59,17 +60,22 @@ public:
     
     String cssText() const;
 
-    // make sure the following fits in 4 bytes.
-    int m_id;
-    int m_shorthandID;  // If this property was set as part of a shorthand, gives the shorthand.
+    friend bool operator==(const CSSProperty&, const CSSProperty&);
+
+    // Make sure the following fits in 4 bytes. Really.
+    int m_id : 15;
+    int m_shorthandID : 15; // If this property was set as part of a shorthand, gives the shorthand.
     bool m_important : 1;
     bool m_implicit : 1; // Whether or not the property was set implicitly as the result of a shorthand.
-
-    friend bool operator==(const CSSProperty &, const CSSProperty &);
 
     RefPtr<CSSValue> m_value;
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+namespace WTF {
+    // Properties in Vector can be initialized with memset and moved using memcpy.
+    template<> struct VectorTraits<WebCore::CSSProperty> : SimpleClassVectorTraits { };
+}
+
+#endif // CSSProperty_h

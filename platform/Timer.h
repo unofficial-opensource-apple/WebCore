@@ -23,84 +23,83 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef TIMER_H
-#define TIMER_H
+#ifndef Timer_h
+#define Timer_h
 
 #include <wtf/Noncopyable.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
-    // Time intervals are all in seconds.
+// Time intervals are all in seconds.
 
-    class TimerHeapElement;
+class TimerHeapElement;
 
-    class TimerBase : Noncopyable {
-    public:
-        TimerBase();
-        virtual ~TimerBase();
+class TimerBase : Noncopyable {
+public:
+    TimerBase();
+    virtual ~TimerBase();
 
-        void start(double nextFireInterval, double repeatInterval);
+    void start(double nextFireInterval, double repeatInterval);
 
-        void startRepeating(double repeatInterval) { start(repeatInterval, repeatInterval); }
-        void startOneShot(double interval) { start(interval, 0); }
+    void startRepeating(double repeatInterval) { start(repeatInterval, repeatInterval); }
+    void startOneShot(double interval) { start(interval, 0); }
 
-        void stop();
-        bool isActive() const;
+    void stop();
+    bool isActive() const;
 
-        double nextFireInterval() const;
-        double repeatInterval() const { return m_repeatInterval; }
+    double nextFireInterval() const;
+    double repeatInterval() const { return m_repeatInterval; }
 
-    private:
-        virtual void fired() = 0;
+    void augmentRepeatInterval(double delta) { setNextFireTime(m_nextFireTime + delta); m_repeatInterval += delta; }
 
-        void checkConsistency() const;
-        void checkHeapIndex() const;
+    static void fireTimersInNestedEventLoop();
 
-        void setNextFireTime(double);
+private:
+    virtual void fired() = 0;
 
-        bool inHeap() const { return m_heapIndex != -1; }
+    void checkConsistency() const;
+    void checkHeapIndex() const;
 
-        void heapDecreaseKey();
-        void heapDelete();
-        void heapDeleteMin();
-        void heapIncreaseKey();
-        void heapInsert();
-        void heapPop();
-        void heapPopMin();
+    void setNextFireTime(double);
 
-        static void collectFiringTimers(double fireTime, Vector<TimerBase*>&);
-        static void fireTimers(double fireTime, const Vector<TimerBase*>&);
-        static void sharedTimerFired();
+    bool inHeap() const { return m_heapIndex != -1; }
 
-        double m_nextFireTime; // 0 if inactive
-        double m_repeatInterval; // 0 if not repeating
-        int m_heapIndex; // -1 if not in heap
+    void heapDecreaseKey();
+    void heapDelete();
+    void heapDeleteMin();
+    void heapIncreaseKey();
+    void heapInsert();
+    void heapPop();
+    void heapPopMin();
 
-        friend void updateSharedTimer();
-        friend void setDeferringTimers(bool);
-        friend class TimerHeapElement;
-        friend bool operator<(const TimerHeapElement&, const TimerHeapElement&);
-    };
+    static void collectFiringTimers(double fireTime, Vector<TimerBase*>&);
+    static void fireTimers(double fireTime, const Vector<TimerBase*>&);
+    static void sharedTimerFired();
 
-    template <typename TimerFiredClass> class Timer : public TimerBase {
-    public:
-        typedef void (TimerFiredClass::*TimerFiredFunction)(Timer*);
+    double m_nextFireTime; // 0 if inactive
+    double m_repeatInterval; // 0 if not repeating
+    int m_heapIndex; // -1 if not in heap
+    unsigned m_heapInsertionOrder; // Used to keep order among equal-fire-time timers
 
-        Timer(TimerFiredClass* o, TimerFiredFunction f)
-            : m_object(o), m_function(f) { }
+    friend void updateSharedTimer();
+    friend class TimerHeapElement;
+    friend bool operator<(const TimerHeapElement&, const TimerHeapElement&);
+};
 
-    private:
-        virtual void fired() { (m_object->*m_function)(this); }
+template <typename TimerFiredClass> class Timer : public TimerBase {
+public:
+    typedef void (TimerFiredClass::*TimerFiredFunction)(Timer*);
 
-        TimerFiredClass* m_object;
-        TimerFiredFunction m_function;
-    };
+    Timer(TimerFiredClass* o, TimerFiredFunction f)
+        : m_object(o), m_function(f) { }
 
-    // Set to true to prevent any timers from firing.
-    // When set back to false, timers that were deferred will fire.
-    bool isDeferringTimers();
-    void setDeferringTimers(bool);
+private:
+    virtual void fired() { (m_object->*m_function)(this); }
+
+    TimerFiredClass* m_object;
+    TimerFiredFunction m_function;
+};
 
 }
 

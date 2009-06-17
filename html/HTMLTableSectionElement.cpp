@@ -1,6 +1,4 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
@@ -20,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "HTMLTableSectionElement.h"
@@ -30,6 +28,7 @@
 #include "HTMLCollection.h"
 #include "HTMLNames.h"
 #include "HTMLTableRowElement.h"
+#include "HTMLTableElement.h"
 #include "NodeList.h"
 #include "Text.h"
 
@@ -37,10 +36,9 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLTableSectionElement::HTMLTableSectionElement(const QualifiedName& tagName, Document *doc, bool implicit)
-    : HTMLTablePartElement(tagName, doc)
+HTMLTableSectionElement::HTMLTableSectionElement(const QualifiedName& tagName, Document* document)
+    : HTMLTablePartElement(tagName, document)
 {
-    m_implicit = implicit;
 }
 
 bool HTMLTableSectionElement::checkDTD(const Node* newChild)
@@ -65,29 +63,40 @@ ContainerNode* HTMLTableSectionElement::addChild(PassRefPtr<Node> child)
     return HTMLTablePartElement::addChild(child);
 }
 
+// used by table row groups to share style decls created by the enclosing table.
+void HTMLTableSectionElement::additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>& results)
+{
+    Node* p = parentNode();
+    while (p && !p->hasTagName(tableTag))
+        p = p->parentNode();
+    if (!p)
+        return;
+    static_cast<HTMLTableElement*>(p)->addSharedGroupDecls(true, results);
+}
+
 // these functions are rather slow, since we need to get the row at
 // the index... but they aren't used during usual HTML parsing anyway
-HTMLElement* HTMLTableSectionElement::insertRow(int index, ExceptionCode& ec)
+PassRefPtr<HTMLElement> HTMLTableSectionElement::insertRow(int index, ExceptionCode& ec)
 {
-    HTMLTableRowElement* r = 0L;
+    RefPtr<HTMLTableRowElement> r;
     RefPtr<HTMLCollection> children = rows();
     int numRows = children ? (int)children->length() : 0;
     if (index < -1 || index > numRows)
         ec = INDEX_SIZE_ERR; // per the DOM
     else {
-        r = new HTMLTableRowElement(document());
-        if ( numRows == index || index == -1 )
+        r = new HTMLTableRowElement(trTag, document());
+        if (numRows == index || index == -1)
             appendChild(r, ec);
         else {
-            Node *n;
+            Node* n;
             if (index < 1)
                 n = firstChild();
             else
                 n = children->item(index);
-            insertBefore(r, n, ec );
+            insertBefore(r, n, ec);
         }
     }
-    return r;
+    return r.release();
 }
 
 void HTMLTableSectionElement::deleteRow( int index, ExceptionCode& ec)
@@ -158,7 +167,7 @@ void HTMLTableSectionElement::setVAlign(const String &value)
 
 PassRefPtr<HTMLCollection> HTMLTableSectionElement::rows()
 {
-    return new HTMLCollection(this, HTMLCollection::TableRows);
+    return HTMLCollection::create(this, HTMLCollection::TSectionRows);
 }
 
 }

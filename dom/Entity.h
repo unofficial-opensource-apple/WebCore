@@ -1,8 +1,6 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 2000 Peter Kelly (pmk@post.com)
- * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,41 +14,28 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef Entity_H
-#define Entity_H
+#ifndef Entity_h
+#define Entity_h
 
 #include "ContainerNode.h"
 
 namespace WebCore {
 
-class Entity : public ContainerNode
-{
+// FIXME: This abstract class is only here so that the JavaScript and Objective-C bindings
+// can continue to be compiled.
+class Entity : public ContainerNode {
 public:
-    Entity(Document*);
-    Entity(Document*, const String& name);
-    Entity(Document*, const String& publicId, const String& systemId, const String& notationName);
-
-    // DOM methods & attributes for Entity
-    String publicId() const { return m_publicId.get(); }
-    String systemId() const { return m_systemId.get(); }
-    String notationName() const { return m_notationName.get(); }
-
-    virtual String nodeName() const;
-    virtual NodeType nodeType() const;
-    virtual PassRefPtr<Node> cloneNode(bool deep);
-    virtual bool childTypeAllowed(NodeType);
-    virtual String toString() const;
+    String publicId() const { ASSERT_NOT_REACHED(); return String(); }
+    String systemId() const { ASSERT_NOT_REACHED(); return String(); }
+    String notationName() const { ASSERT_NOT_REACHED(); return String(); }
 
 private:
-    RefPtr<StringImpl> m_publicId;
-    RefPtr<StringImpl> m_systemId;
-    RefPtr<StringImpl> m_notationName;
-    RefPtr<StringImpl> m_name;
+    Entity() : ContainerNode(0) {}
 };
 
 } //namespace

@@ -13,13 +13,19 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 module html {
-    interface [LegacyParent=KJS::JSHTMLElement] HTMLIsIndexElement : HTMLElement {
+
+    interface [
+        GenerateConstructor,
+        InterfaceUUID=94fc4e39-4d81-44e3-a37d-364553b23a37,
+        ImplementationUUID=b31d409b-8f68-495d-a0c2-b81520716974
+    ] HTMLIsIndexElement : HTMLInputElement {
         readonly attribute HTMLFormElement form;
-        attribute DOMString prompt;
+        attribute [ConvertNullToNullString] DOMString prompt;
     };
+
 }

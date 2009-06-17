@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,37 +23,33 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef insert_into_text_node_command_h__
-#define insert_into_text_node_command_h__
+#ifndef InsertIntoTextNodeCommand_h
+#define InsertIntoTextNodeCommand_h
 
 #include "EditCommand.h"
 
 namespace WebCore {
-    class Text;
-    class String;
-}
 
-namespace WebCore {
+class Text;
 
-class InsertIntoTextNodeCommand : public EditCommand
-{
+class InsertIntoTextNodeCommand : public SimpleEditCommand {
 public:
-    InsertIntoTextNodeCommand(Document *document, Text *, int, const String &);
-    virtual ~InsertIntoTextNodeCommand() { }
+    static PassRefPtr<InsertIntoTextNodeCommand> create(PassRefPtr<Text> node, unsigned offset, const String& text)
+    {
+        return adoptRef(new InsertIntoTextNodeCommand(node, offset, text));
+    }
+
+private:
+    InsertIntoTextNodeCommand(PassRefPtr<Text> node, unsigned offset, const String& text);
 
     virtual void doApply();
     virtual void doUnapply();
 
-    Text *node() const { return m_node.get(); }
-    int offset() const { return m_offset; }
-    String text() const { return m_text; }
-
-private:
     RefPtr<Text> m_node;
-    int m_offset;
+    unsigned m_offset;
     String m_text;
 };
 
 } // namespace WebCore
 
-#endif // __insert_into_text_node_command_h__
+#endif // InsertIntoTextNodeCommand_h

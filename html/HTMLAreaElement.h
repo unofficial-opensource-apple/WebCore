@@ -1,9 +1,7 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004 Apple Computer, Inc.
+ * Copyright (C) 2004, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,25 +15,25 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLAreaElement_H
-#define HTMLAreaElement_H
+#ifndef HTMLAreaElement_h
+#define HTMLAreaElement_h
 
 #include "HTMLAnchorElement.h"
+#include "IntSize.h"
 #include "Path.h"
-#include "RenderObject.h" // for RenderObject::NodeInfo
 
 namespace WebCore {
 
+class HitTestResult;
+
 class HTMLAreaElement : public HTMLAnchorElement {
 public:
-    enum Shape { Default, Poly, Rect, Circle, Unknown };
-
-    HTMLAreaElement(Document*);
+    HTMLAreaElement(const QualifiedName&, Document*);
     ~HTMLAreaElement();
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
@@ -45,7 +43,7 @@ public:
 
     bool isDefault() const { return m_shape == Default; }
 
-    bool mapMouseEvent(int x, int y, const IntSize&, RenderObject::NodeInfo&);
+    bool mapMouseEvent(int x, int y, const IntSize&, HitTestResult&);
 
     virtual IntRect getRect(RenderObject*) const;
 
@@ -58,7 +56,7 @@ public:
     String coords() const;
     void setCoords(const String&);
 
-    String href() const;
+    KURL href() const;
     void setHref(const String&);
 
     bool noHref() const;
@@ -67,13 +65,13 @@ public:
     String shape() const;
     void setShape(const String&);
 
-    int tabIndex() const;
-    void setTabIndex(int);
+    virtual bool isFocusable() const;
 
-    String target() const;
+    virtual String target() const;
     void setTarget(const String&);
 
-protected:
+private:
+    enum Shape { Default, Poly, Rect, Circle, Unknown };
     Path getRegion(const IntSize&) const;
     Path region;
     Length* m_coords;

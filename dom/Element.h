@@ -1,11 +1,9 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,42 +17,38 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #ifndef Element_h
 #define Element_h
 
-#include "Attr.h"
-#include "ScrollBar.h"
-#include "Timer.h"
+#include "ContainerNode.h"
+#include "QualifiedName.h"
+#include "ScrollTypes.h"
 
 #include "RenderStyle.h"
 
 namespace WebCore {
 
-class AtomicStringList;
+class Attr;
 class Attribute;
+class CSSStyleDeclaration;
+class ElementRareData;
+class IntSize;
 
 class Element : public ContainerNode {
-    friend class Document;
-    friend class NamedAttrMap;
-    friend class Attr;
-    friend class Node;
-    friend class CSSStyleSelector;
 public:
     Element(const QualifiedName&, Document*);
     ~Element();
 
-    // Used to quickly determine whether or not an element has a given CSS class.
-    virtual const AtomicStringList* getClassList() const;
     const AtomicString& getIDAttribute() const;
-    bool hasAttribute(const QualifiedName& name) const;
-    const AtomicString& getAttribute(const QualifiedName& name) const;
-    void setAttribute(const QualifiedName& name, StringImpl* value, ExceptionCode&);
-    void removeAttribute(const QualifiedName& name, ExceptionCode&);
+    bool hasAttribute(const QualifiedName&) const;
+    const AtomicString& getAttribute(const QualifiedName&) const;
+    void setAttribute(const QualifiedName&, const AtomicString& value, ExceptionCode&);
+    void removeAttribute(const QualifiedName&, ExceptionCode&);
 
     bool hasAttributes() const;
 
@@ -64,13 +58,13 @@ public:
     const AtomicString& getAttribute(const String& name) const;
     const AtomicString& getAttributeNS(const String& namespaceURI, const String& localName) const;
 
-    void setAttribute(const String& name, const String& value, ExceptionCode&);
-    void setAttributeNS(const String& namespaceURI, const String& qualifiedName, const String& value, ExceptionCode&);
+    void setAttribute(const AtomicString& name, const AtomicString& value, ExceptionCode&);
+    void setAttributeNS(const AtomicString& namespaceURI, const AtomicString& qualifiedName, const AtomicString& value, ExceptionCode&);
 
-    void scrollIntoView (bool alignToTop);
-    void scrollIntoViewIfNeeded(bool centerIfNeeded);
+    void scrollIntoView (bool alignToTop = true);
+    void scrollIntoViewIfNeeded(bool centerIfNeeded = true);
 
-    void scrollByUnits(int units, ScrollGranularity granularity);
+    void scrollByUnits(int units, ScrollGranularity);
     void scrollByLines(int lines);
     void scrollByPages(int pages);
 
@@ -79,6 +73,8 @@ public:
     int offsetWidth();
     int offsetHeight();
     Element* offsetParent();
+    int clientLeft();
+    int clientTop();
     int clientWidth();
     int clientHeight();
     int scrollLeft();
@@ -88,111 +84,172 @@ public:
     int scrollWidth();
     int scrollHeight();
 
-    void removeAttribute(const String &name, ExceptionCode& ec);
-    void removeAttributeNS(const String &namespaceURI, const String& localName, ExceptionCode&);
+    void removeAttribute(const String& name, ExceptionCode&);
+    void removeAttributeNS(const String& namespaceURI, const String& localName, ExceptionCode&);
 
     PassRefPtr<Attr> getAttributeNode(const String& name);
     PassRefPtr<Attr> getAttributeNodeNS(const String& namespaceURI, const String& localName);
     PassRefPtr<Attr> setAttributeNode(Attr*, ExceptionCode&);
-    PassRefPtr<Attr> setAttributeNodeNS(Attr* newAttr, ExceptionCode& ec) { return setAttributeNode(newAttr, ec); }
+    PassRefPtr<Attr> setAttributeNodeNS(Attr*, ExceptionCode&);
     PassRefPtr<Attr> removeAttributeNode(Attr*, ExceptionCode&);
     
-    virtual CSSStyleDeclaration *style();
+    virtual CSSStyleDeclaration* style();
 
     const QualifiedName& tagQName() const { return m_tagName; }
     String tagName() const { return nodeName(); }
-    virtual bool hasTagName(const QualifiedName& tagName) const { return m_tagName.matches(tagName); }
+    bool hasTagName(const QualifiedName& tagName) const { return m_tagName.matches(tagName); }
     
     // A fast function for checking the local name against another atomic string.
     bool hasLocalName(const AtomicString& other) const { return m_tagName.localName() == other; }
     bool hasLocalName(const QualifiedName& other) const { return m_tagName.localName() == other.localName(); }
 
-    virtual const AtomicString& localName() const { return m_tagName.localName(); }
-    virtual const AtomicString& prefix() const { return m_tagName.prefix(); }
-    virtual void setPrefix(const AtomicString &_prefix, ExceptionCode&);
-    virtual const AtomicString& namespaceURI() const { return m_tagName.namespaceURI(); }
+    const AtomicString& localName() const { return m_tagName.localName(); }
+    const AtomicString& prefix() const { return m_tagName.prefix(); }
+    virtual void setPrefix(const AtomicString&, ExceptionCode&);
+    const AtomicString& namespaceURI() const { return m_tagName.namespaceURI(); }
 
-    // DOM methods overridden from  parent classes
+    virtual KURL baseURI() const;
+
+    // DOM methods overridden from parent classes
     virtual NodeType nodeType() const;
     virtual PassRefPtr<Node> cloneNode(bool deep);
     virtual String nodeName() const;
-    virtual bool isElementNode() const { return true; }
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
+
+    PassRefPtr<Element> cloneElement();
+
+    void normalizeAttributes();
+
+    virtual bool isFormControlElement() const { return false; }
+    virtual bool isFormControlElementWithState() const { return false; }
+    virtual bool isInputTypeHidden() const { return false; }
+    virtual bool isPasswordField() const { return false; }
 
     String nodeNamePreservingCase() const;
 
     // convenience methods which ignore exceptions
-    void setAttribute(const QualifiedName& name, const String& value);
+    void setAttribute(const QualifiedName&, const AtomicString& value);
+    void setBooleanAttribute(const QualifiedName& name, bool);
 
-    virtual NamedAttrMap *attributes() const;
+    virtual NamedAttrMap* attributes() const;
     NamedAttrMap* attributes(bool readonly) const;
 
     // This method is called whenever an attribute is added, changed or removed.
-    virtual void attributeChanged(Attribute* attr, bool preserveDecls = false) {}
+    virtual void attributeChanged(Attribute*, bool preserveDecls = false);
 
     // not part of the DOM
-    void setAttributeMap(NamedAttrMap*);
+    void setAttributeMap(PassRefPtr<NamedAttrMap>);
 
-    virtual void copyNonAttributeProperties(const Element *source) {}
+    virtual void copyNonAttributeProperties(const Element* /*source*/) { }
 
     virtual void attach();
     virtual void detach();
-    virtual RenderStyle *styleForRenderer(RenderObject *parent);
-    virtual RenderObject *createRenderer(RenderArena *, RenderStyle *);
-    virtual void recalcStyle( StyleChange = NoChange );
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
+    virtual void recalcStyle(StyleChange = NoChange);
+
+    virtual RenderStyle* computedStyle();
 
     virtual bool childTypeAllowed(NodeType);
 
-    virtual Attribute* createAttribute(const QualifiedName& name, StringImpl* value);
+    virtual PassRefPtr<Attribute> createAttribute(const QualifiedName&, const AtomicString& value);
     
-    void dispatchAttrRemovalEvent(Attribute *attr);
-    void dispatchAttrAdditionEvent(Attribute *attr);
+    void dispatchAttrRemovalEvent(Attribute*);
+    void dispatchAttrAdditionEvent(Attribute*);
 
-    virtual void accessKeyAction(bool sendToAnyEvent) { }
+    virtual void accessKeyAction(bool /*sendToAnyEvent*/) { }
 
-    virtual String toString() const;
+    virtual bool isURLAttribute(Attribute*) const;
+    virtual const QualifiedName& imageSourceAttributeName() const;
+    virtual String target() const { return String(); }
 
-    virtual bool isURLAttribute(Attribute *attr) const;
-        
-    virtual void focus();
-    virtual void updateFocusAppearance();
+    virtual void focus(bool restorePreviousSelection = true);
+    virtual void updateFocusAppearance(bool restorePreviousSelection);
     void blur();
-    bool needsFocusAppearanceUpdate() const { return m_needsFocusAppearanceUpdate; }
-    void setNeedsFocusAppearanceUpdate(bool b) { m_needsFocusAppearanceUpdate = b; }
-    
-#if !NDEBUG
-    virtual void dump(TextStream *stream, DeprecatedString ind = "") const;
-    virtual void formatForDebugger(char *buffer, unsigned length) const;
+
+#ifndef NDEBUG
+    virtual void formatForDebugger(char* buffer, unsigned length) const;
 #endif
 
-    Node* insertAdjacentElement(const String& where, Node* newChild, int& exception);
-    bool contains(const Element*) const;
+    String innerText() const;
+    String outerText() const;
  
+    virtual String title() const;
+
     EVisibility implicitVisibility();
     
-protected:
-    virtual void createAttributeMap() const;
     String openTagStartToString() const;
 
-    // The following method is called when a Document is restored from the page cache
-    // and the element has registered itself with the Document via registerForDidRestorePageCallback()
-    virtual void didRestoreFromCache() { }
-    
-private:
     void updateId(const AtomicString& oldId, const AtomicString& newId);
 
-    virtual void updateStyleAttributeIfNeeded() const {}
-    
-    void updateFocusAppearanceTimerFired(Timer<Element>*);
-    void stopUpdateFocusAppearanceTimer();
-    Timer<Element> m_updateFocusAppearanceTimer;
-    bool m_needsFocusAppearanceUpdate;
+    IntSize minimumSizeForResizing() const;
+    void setMinimumSizeForResizing(const IntSize&);
 
-protected: // member variables
-    mutable RefPtr<NamedAttrMap> namedAttrMap;
+    // Use Document::registerForDocumentActivationCallbacks() to subscribe to these
+    virtual void documentWillBecomeInactive() { }
+    virtual void documentDidBecomeActive() { }
+
+    // Use Document::registerForMediaVolumeCallbacks() to subscribe to this
+    virtual void mediaVolumeDidChange() { }
+
+    bool isFinishedParsingChildren() const { return m_parsingChildrenFinished; }
+    virtual void finishParsingChildren();
+    virtual void beginParsingChildren() { m_parsingChildrenFinished = false; }
+
+    // ElementTraversal API
+    Element* firstElementChild() const;
+    Element* lastElementChild() const;
+    Element* previousElementSibling() const;
+    Element* nextElementSibling() const;
+    unsigned childElementCount() const;
+
+private:
+    virtual void createAttributeMap() const;
+
+    virtual void updateStyleAttribute() const {}
+
+#if ENABLE(SVG)
+    virtual void updateAnimatedSVGAttribute(const String&) const {}
+#endif
+
+    void updateFocusAppearanceSoonAfterAttach();
+    void cancelFocusAppearanceUpdate();
+
+    virtual const AtomicString& virtualPrefix() const { return prefix(); }
+    virtual const AtomicString& virtualLocalName() const { return localName(); }
+    virtual const AtomicString& virtualNamespaceURI() const { return namespaceURI(); }
+    
     QualifiedName m_tagName;
+    virtual NodeRareData* createRareData();
+
+protected:
+    ElementRareData* rareData() const;
+    ElementRareData* ensureRareData();
+    
+    mutable RefPtr<NamedAttrMap> namedAttrMap;
 };
+    
+inline bool Node::hasTagName(const QualifiedName& name) const
+{
+    return isElementNode() && static_cast<const Element*>(this)->hasTagName(name);
+}
+
+inline bool Node::hasAttributes() const
+{
+    return isElementNode() && static_cast<const Element*>(this)->hasAttributes();
+}
+
+inline NamedAttrMap* Node::attributes() const
+{
+    return isElementNode() ? static_cast<const Element*>(this)->attributes() : 0;
+}
+
+inline Element* Node::parentElement() const
+{
+    Node* parent = parentNode();
+    return parent && parent->isElementNode() ? static_cast<Element*>(parent) : 0;
+}
 
 } //namespace
 

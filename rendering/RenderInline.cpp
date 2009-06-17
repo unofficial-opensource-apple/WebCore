@@ -17,32 +17,37 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #include "config.h"
 #include "RenderInline.h"
 
-#include "Document.h"
+#include "FloatQuad.h"
 #include "RenderArena.h"
 #include "RenderBlock.h"
+#include "RenderView.h"
 #include "VisiblePosition.h"
 
 namespace WebCore {
 
 RenderInline::RenderInline(Node* node)
-:RenderFlow(node), m_isContinuation(false)
-{}
+    : RenderFlow(node)
+{
+}
 
 RenderInline::~RenderInline()
-{}
-
-void RenderInline::setStyle(RenderStyle* _style)
 {
-    RenderFlow::setStyle(_style);
+}
+
+void RenderInline::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
+{
+    RenderFlow::styleDidChange(diff, oldStyle);
+
     setInline(true);
+    setHasReflection(false);
 
     // Ensure that all of the split inlines pick up the new style. We
     // only do this if we're an inline, since we don't want to propagate
@@ -62,10 +67,12 @@ void RenderInline::setStyle(RenderStyle* _style)
     }
 
     m_lineHeight = -1;
-    
+
     // Update pseudos for :before and :after now.
-    updatePseudoChild(RenderStyle::BEFORE);
-    updatePseudoChild(RenderStyle::AFTER);
+    if (!isAnonymous() && document()->usesBeforeAfterRules()) {
+        updateBeforeAfterContent(RenderStyle::BEFORE);
+        updateBeforeAfterContent(RenderStyle::AFTER);
+    }
 }
 
 bool RenderInline::isInlineContinuation() const
@@ -73,47 +80,60 @@ bool RenderInline::isInlineContinuation() const
     return m_isContinuation;
 }
 
+static inline bool isAfterContent(RenderObject* child)
+{
+    if (!child)
+        return false;
+    if (child->style()->styleType() != RenderStyle::AFTER)
+        return false;
+    // Text nodes don't have their own styles, so ignore the style on a text node.
+    if (child->isText() && !child->isBR())
+        return false;
+    return true;
+}
+
 void RenderInline::addChildToFlow(RenderObject* newChild, RenderObject* beforeChild)
 {
     // Make sure we don't append things after :after-generated content if we have it.
-    if (!beforeChild && lastChild() && lastChild()->style()->styleType() == RenderStyle::AFTER)
+    if (!beforeChild && isAfterContent(lastChild()))
         beforeChild = lastChild();
 
-    if (!newChild->isInline() && !newChild->isFloatingOrPositioned() && containingBlock()->isBlockFlow()) {
+    if (!newChild->isInline() && !newChild->isFloatingOrPositioned()) {
         // We are placing a block inside an inline. We have to perform a split of this
         // inline into continuations.  This involves creating an anonymous block box to hold
         // |newChild|.  We then make that block box a continuation of this inline.  We take all of
         // the children after |beforeChild| and put them in a clone of this object.
-        RenderStyle *newStyle = new (renderArena()) RenderStyle();
+        RefPtr<RenderStyle> newStyle = RenderStyle::create();
         newStyle->inheritFrom(style());
         newStyle->setDisplay(BLOCK);
 
-        RenderBlock *newBox = new (renderArena()) RenderBlock(document() /* anonymous box */);
-        newBox->setStyle(newStyle);
+        RenderBlock* newBox = new (renderArena()) RenderBlock(document() /* anonymous box */);
+        newBox->setStyle(newStyle.release());
         RenderFlow* oldContinuation = continuation();
         setContinuation(newBox);
 
         // Someone may have put a <p> inside a <q>, causing a split.  When this happens, the :after content
-        // has to move into the inline continuation.  Call updatePseudoChild to ensure that our :after
+        // has to move into the inline continuation.  Call updateBeforeAfterContent to ensure that our :after
         // content gets properly destroyed.
         bool isLastChild = (beforeChild == lastChild());
-        updatePseudoChild(RenderStyle::AFTER);
+        if (document()->usesBeforeAfterRules())
+            updateBeforeAfterContent(RenderStyle::AFTER);
         if (isLastChild && beforeChild != lastChild())
             beforeChild = 0; // We destroyed the last child, so now we need to update our insertion
                              // point to be 0.  It's just a straight append now.
-        
+
         splitFlow(beforeChild, newBox, newChild, oldContinuation);
         return;
     }
 
-    RenderContainer::addChild(newChild,beforeChild);
+    RenderContainer::addChild(newChild, beforeChild);
 
-    newChild->setNeedsLayoutAndMinMaxRecalc();
+    newChild->setNeedsLayoutAndPrefWidthsRecalc();
 }
 
 RenderInline* RenderInline::cloneInline(RenderFlow* src)
 {
-    RenderInline *o = new (src->renderArena()) RenderInline(src->element());
+    RenderInline* o = new (src->renderArena()) RenderInline(src->element());
     o->m_isContinuation = true;
     o->setStyle(src->style());
     return o;
@@ -126,7 +146,7 @@ void RenderInline::splitInlines(RenderBlock* fromBlock, RenderBlock* toBlock,
     // Create a clone of this inline.
     RenderInline* clone = cloneInline(this);
     clone->setContinuation(oldCont);
-    
+
     // Now take all of the children from beforeChild to the end and remove
     // them from |this| and place them in the clone.
     RenderObject* o = beforeChild;
@@ -134,7 +154,7 @@ void RenderInline::splitInlines(RenderBlock* fromBlock, RenderBlock* toBlock,
         RenderObject* tmp = o;
         o = tmp->nextSibling();
         clone->addChildToFlow(removeChildNode(tmp), 0);
-        tmp->setNeedsLayoutAndMinMaxRecalc();
+        tmp->setNeedsLayoutAndPrefWidthsRecalc();
     }
 
     // Hook |clone| up as the continuation of the middle block.
@@ -145,37 +165,48 @@ void RenderInline::splitInlines(RenderBlock* fromBlock, RenderBlock* toBlock,
     // Once we hit the containing block we're done.
     RenderFlow* curr = static_cast<RenderFlow*>(parent());
     RenderFlow* currChild = this;
+    
+    // FIXME: Because splitting is O(n^2) as tags nest pathologically, we cap the depth at which we're willing to clone.
+    // There will eventually be a better approach to this problem that will let us nest to a much
+    // greater depth (see bugzilla bug 13430) but for now we have a limit.  This *will* result in
+    // incorrect rendering, but the alternative is to hang forever.
+    unsigned splitDepth = 1;
+    const unsigned cMaxSplitDepth = 200; 
     while (curr && curr != fromBlock) {
-        // Create a new clone.
-        RenderInline* cloneChild = clone;
-        clone = cloneInline(curr);
+        if (splitDepth < cMaxSplitDepth) {
+            // Create a new clone.
+            RenderInline* cloneChild = clone;
+            clone = cloneInline(curr);
 
-        // Insert our child clone as the first child.
-        clone->addChildToFlow(cloneChild, 0);
+            // Insert our child clone as the first child.
+            clone->addChildToFlow(cloneChild, 0);
 
-        // Hook the clone up as a continuation of |curr|.
-        RenderFlow* oldCont = curr->continuation();
-        curr->setContinuation(clone);
-        clone->setContinuation(oldCont);
+            // Hook the clone up as a continuation of |curr|.
+            RenderFlow* oldCont = curr->continuation();
+            curr->setContinuation(clone);
+            clone->setContinuation(oldCont);
 
-        // Someone may have indirectly caused a <q> to split.  When this happens, the :after content
-        // has to move into the inline continuation.  Call updatePseudoChild to ensure that the inline's :after
-        // content gets properly destroyed.
-        curr->updatePseudoChild(RenderStyle::AFTER);
-        
-        // Now we need to take all of the children starting from the first child
-        // *after* currChild and append them all to the clone.
-        o = currChild->nextSibling();
-        while (o) {
-            RenderObject* tmp = o;
-            o = tmp->nextSibling();
-            clone->addChildToFlow(curr->removeChildNode(tmp), 0);
-            tmp->setNeedsLayoutAndMinMaxRecalc();
+            // Someone may have indirectly caused a <q> to split.  When this happens, the :after content
+            // has to move into the inline continuation.  Call updateBeforeAfterContent to ensure that the inline's :after
+            // content gets properly destroyed.
+            if (document()->usesBeforeAfterRules())
+                curr->updateBeforeAfterContent(RenderStyle::AFTER);
+
+            // Now we need to take all of the children starting from the first child
+            // *after* currChild and append them all to the clone.
+            o = currChild->nextSibling();
+            while (o) {
+                RenderObject* tmp = o;
+                o = tmp->nextSibling();
+                clone->addChildToFlow(curr->removeChildNode(tmp), 0);
+                tmp->setNeedsLayoutAndPrefWidthsRecalc();
+            }
         }
-
+        
         // Keep walking up the chain.
         currChild = curr;
         curr = static_cast<RenderFlow*>(curr->parent());
+        splitDepth++;
     }
 
     // Now we are at the block level. We need to put the clone into the toBlock.
@@ -196,6 +227,10 @@ void RenderInline::splitFlow(RenderObject* beforeChild, RenderBlock* newBlockBox
 {
     RenderBlock* pre = 0;
     RenderBlock* block = containingBlock();
+    
+    // Delete our line boxes before we do the inline split into continuations.
+    block->deleteLineBoxTree();
+    
     bool madeNewBeforeBlock = false;
     if (block->isAnonymousBlock() && (!block->parent() || !block->parent()->createsAnonymousWrapper())) {
         // We can reuse this block and make it the preBlock of the next continuation.
@@ -208,22 +243,21 @@ void RenderInline::splitFlow(RenderObject* beforeChild, RenderBlock* newBlockBox
     }
 
     RenderBlock* post = block->createAnonymousBlock();
-    
+
     RenderObject* boxFirst = madeNewBeforeBlock ? block->firstChild() : pre->nextSibling();
     if (madeNewBeforeBlock)
         block->insertChildNode(pre, boxFirst);
     block->insertChildNode(newBlockBox, boxFirst);
     block->insertChildNode(post, boxFirst);
     block->setChildrenInline(false);
-
+    
     if (madeNewBeforeBlock) {
         RenderObject* o = boxFirst;
-        while (o)
-        {
+        while (o) {
             RenderObject* no = o;
             o = no->nextSibling();
             pre->appendChildNode(block->removeChildNode(no));
-            no->setNeedsLayoutAndMinMaxRecalc();
+            no->setNeedsLayoutAndPrefWidthsRecalc();
         }
     }
 
@@ -239,75 +273,53 @@ void RenderInline::splitFlow(RenderObject* beforeChild, RenderBlock* newBlockBox
     // connected, thus allowing newChild access to a renderArena should it need
     // to wrap itself in additional boxes (e.g., table construction).
     newBlockBox->addChildToFlow(newChild, 0);
-    
+
     // Always just do a full layout in order to ensure that line boxes (especially wrappers for images)
     // get deleted properly.  Because objects moves from the pre block into the post block, we want to
     // make new line boxes instead of leaving the old line boxes around.
-    pre->setNeedsLayoutAndMinMaxRecalc();
-    block->setNeedsLayoutAndMinMaxRecalc();
-    post->setNeedsLayoutAndMinMaxRecalc();
+    pre->setNeedsLayoutAndPrefWidthsRecalc();
+    block->setNeedsLayoutAndPrefWidthsRecalc();
+    post->setNeedsLayoutAndPrefWidthsRecalc();
 }
 
-void RenderInline::paint(PaintInfo& i, int _tx, int _ty)
+void RenderInline::paint(PaintInfo& paintInfo, int tx, int ty)
 {
-    paintLines(i, _tx, _ty);
+    paintLines(paintInfo, tx, ty);
 }
 
-void RenderInline::absoluteRects(DeprecatedValueList<IntRect>& rects, int _tx, int _ty)
+void RenderInline::absoluteRects(Vector<IntRect>& rects, int tx, int ty, bool topLevel)
 {
     for (InlineRunBox* curr = firstLineBox(); curr; curr = curr->nextLineBox())
-        rects.append(IntRect(_tx + curr->xPos(), _ty + curr->yPos(), curr->width(), curr->height()));
-    
-    for (RenderObject* curr = firstChild(); curr; curr = curr->nextSibling())
-        if (!curr->isText())
-            curr->absoluteRects(rects, _tx + curr->xPos(), _ty + curr->yPos());
-    
-    if (continuation())
+        rects.append(IntRect(tx + curr->xPos(), ty + curr->yPos(), curr->width(), curr->height()));
+
+    for (RenderObject* curr = firstChild(); curr; curr = curr->nextSibling()) {
+        if (curr->isBox()) {
+            RenderBox* box = toRenderBox(curr);
+            curr->absoluteRects(rects, tx + box->x(), ty + box->y(), false);
+        }
+    }
+
+    if (continuation() && topLevel)
         continuation()->absoluteRects(rects, 
-                                      _tx - containingBlock()->xPos() + continuation()->xPos(),
-                                      _ty - containingBlock()->yPos() + continuation()->yPos());
+                                      tx - containingBlock()->x() + continuation()->x(),
+                                      ty - containingBlock()->y() + continuation()->y(),
+                                      topLevel);
 }
 
-void RenderInline::calcMinMaxWidth()
+void RenderInline::absoluteQuads(Vector<FloatQuad>& quads, bool topLevel)
 {
-    ASSERT( !minMaxKnown() );
-
-#ifdef DEBUG_LAYOUT
-    kdDebug( 6040 ) << renderName() << "(RenderInline)::calcMinMaxWidth() this=" << this << endl;
-#endif
-
-    // Irrelevant, since some enclosing block will actually measure us and our children.
-    m_minWidth = 0;
-    m_maxWidth = 0;
-
-    setMinMaxKnown();
-}
-
-bool RenderInline::requiresLayer() {
-    return isRoot() || isRelPositioned() || style()->opacity() < 1.0f;
-}
-
-int RenderInline::width() const
-{
-    // Return the width of the minimal left side and the maximal right side.
-    int leftSide = 0;
-    int rightSide = 0;
     for (InlineRunBox* curr = firstLineBox(); curr; curr = curr->nextLineBox()) {
-        if (curr == firstLineBox() || curr->xPos() < leftSide)
-            leftSide = curr->xPos();
-        if (curr == firstLineBox() || curr->xPos() + curr->width() > rightSide)
-            rightSide = curr->xPos() + curr->width();
+        FloatRect localRect(curr->xPos(), curr->yPos(), curr->width(), curr->height());
+        quads.append(localToAbsoluteQuad(localRect));
     }
     
-    return rightSide - leftSide;
-}
+    for (RenderObject* curr = firstChild(); curr; curr = curr->nextSibling()) {
+        if (!curr->isText())
+            curr->absoluteQuads(quads, false);
+    }
 
-int RenderInline::height() const
-{
-    int h = 0;
-    if (firstLineBox())
-        h = lastLineBox()->yPos() + lastLineBox()->height() - firstLineBox()->yPos();
-    return h;
+    if (continuation() && topLevel)
+        continuation()->absoluteQuads(quads, topLevel);
 }
 
 int RenderInline::offsetLeft() const
@@ -326,29 +338,127 @@ int RenderInline::offsetTop() const
     return y;
 }
 
-const char *RenderInline::renderName() const
+const char* RenderInline::renderName() const
 {
     if (isRelPositioned())
         return "RenderInline (relative positioned)";
     if (isAnonymous())
         return "RenderInline (generated)";
+    if (isRunIn())
+        return "RenderInline (run-in)";
     return "RenderInline";
 }
 
-bool RenderInline::nodeAtPoint(NodeInfo& info, int _x, int _y, int _tx, int _ty,
-                               HitTestAction hitTestAction)
+bool RenderInline::nodeAtPoint(const HitTestRequest& request, HitTestResult& result,
+                                int x, int y, int tx, int ty, HitTestAction hitTestAction)
 {
-    return hitTestLines(info, _x, _y, _tx, _ty, hitTestAction);
+    return hitTestLines(request, result, x, y, tx, ty, hitTestAction);
 }
 
 VisiblePosition RenderInline::positionForCoordinates(int x, int y)
 {
-    for (RenderObject *c = continuation(); c; c = c->continuation()) {
+    // Translate the coords from the pre-anonymous block to the post-anonymous block.
+    RenderBlock* cb = containingBlock();
+    int parentBlockX = cb->x() + x;
+    int parentBlockY = cb->y() + y;
+    for (RenderFlow* c = continuation(); c; c = c->continuation()) {
+        RenderFlow* contBlock = c;
+        if (c->isInline())
+            contBlock = c->containingBlock();
         if (c->isInline() || c->firstChild())
-            return c->positionForCoordinates(x, y);
+            return c->positionForCoordinates(parentBlockX - contBlock->x(), parentBlockY - contBlock->y());
     }
 
     return RenderFlow::positionForCoordinates(x, y);
 }
 
+IntRect RenderInline::linesBoundingBox() const
+{
+    IntRect result;
+    
+    // See <rdar://problem/5289721>, for an unknown reason the linked list here is sometimes inconsistent, first is non-zero and last is zero.  We have been
+    // unable to reproduce this at all (and consequently unable to figure ot why this is happening).  The assert will hopefully catch the problem in debug
+    // builds and help us someday figure out why.  We also put in a redundant check of lastLineBox() to avoid the crash for now.
+    ASSERT(!firstLineBox() == !lastLineBox());  // Either both are null or both exist.
+    if (firstLineBox() && lastLineBox()) {
+        // Return the width of the minimal left side and the maximal right side.
+        int leftSide = 0;
+        int rightSide = 0;
+        for (InlineRunBox* curr = firstLineBox(); curr; curr = curr->nextLineBox()) {
+            if (curr == firstLineBox() || curr->xPos() < leftSide)
+                leftSide = curr->xPos();
+            if (curr == firstLineBox() || curr->xPos() + curr->width() > rightSide)
+                rightSide = curr->xPos() + curr->width();
+        }
+        result.setWidth(rightSide - leftSide);
+        result.setX(leftSide);
+        result.setHeight(lastLineBox()->yPos() + lastLineBox()->height() - firstLineBox()->yPos());
+        result.setY(firstLineBox()->yPos());
+    }
+
+    return result;
 }
+
+IntRect RenderInline::clippedOverflowRectForRepaint(RenderBox* repaintContainer)
+{
+    // Only run-ins are allowed in here during layout.
+    ASSERT(!view() || !view()->layoutStateEnabled() || isRunIn());
+
+    if (!firstLineBox() && !continuation())
+        return IntRect();
+
+    // Find our leftmost position.
+    IntRect boundingBox(linesBoundingBox());
+    int left = boundingBox.x();
+    int top = boundingBox.y();
+
+    // Now invalidate a rectangle.
+    int ow = style() ? style()->outlineSize() : 0;
+    
+    // We need to add in the relative position offsets of any inlines (including us) up to our
+    // containing block.
+    RenderBlock* cb = containingBlock();
+    for (RenderObject* inlineFlow = this; inlineFlow && inlineFlow->isRenderInline() && inlineFlow != cb; 
+         inlineFlow = inlineFlow->parent()) {
+         if (inlineFlow->style()->position() == RelativePosition && inlineFlow->hasLayer())
+            toRenderBox(inlineFlow)->layer()->relativePositionOffset(left, top);
+    }
+
+    IntRect r(-ow + left, -ow + top, boundingBox.width() + ow * 2, boundingBox.height() + ow * 2);
+    if (cb->hasColumns())
+        cb->adjustRectForColumns(r);
+
+    if (cb->hasOverflowClip()) {
+        // cb->height() is inaccurate if we're in the middle of a layout of |cb|, so use the
+        // layer's size instead.  Even if the layer's size is wrong, the layer itself will repaint
+        // anyway if its size does change.
+        int x = r.x();
+        int y = r.y();
+        IntRect boxRect(0, 0, cb->layer()->width(), cb->layer()->height());
+        cb->layer()->subtractScrolledContentOffset(x, y); // For overflow:auto/scroll/hidden.
+        IntRect repaintRect(x, y, r.width(), r.height());
+        r = intersection(repaintRect, boxRect);
+    }
+    // FIXME: need to ensure that we compute the correct repaint rect when the repaint container
+    // is an inline.
+    if (repaintContainer != this)
+        cb->computeRectForRepaint(repaintContainer, r);
+
+    if (ow) {
+        for (RenderObject* curr = firstChild(); curr; curr = curr->nextSibling()) {
+            if (!curr->isText()) {
+                IntRect childRect = curr->rectWithOutlineForRepaint(repaintContainer, ow);
+                r.unite(childRect);
+            }
+        }
+
+        if (continuation() && !continuation()->isInline()) {
+            IntRect contRect = continuation()->rectWithOutlineForRepaint(repaintContainer, ow);
+            r.unite(contRect);
+        }
+    }
+
+    return r;
+}
+
+} // namespace WebCore

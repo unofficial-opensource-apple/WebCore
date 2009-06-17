@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,123 +26,79 @@
 #import "config.h"
 #import "DOMInternal.h"
 
-#import "Document.h"
-#import "Event.h"
-#import "FrameMac.h"
-#import "Range.h"
-#import "kjs_dom.h"
-#import "kjs_proxy.h"
+#import "DOMNodeInternal.h"
+#import "Frame.h"
+#import "JSNode.h"
 #import "WebScriptObjectPrivate.h"
-#import "XPathEvaluator.h"
+#import "runtime_root.h"
 
-#import "WebCoreThread.h"
-#import "ThreadSafeWrapper.h"
-
-using namespace WebCore;
-
-using KJS::ExecState;
-using KJS::Interpreter;
-using KJS::JSObject;
-
-using KJS::Bindings::RootObject;
+#define NEEDS_WRAPPER_CACHE_LOCK 1
 
 //------------------------------------------------------------------------------------------
-// Wrapping khtml implementation objects
+// Wrapping WebCore implementation objects
+
+static NSMapTable* DOMWrapperCache;
+    
+#ifdef NEEDS_WRAPPER_CACHE_LOCK
+static Mutex& wrapperCacheLock()
+{
+    DEFINE_STATIC_LOCAL(Mutex, wrapperCacheMutex, ());
+    return wrapperCacheMutex;
+}
+#endif
+
+NSMapTable* createWrapperCache()
+{
+#ifdef BUILDING_ON_TIGER
+    return NSCreateMapTable(NSNonOwnedPointerMapKeyCallBacks, NSNonRetainedObjectMapValueCallBacks, 0);
+#else
+    // NSMapTable with zeroing weak pointers is the recommended way to build caches like this under garbage collection.
+    NSPointerFunctionsOptions keyOptions = NSPointerFunctionsOpaqueMemory | NSPointerFunctionsOpaquePersonality;
+    NSPointerFunctionsOptions valueOptions = NSPointerFunctionsZeroingWeakMemory | NSPointerFunctionsObjectPersonality;
+    return [[NSMapTable alloc] initWithKeyOptions:keyOptions valueOptions:valueOptions capacity:0];
+#endif
+}
+
+NSMapTable* createWrapperCacheWithIntegerKeys()
+{
+#ifdef BUILDING_ON_TIGER
+    return NSCreateMapTable(NSIntMapKeyCallBacks, NSNonRetainedObjectMapValueCallBacks, 0);
+#else
+    // NSMapTable with zeroing weak pointers is the recommended way to build caches like this under garbage collection.
+    NSPointerFunctionsOptions keyOptions = NSPointerFunctionsOpaqueMemory | NSPointerFunctionsIntegerPersonality;
+    NSPointerFunctionsOptions valueOptions = NSPointerFunctionsZeroingWeakMemory | NSPointerFunctionsObjectPersonality;
+    return [[NSMapTable alloc] initWithKeyOptions:keyOptions valueOptions:valueOptions capacity:0];
+#endif
+}
 
 NSObject* getDOMWrapper(DOMObjectInternal* impl)
 {
-    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
-    WebThreadContext *threadContext = WebThreadCurrentContext();
-    if (!threadContext->DOMWrapperCache)
+#ifdef NEEDS_WRAPPER_CACHE_LOCK
+    MutexLocker locker(wrapperCacheLock());
+#endif
+    if (!DOMWrapperCache)
         return nil;
-    return ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->get(impl);
+    return static_cast<NSObject*>(NSMapGet(DOMWrapperCache, impl));
 }
 
 void addDOMWrapper(NSObject* wrapper, DOMObjectInternal* impl)
 {
-    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
-    WebThreadContext *threadContext = WebThreadCurrentContext();
-    if (!threadContext->DOMWrapperCache)
-         threadContext->DOMWrapperCache = new HashMap<DOMObjectInternal*, NSObject*>;
-    ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->set(impl, wrapper);
+#ifdef NEEDS_WRAPPER_CACHE_LOCK
+    MutexLocker locker(wrapperCacheLock());
+#endif
+    if (!DOMWrapperCache)
+        DOMWrapperCache = createWrapperCache();
+    NSMapInsert(DOMWrapperCache, impl, wrapper);
 }
 
 void removeDOMWrapper(DOMObjectInternal* impl)
 {
-    ASSERT_WITH_MESSAGE(!WebThreadIsEnabled() || WebThreadIsLocked(), "DOM wrapper cache accessed without web lock");
-    WebThreadContext *threadContext = WebThreadCurrentContext();
-    if (!threadContext->DOMWrapperCache)
+#ifdef NEEDS_WRAPPER_CACHE_LOCK
+    MutexLocker locker(wrapperCacheLock());
+#endif
+    if (!DOMWrapperCache)
         return;
-    ((HashMap<DOMObjectInternal*, NSObject*>*)threadContext->DOMWrapperCache)->remove(impl);
-}
-
-//------------------------------------------------------------------------------------------
-// Exceptions
-
-NSString * const DOMException = @"DOMException";
-NSString * const DOMRangeException = @"DOMRangeException";
-NSString * const DOMEventException = @"DOMEventException";
-#if XPATH_SUPPORT
-NSString * const DOMXPathException = @"DOMXPathException";
-#endif // XPATH_SUPPORT
-
-void raiseDOMException(ExceptionCode ec)
-{
-    ASSERT(ec);
-
-    NSString *name = ::DOMException;
-
-    int code = ec;
-    if (ec >= RangeExceptionOffset && ec <= RangeExceptionMax) {
-        name = DOMRangeException;
-        code -= RangeExceptionOffset;
-    } else if (ec >= EventExceptionOffset && ec <= EventExceptionMax) {
-        name = DOMEventException;
-        code -= EventExceptionOffset;
-#if XPATH_SUPPORT
-    } else if (ec >= XPathExceptionOffset && ec <= XPathExceptionMax) {
-        name = DOMXPathException;
-        code -= XPathExceptionOffset;
-#endif // XPATH_SUPPORT
-    }
-
-    NSString *reason = [NSString stringWithFormat:@"*** Exception received from DOM API: %d", code];
-    NSException *exception = [NSException exceptionWithName:name reason:reason
-        userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithInt:code] forKey:name]];
-    [exception raise];
-}
-
-//------------------------------------------------------------------------------------------
-// String/NSString bridging
-
-String::String(NSString* str)
-{
-    if (!str)
-        return;
-
-    CFIndex size = CFStringGetLength(reinterpret_cast<CFStringRef>(str));
-    if (size == 0)
-        m_impl = StringImpl::empty();
-    else {
-        Vector<UChar, 1024> buffer(size);
-        CFStringGetCharacters(reinterpret_cast<CFStringRef>(str), CFRangeMake(0, size), buffer.data());
-        m_impl = new StringImpl(buffer.data(), size);
-    }
-}
-
-String::String(CFStringRef str)
-{
-    if (!str)
-        return;
-
-    CFIndex size = CFStringGetLength(str);
-    if (size == 0)
-        m_impl = StringImpl::empty();
-    else {
-        Vector<UChar, 1024> buffer(size);
-        CFStringGetCharacters(str, CFRangeMake(0, size), buffer.data());
-        m_impl = new StringImpl(buffer.data(), size);
-    }
+    NSMapRemove(DOMWrapperCache, impl);
 }
 
 //------------------------------------------------------------------------------------------
@@ -150,7 +106,7 @@ String::String(CFStringRef str)
 @implementation WebScriptObject (WebScriptObjectInternal)
 
 // Only called by DOMObject subclass.
-- _init
+- (id)_init
 {
     self = [super init];
 
@@ -167,7 +123,7 @@ String::String(CFStringRef str)
 
 - (void)_initializeScriptDOMNodeImp
 {
-    assert (_private->isCreatedByDOMWrapper);
+    ASSERT(_private->isCreatedByDOMWrapper);
     
     if (![self isKindOfClass:[DOMNode class]]) {
         // DOMObject can't map back to a document, and thus an interpreter,
@@ -178,19 +134,23 @@ String::String(CFStringRef str)
     
     // Extract the WebCore::Node from the ObjectiveC wrapper.
     DOMNode *n = (DOMNode *)self;
-    Node *nodeImpl = [n _node];
+    WebCore::Node *nodeImpl = core(n);
 
     // Dig up Interpreter and ExecState.
-    Frame *frame = nodeImpl->document()->frame();
-    Interpreter *interpreter = frame->jScript()->interpreter();
-    ExecState *exec = interpreter->globalExec();
+    WebCore::Frame *frame = 0;
+    if (WebCore::Document* document = nodeImpl->document())
+        frame = document->frame();
+    if (!frame)
+        return;
+        
+    JSC::ExecState *exec = frame->script()->globalObject()->globalExec();
     
     // Get (or create) a cached JS object for the DOM node.
-    JSObject *scriptImp = static_cast<JSObject *>(toJS(exec, nodeImpl));
+    JSC::JSObject *scriptImp = asObject(WebCore::toJS(exec, nodeImpl));
 
-    const RootObject *executionContext = Mac(frame)->bindingRootObject();
+    JSC::Bindings::RootObject* rootObject = frame->script()->bindingRootObject();
 
-    [self _initializeWithObjectImp:scriptImp originExecutionContext:executionContext executionContext:executionContext];
+    [self _setImp:scriptImp originRootObject:rootObject rootObject:rootObject];
 }
 
 @end

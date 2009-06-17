@@ -1,9 +1,7 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,57 +15,50 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLObjectElement_H
-#define HTMLObjectElement_H
+#ifndef HTMLObjectElement_h
+#define HTMLObjectElement_h
 
-#include "HTMLPlugInElement.h"
-
-#if PLATFORM(MAC)
-#include <JavaScriptCore/runtime.h>
-#else
-namespace KJS { namespace Bindings { class Instance; } }
-#endif
+#include "HTMLPlugInImageElement.h"
 
 namespace WebCore {
 
-class HTMLFormElement;
-class HTMLImageLoader;
+class KURL;
 
-class HTMLObjectElement : public HTMLPlugInElement
-{
+class HTMLObjectElement : public HTMLPlugInImageElement {
 public:
-    HTMLObjectElement(Document*);
+    HTMLObjectElement(const QualifiedName&, Document*, bool createdByParser);
     ~HTMLObjectElement();
 
-    virtual int tagPriority() const { return 7; }
+    virtual int tagPriority() const { return 5; }
 
     virtual void parseMappedAttribute(MappedAttribute*);
 
     virtual void attach();
+    virtual bool canLazyAttach() { return false; }
     virtual bool rendererIsNeeded(RenderStyle*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual void closeRenderer();
+    virtual void finishParsingChildren();
     virtual void detach();
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
     
-    virtual void recalcStyle(StyleChange ch);
-    virtual void childrenChanged();
+    virtual void recalcStyle(StyleChange);
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
     virtual bool isURLAttribute(Attribute*) const;
+    virtual const QualifiedName& imageSourceAttributeName() const;
 
-    bool isImageType();
+    virtual void updateWidget();
+    void setNeedWidgetUpdate(bool needWidgetUpdate) { m_needWidgetUpdate = needWidgetUpdate; }
 
     void renderFallbackContent();
 
-#if PLATFORM(MAC)
-    virtual KJS::Bindings::Instance* getInstance() const;
-#endif
+    virtual RenderWidget* renderWidgetForJSBindings() const;
 
     String archive() const;
     void setArchive(const String&);
@@ -83,25 +74,18 @@ public:
 
     String codeType() const;
     void setCodeType(const String&);
-
-    Document* contentDocument() const;
     
-    String data() const;
+    KURL data() const;
     void setData(const String&);
 
     bool declare() const;
     void setDeclare(bool);
 
-    HTMLFormElement* form() const;
-    
-    String hspace() const;
-    void setHspace(const String&);
+    int hspace() const;
+    void setHspace(int);
 
     String standby() const;
     void setStandby(const String&);
-
-    int tabIndex() const;
-    void setTabIndex(int);
 
     String type() const;
     void setType(const String&);
@@ -109,26 +93,25 @@ public:
     String useMap() const;
     void setUseMap(const String&);
 
-    String vspace() const;
-    void setVspace(const String&);
+    int vspace() const;
+    void setVspace(int);
 
-    bool isComplete() const { return m_complete; }
-    void setComplete(bool complete);
-    
     bool isDocNamedItem() const { return m_docNamedItem; }
 
-    DeprecatedString serviceType;
-    DeprecatedString url;
-    String classId;
-    bool needWidgetUpdate : 1;
-    bool m_useFallbackContent : 1;
-    HTMLImageLoader* m_imageLoader;
+    const String& classId() const { return m_classId; }
+
+    bool containsJavaApplet() const;
+
+    virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
 private:
     void updateDocNamedItem();
-    String oldIdAttr;
-    bool m_complete;
-    bool m_docNamedItem;
+
+    AtomicString m_id;
+    String m_classId;
+    bool m_docNamedItem : 1;
+    bool m_needWidgetUpdate : 1;
+    bool m_useFallbackContent : 1;
 };
 
 }

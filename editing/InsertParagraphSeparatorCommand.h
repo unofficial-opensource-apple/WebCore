@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef insert_paragraph_separator_command_h__
-#define insert_paragraph_separator_command_h__
+#ifndef InsertParagraphSeparatorCommand_h
+#define InsertParagraphSeparatorCommand_h
 
 #include "CompositeEditCommand.h"
 
@@ -32,17 +32,26 @@ namespace WebCore {
 
 class InsertParagraphSeparatorCommand : public CompositeEditCommand {
 public:
-    InsertParagraphSeparatorCommand(Document*);
+    static PassRefPtr<InsertParagraphSeparatorCommand> create(Document* document, bool useDefaultParagraphElement = false)
+    {
+        return adoptRef(new InsertParagraphSeparatorCommand(document, useDefaultParagraphElement));
+    }
+
+private:
+    InsertParagraphSeparatorCommand(Document*, bool useDefaultParagraphElement);
 
     virtual void doApply();
 
-private:
     void calculateStyleBeforeInsertion(const Position&);
-    void applyStyleAfterInsertion();
+    void applyStyleAfterInsertion(Node* originalEnclosingBlock);
+    
+    bool shouldUseDefaultParagraphElement(Node*) const;
 
     virtual bool preservesTypingStyle() const;
 
     RefPtr<CSSMutableStyleDeclaration> m_style;
+    
+    bool m_mustUseDefaultParagraphElement;
 };
 
 }

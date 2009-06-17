@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,40 +23,37 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef typing_command_h__
-#define typing_command_h__
+#ifndef TypingCommand_h
+#define TypingCommand_h
 
 #include "CompositeEditCommand.h"
 
 namespace WebCore {
 
-class TypingCommand : public CompositeEditCommand
-{
+class TypingCommand : public CompositeEditCommand {
 public:
     enum ETypingCommand { 
+        DeleteSelection,
         DeleteKey, 
         ForwardDeleteKey, 
         InsertText, 
         InsertLineBreak, 
         InsertParagraphSeparator,
-        InsertParagraphSeparatorInQuotedContent,
+        InsertParagraphSeparatorInQuotedContent
     };
 
-    TypingCommand(Document *document, ETypingCommand, const String &text = "", bool selectInsertedText = false, TextGranularity granularity = CharacterGranularity);
-
-    static void deleteKeyPressed(Document *, bool smartDelete = false, TextGranularity granularity = CharacterGranularity);
-    static void forwardDeleteKeyPressed(Document *, bool smartDelete = false, TextGranularity granularity = CharacterGranularity);
-    static void insertText(Document *, const String &, bool selectInsertedText = false);
-    static void insertLineBreak(Document *);
-    static void insertParagraphSeparator(Document *);
-    static void insertParagraphSeparatorInQuotedContent(Document *);
-    static bool isOpenForMoreTypingCommand(const EditCommandPtr &);
-    static void closeTyping(const EditCommandPtr &);
+    static void deleteSelection(Document*, bool smartDelete = false);
+    static void deleteKeyPressed(Document*, bool smartDelete = false, TextGranularity = CharacterGranularity, bool killRing = false);
+    static void forwardDeleteKeyPressed(Document*, bool smartDelete = false, TextGranularity = CharacterGranularity, bool killRing = false);
+    static void insertText(Document*, const String&, bool selectInsertedText = false, bool insertedTextIsComposition = false);
+    static void insertText(Document*, const String&, const Selection&, bool selectInsertedText = false, bool insertedTextIsComposition = false);
+    static void insertLineBreak(Document*);
+    static void insertParagraphSeparator(Document*);
+    static void insertParagraphSeparatorInQuotedContent(Document*);
+    static bool isOpenForMoreTypingCommand(const EditCommand*);
+    static void closeTyping(EditCommand*);
     
-    virtual void doApply();
-    virtual EditAction editingAction() const;
-
-    bool openForMoreTyping() const { return m_openForMoreTyping; }
+    bool isOpenForMoreTyping() const { return m_openForMoreTyping; }
     void closeTyping() { m_openForMoreTyping = false; }
 
     void insertText(const String &text, bool selectInsertedText);
@@ -64,13 +61,25 @@ public:
     void insertLineBreak();
     void insertParagraphSeparatorInQuotedContent();
     void insertParagraphSeparator();
-    void deleteKeyPressed(TextGranularity);
-    void forwardDeleteKeyPressed(TextGranularity);
+    void deleteKeyPressed(TextGranularity, bool killRing);
+    void forwardDeleteKeyPressed(TextGranularity, bool killRing);
+    void deleteSelection(bool smartDelete);
 
-    bool smartDelete() { return m_smartDelete; }
-    void setSmartDelete(bool smartDelete) { m_smartDelete = smartDelete; }
+    void setEndingSelectionOnLastInsertCommand(const Selection& selection);
 
 private:
+    static PassRefPtr<TypingCommand> create(Document* document, ETypingCommand command, const String& text = "", bool selectInsertedText = false, TextGranularity granularity = CharacterGranularity, bool killRing = false)
+    {
+        return adoptRef(new TypingCommand(document, command, text, selectInsertedText, granularity, killRing));
+    }
+
+    TypingCommand(Document*, ETypingCommand, const String& text, bool selectInsertedText, TextGranularity, bool killRing);
+
+    bool smartDelete() const { return m_smartDelete; }
+    void setSmartDelete(bool smartDelete) { m_smartDelete = smartDelete; }
+    
+    virtual void doApply();
+    virtual EditAction editingAction() const;
     virtual bool isTypingCommand() const;
     virtual bool preservesTypingStyle() const;
 
@@ -80,12 +89,17 @@ private:
     ETypingCommand m_commandType;
     String m_textToInsert;
     bool m_openForMoreTyping;
-    bool m_applyEditing;
     bool m_selectInsertedText;
     bool m_smartDelete;
     TextGranularity m_granularity;
+    bool m_killRing;
+    
+    // Undoing a series of backward deletes will restore a selection around all of the
+    // characters that were deleted, but only if the typing command being undone
+    // was opened with a backward delete.
+    bool m_openedByBackwardDelete;
 };
 
 } // namespace WebCore
 
-#endif // __typing_command_h__
+#endif // TypingCommand_h

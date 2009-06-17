@@ -1,10 +1,8 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003 Apple Computer, Inc.
+ * Copyright (C) 2003, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,31 +16,35 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "HTMLBaseElement.h"
 
+#include "CSSHelper.h"
 #include "Document.h"
 #include "Frame.h"
+#include "FrameLoader.h"
 #include "HTMLNames.h"
-#include "csshelper.h"
+#include "KURL.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLBaseElement::HTMLBaseElement(Document *doc)
-    : HTMLElement(baseTag, doc)
+HTMLBaseElement::HTMLBaseElement(const QualifiedName& qName, Document* doc)
+    : HTMLElement(qName, doc)
 {
+    ASSERT(hasTagName(baseTag));
 }
 
 HTMLBaseElement::~HTMLBaseElement()
 {
 }
 
-void HTMLBaseElement::parseMappedAttribute(MappedAttribute *attr)
+void HTMLBaseElement::parseMappedAttribute(MappedAttribute* attr)
 {
     if (attr->name() == hrefAttr) {
         m_href = parseURL(attr->value());
@@ -66,8 +68,8 @@ void HTMLBaseElement::removedFromDocument()
 
     // Since the document doesn't have a base element...
     // (This will break in the case of multiple base elements, but that's not valid anyway (?))
-    document()->setBaseURL(DeprecatedString::null);
-    document()->setBaseTarget(DeprecatedString::null);
+    document()->setBaseElementURL(KURL());
+    document()->setBaseElementTarget(String());
 }
 
 void HTMLBaseElement::process()
@@ -75,11 +77,11 @@ void HTMLBaseElement::process()
     if (!inDocument())
         return;
 
-    if (!m_href.isEmpty() && document()->frame())
-        document()->setBaseURL(KURL(document()->frame()->url(), m_href.deprecatedString()).url());
+    if (!m_href.isEmpty())
+        document()->setBaseElementURL(KURL(document()->url(), m_href));
 
     if (!m_target.isEmpty())
-        document()->setBaseTarget(m_target.deprecatedString());
+        document()->setBaseElementTarget(m_target);
 
     // ### should changing a document's base URL dynamically automatically update all images, stylesheets etc?
 }

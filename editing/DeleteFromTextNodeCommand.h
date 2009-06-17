@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,37 +23,34 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef delete_from_text_node_command_h__
-#define delete_from_text_node_command_h__
+#ifndef DeleteFromTextNodeCommand_h
+#define DeleteFromTextNodeCommand_h
 
 #include "EditCommand.h"
 
 namespace WebCore {
-    class Text;
-}
 
-namespace WebCore {
+class Text;
 
-class DeleteFromTextNodeCommand : public EditCommand
-{
+class DeleteFromTextNodeCommand : public SimpleEditCommand {
 public:
-    DeleteFromTextNodeCommand(Document *document, Text *node, int offset, int count);
-    virtual ~DeleteFromTextNodeCommand() { }
+    static PassRefPtr<DeleteFromTextNodeCommand> create(PassRefPtr<Text> node, unsigned offset, unsigned count)
+    {
+        return adoptRef(new DeleteFromTextNodeCommand(node, offset, count));
+    }
+
+private:
+    DeleteFromTextNodeCommand(PassRefPtr<Text>, unsigned offset, unsigned count);
 
     virtual void doApply();
     virtual void doUnapply();
 
-    Text *node() const { return m_node.get(); }
-    int offset() const { return m_offset; }
-    int count() const { return m_count; }
-
-private:
     RefPtr<Text> m_node;
-    int m_offset;
-    int m_count;
+    unsigned m_offset;
+    unsigned m_count;
     String m_text;
 };
 
 } // namespace WebCore
 
-#endif // __delete_from_text_node_command_h__
+#endif // DeleteFromTextNodeCommand_h

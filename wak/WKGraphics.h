@@ -31,3 +31,24 @@ void WKSetPattern(CGContextRef context, CGPatternRef pattern, bool fill, bool st
 #ifdef __cplusplus
 }
 #endif
+
+#ifdef __cplusplus
+class WKFontAntialiasingStateSaver
+{
+public:
+
+    WKFontAntialiasingStateSaver(bool useOrientationDependentFontAntialiasing)
+        : m_useOrientationDependentFontAntialiasing(useOrientationDependentFontAntialiasing)
+    {
+    }
+
+    void setup(bool isLandscapeOrientation);
+    void restore();
+
+private:
+
+    bool m_useOrientationDependentFontAntialiasing;
+    bool m_oldShouldUseFontSmoothing;
+    CGFontAntialiasingStyle m_oldAntialiasingStyle;
+};
+#endif

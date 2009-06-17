@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
- *
+ * Copyright (C) 2004, 2005, 2006 Apple Inc.
+ * 
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
  * License as published by the Free Software Foundation; either
@@ -13,30 +13,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
+#if defined(HAVE_CONFIG_H) && HAVE_CONFIG_H
+#include "autotoolsconfig.h"
+#endif
+
 #include <wtf/Platform.h>
 
-#define KHTML_NO_XBL 1
+#define MOBILE 0
 
-#if __APPLE__
+#ifdef __APPLE__
 #define HAVE_FUNC_USLEEP 1
+#endif /* __APPLE__ */
 
-#ifndef CGFLOAT_DEFINED
-#if __LP64__
-typedef double CGFloat;
-#else
-typedef float CGFloat;
-#endif
-#define CGFLOAT_DEFINED 1
-#endif
-
-#endif
-
-#if WIN32
+#if PLATFORM(WIN_OS)
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0500
@@ -46,16 +40,31 @@ typedef float CGFloat;
 #define WINVER 0x0500
 #endif
 
-// Hack to match configuration of JavaScriptCore.
-// Maybe there's a better way to do this.
-#define USE_SYSTEM_MALLOC 1
+// If we don't define these, they get defined in windef.h.
+// We want to use std::min and std::max.
+#ifndef max
+#define max max
+#endif
+#ifndef min
+#define min min
+#endif
 
-// FIXME: Should probably just dump this eventually, but it's needed for now.
-// We get this from some system place on OS X; probably better not to use it
-// in WebCore code.
+// CURL needs winsock, so don't prevent inclusion of it
+#if !USE(CURL)
+#ifndef _WINSOCKAPI_
+#define _WINSOCKAPI_ // Prevent inclusion of winsock.h in windows.h
+#endif
+#endif
 
-#include <assert.h>
+#endif /* PLATFORM(WIN_OS) */
 
+// On MSW, wx headers need to be included before windows.h is.
+// The only way we can always ensure this is if we include wx here.
+#if PLATFORM(WX)
+// The defines in KeyboardCodes.h conflict with Windows as well, and the only way I've found
+// to address the problem is include KeyboarddCodes.h before windows.h, so do it here.
+#include "KeyboardCodes.h"
+#include <wx/defs.h>
 #endif
 
 #ifdef __cplusplus
@@ -68,17 +77,79 @@ typedef float CGFloat;
 
 #endif
 
-#if !defined(WIN32) // can't get this to compile on Visual C++ yet
-#define AVOID_STATIC_CONSTRUCTORS 1
+// this breaks compilation of <QFontDatabase>, at least, so turn it off for now
+// Also generates errors on wx on Windows, presumably because these functions
+// are used from wx headers.
+#if !PLATFORM(QT) && !PLATFORM(WX)
+#include <wtf/DisallowCType.h>
+#endif
+
+#if COMPILER(MSVC)
+#define SKIP_STATIC_CONSTRUCTORS_ON_MSVC 1
+#else
+#define SKIP_STATIC_CONSTRUCTORS_ON_GCC 1
+#endif
+
+#if PLATFORM(WIN)
+#define WTF_PLATFORM_CG 1
+#undef WTF_PLATFORM_CAIRO
+#define WTF_USE_CFNETWORK 1
+#undef WTF_USE_WININET
+#define WTF_PLATFORM_CF 1
+#define WTF_USE_PTHREADS 0
 #endif
 
 
-#define roundf(f) ((float)((int)((f) + (f > 0 ? 0.5f : -0.5 ))))
-#define lroundf(f) ((long int)((int)((f) + (f > 0 ? 0.5f : -0.5 ))))
+// Accelerated compositing
+#define WTF_USE_ACCELERATED_COMPOSITING 1
 
-#define floorf(f) ((float)((int)(f >= 0 ? f : f + 1.0)))
-#define lfloorf(f) ((long int)((int)(f >= 0 ? f : f + 1.0)))
+#define WTF_USE_ATSUI 0
+#define WTF_USE_CORE_TEXT 1
 
-#define ceilf(f)  ((float)((int)(f > 0 ? (f) + 1.0 - __FLT_EPSILON__ : f)))
-#define lceilf(f)  ((long int)((int)(f > 0 ? (f) + 1.0 - __FLT_EPSILON__ : f)))
+#if PLATFORM(SYMBIAN)
+#undef WIN32
+#undef _WIN32
+#undef SKIP_STATIC_CONSTRUCTORS_ON_GCC
+#define USE_SYSTEM_MALLOC 1
+#define U_HAVE_INT8_T 0
+#define U_HAVE_INT16_T 0
+#define U_HAVE_INT32_T 0
+#define U_HAVE_INT64_T 0
+#define U_HAVE_INTTYPES_H 0
 
+#include <stdio.h>
+#include <limits.h>
+#include <wtf/MathExtras.h>
+#endif
+
+#if !defined(WTF_USE_V8)
+/* Currently Chromium is the only platform which uses V8 by default */
+#if PLATFORM(CHROMIUM)
+#define WTF_USE_V8 1
+#else
+#define WTF_USE_V8 0
+#endif /* PLATFORM(CHROMIUM) */
+#endif /* !defined(WTF_USE_V8) */
+
+/* Using V8 implies not using JSC and vice versa */
+#define WTF_USE_JSC !WTF_USE_V8
+
+#if PLATFORM(CG)
+#ifndef CGFLOAT_DEFINED
+#ifdef __LP64__
+typedef double CGFloat;
+#else
+typedef float CGFloat;
+#endif
+#define CGFLOAT_DEFINED 1
+#endif
+#endif /* PLATFORM(CG) */
+
+#ifdef BUILDING_ON_TIGER
+#undef ENABLE_FTPDIR
+#define ENABLE_FTPDIR 0
+#endif
+
+#if PLATFORM(WIN) && PLATFORM(CG)
+#define WTF_USE_SAFARI_THEME 1
+#endif

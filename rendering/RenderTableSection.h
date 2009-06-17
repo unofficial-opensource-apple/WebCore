@@ -20,12 +20,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef RenderTableSection_H
-#define RenderTableSection_H
+#ifndef RenderTableSection_h
+#define RenderTableSection_h
 
 #include "RenderTable.h"
 #include <wtf/Vector.h>
@@ -33,58 +33,55 @@
 namespace WebCore {
 
 class RenderTableCell;
+class RenderTableRow;
 
-class RenderTableSection : public RenderContainer
-{
+class RenderTableSection : public RenderContainer {
 public:
     RenderTableSection(Node*);
     ~RenderTableSection();
-    virtual void destroy();
 
-    virtual void setStyle(RenderStyle*);
+    virtual const char* renderName() const { return isAnonymous() ? "RenderTableSection (anonymous)" : "RenderTableSection"; }
 
-    virtual const char *renderName() const { return "RenderTableSection"; }
-
-    // overrides
-    virtual void addChild(RenderObject *child, RenderObject *beforeChild = 0);
     virtual bool isTableSection() const { return true; }
 
-    virtual short lineHeight(bool) const { return 0; }
-    virtual void position(int, int, int, int, int, bool, bool, int) {}
+    virtual void destroy();
 
-#ifndef NDEBUG
-    virtual void dump(TextStream *stream, DeprecatedString ind = "") const;
-#endif
+    virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0);
 
-    void addCell(RenderTableCell *cell, RenderObject* row);
+    virtual int getBaselineOfFirstLineBox() const;
+
+    void addCell(RenderTableCell*, RenderTableRow* row);
 
     void setCellWidths();
-    void calcRowHeight();
+    int calcRowHeight();
     int layoutRows(int height);
 
-    RenderTable *table() const { return static_cast<RenderTable *>(parent()); }
+    RenderTable* table() const { return static_cast<RenderTable*>(parent()); }
 
     struct CellStruct {
-        RenderTableCell *cell;
+        RenderTableCell* cell;
         bool inColSpan; // true for columns after the first in a colspan
     };
+
     typedef Vector<CellStruct> Row;
+
     struct RowStruct {
         Row* row;
-        RenderObject* rowRenderer;
-        int baseLine;
+        RenderTableRow* rowRenderer;
+        int baseline;
         Length height;
     };
 
-    CellStruct& cellAt(int row,  int col) {
-        return (*grid[row].row)[col];
-    }
-    const CellStruct& cellAt(int row, int col) const {
-        return (*grid[row].row)[col];
-    }
+    CellStruct& cellAt(int row,  int col) { return (*m_grid[row].row)[col]; }
+    const CellStruct& cellAt(int row, int col) const { return (*m_grid[row].row)[col]; }
 
-    virtual int overflowWidth(bool includeInterior = true) const { return (!includeInterior && hasOverflowClip()) ? m_width : m_overflowWidth; }
+    void appendColumn(int pos);
+    void splitColumn(int pos, int newSize);
+
+    virtual int overflowWidth(bool includeInterior = true) const { return (!includeInterior && hasOverflowClip()) ? width() : m_overflowWidth; }
     virtual int overflowLeft(bool includeInterior = true) const { return (!includeInterior && hasOverflowClip()) ? 0 : m_overflowLeft; }
+    virtual int overflowHeight(bool includeInterior = true) const { return (!includeInterior && hasOverflowClip()) ? height() : m_overflowHeight; }
+    virtual int overflowTop(bool includeInterior = true) const { return (!includeInterior && hasOverflowClip()) ? 0 : m_overflowTop; }
 
     virtual int lowestPosition(bool includeOverflowInterior, bool includeSelf) const;
     virtual int rightmostPosition(bool includeOverflowInterior, bool includeSelf) const;
@@ -101,44 +98,60 @@ public:
     int outerBorderLeft() const { return m_outerBorderLeft; }
     int outerBorderRight() const { return m_outerBorderRight; }
 
-    virtual void paint(PaintInfo& i, int tx, int ty);
+    virtual void paint(PaintInfo&, int tx, int ty);
+    virtual void paintObject(PaintInfo&, int tx, int ty);
 
-    int numRows() const { return gridRows; }
+    virtual void imageChanged(WrappedImagePtr, const IntRect* = 0);
+
+    int numRows() const { return m_gridRows; }
     int numColumns() const;
-    int getBaseline(int row) {return grid[row].baseLine;}
-
-    void setNeedCellRecalc() {
-        needCellRecalc = true;
-        table()->setNeedSectionRecalc();
+    void recalcCells();
+    void recalcCellsIfNeeded()
+    {
+        if (m_needsCellRecalc)
+            recalcCells();
     }
 
-    virtual RenderObject* removeChildNode(RenderObject* child);
+    bool needsCellRecalc() const { return m_needsCellRecalc; }
+    void setNeedsCellRecalc()
+    {
+        m_needsCellRecalc = true;
+        table()->setNeedsSectionRecalc();
+    }
 
-    virtual bool nodeAtPoint(NodeInfo& info, int x, int y, int tx, int ty, HitTestAction action);
+    int getBaseline(int row) { return m_grid[row].baseline; }
 
-    // this gets a cell grid data structure. changing the number of
-    // columns is done by the table
-    Vector<RowStruct> grid;
-    int gridRows;
-    Vector<int> rowPos;
+    virtual RenderObject* removeChildNode(RenderObject*, bool fullRemove = true);
+
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
+
+private:
+    virtual int lineHeight(bool, bool) const { return 0; }
+    virtual void position(InlineBox*) { }
+
+    bool ensureRows(int);
+    void clearGrid();
+
+    Vector<RowStruct> m_grid;
+    int m_gridRows;
+    Vector<int> m_rowPos;
 
     // the current insertion position
-    int cCol;
-    int cRow;
-    bool needCellRecalc;
+    int m_cCol;
+    int m_cRow;
+    bool m_needsCellRecalc;
 
-    void recalcCells();
-protected:
-    bool ensureRows(int numRows);
-    void clearGrid();
     int m_outerBorderLeft;
     int m_outerBorderRight;
     int m_outerBorderTop;
     int m_outerBorderBottom;
     int m_overflowLeft;
     int m_overflowWidth;
+    int m_overflowTop;
+    int m_overflowHeight;
     bool m_hasOverflowingCell;
 };
 
-}
-#endif
+} // namespace WebCore
+
+#endif // RenderTableSection_h

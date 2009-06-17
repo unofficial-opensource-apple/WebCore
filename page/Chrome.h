@@ -1,6 +1,5 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -14,16 +13,24 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #ifndef Chrome_h
 #define Chrome_h
 
+#include "FileChooser.h"
 #include "FocusDirection.h"
+#include "HostWindow.h"
 #include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
+
+#ifndef __OBJC__
+class WAKView;
+#else
+@class WAKView;
+#endif
 
 #if PLATFORM(MAC)
 #ifndef __OBJC__
@@ -32,40 +39,102 @@ class NSView;
 #endif
 
 namespace WebCore {
-    
+
     class ChromeClient;
     class ContextMenu;
     class FloatRect;
     class Frame;
+    class Geolocation;
+    class HitTestResult;
     class IntRect;
     class Page;
     class String;
-    
+
     struct FrameLoadRequest;
+    struct WindowFeatures;
     
-    enum MessageSource {
-        HTMLMessageSource,
-        XMLMessageSource,
-        JSMessageSource,
-        CSSMessageSource,
-        OtherMessageSource
-    };
-    
-    enum MessageLevel {
-        TipMessageLevel,
-        LogMessageLevel,
-        WarningMessageLevel,
-        ErrorMessageLevel
-    };
-    
-    class Chrome {
-public:
+    class Chrome : public HostWindow {
+    public:
         Chrome(Page*, ChromeClient*);
         ~Chrome();
-        
+
         ChromeClient* client() { return m_client; }
-        void addMessageToConsole(MessageSource, MessageLevel, const String& message, unsigned lineNumber, const String& sourceID);
-private:
+
+        // HostWindow methods.
+        virtual void repaint(const IntRect&, bool contentChanged, bool immediate = false, bool repaintContentOnly = false);
+        virtual void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, const IntRect& clipRect);
+        virtual IntPoint screenToWindow(const IntPoint&) const;
+        virtual IntRect windowToScreen(const IntRect&) const;
+        virtual PlatformWidget platformWindow() const;
+        virtual void scrollRectIntoView(const IntRect&, const ScrollView*) const;
+
+        void contentsSizeChanged(Frame*, const IntSize&) const;
+
+        void setWindowRect(const FloatRect&) const;
+        FloatRect windowRect() const;
+
+        FloatRect pageRect() const;
+        
+        float scaleFactor();
+
+        void focus(bool userGesture) const;
+        void unfocus() const;
+
+        bool canTakeFocus(FocusDirection) const;
+        void takeFocus(FocusDirection) const;
+
+        Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&, const bool) const;
+        void show() const;
+
+        bool canRunModal() const;
+        bool canRunModalNow() const;
+        void runModal() const;
+
+        void setToolbarsVisible(bool) const;
+        bool toolbarsVisible() const;
+        
+        void setStatusbarVisible(bool) const;
+        bool statusbarVisible() const;
+        
+        void setScrollbarsVisible(bool) const;
+        bool scrollbarsVisible() const;
+        
+        void setMenubarVisible(bool) const;
+        bool menubarVisible() const;
+        
+        void setResizable(bool) const;
+
+        bool canRunBeforeUnloadConfirmPanel();
+        bool runBeforeUnloadConfirmPanel(const String& message, Frame* frame);
+
+        void closeWindowSoon();
+
+        void runJavaScriptAlert(Frame*, const String&);
+        bool runJavaScriptConfirm(Frame*, const String&);
+        bool runJavaScriptPrompt(Frame*, const String& message, const String& defaultValue, String& result);
+        void setStatusbarText(Frame*, const String&);
+        bool shouldInterruptJavaScript();
+
+        IntRect windowResizerRect() const;
+
+        void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags);
+
+        void setToolTip(const HitTestResult&);
+
+        void print(Frame*);
+
+        void enableSuddenTermination();
+        void disableSuddenTermination();
+
+        bool requestGeolocationPermissionForFrame(Frame*, Geolocation*);
+            
+        void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
+
+#if PLATFORM(MAC)
+        void focusNSView(NSView*);
+#endif
+
+    private:
         Page* m_page;
         ChromeClient* m_client;
     };

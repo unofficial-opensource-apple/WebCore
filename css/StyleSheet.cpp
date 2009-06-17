@@ -16,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "StyleSheet.h"
@@ -26,7 +26,7 @@
 
 namespace WebCore {
 
-StyleSheet::StyleSheet(StyleSheet* parentSheet, String href)
+StyleSheet::StyleSheet(StyleSheet* parentSheet, const String& href)
     : StyleList(parentSheet)
     , m_parentNode(0)
     , m_strHref(href)
@@ -35,7 +35,7 @@ StyleSheet::StyleSheet(StyleSheet* parentSheet, String href)
 }
 
 
-StyleSheet::StyleSheet(Node* parentNode, String href)
+StyleSheet::StyleSheet(Node* parentNode, const String& href)
     : StyleList(0)
     , m_parentNode(parentNode)
     , m_strHref(href)
@@ -43,7 +43,7 @@ StyleSheet::StyleSheet(Node* parentNode, String href)
 {
 }
 
-StyleSheet::StyleSheet(StyleBase* owner, String href)
+StyleSheet::StyleSheet(StyleBase* owner, const String& href)
     : StyleList(owner)
     , m_parentNode(0)
     , m_strHref(href)
@@ -62,13 +62,23 @@ StyleSheet* StyleSheet::parentStyleSheet() const
     return (parent() && parent()->isStyleSheet()) ? static_cast<StyleSheet*>(parent()) : 0;
 }
 
-void StyleSheet::setMedia(MediaList* media)
+void StyleSheet::setMedia(PassRefPtr<MediaList> media)
 {
     if (m_media)
         m_media->setParent(0);
 
     m_media = media;
     m_media->setParent(this);
+}
+
+KURL StyleSheet::completeURL(const String& url) const
+{
+    // Always return a null URL when passed a null string.
+    // FIXME: Should we change the KURL constructor to have this behavior?
+    // See also Document::completeURL(const String&)
+    if (url.isNull())
+        return KURL();
+    return KURL(baseURL(), url);
 }
 
 }

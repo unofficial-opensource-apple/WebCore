@@ -31,16 +31,11 @@
 @end
 
 @interface WAKWindow : WAKResponder
-- (void)sendEvent:(GSEventRef)event;
+- (void)sendGSEvent:(GSEventRef)event;
 @end
 
 @protocol WebPolicyDecisionListener <NSObject>
 - (void)use;
-@end
-
-@interface WebCoreFrameBridge : NSObject
-- (NSString *)stringByEvaluatingJavaScriptFromString:(NSString *)string forceUserGesture:(BOOL)forceUserGesture;
-- (void)insertText:(NSString *)aStringValue selectInsertedText:(BOOL)aFlag;
 @end
 
 @interface WebScriptObject : NSObject
@@ -48,8 +43,3 @@
 
 @interface DOMObject : WebScriptObject
 @end
-
-@interface DOMNode : DOMObject
-- (void)simulateCompleteClick;
-@end
-

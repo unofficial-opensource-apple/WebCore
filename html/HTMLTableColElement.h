@@ -20,13 +20,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLTableColElement_H
-#define HTMLTableColElement_H
+#ifndef HTMLTableColElement_h
+#define HTMLTableColElement_h
 
 #include "HTMLTablePartElement.h"
 
@@ -42,12 +42,13 @@ public:
     virtual HTMLTagStatus endTagRequirement() const;
     virtual int tagPriority() const;
     virtual bool checkDTD(const Node*);
-    void setTable(HTMLTableElement* t) { table = t; }
 
     // overrides
     virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
     virtual void parseMappedAttribute(MappedAttribute*);
-
+    virtual bool canHaveAdditionalAttributeStyleDecls() const { return true; }
+    virtual void additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>&);
+   
     int span() const { return _span; }
 
     String align() const;
@@ -69,7 +70,6 @@ public:
 
 protected:
     int _span;
-    HTMLTableElement *table;
 };
 
 } //namespace

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,17 +28,50 @@
 
 #include "Document.h"
 #include "Element.h"
-#include "RenderBlock.h"
-#include "TextBoundaries.h"
-#include "htmlediting.h"
 #include "HTMLNames.h"
+#include "RenderBlock.h"
+#include "RenderLayer.h"
+#include "TextBoundaries.h"
+#include "TextBreakIterator.h"
 #include "TextIterator.h"
+#include "VisiblePosition.h"
+#include "htmlediting.h"
+#include <wtf/unicode/Unicode.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
+using namespace WTF::Unicode;
 
-static VisiblePosition previousBoundary(const VisiblePosition &c, unsigned (*searchFunction)(const UChar *, unsigned))
+static int endOfFirstWordBoundaryContext(const UChar* characters, int length)
+{
+    for (int i = 0; i < length; ) {
+        int first = i;
+        UChar32 ch;
+        U16_NEXT(characters, i, length, ch);
+        if (!requiresContextForWordBoundary(ch))
+            return first;
+    }
+    return length;
+}
+
+static int startOfLastWordBoundaryContext(const UChar* characters, int length)
+{
+    for (int i = length; i > 0; ) {
+        int last = i;
+        UChar32 ch;
+        U16_PREV(characters, 0, i, ch);
+        if (!requiresContextForWordBoundary(ch))
+            return last;
+    }
+    return 0;
+}
+
+enum BoundarySearchContextAvailability { DontHaveMoreContext, MayHaveMoreContext };
+
+typedef unsigned (*BoundarySearchFunction)(const UChar*, unsigned length, unsigned offset, BoundarySearchContextAvailability, bool& needMoreContext);
+
+static VisiblePosition previousBoundary(const VisiblePosition& c, BoundarySearchFunction searchFunction)
 {
     Position pos = c.deepEquivalent();
     Node *n = pos.node();
@@ -57,65 +90,81 @@ static VisiblePosition previousBoundary(const VisiblePosition &c, unsigned (*sea
 
     Position start = rangeCompliantEquivalent(Position(boundary, 0));
     Position end = rangeCompliantEquivalent(pos);
-    RefPtr<Range> searchRange = new Range(d);
+    RefPtr<Range> searchRange = Range::create(d);
     
-    int exception = 0;
-    searchRange->setStart(start.node(), start.offset(), exception);
-    searchRange->setEnd(end.node(), end.offset(), exception);
+    Vector<UChar, 1024> string;
+    unsigned suffixLength = 0;
+
+    ExceptionCode ec = 0;
+    if (requiresContextForWordBoundary(c.characterBefore())) {
+        RefPtr<Range> forwardsScanRange(d->createRange());
+        forwardsScanRange->setEndAfter(boundary, ec);
+        forwardsScanRange->setStart(end.node(), end.offset(), ec);
+        TextIterator forwardsIterator(forwardsScanRange.get());
+        while (!forwardsIterator.atEnd()) {
+            const UChar* characters = forwardsIterator.characters();
+            int length = forwardsIterator.length();
+            int i = endOfFirstWordBoundaryContext(characters, length);
+            string.append(characters, i);
+            suffixLength += i;
+            if (i < length)
+                break;
+            forwardsIterator.advance();
+        }
+    }
+
+    searchRange->setStart(start.node(), start.offset(), ec);
+    searchRange->setEnd(end.node(), end.offset(), ec);
     
-    ASSERT(!exception);
-    if (exception)
+    ASSERT(!ec);
+    if (ec)
         return VisiblePosition();
-        
+
     SimplifiedBackwardsTextIterator it(searchRange.get());
-    DeprecatedString string;
     unsigned next = 0;
-    while (!it.atEnd() && it.length() > 0) {
+    bool inTextSecurityMode = start.node() && start.node()->renderer() && start.node()->renderer()->style()->textSecurity() != TSNONE;
+    bool needMoreContext = false;
+    while (!it.atEnd()) {
         // iterate to get chunks until the searchFunction returns a non-zero value.
-        string.prepend(reinterpret_cast<const DeprecatedChar*>(it.characters()), it.length());
-        next = searchFunction(reinterpret_cast<const UChar*>(string.unicode()), string.length());
+        if (!inTextSecurityMode) 
+            string.prepend(it.characters(), it.length());
+        else {
+            // Treat bullets used in the text security mode as regular characters when looking for boundaries
+            String iteratorString(it.characters(), it.length());
+            iteratorString = iteratorString.impl()->secure('x');
+            string.prepend(iteratorString.characters(), iteratorString.length());
+        }
+        next = searchFunction(string.data(), string.size(), string.size() - suffixLength, MayHaveMoreContext, needMoreContext);
         if (next != 0)
             break;
         it.advance();
     }
-    
+    if (needMoreContext) {
+        // The last search returned the beginning of the buffer and asked for more context,
+        // but there is no earlier text. Force a search with what's available.
+        next = searchFunction(string.data(), string.size(), string.size() - suffixLength, DontHaveMoreContext, needMoreContext);
+        ASSERT(!needMoreContext);
+    }
+
     if (it.atEnd() && next == 0) {
-        RefPtr<Range> range(it.range());
-        pos = Position(range->startContainer(exception), range->startOffset(exception));
-    } else if (!it.atEnd() && it.length() == 0) {
-        // Got a zero-length chunk.
-        // This means we have hit a replaced element.
-        // Make a check to see if the position should be before or after the replaced element
-        // by performing an additional check with a modified string which uses an "X" 
-        // character to stand in for the replaced element.
-        DeprecatedChar chars[2];
-        chars[0] = 'X';
-        chars[1] = ' ';
-        string.prepend(chars, 2);
-        unsigned pastImage = searchFunction(reinterpret_cast<const UChar*>(string.unicode()), string.length());
-        RefPtr<Range> range(it.range());
-        if (pastImage == 0)
-            pos = Position(range->startContainer(exception), range->startOffset(exception));
-        else
-            pos = Position(range->endContainer(exception), range->endOffset(exception));
+        pos = it.range()->startPosition();
     } else if (next != 0) {
-        // The simpler iterator used in this function, as compared to the one used in 
-        // nextWordPosition(), gives us results we can use directly without having to 
-        // iterate again to translate the next value into a DOM position. 
-        Node *node = it.range()->startContainer(exception);
-        if (node->isTextNode() || (node->renderer() && node->renderer()->isBR()))
+        Node *node = it.range()->startContainer(ec);
+        if ((node->isTextNode() && static_cast<int>(next) <= node->maxCharacterOffset()) || (node->renderer() && node->renderer()->isBR() && !next))
             // The next variable contains a usable index into a text node
             pos = Position(node, next);
-        else
-            // If we are not in a text node, we ended on a node boundary, so the
-            // range start offset should be used.
-            pos = Position(node, it.range()->startOffset(exception));
+        else {
+            // Use the character iterator to translate the next value into a DOM position.
+            BackwardsCharacterIterator charIt(searchRange.get());
+            charIt.advance(string.size() - suffixLength - next);
+            pos = charIt.range()->endPosition();
+        }
     }
 
     return VisiblePosition(pos, DOWNSTREAM);
 }
 
-static VisiblePosition nextBoundary(const VisiblePosition &c, unsigned (*searchFunction)(const UChar *, unsigned))
+static VisiblePosition nextBoundary(const VisiblePosition& c, BoundarySearchFunction searchFunction)
 {
     Position pos = c.deepEquivalent();
     Node *n = pos.node();
@@ -134,48 +183,70 @@ static VisiblePosition nextBoundary(const VisiblePosition &c, unsigned (*searchF
 
     RefPtr<Range> searchRange(d->createRange());
     Position start(rangeCompliantEquivalent(pos));
+
+    Vector<UChar, 1024> string;
+    unsigned prefixLength = 0;
+
     ExceptionCode ec = 0;
+    if (requiresContextForWordBoundary(c.characterAfter())) {
+        RefPtr<Range> backwardsScanRange(d->createRange());
+        backwardsScanRange->setEnd(start.node(), start.offset(), ec);
+        SimplifiedBackwardsTextIterator backwardsIterator(backwardsScanRange.get());
+        while (!backwardsIterator.atEnd()) {
+            const UChar* characters = backwardsIterator.characters();
+            int length = backwardsIterator.length();
+            int i = startOfLastWordBoundaryContext(characters, length);
+            string.prepend(characters + i, length - i);
+            prefixLength += length - i;
+            if (i > 0)
+                break;
+            backwardsIterator.advance();
+        }
+    }
+
     searchRange->selectNodeContents(boundary, ec);
     searchRange->setStart(start.node(), start.offset(), ec);
-    TextIterator it(searchRange.get(), RUNFINDER);
-    DeprecatedString string;
+    TextIterator it(searchRange.get(), true);
     unsigned next = 0;
-    while (!it.atEnd() && it.length() > 0) {
+    bool inTextSecurityMode = start.node() && start.node()->renderer() && start.node()->renderer()->style()->textSecurity() != TSNONE;
+    bool needMoreContext = false;
+    while (!it.atEnd()) {
         // Keep asking the iterator for chunks until the search function
         // returns an end value not equal to the length of the string passed to it.
-        string.append(reinterpret_cast<const DeprecatedChar*>(it.characters()), it.length());
-        next = searchFunction(reinterpret_cast<const UChar*>(string.unicode()), string.length());
-        if (next != string.length())
+        if (!inTextSecurityMode)
+            string.append(it.characters(), it.length());
+        else {
+            // Treat bullets used in the text security mode as regular characters when looking for boundaries
+            String iteratorString(it.characters(), it.length());
+            iteratorString = iteratorString.impl()->secure('x');
+            string.append(iteratorString.characters(), iteratorString.length());
+        }
+        next = searchFunction(string.data(), string.size(), prefixLength, MayHaveMoreContext, needMoreContext);
+        if (next != string.size())
             break;
         it.advance();
     }
+    if (needMoreContext) {
+        // The last search returned the end of the buffer and asked for more context,
+        // but there is no further text. Force a search with what's available.
+        next = searchFunction(string.data(), string.size(), prefixLength, DontHaveMoreContext, needMoreContext);
+        ASSERT(!needMoreContext);
+    }
     
-    if (it.atEnd() && next == string.length()) {
-        RefPtr<Range> range(it.range());
-        int exception = 0;
-        pos = Position(range->startContainer(exception), range->startOffset(exception));
-    } else if (!it.atEnd() && it.length() == 0) {
-        // Got a zero-length chunk.
-        // This means we have hit a replaced element.
-        // Make a check to see if the position should be before or after the replaced element
-        // by performing an additional check with a modified string which uses an "X" 
-        // character to stand in for the replaced element.
-        DeprecatedChar chars[2];
-        chars[0] = ' ';
-        chars[1] = 'X';
-        string.append(chars, 2);
-        unsigned pastImage = searchFunction(reinterpret_cast<const UChar*>(string.unicode()), string.length());
-        RefPtr<Range> range(it.range());
-        int exception = 0;
-        if (next != pastImage)
-            pos = Position(range->endContainer(exception), range->endOffset(exception));
-        else
-            pos = Position(range->startContainer(exception), range->startOffset(exception));
-    } else if (next != 0) {
+    if (it.atEnd() && next == string.size()) {
+        pos = it.range()->startPosition();
+    } else if (next != prefixLength) {
         // Use the character iterator to translate the next value into a DOM position.
-        CharacterIterator charIt(searchRange.get());
-        charIt.advance(next - 1);
-        pos = Position(charIt.range()->endContainer(ec), charIt.range()->endOffset(ec));
+        CharacterIterator charIt(searchRange.get(), true);
+        charIt.advance(next - prefixLength - 1);
+        pos = charIt.range()->endPosition();
+        
+        if (*charIt.characters() == '\n') {
+            // FIXME: workaround for collapsed range (where only start position is correct) emitted for some emitted newlines (see rdar://5192593)
+            VisiblePosition visPos = VisiblePosition(pos);
+            if (visPos == VisiblePosition(charIt.range()->startPosition()))
+                pos = visPos.next(true).deepEquivalent();
+        }
     }
 
     // generate VisiblePosition, use UPSTREAM affinity if possible
@@ -184,10 +255,16 @@ static VisiblePosition nextBoundary(const VisiblePosition &c, unsigned (*searchF
 
 // ---------
 
-static unsigned startWordBoundary(const UChar* characters, unsigned length)
+static unsigned startWordBoundary(const UChar* characters, unsigned length, unsigned offset, BoundarySearchContextAvailability mayHaveMoreContext, bool& needMoreContext)
 {
+    ASSERT(offset);
+    if (mayHaveMoreContext && !startOfLastWordBoundaryContext(characters, offset)) {
+        needMoreContext = true;
+        return 0;
+    }
+    needMoreContext = false;
     int start, end;
-    findWordBoundary(characters, length, length, &start, &end);
+    findWordBoundary(characters, length, offset - 1, &start, &end);
     return start;
 }
 
@@ -208,10 +285,16 @@ VisiblePosition startOfWord(const VisiblePosition &c, EWordSide side)
     return previousBoundary(p, startWordBoundary);
 }
 
-static unsigned endWordBoundary(const UChar* characters, unsigned length)
+static unsigned endWordBoundary(const UChar* characters, unsigned length, unsigned offset, BoundarySearchContextAvailability mayHaveMoreContext, bool& needMoreContext)
 {
+    ASSERT(offset <= length);
+    if (mayHaveMoreContext && endOfFirstWordBoundaryContext(characters + offset, length - offset) == static_cast<int>(length - offset)) {
+        needMoreContext = true;
+        return length;
+    }
+    needMoreContext = false;
     int start, end;
-    findWordBoundary(characters, length, 0, &start, &end);
+    findWordBoundary(characters, length, offset, &start, &end);
     return end;
 }
 
@@ -225,35 +308,42 @@ VisiblePosition endOfWord(const VisiblePosition &c, EWordSide side)
         p = c.previous();
         if (p.isNull())
             return c;
-    } else {
-        // at paragraph end, the endOfWord is the start of next paragraph
-        if (isEndOfParagraph(c)) {
-            p = c.next();
-            return p.isNotNull() ? p : c;
-        }
-    }
+    } else if (isEndOfParagraph(c))
+        return c;
     
     return nextBoundary(p, endWordBoundary);
 }
 
-static unsigned previousWordPositionBoundary(const UChar* characters, unsigned length)
+static unsigned previousWordPositionBoundary(const UChar* characters, unsigned length, unsigned offset, BoundarySearchContextAvailability mayHaveMoreContext, bool& needMoreContext)
 {
-    return findNextWordFromIndex(characters, length, length, false);
+    if (mayHaveMoreContext && !startOfLastWordBoundaryContext(characters, offset)) {
+        needMoreContext = true;
+        return 0;
+    }
+    needMoreContext = false;
+    return findNextWordFromIndex(characters, length, offset, false);
 }
 
 VisiblePosition previousWordPosition(const VisiblePosition &c)
 {
-    return previousBoundary(c, previousWordPositionBoundary);
+    VisiblePosition prev = previousBoundary(c, previousWordPositionBoundary);
+    return c.honorEditableBoundaryAtOrAfter(prev);
 }
 
-static unsigned nextWordPositionBoundary(const UChar* characters, unsigned length)
+static unsigned nextWordPositionBoundary(const UChar* characters, unsigned length, unsigned offset, BoundarySearchContextAvailability mayHaveMoreContext, bool& needMoreContext)
 {
-    return findNextWordFromIndex(characters, length, 0, true);
+    if (mayHaveMoreContext && endOfFirstWordBoundaryContext(characters + offset, length - offset) == static_cast<int>(length - offset)) {
+        needMoreContext = true;
+        return length;
+    }
+    needMoreContext = false;
+    return findNextWordFromIndex(characters, length, offset, true);
 }
 
 VisiblePosition nextWordPosition(const VisiblePosition &c)
 {
-    return nextBoundary(c, nextWordPositionBoundary);
+    VisiblePosition next = nextBoundary(c, nextWordPositionBoundary);    
+    return c.honorEditableBoundaryAtOrBefore(next);
 }
 
 // ---------
@@ -268,19 +358,39 @@ static RootInlineBox *rootBoxForLine(const VisiblePosition &c)
     RenderObject *renderer = node->renderer();
     if (!renderer)
         return 0;
+
+    InlineBox* box;
+    int offset;
+    c.getInlineBoxAndOffset(box, offset);
     
-    InlineBox *box = renderer->inlineBox(p.offset(), c.affinity());
-    if (!box)
-        return 0;
-    
-    return box->root();
+    return box ? box->root() : 0;
 }
 
-VisiblePosition startOfLine(const VisiblePosition &c)
+static VisiblePosition positionAvoidingFirstPositionInTable(const VisiblePosition& c)
 {
-    RootInlineBox *rootBox = rootBoxForLine(c);
-    if (!rootBox)
+    // return table offset 0 instead of the first VisiblePosition inside the table
+    VisiblePosition previous = c.previous();
+    if (isLastPositionBeforeTable(previous))
+        return previous;
+    
+    return c;
+}
+
+static VisiblePosition startPositionForLine(const VisiblePosition& c)
+{
+    if (c.isNull())
         return VisiblePosition();
+
+    RootInlineBox *rootBox = rootBoxForLine(c);
+    if (!rootBox) {
+        // There are VisiblePositions at offset 0 in blocks without
+        // RootInlineBoxes, like empty editable blocks and bordered blocks.
+        Position p = c.deepEquivalent();
+        if (p.node()->renderer() && p.node()->renderer()->isRenderBlock() && p.offset() == 0)
+            return positionAvoidingFirstPositionInTable(c);
+        
+        return VisiblePosition();
+    }
     
     // Generated content (e.g. list markers and CSS :before and :after
     // pseudoelements) have no corresponding DOM element, and so cannot be
@@ -305,17 +415,49 @@ VisiblePosition startOfLine(const VisiblePosition &c)
     int startOffset = 0;
     if (startBox->isInlineTextBox()) {
         InlineTextBox *startTextBox = static_cast<InlineTextBox *>(startBox);
-        startOffset = startTextBox->m_start;
+        startOffset = startTextBox->start();
     }
-    
-    return VisiblePosition(startNode, startOffset, DOWNSTREAM);
+  
+    VisiblePosition visPos = VisiblePosition(startNode, startOffset, DOWNSTREAM);
+    return positionAvoidingFirstPositionInTable(visPos);
 }
 
-VisiblePosition endOfLine(const VisiblePosition &c)
+VisiblePosition startOfLine(const VisiblePosition& c)
 {
-    RootInlineBox *rootBox = rootBoxForLine(c);
-    if (!rootBox)
+    VisiblePosition visPos = startPositionForLine(c);
+    
+    if (visPos.isNotNull()) {
+        // Make sure the start of line is not greater than the given input position.  Else use the previous position to 
+        // obtain start of line.  This condition happens when the input position is before the space character at the end 
+        // of a soft-wrapped non-editable line. In this scenario, startPositionForLine would incorrectly hand back a position
+        // greater than the input position.  This fix is to account for the discrepancy between lines with webkit-line-break:after-white-space 
+        // style versus lines without that style, which would break before a space by default. 
+        Position p = visPos.deepEquivalent();
+        if (p.offset() > c.deepEquivalent().offset() && p.node()->isSameNode(c.deepEquivalent().node())) {
+            visPos = c.previous();
+            if (visPos.isNull())
+                return VisiblePosition();
+            visPos = startPositionForLine(visPos);
+        }
+    }
+
+    return c.honorEditableBoundaryAtOrAfter(visPos);
+}
+
+static VisiblePosition endPositionForLine(const VisiblePosition& c)
+{
+    if (c.isNull())
         return VisiblePosition();
+
+    RootInlineBox *rootBox = rootBoxForLine(c);
+    if (!rootBox) {
+        // There are VisiblePositions at offset 0 in blocks without
+        // RootInlineBoxes, like empty editable blocks and bordered blocks.
+        Position p = c.deepEquivalent();
+        if (p.node()->renderer() && p.node()->renderer()->isRenderBlock() && p.offset() == 0)
+            return c;
+        return VisiblePosition();
+    }
     
     // Generated content (e.g. list markers and CSS :before and :after
     // pseudoelements) have no corresponding DOM element, and so cannot be
@@ -342,10 +484,31 @@ VisiblePosition endOfLine(const VisiblePosition &c)
         endOffset = 0;
     } else if (endBox->isInlineTextBox()) {
         InlineTextBox *endTextBox = static_cast<InlineTextBox *>(endBox);
-        endOffset = endTextBox->m_start + endTextBox->m_len;
+        endOffset = endTextBox->start();
+        if (!endTextBox->isLineBreak())
+            endOffset += endTextBox->len();
     }
     
     return VisiblePosition(endNode, endOffset, VP_UPSTREAM_IF_POSSIBLE);
+}
+
+VisiblePosition endOfLine(const VisiblePosition& c)
+{
+    VisiblePosition visPos = endPositionForLine(c);
+    
+    // Make sure the end of line is at the same line as the given input position.  Else use the previous position to 
+    // obtain end of line.  This condition happens when the input position is before the space character at the end 
+    // of a soft-wrapped non-editable line. In this scenario, endPositionForLine would incorrectly hand back a position
+    // in the next line instead. This fix is to account for the discrepancy between lines with webkit-line-break:after-white-space style
+    // versus lines without that style, which would break before a space by default. 
+    if (!inSameLine(c, visPos)) {
+        visPos = c.previous();
+        if (visPos.isNull())
+            return VisiblePosition();
+        visPos = endPositionForLine(visPos);
+    }
+    
+    return c.honorEditableBoundaryAtOrBefore(visPos);
 }
 
 bool inSameLine(const VisiblePosition &a, const VisiblePosition &b)
@@ -363,10 +526,24 @@ bool isEndOfLine(const VisiblePosition &p)
     return p.isNotNull() && p == endOfLine(p);
 }
 
+// The first leaf before node that has the same editability as node.
+static Node* previousLeafWithSameEditability(Node* node)
+{
+    bool editable = node->isContentEditable();
+    Node* n = node->previousLeafNode();
+    while (n) {
+        if (editable == n->isContentEditable())
+            return n;
+        n = n->previousLeafNode();
+    }
+    return 0;
+}
+
 VisiblePosition previousLinePosition(const VisiblePosition &visiblePosition, int x)
 {
     Position p = visiblePosition.deepEquivalent();
     Node *node = p.node();
+    Node* highestRoot = highestEditableRoot(p);
     if (!node)
         return VisiblePosition();
     
@@ -378,7 +555,9 @@ VisiblePosition previousLinePosition(const VisiblePosition &visiblePosition, int
 
     RenderBlock *containingBlock = 0;
     RootInlineBox *root = 0;
-    InlineBox *box = renderer->inlineBox(p.offset(), visiblePosition.affinity());
+    InlineBox* box;
+    int ignoredCaretOffset;
+    visiblePosition.getInlineBoxAndOffset(box, ignoredCaretOffset);
     if (box) {
         root = box->root()->prevRootBox();
         if (root)
@@ -389,17 +568,18 @@ VisiblePosition previousLinePosition(const VisiblePosition &visiblePosition, int
         // This containing editable block does not have a previous line.
         // Need to move back to previous containing editable block in this root editable
         // block and find the last root line box in that block.
-        Node *startBlock = node->enclosingBlockFlowElement();
-        Node *n = node->previousEditable();
-        while (n && startBlock == n->enclosingBlockFlowElement())
-            n = n->previousEditable();
+        Node* startBlock = enclosingBlock(node);
+        Node* n = previousLeafWithSameEditability(node);
+        while (n && startBlock == enclosingBlock(n))
+            n = previousLeafWithSameEditability(n);
         while (n) {
-            if (!n->inSameRootEditableElement(node))
+            if (highestEditableRoot(Position(n, 0)) != highestRoot)
                 break;
-            Position pos(n, n->caretMinOffset());
-            if (pos.inRenderedContent()) {
-                assert(n->renderer());
-                box = n->renderer()->inlineBox(n->caretMaxOffset());
+            Position pos(n, caretMinOffset(n));
+            if (pos.isCandidate()) {
+                ASSERT(n->renderer());
+                Position maxPos(n, caretMaxOffset(n));
+                maxPos.getInlineBoxAndOffset(DOWNSTREAM, box, ignoredCaretOffset);
                 if (box) {
                     // previous root line box found
                     root = box->root();
@@ -409,29 +589,63 @@ VisiblePosition previousLinePosition(const VisiblePosition &visiblePosition, int
 
                 return VisiblePosition(pos, DOWNSTREAM);
             }
-            n = n->previousEditable();
+            n = previousLeafWithSameEditability(n);
         }
     }
     
     if (root) {
-        int absx, absy;
-        containingBlock->absolutePositionForContent(absx, absy);
+        // FIXME: Can be wrong for multi-column layout and with transforms.
+        FloatPoint absPos = containingBlock->localToAbsolute(FloatPoint());
         if (containingBlock->hasOverflowClip())
-            containingBlock->layer()->subtractScrollOffset(absx, absy);
-        RenderObject *renderer = root->closestLeafChildForXPos(x, absx)->object();
-        return renderer->positionForCoordinates(x, absy + root->topOverflow());
+            absPos -= containingBlock->layer()->scrolledContentOffset();
+        RenderObject *renderer = root->closestLeafChildForXPos(x - absPos.x(), isEditablePosition(p))->object();
+        Node* node = renderer->node();
+        if (editingIgnoresContent(node))
+            return Position(node->parent(), node->nodeIndex());
+        return renderer->positionForCoordinates(x - absPos.x(), root->topOverflow());
     }
     
     // Could not find a previous line. This means we must already be on the first line.
     // Move to the start of the content in this block, which effectively moves us
     // to the start of the line we're on.
-    return VisiblePosition(node->rootEditableElement(), 0, DOWNSTREAM);
+    Node* rootElement = node->isContentEditable() ? node->rootEditableElement() : node->document()->documentElement();
+    return VisiblePosition(rootElement, 0, DOWNSTREAM);
+}
+
+static Node* nextLeafWithSameEditability(Node* node, int offset)
+{
+    bool editable = node->isContentEditable();
+    ASSERT(offset >= 0);
+    Node* child = node->childNode(offset);
+    Node* n = child ? child->nextLeafNode() : node->nextLeafNode();
+    while (n) {
+        if (editable == n->isContentEditable())
+            return n;
+        n = n->nextLeafNode();
+    }
+    return 0;
+}
+
+static Node* nextLeafWithSameEditability(Node* node)
+{
+    if (!node)
+        return 0;
+    
+    bool editable = node->isContentEditable();
+    Node* n = node->nextLeafNode();
+    while (n) {
+        if (editable == n->isContentEditable())
+            return n;
+        n = n->nextLeafNode();
+    }
+    return 0;
 }
 
 VisiblePosition nextLinePosition(const VisiblePosition &visiblePosition, int x)
 {
     Position p = visiblePosition.deepEquivalent();
     Node *node = p.node();
+    Node* highestRoot = highestEditableRoot(p);
     if (!node)
         return VisiblePosition();
     
@@ -443,7 +657,9 @@ VisiblePosition nextLinePosition(const VisiblePosition &visiblePosition, int x)
 
     RenderBlock *containingBlock = 0;
     RootInlineBox *root = 0;
-    InlineBox *box = renderer->inlineBox(p.offset(), visiblePosition.affinity());
+    InlineBox* box;
+    int ignoredCaretOffset;
+    visiblePosition.getInlineBoxAndOffset(box, ignoredCaretOffset);
     if (box) {
         root = box->root()->nextRootBox();
         if (root)
@@ -454,17 +670,17 @@ VisiblePosition nextLinePosition(const VisiblePosition &visiblePosition, int x)
         // This containing editable block does not have a next line.
         // Need to move forward to next containing editable block in this root editable
         // block and find the first root line box in that block.
-        Node *startBlock = node->enclosingBlockFlowElement();
-        Node *n = node->nextEditable(p.offset());
-        while (n && startBlock == n->enclosingBlockFlowElement())
-            n = n->nextEditable();
+        Node* startBlock = enclosingBlock(node);
+        Node* n = nextLeafWithSameEditability(node, p.offset());
+        while (n && startBlock == enclosingBlock(n))
+            n = nextLeafWithSameEditability(n);
         while (n) {
-            if (!n->inSameRootEditableElement(node))
+            if (highestEditableRoot(Position(n, 0)) != highestRoot)
                 break;
-            Position pos(n, n->caretMinOffset());
-            if (pos.inRenderedContent()) {
-                assert(n->renderer());
-                box = n->renderer()->inlineBox(n->caretMinOffset());
+            Position pos(n, caretMinOffset(n));
+            if (pos.isCandidate()) {
+                ASSERT(n->renderer());
+                pos.getInlineBoxAndOffset(DOWNSTREAM, box, ignoredCaretOffset);
                 if (box) {
                     // next root line box found
                     root = box->root();
@@ -474,33 +690,36 @@ VisiblePosition nextLinePosition(const VisiblePosition &visiblePosition, int x)
 
                 return VisiblePosition(pos, DOWNSTREAM);
             }
-            n = n->nextEditable();
+            n = nextLeafWithSameEditability(n);
         }
     }
     
     if (root) {
-        int absx, absy;
-        containingBlock->absolutePositionForContent(absx, absy);
+        // FIXME: Can be wrong for multi-column layout and with transforms.
+        FloatPoint absPos = containingBlock->localToAbsolute(FloatPoint());
         if (containingBlock->hasOverflowClip())
-            containingBlock->layer()->subtractScrollOffset(absx, absy);
-        RenderObject *renderer = root->closestLeafChildForXPos(x, absx)->object();
-        return renderer->positionForCoordinates(x, absy + root->topOverflow());
+            absPos -= containingBlock->layer()->scrolledContentOffset();
+        RenderObject *renderer = root->closestLeafChildForXPos(x - absPos.x(), isEditablePosition(p))->object();
+        Node* node = renderer->node();
+        if (editingIgnoresContent(node))
+            return Position(node->parent(), node->nodeIndex());
+        return renderer->positionForCoordinates(x - absPos.x(), root->topOverflow());
     }    
 
     // Could not find a next line. This means we must already be on the last line.
     // Move to the end of the content in this block, which effectively moves us
     // to the end of the line we're on.
-    Element *rootElement = node->rootEditableElement();
+    Element* rootElement = node->isContentEditable() ? node->rootEditableElement() : node->document()->documentElement();
     return VisiblePosition(rootElement, rootElement ? rootElement->childNodeCount() : 0, DOWNSTREAM);
 }
 
 // ---------
 
-static unsigned startSentenceBoundary(const UChar* characters, unsigned length)
+static unsigned startSentenceBoundary(const UChar* characters, unsigned length, unsigned, BoundarySearchContextAvailability, bool&)
 {
-    int start, end;
-    findSentenceBoundary(characters, length, length, &start, &end);
-    return start;
+    TextBreakIterator* iterator = sentenceBreakIterator(characters, length);
+    // FIXME: The following function can return -1; we don't handle that.
+    return textBreakPreceding(iterator, length);
 }
 
 VisiblePosition startOfSentence(const VisiblePosition &c)
@@ -508,38 +727,47 @@ VisiblePosition startOfSentence(const VisiblePosition &c)
     return previousBoundary(c, startSentenceBoundary);
 }
 
-static unsigned endSentenceBoundary(const UChar* characters, unsigned length)
+static unsigned endSentenceBoundary(const UChar* characters, unsigned length, unsigned, BoundarySearchContextAvailability, bool&)
 {
-    int start, end;
-    findSentenceBoundary(characters, length, 0, &start, &end);
-    return end;
+    TextBreakIterator* iterator = sentenceBreakIterator(characters, length);
+    return textBreakNext(iterator);
 }
 
+// FIXME: This includes the space after the punctuation that marks the end of the sentence.
 VisiblePosition endOfSentence(const VisiblePosition &c)
 {
     return nextBoundary(c, endSentenceBoundary);
 }
 
-static unsigned previousSentencePositionBoundary(const UChar* characters, unsigned length)
+static unsigned previousSentencePositionBoundary(const UChar* characters, unsigned length, unsigned, BoundarySearchContextAvailability, bool&)
 {
-    return findNextSentenceFromIndex(characters, length, length, false);
+    // FIXME: This is identical to startSentenceBoundary. I'm pretty sure that's not right.
+    TextBreakIterator* iterator = sentenceBreakIterator(characters, length);
+    // FIXME: The following function can return -1; we don't handle that.
+    return textBreakPreceding(iterator, length);
 }
 
 VisiblePosition previousSentencePosition(const VisiblePosition &c)
 {
-    return previousBoundary(c, previousSentencePositionBoundary);
+    VisiblePosition prev = previousBoundary(c, previousSentencePositionBoundary);
+    return c.honorEditableBoundaryAtOrAfter(prev);
 }
 
-static unsigned nextSentencePositionBoundary(const UChar* characters, unsigned length)
+static unsigned nextSentencePositionBoundary(const UChar* characters, unsigned length, unsigned, BoundarySearchContextAvailability, bool&)
 {
-    return findNextSentenceFromIndex(characters, length, 0, true);
+    // FIXME: This is identical to endSentenceBoundary.  This isn't right, it needs to 
+    // move to the equivlant position in the following sentence.
+    TextBreakIterator* iterator = sentenceBreakIterator(characters, length);
+    return textBreakFollowing(iterator, 0);
 }
 
 VisiblePosition nextSentencePosition(const VisiblePosition &c)
 {
-    return nextBoundary(c, nextSentencePositionBoundary);
+    VisiblePosition next = nextBoundary(c, nextSentencePositionBoundary);    
+    return c.honorEditableBoundaryAtOrBefore(next);
 }
 
+// FIXME: Broken for positions before/after images that aren't inline (5027702)
 VisiblePosition startOfParagraph(const VisiblePosition &c)
 {
     Position p = c.deepEquivalent();
@@ -554,7 +782,7 @@ VisiblePosition startOfParagraph(const VisiblePosition &c)
         && p.offset() == maxDeepOffset(startNode))
         return VisiblePosition(Position(startNode, 0));
 
-    Node *startBlock = startNode->enclosingBlockFlowElement();
+    Node* startBlock = enclosingBlock(startNode);
 
     Node *node = startNode;
     int offset = p.offset();
@@ -573,19 +801,19 @@ VisiblePosition startOfParagraph(const VisiblePosition &c)
             n = n->traversePreviousNodePostOrder(startBlock);
             continue;
         }
-        // FIXME: isBlockFlow should not exclude non-inline tables
-        if (r->isBR() || r->isBlockFlow() || (r->isTable() && !r->isInline()))
+        
+        if (r->isBR() || isBlock(n))
             break;
             
         if (r->isText()) {
             if (style->preserveNewline()) {
-                const UChar* text = static_cast<RenderText*>(r)->text();
-                int i = static_cast<RenderText*>(r)->length();
+                const UChar* chars = toRenderText(r)->characters();
+                int i = toRenderText(r)->textLength();
                 int o = offset;
                 if (n == startNode && o < i)
                     i = max(0, o);
                 while (--i >= 0)
-                    if (text[i] == '\n')
+                    if (chars[i] == '\n')
                         return VisiblePosition(n, i + 1, DOWNSTREAM);
             }
             node = n;
@@ -602,6 +830,7 @@ VisiblePosition startOfParagraph(const VisiblePosition &c)
     return VisiblePosition(node, offset, DOWNSTREAM);
 }
 
+// FIXME: Broken for positions before/after images that aren't inline (5027702)
 VisiblePosition endOfParagraph(const VisiblePosition &c)
 {    
     if (c.isNull())
@@ -616,7 +845,7 @@ VisiblePosition endOfParagraph(const VisiblePosition &c)
         && p.offset() == 0)
         return VisiblePosition(Position(startNode, maxDeepOffset(startNode)));
     
-    Node *startBlock = startNode->enclosingBlockFlowElement();
+    Node* startBlock = enclosingBlock(startNode);
     Node *stayInsideBlock = startBlock;
     
     Node *node = startNode;
@@ -637,19 +866,18 @@ VisiblePosition endOfParagraph(const VisiblePosition &c)
             continue;
         }
         
-        // FIXME: isBlockFlow should not exclude non-inline tables
-        if (r->isBR() || r->isBlockFlow() || (r->isTable() && !r->isInline()))
+        if (r->isBR() || isBlock(n))
             break;
             
         // FIXME: We avoid returning a position where the renderer can't accept the caret.
         // We should probably do this in other cases such as startOfParagraph.
         if (r->isText() && r->caretMaxRenderedOffset() > 0) {
-            int length = static_cast<RenderText *>(r)->length();
+            int length = toRenderText(r)->textLength();
             if (style->preserveNewline()) {
-                const UChar* text = static_cast<RenderText *>(r)->text();
+                const UChar* chars = toRenderText(r)->characters();
                 int o = n == startNode ? offset : 0;
                 for (int i = o; i < length; ++i)
-                    if (text[i] == '\n')
+                    if (chars[i] == '\n')
                         return VisiblePosition(n, i, DOWNSTREAM);
             }
             node = n;
@@ -664,6 +892,17 @@ VisiblePosition endOfParagraph(const VisiblePosition &c)
     }
 
     return VisiblePosition(node, offset, DOWNSTREAM);
+}
+
+VisiblePosition startOfNextParagraph(const VisiblePosition& visiblePosition)
+{
+    VisiblePosition paragraphEnd(endOfParagraph(visiblePosition));
+    VisiblePosition afterParagraphEnd(paragraphEnd.next(true));
+    // The position after the last position in the last cell of a table
+    // is not the start of the next paragraph.
+    if (isFirstPositionAfterTable(afterParagraphEnd))
+        return afterParagraphEnd.next(true);
+    return afterParagraphEnd;
 }
 
 bool inSameParagraph(const VisiblePosition &a, const VisiblePosition &b)
@@ -746,16 +985,31 @@ bool isEndOfBlock(const VisiblePosition &pos)
 
 // ---------
 
+VisiblePosition startOfDocument(const Node* node)
+{
+    if (!node)
+        return VisiblePosition();
+    
+    return VisiblePosition(node->document()->documentElement(), 0, DOWNSTREAM);
+}
+
 VisiblePosition startOfDocument(const VisiblePosition &c)
 {
-    Element* documentElement = c.deepEquivalent().documentElement();
-    return documentElement ? VisiblePosition(documentElement, 0, DOWNSTREAM) : VisiblePosition();
+    return startOfDocument(c.deepEquivalent().node());
+}
+
+VisiblePosition endOfDocument(const Node* node)
+{
+    if (!node || !node->document())
+        return VisiblePosition();
+    
+    Element* doc = node->document()->documentElement();
+    return VisiblePosition(doc, doc->childNodeCount(), DOWNSTREAM);
 }
 
 VisiblePosition endOfDocument(const VisiblePosition &c)
 {
-    Element* documentElement = c.deepEquivalent().documentElement();
-    return documentElement ? VisiblePosition(documentElement, documentElement->childNodeCount(), DOWNSTREAM) : VisiblePosition();
+    return endOfDocument(c.deepEquivalent().node());
 }
 
 bool inSameDocument(const VisiblePosition &a, const VisiblePosition &b)
@@ -784,56 +1038,22 @@ bool isEndOfDocument(const VisiblePosition &p)
 
 // ---------
 
-VisiblePosition startOfEditableContent(const VisiblePosition &c)
+VisiblePosition startOfEditableContent(const VisiblePosition& visiblePosition)
 {
-    Position p = c.deepEquivalent();
-    Node *node = p.node();
-    if (!node)
+    Node* highestRoot = highestEditableRoot(visiblePosition.deepEquivalent());
+    if (!highestRoot)
         return VisiblePosition();
 
-    return VisiblePosition(node->rootEditableElement(), 0, DOWNSTREAM);
+    return VisiblePosition(highestRoot, 0, DOWNSTREAM);
 }
 
-VisiblePosition endOfEditableContent(const VisiblePosition &c)
+VisiblePosition endOfEditableContent(const VisiblePosition& visiblePosition)
 {
-    Position p = c.deepEquivalent();
-    Node *node = p.node();
-    if (!node)
+    Node* highestRoot = highestEditableRoot(visiblePosition.deepEquivalent());
+    if (!highestRoot)
         return VisiblePosition();
 
-    node = node->rootEditableElement();
-    if (!node)
-        return VisiblePosition();
-
-    return VisiblePosition(node, node->childNodeCount(), DOWNSTREAM);
-}
-
-bool inSameEditableContent(const VisiblePosition &a, const VisiblePosition &b)
-{
-    Position ap = a.deepEquivalent();
-    Node *an = ap.node();
-    if (!an)
-        return false;
-        
-    Position bp = b.deepEquivalent();
-    Node *bn = bp.node();
-    if (!bn)
-        return false;
-    
-    if (!an->isContentEditable() || !bn->isContentEditable())
-        return false;
-
-    return an->rootEditableElement() == bn->rootEditableElement();
-}
-
-bool isStartOfEditableContent(const VisiblePosition &p)
-{
-    return !inSameEditableContent(p, p.previous());
-}
-
-bool isEndOfEditableContent(const VisiblePosition &p)
-{
-    return !inSameEditableContent(p, p.next());
+    return VisiblePosition(highestRoot, maxDeepOffset(highestRoot), DOWNSTREAM);
 }
 
 }

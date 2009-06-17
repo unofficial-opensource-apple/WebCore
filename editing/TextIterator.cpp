@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2005 Alexey Proskuryakov.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -27,6 +27,7 @@
 #include "config.h"
 #include "TextIterator.h"
 
+#include "CharacterNames.h"
 #include "Document.h"
 #include "Element.h"
 #include "HTMLNames.h"
@@ -36,88 +37,136 @@
 #include "Range.h"
 #include "RenderTableCell.h"
 #include "RenderTableRow.h"
+#include "RenderTextControl.h"
+#include "VisiblePosition.h"
+#include "visible_units.h"
 
+#if USE(ICU_UNICODE) && !UCONFIG_NO_COLLATION
+#include <unicode/usearch.h>
+#endif
+
+using namespace WTF::Unicode;
 using namespace std;
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-const UChar nonBreakingSpace = 0xA0;
-
 // Buffer that knows how to compare with a search target.
-// Keeps enough of the previous text to be able to search in the future,
-// but no more.
-class CircularSearchBuffer {
+// Keeps enough of the previous text to be able to search in the future, but no more.
+// Non-breaking spaces are always equal to normal spaces.
+// Case folding is also done if <isCaseSensitive> is false.
+class SearchBuffer : Noncopyable {
 public:
-    CircularSearchBuffer(const String& target, bool isCaseSensitive);
-    ~CircularSearchBuffer() { fastFree(m_buffer); }
+    SearchBuffer(const String& target, bool isCaseSensitive);
+    ~SearchBuffer();
 
-    void clear() { m_cursor = m_buffer; m_bufferFull = false; }
-    void append(int length, const UChar* characters);
-    void append(UChar);
+    // Returns number of characters appended; guaranteed to be in the range [1, length].
+    size_t append(const UChar*, size_t length);
+    void reachedBreak();
 
-    int neededCharacters() const;
-    bool isMatch() const;
-    int length() const { return m_target.length(); }
+    // Result is the size in characters of what was found.
+    // And <startOffset> is the number of characters back to the start of what was found.
+    size_t search(size_t& startOffset);
+    bool atBreak() const;
+
+#if USE(ICU_UNICODE) && !UCONFIG_NO_COLLATION
 
 private:
     String m_target;
+    Vector<UChar> m_buffer;
+    size_t m_overlap;
+    bool m_atBreak;
+
+#else
+
+private:
+    void append(UChar, bool isCharacterStart);
+    size_t length() const;
+
+    String m_target;
     bool m_isCaseSensitive;
 
-    UChar* m_buffer;
-    UChar* m_cursor;
-    bool m_bufferFull;
+    Vector<UChar> m_buffer;
+    Vector<bool> m_isCharacterStartBuffer;
+    bool m_isBufferFull;
+    size_t m_cursor;
 
-    CircularSearchBuffer(const CircularSearchBuffer&);
-    CircularSearchBuffer &operator=(const CircularSearchBuffer&);
+#endif
 };
 
-TextIterator::TextIterator() : m_endContainer(0), m_endOffset(0), m_positionNode(0), m_lastCharacter(0)
+// --------
+
+TextIterator::TextIterator()
+    : m_startContainer(0)
+    , m_startOffset(0)
+    , m_endContainer(0)
+    , m_endOffset(0)
+    , m_positionNode(0)
+    , m_lastCharacter(0)
+    , m_emitCharactersBetweenAllVisiblePositions(false)
+    , m_enterTextControls(false)
 {
 }
 
-TextIterator::TextIterator(const Range *r, IteratorKind kind) : m_endContainer(0), m_endOffset(0), m_positionNode(0)
+TextIterator::TextIterator(const Range* r, bool emitCharactersBetweenAllVisiblePositions, bool enterTextControls) 
+    : m_inShadowContent(false)
+    , m_startContainer(0) 
+    , m_startOffset(0)
+    , m_endContainer(0)
+    , m_endOffset(0)
+    , m_positionNode(0)
+    , m_emitCharactersBetweenAllVisiblePositions(emitCharactersBetweenAllVisiblePositions)
+    , m_enterTextControls(enterTextControls)
 {
     if (!r)
         return;
 
-    ExceptionCode ec = 0;
-
     // get and validate the range endpoints
-    Node *startContainer = r->startContainer(ec);
-    int startOffset = r->startOffset(ec);
-    Node *endContainer = r->endContainer(ec);
-    int endOffset = r->endOffset(ec);
-    if (ec != 0)
+    Node* startContainer = r->startContainer();
+    if (!startContainer)
         return;
+    int startOffset = r->startOffset();
+    Node* endContainer = r->endContainer();
+    int endOffset = r->endOffset();
 
-    // remember ending place - this does not change
+    // Callers should be handing us well-formed ranges. If we discover that this isn't
+    // the case, we could consider changing this assertion to an early return.
+    ASSERT(r->boundaryPointsValid());
+
+    // remember range - this does not change
+    m_startContainer = startContainer;
+    m_startOffset = startOffset;
     m_endContainer = endContainer;
     m_endOffset = endOffset;
 
+    for (Node* n = startContainer; n; n = n->parentNode()) {
+        if (n->isShadowNode()) {
+            m_inShadowContent = true;
+            break;
+        }
+    }
+
     // set up the current node for processing
-    m_node = r->startNode();
+    m_node = r->firstNode();
     if (m_node == 0)
         return;
-    m_offset = m_node == startContainer ? startOffset : 0;
+    m_offset = m_node == m_startContainer ? m_startOffset : 0;
     m_handledNode = false;
     m_handledChildren = false;
 
     // calculate first out of bounds node
-    m_pastEndNode = r->pastEndNode();
+    m_pastEndNode = r->pastLastNode();
 
     // initialize node processing state
     m_needAnotherNewline = false;
     m_textBox = 0;
 
     // initialize record of previous node processing
+    m_haveEmitted = false;
     m_lastTextNode = 0;
     m_lastTextNodeEndedWithCollapsedSpace = false;
-    if (kind == RUNFINDER)
-        m_lastCharacter = 0;
-    else
-        m_lastCharacter = '\n';
+    m_lastCharacter = 0;
 
 #ifndef NDEBUG
     // need this just because of the assert in advance()
@@ -136,8 +185,14 @@ void TextIterator::advance()
 
     // handle remembered node that needed a newline after the text node's newline
     if (m_needAnotherNewline) {
-        // emit the newline, with position a collapsed range at the end of current node.
-        emitCharacter('\n', m_node->parentNode(), m_node, 1, 1);
+        // Emit the extra newline, and position it *inside* m_node, after m_node's 
+        // contents, in case it's a block, in the same way that we position the first 
+        // newline.  The range for the emitted newline should start where the line 
+        // break begins.
+        // FIXME: It would be cleaner if we emitted two newlines during the last 
+        // iteration, instead of using m_needAnotherNewline.
+        Node* baseNode = m_node->lastChild() ? m_node->lastChild() : m_node;
+        emitCharacter('\n', baseNode->parentNode(), baseNode, 1, 1);
         m_needAnotherNewline = false;
         return;
     }
@@ -149,21 +204,33 @@ void TextIterator::advance()
             return;
     }
 
-    while (m_node && m_node != m_pastEndNode && !(m_node == m_endContainer && m_endOffset == 0)) {
-        // handle current node according to its type
-        if (!m_handledNode) {
-            RenderObject *renderer = m_node->renderer();
-            if (renderer && renderer->isText() && m_node->nodeType() == Node::TEXT_NODE) {
-                // FIXME: What about CDATA_SECTION_NODE?
-                if (renderer->style()->visibility() == VISIBLE)
+    while (m_node && m_node != m_pastEndNode) {
+        // if the range ends at offset 0 of an element, represent the
+        // position, but not the content, of that element e.g. if the
+        // node is a blockflow element, emit a newline that
+        // precedes the element
+        if (m_node == m_endContainer && m_endOffset == 0) {
+            representNodeOffsetZero();
+            m_node = 0;
+            return;
+        }
+        
+        RenderObject *renderer = m_node->renderer();
+        if (!renderer) {
+            m_handledNode = true;
+            m_handledChildren = true;
+        } else {
+            // handle current node according to its type
+            if (!m_handledNode) {
+                if (renderer->isText() && m_node->nodeType() == Node::TEXT_NODE) // FIXME: What about CDATA_SECTION_NODE?
                     m_handledNode = handleTextNode();
-            } else if (renderer && (renderer->isImage() || renderer->isWidget())) {
-                if (renderer->style()->visibility() == VISIBLE)
+                else if (renderer && (renderer->isImage() || renderer->isWidget() || (renderer->element() && renderer->element()->isControl())))
                     m_handledNode = handleReplacedElement();
-            } else
-                m_handledNode = handleNonTextNode();
-            if (m_positionNode)
-                return;
+                else
+                    m_handledNode = handleNonTextNode();
+                if (m_positionNode)
+                    return;
+            }
         }
 
         // find a new current node to handle in depth-first manner,
@@ -173,11 +240,24 @@ void TextIterator::advance()
         if (!next) {
             next = m_node->nextSibling();
             if (!next) {
-                if (m_node->traverseNextNode() == m_pastEndNode)
-                    break;
-                while (!next && m_node->parentNode()) {
-                    m_node = m_node->parentNode();
-                    exitNode();
+                bool pastEnd = m_node->traverseNextNode() == m_pastEndNode;
+                Node* parentNode = m_node->parentNode();
+                if (!parentNode && m_inShadowContent) {
+                    m_inShadowContent = false;
+                    parentNode = m_node->shadowParentNode();
+                }
+                while (!next && parentNode) {
+                    if (pastEnd && parentNode == m_endContainer || m_endContainer->isDescendantOf(parentNode))
+                        return;
+                    bool haveRenderer = m_node->renderer();
+                    m_node = parentNode;
+                    parentNode = m_node->parentNode();
+                    if (!parentNode && m_inShadowContent) {
+                        m_inShadowContent = false;
+                        parentNode = m_node->shadowParentNode();
+                    }
+                    if (haveRenderer)
+                        exitNode();
                     if (m_positionNode) {
                         m_handledNode = true;
                         m_handledChildren = true;
@@ -206,10 +286,12 @@ static inline bool compareBoxStart(const InlineTextBox *first, const InlineTextB
 
 bool TextIterator::handleTextNode()
 {
+    RenderText* renderer = toRenderText(m_node->renderer());
+    if (renderer->style()->visibility() != VISIBLE)
+        return false;
+        
     m_lastTextNode = m_node;
-
-    RenderText *renderer = static_cast<RenderText *>(m_node->renderer());
-    String str = renderer->string();
+    String str = renderer->text();
 
     // handle pre-formatted text
     if (!renderer->style()->collapseWhiteSpace()) {
@@ -219,21 +301,13 @@ bool TextIterator::handleTextNode()
             return false;
         }
         int strLength = str.length();
-        int end = (m_node == m_endContainer) ? m_endOffset : LONG_MAX;
+        int end = (m_node == m_endContainer) ? m_endOffset : INT_MAX;
         int runEnd = min(strLength, end);
 
         if (runStart >= runEnd)
             return true;
 
-        m_positionNode = m_node;
-        m_positionOffsetBaseNode = 0;
-        m_positionStartOffset = runStart;
-        m_positionEndOffset = runEnd;
-        m_textCharacters = str.characters() + runStart;
-        m_textLength = runEnd - runStart;
-
-        m_lastCharacter = str[runEnd - 1];
-
+        emitText(m_node, runStart, runEnd);
         return true;
     }
 
@@ -259,12 +333,12 @@ bool TextIterator::handleTextNode()
 
 void TextIterator::handleTextBox()
 {    
-    RenderText *renderer = static_cast<RenderText *>(m_node->renderer());
-    String str = renderer->string();
+    RenderText *renderer = toRenderText(m_node->renderer());
+    String str = renderer->text();
     int start = m_offset;
-    int end = (m_node == m_endContainer) ? m_endOffset : LONG_MAX;
+    int end = (m_node == m_endContainer) ? m_endOffset : INT_MAX;
     while (m_textBox) {
-        int textBoxStart = m_textBox->m_start;
+        int textBoxStart = m_textBox->start();
         int runStart = max(textBoxStart, start);
 
         // Check for collapsed space at the start of this run.
@@ -272,10 +346,16 @@ void TextIterator::handleTextBox()
         bool needSpace = m_lastTextNodeEndedWithCollapsedSpace
             || (m_textBox == firstTextBox && textBoxStart == runStart && runStart > 0);
         if (needSpace && !isCollapsibleWhitespace(m_lastCharacter) && m_lastCharacter) {
-            emitCharacter(' ', m_node, 0, runStart, runStart);
+            if (m_lastTextNode == m_node && runStart > 0 && str[runStart - 1] == ' ') {
+                unsigned spaceRunStart = runStart - 1;
+                while (spaceRunStart > 0 && str[spaceRunStart - 1] == ' ')
+                    --spaceRunStart;
+                emitText(m_node, spaceRunStart, spaceRunStart + 1);
+            } else
+                emitCharacter(' ', m_node, 0, runStart, runStart);
             return;
         }
-        int textBoxEnd = textBoxStart + m_textBox->m_len;
+        int textBoxEnd = textBoxStart + m_textBox->len();
         int runEnd = min(textBoxEnd, end);
         
         // Determine what the next text box will be, but don't advance yet
@@ -297,18 +377,9 @@ void TextIterator::handleTextBox()
                 int subrunEnd = str.find('\n', runStart);
                 if (subrunEnd == -1 || subrunEnd > runEnd)
                     subrunEnd = runEnd;
-
+    
                 m_offset = subrunEnd;
-
-                m_positionNode = m_node;
-                m_positionOffsetBaseNode = 0;
-                m_positionStartOffset = runStart;
-                m_positionEndOffset = subrunEnd;
-                m_textCharacters = str.characters() + runStart;
-                m_textLength = subrunEnd - runStart;
-
-                m_lastTextNodeEndedWithCollapsedSpace = false;
-                m_lastCharacter = str[subrunEnd - 1];
+                emitText(m_node, runStart, subrunEnd);
             }
 
             // If we are doing a subrun that doesn't go to the end of the text box,
@@ -317,7 +388,7 @@ void TextIterator::handleTextBox()
                 return;
 
             // Advance and return
-            int nextRunStart = nextTextBox ? nextTextBox->m_start : str.length();
+            int nextRunStart = nextTextBox ? nextTextBox->start() : str.length();
             if (nextRunStart > runEnd)
                 m_lastTextNodeEndedWithCollapsedSpace = true; // collapsed space between runs or at the end
             m_textBox = nextTextBox;
@@ -334,9 +405,30 @@ void TextIterator::handleTextBox()
 
 bool TextIterator::handleReplacedElement()
 {
+    RenderObject* renderer = m_node->renderer();
+    if (renderer->style()->visibility() != VISIBLE)
+        return false;
+
     if (m_lastTextNodeEndedWithCollapsedSpace) {
         emitCharacter(' ', m_lastTextNode->parentNode(), m_lastTextNode, 1, 1);
         return false;
+    }
+
+    if (m_enterTextControls && (renderer->isTextArea() || renderer->isTextField())) {
+        m_node = static_cast<RenderTextControl*>(renderer)->innerTextElement();
+        m_offset = 0;
+        m_inShadowContent = true;
+        return false;
+    }
+
+    m_haveEmitted = true;
+
+    if (m_emitCharactersBetweenAllVisiblePositions) {
+        // We want replaced elements to behave like punctuation for boundary 
+        // finding, and to simply take up space for the selection preservation 
+        // code in moveParagraphs, so we use a comma.
+        emitCharacter(',', m_node->parentNode(), m_node, 0, 1);
+        return true;
     }
 
     m_positionNode = m_node->parentNode();
@@ -352,15 +444,6 @@ bool TextIterator::handleReplacedElement()
     return true;
 }
 
-static bool isTableCell(Node* node)
-{
-    RenderObject* r = node->renderer();
-    if (!r)
-        return node->hasTagName(tdTag) || node->hasTagName(thTag);
-    
-    return r->isTableCell();
-}
-
 static bool shouldEmitTabBeforeNode(Node* node)
 {
     RenderObject* r = node->renderer();
@@ -373,13 +456,6 @@ static bool shouldEmitTabBeforeNode(Node* node)
     RenderTableCell* rc = static_cast<RenderTableCell*>(r);
     RenderTable* t = rc->table();
     return t && (t->cellBefore(rc) || t->cellAbove(rc));
-}
-
-static bool shouldEmitSpaceBeforeAndAfterNode(Node* node)
-{
-    RenderObject* r = node->renderer();
-    
-    return r && r->isTable() && r->isInline();
 }
 
 static bool shouldEmitNewlineForNode(Node* node)
@@ -418,7 +494,7 @@ static bool shouldEmitNewlinesBeforeAndAfterNode(Node* node)
                 || node->hasTagName(trTag)
                 || node->hasTagName(ulTag));
     }
-
+    
     // Need to make an exception for table cells, because they are blocks, but we
     // want them tab-delimited rather than having newlines before and after.
     if (isTableCell(node))
@@ -432,8 +508,25 @@ static bool shouldEmitNewlinesBeforeAndAfterNode(Node* node)
             return true;
     }
     
-    // Check for non-inline block
-    return !r->isInline() && r->isRenderBlock() && !r->isBody();
+    return !r->isInline() && r->isRenderBlock() && !r->isFloatingOrPositioned() && !r->isBody();
+}
+
+static bool shouldEmitNewlineAfterNode(Node* node)
+{
+    // FIXME: It should be better but slower to create a VisiblePosition here.
+    if (!shouldEmitNewlinesBeforeAndAfterNode(node))
+        return false;
+    // Check if this is the very last renderer in the document.
+    // If so, then we should not emit a newline.
+    while ((node = node->traverseNextSibling()))
+        if (node->renderer())
+            return true;
+    return false;
+}
+
+static bool shouldEmitNewlineBeforeNode(Node* node)
+{
+    return shouldEmitNewlinesBeforeAndAfterNode(node); 
 }
 
 static bool shouldEmitExtraNewlineForNode(Node* node)
@@ -443,7 +536,7 @@ static bool shouldEmitExtraNewlineForNode(Node* node)
     // result even without margin collapsing. For example: <div><p>text</p></div>
     // will work right even if both the <div> and the <p> have bottom margins.
     RenderObject* r = node->renderer();
-    if (!r)
+    if (!r || !r->isBox())
         return false;
     
     // NOTE: We only do this for a select set of nodes, and fwiw WinIE appears
@@ -457,7 +550,7 @@ static bool shouldEmitExtraNewlineForNode(Node* node)
         || node->hasTagName(pTag)) {
         RenderStyle* style = r->style();
         if (style) {
-            int bottomMargin = r->collapsedMarginBottom();
+            int bottomMargin = toRenderBox(r)->collapsedMarginBottom();
             int fontSize = style->fontDescription().computedPixelSize();
             if (bottomMargin * 2 >= fontSize)
                 return true;
@@ -467,46 +560,140 @@ static bool shouldEmitExtraNewlineForNode(Node* node)
     return false;
 }
 
+// Whether or not we should emit a character as we enter m_node (if it's a container) or as we hit it (if it's atomic).
+bool TextIterator::shouldRepresentNodeOffsetZero()
+{
+    if (m_emitCharactersBetweenAllVisiblePositions && m_node->renderer() && m_node->renderer()->isTable())
+        return true;
+        
+    // Leave element positioned flush with start of a paragraph
+    // (e.g. do not insert tab before a table cell at the start of a paragraph)
+    if (m_lastCharacter == '\n')
+        return false;
+    
+    // Otherwise, show the position if we have emitted any characters
+    if (m_haveEmitted)
+        return true;
+    
+    // We've not emitted anything yet. Generally, there is no need for any positioning then.
+    // The only exception is when the element is visually not in the same line as
+    // the start of the range (e.g. the range starts at the end of the previous paragraph).
+    // NOTE: Creating VisiblePositions and comparing them is relatively expensive, so we
+    // make quicker checks to possibly avoid that. Another check that we could make is
+    // is whether the inline vs block flow changed since the previous visible element.
+    // I think we're already in a special enough case that that won't be needed, tho.
+
+    // No character needed if this is the first node in the range.
+    if (m_node == m_startContainer)
+        return false;
+    
+    // If we are outside the start container's subtree, assume we need to emit.
+    // FIXME: m_startContainer could be an inline block
+    if (!m_node->isDescendantOf(m_startContainer))
+        return true;
+
+    // If we started as m_startContainer offset 0 and the current node is a descendant of
+    // the start container, we already had enough context to correctly decide whether to
+    // emit after a preceding block. We chose not to emit (m_haveEmitted is false),
+    // so don't second guess that now.
+    // NOTE: Is this really correct when m_node is not a leftmost descendant? Probably
+    // immaterial since we likely would have already emitted something by now.
+    if (m_startOffset == 0)
+        return false;
+        
+    // If this node is unrendered or invisible the VisiblePosition checks below won't have much meaning.
+    // Additionally, if the range we are iterating over contains huge sections of unrendered content, 
+    // we would create VisiblePositions on every call to this function without this check.
+    if (!m_node->renderer() || m_node->renderer()->style()->visibility() != VISIBLE)
+        return false;
+    
+    // The currPos.isNotNull() check is needed because positions in non-html content
+    // (like svg) do not have visible positions, and we don't want to emit for them either.
+    VisiblePosition startPos = VisiblePosition(m_startContainer, m_startOffset, DOWNSTREAM);
+    VisiblePosition currPos = VisiblePosition(m_node, 0, DOWNSTREAM);
+    return currPos.isNotNull() && !inSameLine(startPos, currPos);
+}
+
+bool TextIterator::shouldEmitSpaceBeforeAndAfterNode(Node* node)
+{
+    return node->renderer() && node->renderer()->isTable() && (node->renderer()->isInline() || m_emitCharactersBetweenAllVisiblePositions);
+}
+
+void TextIterator::representNodeOffsetZero()
+{
+    // Emit a character to show the positioning of m_node.
+    
+    // When we haven't been emitting any characters, shouldRepresentNodeOffsetZero() can 
+    // create VisiblePositions, which is expensive.  So, we perform the inexpensive checks
+    // on m_node to see if it necessitates emitting a character first and will early return 
+    // before encountering shouldRepresentNodeOffsetZero()s worse case behavior.
+    if (shouldEmitTabBeforeNode(m_node)) {
+        if (shouldRepresentNodeOffsetZero())
+            emitCharacter('\t', m_node->parentNode(), m_node, 0, 0);
+    } else if (shouldEmitNewlineBeforeNode(m_node)) {
+        if (shouldRepresentNodeOffsetZero())
+            emitCharacter('\n', m_node->parentNode(), m_node, 0, 0);
+    } else if (shouldEmitSpaceBeforeAndAfterNode(m_node)) {
+        if (shouldRepresentNodeOffsetZero())
+            emitCharacter(' ', m_node->parentNode(), m_node, 0, 0);
+    }
+}
+
 bool TextIterator::handleNonTextNode()
 {
-    if (shouldEmitNewlineForNode(m_node)) {
+    if (shouldEmitNewlineForNode(m_node))
         emitCharacter('\n', m_node->parentNode(), m_node, 0, 1);
-    } else if (m_lastCharacter != '\n' && m_lastTextNode) {
-        // only add the tab or newline if not at the start of a line
-        if (shouldEmitTabBeforeNode(m_node))
-            emitCharacter('\t', m_lastTextNode->parentNode(), m_lastTextNode, 0, 1);
-        else if (shouldEmitNewlinesBeforeAndAfterNode(m_node))
-            emitCharacter('\n', m_lastTextNode->parentNode(), m_lastTextNode, 0, 1);
-        else if (shouldEmitSpaceBeforeAndAfterNode(m_node))
-            emitCharacter(' ', m_lastTextNode->parentNode(), m_lastTextNode, 0, 1);
-    }
+    else if (m_emitCharactersBetweenAllVisiblePositions && m_node->renderer() && m_node->renderer()->isHR())
+        emitCharacter(' ', m_node->parentNode(), m_node, 0, 1);
+    else
+        representNodeOffsetZero();
 
     return true;
 }
 
 void TextIterator::exitNode()
 {
-    if (m_lastTextNode && shouldEmitNewlinesBeforeAndAfterNode(m_node)) {
+    // prevent emitting a newline when exiting a collapsed block at beginning of the range
+    // FIXME: !m_haveEmitted does not necessarily mean there was a collapsed block... it could
+    // have been an hr (e.g.). Also, a collapsed block could have height (e.g. a table) and
+    // therefore look like a blank line.
+    if (!m_haveEmitted)
+        return;
+        
+    // Emit with a position *inside* m_node, after m_node's contents, in 
+    // case it is a block, because the run should start where the 
+    // emitted character is positioned visually.
+    Node* baseNode = m_node->lastChild() ? m_node->lastChild() : m_node;
+    // FIXME: This shouldn't require the m_lastTextNode to be true, but we can't change that without making
+    // the logic in _web_attributedStringFromRange match.  We'll get that for free when we switch to use
+    // TextIterator in _web_attributedStringFromRange.
+    // See <rdar://problem/5428427> for an example of how this mismatch will cause problems.
+    if (m_lastTextNode && shouldEmitNewlineAfterNode(m_node)) {
         // use extra newline to represent margin bottom, as needed
         bool addNewline = shouldEmitExtraNewlineForNode(m_node);
         
+        // FIXME: We need to emit a '\n' as we leave an empty block(s) that
+        // contain a VisiblePosition when doing selection preservation.
         if (m_lastCharacter != '\n') {
-            // insert a newline with a position following this block
-            emitCharacter('\n', m_node->parentNode(), m_node, 1, 1);
-
+            // insert a newline with a position following this block's contents.
+            emitCharacter('\n', baseNode->parentNode(), baseNode, 1, 1);
             // remember whether to later add a newline for the current node
-            assert(!m_needAnotherNewline);
+            ASSERT(!m_needAnotherNewline);
             m_needAnotherNewline = addNewline;
-        } else if (addNewline) {
-            // insert a newline with a position following this block
-            emitCharacter('\n', m_node->parentNode(), m_node, 1, 1);
-        }
-    } else if (shouldEmitSpaceBeforeAndAfterNode(m_node))
-        emitCharacter(' ', m_node->parentNode(), m_node, 1, 1);
+        } else if (addNewline)
+            // insert a newline with a position following this block's contents.
+            emitCharacter('\n', baseNode->parentNode(), baseNode, 1, 1);
+    }
+    
+    // If nothing was emitted, see if we need to emit a space.
+    if (!m_positionNode && shouldEmitSpaceBeforeAndAfterNode(m_node))
+        emitCharacter(' ', baseNode->parentNode(), baseNode, 1, 1);
 }
 
 void TextIterator::emitCharacter(UChar c, Node *textNode, Node *offsetBaseNode, int textStartOffset, int textEndOffset)
 {
+    m_haveEmitted = true;
+    
     // remember information with which to construct the TextIterator::range()
     // NOTE: textNode is often not a text node, so the range will specify child nodes of positionNode
     m_positionNode = textNode;
@@ -524,6 +711,24 @@ void TextIterator::emitCharacter(UChar c, Node *textNode, Node *offsetBaseNode, 
     m_lastCharacter = c;
 }
 
+void TextIterator::emitText(Node* textNode, int textStartOffset, int textEndOffset)
+{
+    RenderText* renderer = toRenderText(m_node->renderer());
+    String str = renderer->text();
+    ASSERT(str.characters());
+
+    m_positionNode = textNode;
+    m_positionOffsetBaseNode = 0;
+    m_positionStartOffset = textStartOffset;
+    m_positionEndOffset = textEndOffset;
+    m_textCharacters = str.characters() + textStartOffset;
+    m_textLength = textEndOffset - textStartOffset;
+    m_lastCharacter = str[textEndOffset - 1];
+
+    m_lastTextNodeEndedWithCollapsedSpace = false;
+    m_haveEmitted = true;
+}
+
 PassRefPtr<Range> TextIterator::range() const
 {
     // use the current run information, if we have it
@@ -534,15 +739,32 @@ PassRefPtr<Range> TextIterator::range() const
             m_positionEndOffset += index;
             m_positionOffsetBaseNode = 0;
         }
-        return new Range(m_positionNode->document(), m_positionNode, m_positionStartOffset, m_positionNode, m_positionEndOffset);
+        return Range::create(m_positionNode->document(), m_positionNode, m_positionStartOffset, m_positionNode, m_positionEndOffset);
     }
 
     // otherwise, return the end of the overall range we were given
     if (m_endContainer)
-        return new Range(m_endContainer->document(), m_endContainer, m_endOffset, m_endContainer, m_endOffset);
+        return Range::create(m_endContainer->document(), m_endContainer, m_endOffset, m_endContainer, m_endOffset);
         
     return 0;
 }
+    
+Node* TextIterator::node() const
+{
+    RefPtr<Range> textRange = range();
+    if (!textRange)
+        return 0;
+
+    Node* node = textRange->startContainer();
+    if (!node)
+        return 0;
+    if (node->offsetInCharacters())
+        return node;
+    
+    return node->childNode(textRange->startOffset());
+}
+
+// --------
 
 SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator() : m_positionNode(0)
 {
@@ -555,19 +777,12 @@ SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator(const Range *r)
     if (!r)
         return;
 
-    int exception = 0;
-    Node *startNode = r->startContainer(exception);
-    if (exception)
+    Node* startNode = r->startContainer();
+    if (!startNode)
         return;
-    Node *endNode = r->endContainer(exception);
-    if (exception)
-        return;
-    int startOffset = r->startOffset(exception);
-    if (exception)
-        return;
-    int endOffset = r->endOffset(exception);
-    if (exception)
-        return;
+    Node* endNode = r->endContainer();
+    int startOffset = r->startOffset();
+    int endOffset = r->endOffset();
 
     if (!startNode->offsetInCharacters()) {
         if (startOffset >= 0 && startOffset < static_cast<int>(startNode->childNodeCount())) {
@@ -578,7 +793,7 @@ SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator(const Range *r)
     if (!endNode->offsetInCharacters()) {
         if (endOffset > 0 && endOffset <= static_cast<int>(endNode->childNodeCount())) {
             endNode = endNode->childNode(endOffset - 1);
-            endOffset = endNode->hasChildNodes() ? endNode->childNodeCount() : endNode->maxOffset();
+            endOffset = endNode->offsetInCharacters() ? endNode->maxCharacterOffset() : endNode->childNodeCount();
         }
     }
 
@@ -589,7 +804,9 @@ SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator(const Range *r)
 
     m_startNode = startNode;
     m_startOffset = startOffset;
-
+    m_endNode = endNode;
+    m_endOffset = endOffset;
+    
 #ifndef NDEBUG
     // Need this just because of the assert.
     m_positionNode = endNode;
@@ -597,19 +814,29 @@ SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator(const Range *r)
 
     m_lastTextNode = 0;
     m_lastCharacter = '\n';
+    
+    if (startOffset == 0 || !startNode->firstChild()) {
+        m_pastStartNode = startNode->previousSibling();
+        while (!m_pastStartNode && startNode->parentNode()) {
+            startNode = startNode->parentNode();
+            m_pastStartNode = startNode->previousSibling();
+        }
+    } else
+        m_pastStartNode = startNode->childNode(startOffset - 1);
 
     advance();
 }
 
 void SimplifiedBackwardsTextIterator::advance()
 {
-    assert(m_positionNode);
+    ASSERT(m_positionNode);
 
     m_positionNode = 0;
     m_textLength = 0;
 
-    while (m_node) {
-        if (!m_handledNode) {
+    while (m_node && m_node != m_pastStartNode) {
+        // Don't handle node if we start iterating at [node, 0].
+        if (!m_handledNode && !(m_node == m_endNode && m_endOffset == 0)) {
             RenderObject *renderer = m_node->renderer();
             if (renderer && renderer->isText() && m_node->nodeType() == Node::TEXT_NODE) {
                 // FIXME: What about CDATA_SECTION_NODE?
@@ -624,49 +851,41 @@ void SimplifiedBackwardsTextIterator::advance()
                 return;
         }
 
-        if (m_node == m_startNode)
-            return;
-
-        Node *next = 0;
-        if (!m_handledChildren) {
-            next = m_node->lastChild();
-            while (next && next->lastChild())
-                next = next->lastChild();
-            m_handledChildren = true;
-        }
-        if (!next && m_node != m_startNode) {
+        Node* next = m_handledChildren ? 0 : m_node->lastChild();
+        if (!next) {
+            // Exit empty containers as we pass over them or containers
+            // where [container, 0] is where we started iterating.
+            if (!m_handledNode &&
+                canHaveChildrenForEditing(m_node) && 
+                m_node->parentNode() && 
+                (!m_node->lastChild() || m_node == m_endNode && m_endOffset == 0)) {
+                exitNode();
+                if (m_positionNode) {
+                    m_handledNode = true;
+                    m_handledChildren = true;
+                    return;
+                }            
+            }
+            // Exit all other containers.
             next = m_node->previousSibling();
-            if (next) {
+            while (!next) {
+                if (!m_node->parentNode())
+                    break;
+                m_node = m_node->parentNode();
                 exitNode();
-                while (next->lastChild())
-                    next = next->lastChild();
-            }
-            else if (m_node->parentNode()) {
-                next = m_node->parentNode();
-                exitNode();
-            }
-        }
-        
-        // Check for leaving a node and iterating backwards
-        // into a different block that is an descendent of the
-        // block containing the node (as in leaving
-        // the "bar" node in this example: <p>foo</p>bar).
-        // Must emit newline when leaving node containing "bar".
-        if (next && m_node->renderer() && m_node->renderer()->style()->visibility() == VISIBLE) {
-            Node *block = m_node->enclosingBlockFlowElement();
-            if (block) {
-                Node *nextBlock = next->enclosingBlockFlowElement();
-                if (nextBlock && nextBlock->isAncestor(block))
-                    emitNewline();
+                if (m_positionNode) {
+                    m_handledNode = true;
+                    m_handledChildren = true;
+                    return;
+                }
+                next = m_node->previousSibling();
             }
         }
         
         m_node = next;
-        if (m_node)
-            m_offset = m_node->caretMaxOffset();
-        else
-            m_offset = 0;
+        m_offset = m_node ? caretMaxOffset(m_node) : 0;
         m_handledNode = false;
+        m_handledChildren = false;
         
         if (m_positionNode)
             return;
@@ -677,8 +896,8 @@ bool SimplifiedBackwardsTextIterator::handleTextNode()
 {
     m_lastTextNode = m_node;
 
-    RenderText *renderer = static_cast<RenderText *>(m_node->renderer());
-    String str = m_node->nodeValue();
+    RenderText *renderer = toRenderText(m_node->renderer());
+    String str = renderer->text();
 
     if (!renderer->firstTextBox() && str.length() > 0)
         return true;
@@ -698,17 +917,12 @@ bool SimplifiedBackwardsTextIterator::handleTextNode()
 
 bool SimplifiedBackwardsTextIterator::handleReplacedElement()
 {
-    int offset = m_node->nodeIndex();
-
-    m_positionNode = m_node->parentNode();
-    m_positionStartOffset = offset;
-    m_positionEndOffset = offset + 1;
-
-    m_textCharacters = 0;
-    m_textLength = 0;
-
-    m_lastCharacter = 0;
-
+    unsigned index = m_node->nodeIndex();
+    // We want replaced elements to behave like punctuation for boundary 
+    // finding, and to simply take up space for the selection preservation 
+    // code in moveParagraphs, so we use a comma.  Unconditionally emit
+    // here because this iterator is only used for boundary finding.
+    emitCharacter(',', m_node->parentNode(), index, index + 1);
     return true;
 }
 
@@ -717,21 +931,25 @@ bool SimplifiedBackwardsTextIterator::handleNonTextNode()
     // We can use a linefeed in place of a tab because this simple iterator is only used to
     // find boundaries, not actual content.  A linefeed breaks words, sentences, and paragraphs.
     if (shouldEmitNewlineForNode(m_node) ||
-        shouldEmitNewlinesBeforeAndAfterNode(m_node) ||
-        shouldEmitTabBeforeNode(m_node))
-        emitNewline();
+        shouldEmitNewlineAfterNode(m_node) ||
+        shouldEmitTabBeforeNode(m_node)) {
+        unsigned index = m_node->nodeIndex();
+        // The start of this emitted range is wrong, ensuring correctness would require
+        // VisiblePositions and so would be slow.  previousBoundary expects this.
+        emitCharacter('\n', m_node->parentNode(), index + 1, index + 1);
+    }
     
     return true;
 }
 
 void SimplifiedBackwardsTextIterator::exitNode()
 {
-    // Left this function in so that the name and usage patterns remain similar to 
-    // TextIterator. However, the needs of this iterator are much simpler, and
-    // the handleNonTextNode() function does just what we want (i.e. insert a
-    // BR for certain node types to "break up" text so that it does not seem
-    // like content is next to other text when it really isn't). 
-    handleNonTextNode();
+    if (shouldEmitNewlineForNode(m_node) ||
+        shouldEmitNewlineBeforeNode(m_node) ||
+        shouldEmitTabBeforeNode(m_node))
+        // The start of this emitted range is wrong, ensuring correctness would require
+        // VisiblePositions and so would be slow.  previousBoundary expects this.
+        emitCharacter('\n', m_node, 0, 0);
 }
 
 void SimplifiedBackwardsTextIterator::emitCharacter(UChar c, Node *node, int startOffset, int endOffset)
@@ -745,38 +963,31 @@ void SimplifiedBackwardsTextIterator::emitCharacter(UChar c, Node *node, int sta
     m_lastCharacter = c;
 }
 
-void SimplifiedBackwardsTextIterator::emitNewline()
-{
-    int offset;
-    
-    if (m_lastTextNode) {
-        offset = m_lastTextNode->nodeIndex();
-        emitCharacter('\n', m_lastTextNode->parentNode(), offset, offset + 1);
-    } else {
-        offset = m_node->nodeIndex();
-        emitCharacter('\n', m_node->parentNode(), offset, offset + 1);
-    }
-}
-
 PassRefPtr<Range> SimplifiedBackwardsTextIterator::range() const
 {
     if (m_positionNode)
-        return new Range(m_positionNode->document(), m_positionNode, m_positionStartOffset, m_positionNode, m_positionEndOffset);
+        return Range::create(m_positionNode->document(), m_positionNode, m_positionStartOffset, m_positionNode, m_positionEndOffset);
     
-    return new Range(m_startNode->document(), m_startNode, m_startOffset, m_startNode, m_startOffset);
+    return Range::create(m_startNode->document(), m_startNode, m_startOffset, m_startNode, m_startOffset);
 }
+
+// --------
 
 CharacterIterator::CharacterIterator()
-    : m_offset(0), m_runOffset(0), m_atBreak(true)
+    : m_offset(0)
+    , m_runOffset(0)
+    , m_atBreak(true)
 {
 }
 
-CharacterIterator::CharacterIterator(const Range *r)
-    : m_offset(0), m_runOffset(0), m_atBreak(true), m_textIterator(r, RUNFINDER)
+CharacterIterator::CharacterIterator(const Range *r, bool emitCharactersBetweenAllVisiblePositions, bool enterTextControls)
+    : m_offset(0)
+    , m_runOffset(0)
+    , m_atBreak(true)
+    , m_textIterator(r, emitCharactersBetweenAllVisiblePositions, enterTextControls)
 {
-    while (!atEnd() && m_textIterator.length() == 0) {
+    while (!atEnd() && m_textIterator.length() == 0)
         m_textIterator.advance();
-    }
 }
 
 PassRefPtr<Range> CharacterIterator::range() const
@@ -784,14 +995,15 @@ PassRefPtr<Range> CharacterIterator::range() const
     RefPtr<Range> r = m_textIterator.range();
     if (!m_textIterator.atEnd()) {
         if (m_textIterator.length() <= 1) {
-            assert(m_runOffset == 0);
+            ASSERT(m_runOffset == 0);
         } else {
-            int exception = 0;
-            Node *n = r->startContainer(exception);
-            assert(n == r->endContainer(exception));
-            int offset = r->startOffset(exception) + m_runOffset;
-            r->setStart(n, offset, exception);
-            r->setEnd(n, offset + 1, exception);
+            Node* n = r->startContainer();
+            ASSERT(n == r->endContainer());
+            int offset = r->startOffset() + m_runOffset;
+            ExceptionCode ec = 0;
+            r->setStart(n, offset, ec);
+            r->setEnd(n, offset + 1, ec);
+            ASSERT(!ec);
         }
     }
     return r.release();
@@ -799,6 +1011,11 @@ PassRefPtr<Range> CharacterIterator::range() const
 
 void CharacterIterator::advance(int count)
 {
+    if (count <= 0) {
+        ASSERT(count == 0);
+        return;
+    }
+    
     m_atBreak = false;
 
     // easy if there is enough left in the current m_textIterator run
@@ -837,18 +1054,109 @@ void CharacterIterator::advance(int count)
     m_runOffset = 0;
 }
 
-DeprecatedString CharacterIterator::string(int numChars)
+String CharacterIterator::string(int numChars)
 {
-    DeprecatedString result;
-    result.reserve(numChars);
+    Vector<UChar> result;
+    result.reserveInitialCapacity(numChars);
     while (numChars > 0 && !atEnd()) {
         int runSize = min(numChars, length());
-        result.append(reinterpret_cast<const DeprecatedChar*>(characters()), runSize);
+        result.append(characters(), runSize);
         numChars -= runSize;
         advance(runSize);
     }
-    return result;
+    return String::adopt(result);
 }
+
+static PassRefPtr<Range> characterSubrange(CharacterIterator& it, int offset, int length)
+{
+    it.advance(offset);
+    RefPtr<Range> start = it.range();
+
+    if (length > 1)
+        it.advance(length - 1);
+    RefPtr<Range> end = it.range();
+
+    return Range::create(start->startContainer()->document(), 
+        start->startContainer(), start->startOffset(), 
+        end->endContainer(), end->endOffset());
+}
+
+BackwardsCharacterIterator::BackwardsCharacterIterator()
+    : m_offset(0)
+    , m_runOffset(0)
+    , m_atBreak(true)
+{
+}
+
+BackwardsCharacterIterator::BackwardsCharacterIterator(const Range* range)
+    : m_offset(0)
+    , m_runOffset(0)
+    , m_atBreak(true)
+    , m_textIterator(range)
+{
+    while (!atEnd() && !m_textIterator.length())
+        m_textIterator.advance();
+}
+
+PassRefPtr<Range> BackwardsCharacterIterator::range() const
+{
+    RefPtr<Range> r = m_textIterator.range();
+    if (!m_textIterator.atEnd()) {
+        if (m_textIterator.length() <= 1)
+            ASSERT(m_runOffset == 0);
+        else {
+            Node* n = r->startContainer();
+            ASSERT(n == r->endContainer());
+            int offset = r->endOffset() - m_runOffset;
+            ExceptionCode ec = 0;
+            r->setStart(n, offset - 1, ec);
+            r->setEnd(n, offset, ec);
+            ASSERT(!ec);
+        }
+    }
+    return r.release();
+}
+
+void BackwardsCharacterIterator::advance(int count)
+{
+    if (count <= 0) {
+        ASSERT(!count);
+        return;
+    }
+
+    m_atBreak = false;
+
+    int remaining = m_textIterator.length() - m_runOffset;
+    if (count < remaining) {
+        m_runOffset += count;
+        m_offset += count;
+        return;
+    }
+
+    count -= remaining;
+    m_offset += remaining;
+
+    for (m_textIterator.advance(); !atEnd(); m_textIterator.advance()) {
+        int runLength = m_textIterator.length();
+        if (runLength == 0)
+            m_atBreak = true;
+        else {
+            if (count < runLength) {
+                m_runOffset = count;
+                m_offset += count;
+                return;
+            }
+            
+            count -= runLength;
+            m_offset += runLength;
+        }
+    }
+
+    m_atBreak = true;
+    m_runOffset = 0;
+}
+
+// --------
 
 WordAwareIterator::WordAwareIterator()
 : m_previousText(0), m_didLookAhead(false)
@@ -869,24 +1177,23 @@ WordAwareIterator::WordAwareIterator(const Range *r)
 //      (we looked ahead to the next chunk and found a word boundary)
 // - We built up our own chunk of text from many chunks from the text iterator
 
-//FIXME: Perf could be bad for huge spans next to each other that don't fall on word boundaries
+// FIXME: Perf could be bad for huge spans next to each other that don't fall on word boundaries
 
 void WordAwareIterator::advance()
 {
     m_previousText = 0;
-    m_buffer = "";      // toss any old buffer we built up
+    m_buffer.clear();      // toss any old buffer we built up
 
     // If last time we did a look-ahead, start with that looked-ahead chunk now
     if (!m_didLookAhead) {
-        assert(!m_textIterator.atEnd());
+        ASSERT(!m_textIterator.atEnd());
         m_textIterator.advance();
     }
     m_didLookAhead = false;
 
     // Go to next non-empty chunk 
-    while (!m_textIterator.atEnd() && m_textIterator.length() == 0) {
+    while (!m_textIterator.atEnd() && m_textIterator.length() == 0)
         m_textIterator.advance();
-    }
     m_range = m_textIterator.range();
 
     if (m_textIterator.atEnd())
@@ -894,7 +1201,7 @@ void WordAwareIterator::advance()
     
     while (1) {
         // If this chunk ends in whitespace we can just use it as our chunk.
-        if (DeprecatedChar(m_textIterator.characters()[m_textIterator.length() - 1]).isSpace())
+        if (isSpaceOrNewline(m_textIterator.characters()[m_textIterator.length() - 1]))
             return;
 
         // If this is the first chunk that failed, save it in previousText before look ahead
@@ -905,26 +1212,26 @@ void WordAwareIterator::advance()
 
         // Look ahead to next chunk.  If it is whitespace or a break, we can use the previous stuff
         m_textIterator.advance();
-        if (m_textIterator.atEnd() || m_textIterator.length() == 0 || DeprecatedChar(m_textIterator.characters()[0]).isSpace()) {
+        if (m_textIterator.atEnd() || m_textIterator.length() == 0 || isSpaceOrNewline(m_textIterator.characters()[0])) {
             m_didLookAhead = true;
             return;
         }
 
         if (m_buffer.isEmpty()) {
             // Start gobbling chunks until we get to a suitable stopping point
-            m_buffer.append(reinterpret_cast<const DeprecatedChar*>(m_previousText), m_previousLength);
+            m_buffer.append(m_previousText, m_previousLength);
             m_previousText = 0;
         }
-        m_buffer.append(reinterpret_cast<const DeprecatedChar*>(m_textIterator.characters()), m_textIterator.length());
+        m_buffer.append(m_textIterator.characters(), m_textIterator.length());
         int exception = 0;
-        m_range->setEnd(m_textIterator.range()->endContainer(exception), m_textIterator.range()->endOffset(exception), exception);
+        m_range->setEnd(m_textIterator.range()->endContainer(), m_textIterator.range()->endOffset(), exception);
     }
 }
 
 int WordAwareIterator::length() const
 {
     if (!m_buffer.isEmpty())
-        return m_buffer.length();
+        return m_buffer.size();
     if (m_previousText)
         return m_previousLength;
     return m_textIterator.length();
@@ -933,95 +1240,283 @@ int WordAwareIterator::length() const
 const UChar* WordAwareIterator::characters() const
 {
     if (!m_buffer.isEmpty())
-        return reinterpret_cast<const UChar*>(m_buffer.unicode());
+        return m_buffer.data();
     if (m_previousText)
         return m_previousText;
     return m_textIterator.characters();
 }
 
-CircularSearchBuffer::CircularSearchBuffer(const String& s, bool isCaseSensitive)
-    : m_target(s)
+// --------
+
+#if USE(ICU_UNICODE) && !UCONFIG_NO_COLLATION
+
+static const size_t minimumSearchBufferSize = 8192;
+
+#ifndef NDEBUG
+static bool searcherInUse;
+#endif
+
+static UStringSearch* createSearcher()
 {
-    assert(!s.isEmpty());
+    // Provide a non-empty pattern and non-empty text so usearch_open will not fail,
+    // but it doesn't matter exactly what it is, since we don't perform any searches
+    // without setting both the pattern and the text.
 
-    if (!isCaseSensitive)
-        m_target = s.foldCase();
-    m_target.replace(nonBreakingSpace, ' ');
-    m_isCaseSensitive = isCaseSensitive;
+    // Pass empty string for the locale for now to get the Unicode Collation Algorithm,
+    // rather than something locale-specific.
 
-    m_buffer = static_cast<UChar*>(fastMalloc(s.length() * sizeof(UChar)));
-    m_cursor = m_buffer;
-    m_bufferFull = false;
+    UErrorCode status = U_ZERO_ERROR;
+    UStringSearch* searcher = usearch_open(&newlineCharacter, 1, &newlineCharacter, 1, "", 0, &status);
+    ASSERT(status == U_ZERO_ERROR);
+    return searcher;
 }
 
-void CircularSearchBuffer::append(UChar c)
+static UStringSearch* searcher()
 {
-    if (m_isCaseSensitive)
-        *m_cursor++ = c == nonBreakingSpace ? ' ' : c;
-    else
-        *m_cursor++ = c == nonBreakingSpace ? ' ' : u_foldCase(c, U_FOLD_CASE_DEFAULT);
-    if (m_cursor == m_buffer + length()) {
-        m_cursor = m_buffer;
-        m_bufferFull = true;
+    static UStringSearch* searcher = createSearcher();
+    return searcher;
+}
+
+static inline void lockSearcher()
+{
+#ifndef NDEBUG
+    ASSERT(!searcherInUse);
+    searcherInUse = true;
+#endif
+}
+
+static inline void unlockSearcher()
+{
+#ifndef NDEBUG
+    ASSERT(searcherInUse);
+    searcherInUse = false;
+#endif
+}
+
+inline SearchBuffer::SearchBuffer(const String& target, bool isCaseSensitive)
+    : m_target(target)
+    , m_atBreak(true)
+{
+    ASSERT(!m_target.isEmpty());
+
+    size_t targetLength = target.length();
+    m_buffer.reserveInitialCapacity(max(targetLength * 8, minimumSearchBufferSize));
+    m_overlap = m_buffer.capacity() / 4;
+
+    // Grab the single global searcher.
+    // If we ever have a reason to do more than once search buffer at once, we'll have
+    // to move to multiple searchers.
+    lockSearcher();
+
+    UStringSearch* searcher = WebCore::searcher();
+    UCollator* collator = usearch_getCollator(searcher);
+
+    UCollationStrength strength = isCaseSensitive ? UCOL_TERTIARY : UCOL_PRIMARY;
+    if (ucol_getStrength(collator) != strength) {
+        ucol_setStrength(collator, strength);
+        usearch_reset(searcher);
     }
+
+    UErrorCode status = U_ZERO_ERROR;
+    usearch_setPattern(searcher, m_target.characters(), targetLength, &status);
+    ASSERT(status == U_ZERO_ERROR);
 }
 
-// This function can only be used when the buffer is not yet full,
-// and when then count is small enough to fit in the buffer.
-// No need for a more general version for the search algorithm.
-void CircularSearchBuffer::append(int count, const UChar* characters)
+inline SearchBuffer::~SearchBuffer()
 {
-    int tailSpace = m_buffer + length() - m_cursor;
+    unlockSearcher();
+}
 
-    assert(!m_bufferFull);
-    assert(count <= tailSpace);
+inline size_t SearchBuffer::append(const UChar* characters, size_t length)
+{
+    ASSERT(length);
 
-    if (m_isCaseSensitive) {
-        for (int i = 0; i != count; ++i) {
-            UChar c = characters[i];
-            m_cursor[i] = c == nonBreakingSpace ? ' ' : c;
-        }
+    if (m_atBreak) {
+        m_buffer.shrink(0);
+        m_atBreak = false;
+    } else if (m_buffer.size() == m_buffer.capacity()) {
+        memcpy(m_buffer.data(), m_buffer.data() + m_buffer.size() - m_overlap, m_overlap * sizeof(UChar));
+        m_buffer.shrink(m_overlap);
+    }
+
+    size_t usableLength = min(m_buffer.capacity() - m_buffer.size(), length);
+    ASSERT(usableLength);
+    m_buffer.append(characters, usableLength);
+    return usableLength;
+}
+
+inline bool SearchBuffer::atBreak() const
+{
+    return m_atBreak;
+}
+
+inline void SearchBuffer::reachedBreak()
+{
+    m_atBreak = true;
+}
+
+inline size_t SearchBuffer::search(size_t& start)
+{
+    size_t size = m_buffer.size();
+    if (m_atBreak) {
+        if (!size)
+            return 0;
     } else {
-        for (int i = 0; i != count; ++i) {
-            UChar c = characters[i];
-            m_cursor[i] = c == nonBreakingSpace ? ' ' : u_foldCase(c, U_FOLD_CASE_DEFAULT);
-        }
+        if (size != m_buffer.capacity())
+            return 0;
     }
-    if (count < tailSpace)
-        m_cursor += count;
-    else {
-        m_bufferFull = true;
-        m_cursor = m_buffer;
+
+    UStringSearch* searcher = WebCore::searcher();
+
+    UErrorCode status = U_ZERO_ERROR;
+    usearch_setText(searcher, m_buffer.data(), size, &status);
+    ASSERT(status == U_ZERO_ERROR);
+
+    int matchStart = usearch_first(searcher, &status);
+    ASSERT(status == U_ZERO_ERROR);
+    if (!(matchStart >= 0 && static_cast<size_t>(matchStart) < size)) {
+        ASSERT(matchStart == USEARCH_DONE);
+        return 0;
+    }
+
+    // Matches that start in the overlap area are only tentative.
+    // The same match may appear later, matching more characters,
+    // possibly including a combining character that's not yet in the buffer.
+    if (!m_atBreak && static_cast<size_t>(matchStart) >= size - m_overlap) {
+        memcpy(m_buffer.data(), m_buffer.data() + size - m_overlap, m_overlap * sizeof(UChar));
+        m_buffer.shrink(m_overlap);
+        return 0;
+    }
+
+    size_t newSize = size - (matchStart + 1);
+    memmove(m_buffer.data(), m_buffer.data() + matchStart + 1, newSize * sizeof(UChar));
+    m_buffer.shrink(newSize);
+
+    start = size - matchStart;
+    return usearch_getMatchedLength(searcher);
+}
+
+#else // !ICU_UNICODE
+
+inline SearchBuffer::SearchBuffer(const String& target, bool isCaseSensitive)
+    : m_target(isCaseSensitive ? target : target.foldCase())
+    , m_isCaseSensitive(isCaseSensitive)
+    , m_buffer(m_target.length())
+    , m_isCharacterStartBuffer(m_target.length())
+    , m_isBufferFull(false)
+    , m_cursor(0)
+{
+    ASSERT(!m_target.isEmpty());
+    m_target.replace(noBreakSpace, ' ');
+}
+
+inline SearchBuffer::~SearchBuffer()
+{
+}
+
+inline void SearchBuffer::reachedBreak()
+{
+    m_cursor = 0;
+    m_isBufferFull = false;
+}
+
+inline bool SearchBuffer::atBreak() const
+{
+    return !m_cursor && !m_isBufferFull;
+}
+
+inline void SearchBuffer::append(UChar c, bool isStart)
+{
+    m_buffer[m_cursor] = c == noBreakSpace ? ' ' : c;
+    m_isCharacterStartBuffer[m_cursor] = isStart;
+    if (++m_cursor == m_target.length()) {
+        m_cursor = 0;
+        m_isBufferFull = true;
     }
 }
 
-int CircularSearchBuffer::neededCharacters() const
+inline size_t SearchBuffer::append(const UChar* characters, size_t length)
 {
-    return m_bufferFull ? 0 : m_buffer + length() - m_cursor;
-}
-
-bool CircularSearchBuffer::isMatch() const
-{
-    assert(m_bufferFull);
-
-    int headSpace = m_cursor - m_buffer;
-    int tailSpace = length() - headSpace;
-    return memcmp(m_cursor, m_target.characters(), tailSpace * sizeof(UChar)) == 0
-        && memcmp(m_buffer, m_target.characters() + tailSpace, headSpace * sizeof(UChar)) == 0;
-}
-
-int TextIterator::rangeLength(const Range *r)
-{
-    int length = 0;
-    for (TextIterator it(r); !it.atEnd(); it.advance()) {
-        length += it.length();
+    ASSERT(length);
+    if (m_isCaseSensitive) {
+        append(characters[0], true);
+        return 1;
     }
+    const int maxFoldedCharacters = 16; // sensible maximum is 3, this should be more than enough
+    UChar foldedCharacters[maxFoldedCharacters];
+    bool error;
+    int numFoldedCharacters = foldCase(foldedCharacters, maxFoldedCharacters, characters, 1, &error);
+    ASSERT(!error);
+    ASSERT(numFoldedCharacters);
+    ASSERT(numFoldedCharacters <= maxFoldedCharacters);
+    if (!error && numFoldedCharacters) {
+        numFoldedCharacters = min(numFoldedCharacters, maxFoldedCharacters);
+        append(foldedCharacters[0], true);
+        for (int i = 1; i < numFoldedCharacters; ++i)
+            append(foldedCharacters[i], false);
+    }
+    return 1;
+}
+
+inline size_t SearchBuffer::search(size_t& start)
+{
+    if (!m_isBufferFull)
+        return 0;
+    if (!m_isCharacterStartBuffer[m_cursor])
+        return 0;
+
+    size_t tailSpace = m_target.length() - m_cursor;
+    if (memcmp(&m_buffer[m_cursor], m_target.characters(), tailSpace * sizeof(UChar)) != 0)
+        return 0;
+    if (memcmp(&m_buffer[0], m_target.characters() + tailSpace, m_cursor * sizeof(UChar)) != 0)
+        return 0;
+
+    start = length();
+
+    // Now that we've found a match once, we don't want to find it again, because those
+    // are the SearchBuffer semantics, allowing for a buffer where you append more than one
+    // character at a time. To do this we take advantage of m_isCharacterStartBuffer, but if
+    // we want to get rid of that in the future we could track this with a separate boolean
+    // or even move the characters to the start of the buffer and set m_isBufferFull to false.
+    m_isCharacterStartBuffer[m_cursor] = false;
+
+    return start;
+}
+
+// Returns the number of characters that were appended to the buffer (what we are searching in).
+// That's not necessarily the same length as the passed-in target string, because case folding
+// can make two strings match even though they're not the same length.
+size_t SearchBuffer::length() const
+{
+    size_t bufferSize = m_target.length();
+    size_t length = 0;
+    for (size_t i = 0; i < bufferSize; ++i)
+        length += m_isCharacterStartBuffer[i];
     return length;
 }
 
-PassRefPtr<Range> TextIterator::rangeFromLocationAndLength(Document *doc, int rangeLocation, int rangeLength)
+#endif // !ICU_UNICODE
+
+// --------
+
+int TextIterator::rangeLength(const Range *r, bool forSelectionPreservation)
 {
-    RefPtr<Range> resultRange = doc->createRange();
+    int length = 0;
+    for (TextIterator it(r, forSelectionPreservation); !it.atEnd(); it.advance())
+        length += it.length();
+    
+    return length;
+}
+
+PassRefPtr<Range> TextIterator::subrange(Range* entireRange, int characterOffset, int characterCount)
+{
+    CharacterIterator entireRangeIterator(entireRange);
+    return characterSubrange(entireRangeIterator, characterOffset, characterCount);
+}
+
+PassRefPtr<Range> TextIterator::rangeFromLocationAndLength(Element *scope, int rangeLocation, int rangeLength, bool forSelectionPreservation)
+{
+    RefPtr<Range> resultRange = scope->document()->createRange();
 
     int docTextPosition = 0;
     int rangeEnd = rangeLocation + rangeLength;
@@ -1029,17 +1524,17 @@ PassRefPtr<Range> TextIterator::rangeFromLocationAndLength(Document *doc, int ra
 
     RefPtr<Range> textRunRange;
 
-    TextIterator it(rangeOfContents(doc).get());
+    TextIterator it(rangeOfContents(scope).get(), forSelectionPreservation);
     
-    // FIXME: the atEnd() check shouldn't be necessary, workaround for <http://bugzilla.opendarwin.org/show_bug.cgi?id=6289>.
+    // FIXME: the atEnd() check shouldn't be necessary, workaround for <http://bugs.webkit.org/show_bug.cgi?id=6289>.
     if (rangeLocation == 0 && rangeLength == 0 && it.atEnd()) {
-        int exception = 0;
         textRunRange = it.range();
         
-        resultRange->setStart(textRunRange->startContainer(exception), 0, exception);
-        assert(exception == 0);
-        resultRange->setEnd(textRunRange->startContainer(exception), 0, exception);
-        assert(exception == 0);
+        ExceptionCode ec = 0;
+        resultRange->setStart(textRunRange->startContainer(), 0, ec);
+        ASSERT(!ec);
+        resultRange->setEnd(textRunRange->startContainer(), 0, ec);
+        ASSERT(!ec);
         
         return resultRange.release();
     }
@@ -1047,36 +1542,53 @@ PassRefPtr<Range> TextIterator::rangeFromLocationAndLength(Document *doc, int ra
     for (; !it.atEnd(); it.advance()) {
         int len = it.length();
         textRunRange = it.range();
-
-        if (rangeLocation >= docTextPosition && rangeLocation <= docTextPosition + len) {
-            startRangeFound = true;
-            int exception = 0;
-            if (textRunRange->startContainer(exception)->isTextNode()) {
-                int offset = rangeLocation - docTextPosition;
-                resultRange->setStart(textRunRange->startContainer(exception), offset + textRunRange->startOffset(exception), exception);
-            } else {
-                if (rangeLocation == docTextPosition)
-                    resultRange->setStart(textRunRange->startContainer(exception), textRunRange->startOffset(exception), exception);
-                else
-                    resultRange->setStart(textRunRange->endContainer(exception), textRunRange->endOffset(exception), exception);
+        
+        bool foundStart = rangeLocation >= docTextPosition && rangeLocation <= docTextPosition + len;
+        bool foundEnd = rangeEnd >= docTextPosition && rangeEnd <= docTextPosition + len;
+        
+        // Fix textRunRange->endPosition(), but only if foundStart || foundEnd, because it is only
+        // in those cases that textRunRange is used.
+        if (foundStart || foundEnd) {
+            // FIXME: This is a workaround for the fact that the end of a run is often at the wrong
+            // position for emitted '\n's.
+            if (len == 1 && it.characters()[0] == '\n') {
+                Position runStart = textRunRange->startPosition();
+                Position runEnd = rangeCompliantEquivalent(VisiblePosition(runStart).next().deepEquivalent());
+                if (runEnd.isNotNull()) {
+                    ExceptionCode ec = 0;
+                    textRunRange->setEnd(runEnd.node(), runEnd.offset(), ec);
+                    ASSERT(!ec);
+                }
             }
         }
 
-        if (rangeEnd >= docTextPosition && rangeEnd <= docTextPosition + len) {
+        if (foundStart) {
+            startRangeFound = true;
             int exception = 0;
-            if (textRunRange->startContainer(exception)->isTextNode()) {
+            if (textRunRange->startContainer()->isTextNode()) {
+                int offset = rangeLocation - docTextPosition;
+                resultRange->setStart(textRunRange->startContainer(), offset + textRunRange->startOffset(), exception);
+            } else {
+                if (rangeLocation == docTextPosition)
+                    resultRange->setStart(textRunRange->startContainer(), textRunRange->startOffset(), exception);
+                else
+                    resultRange->setStart(textRunRange->endContainer(), textRunRange->endOffset(), exception);
+            }
+        }
+
+        if (foundEnd) {
+            int exception = 0;
+            if (textRunRange->startContainer()->isTextNode()) {
                 int offset = rangeEnd - docTextPosition;
-                resultRange->setEnd(textRunRange->startContainer(exception), offset + textRunRange->startOffset(exception), exception);
+                resultRange->setEnd(textRunRange->startContainer(), offset + textRunRange->startOffset(), exception);
             } else {
                 if (rangeEnd == docTextPosition)
-                    resultRange->setEnd(textRunRange->startContainer(exception), textRunRange->startOffset(exception), exception);
+                    resultRange->setEnd(textRunRange->startContainer(), textRunRange->startOffset(), exception);
                 else
-                    resultRange->setEnd(textRunRange->endContainer(exception), textRunRange->endOffset(exception), exception);
+                    resultRange->setEnd(textRunRange->endContainer(), textRunRange->endOffset(), exception);
             }
-            if (!(rangeLength == 0 && rangeEnd == docTextPosition + len)) {
-                docTextPosition += len;
-                break;
-            }
+            docTextPosition += len;
+            break;
         }
         docTextPosition += len;
     }
@@ -1086,87 +1598,160 @@ PassRefPtr<Range> TextIterator::rangeFromLocationAndLength(Document *doc, int ra
     
     if (rangeLength != 0 && rangeEnd > docTextPosition) { // rangeEnd is out of bounds
         int exception = 0;
-        resultRange->setEnd(textRunRange->endContainer(exception), textRunRange->endOffset(exception), exception);
+        resultRange->setEnd(textRunRange->endContainer(), textRunRange->endOffset(), exception);
     }
     
     return resultRange.release();
 }
 
-DeprecatedString plainText(const Range* r)
+// --------
+    
+UChar* plainTextToMallocAllocatedBuffer(const Range* r, unsigned& bufferLength, bool isDisplayString) 
 {
-    DeprecatedString result("");
-    for (TextIterator it(r); !it.atEnd(); it.advance())
-        result.append(reinterpret_cast<const DeprecatedChar*>(it.characters()), it.length());
+    UChar* result = 0;
+
+    // Do this in pieces to avoid massive reallocations if there is a large amount of text.
+    // Use system malloc for buffers since they can consume lots of memory and current TCMalloc is unable return it back to OS.
+    static const unsigned cMaxSegmentSize = 1 << 16;
+    bufferLength = 0;
+    typedef pair<UChar*, unsigned> TextSegment;
+    Vector<TextSegment>* textSegments = 0;
+    Vector<UChar> textBuffer;
+    textBuffer.reserveInitialCapacity(cMaxSegmentSize);
+    for (TextIterator it(r); !it.atEnd(); it.advance()) {
+        if (textBuffer.size() && textBuffer.size() + it.length() > cMaxSegmentSize) {
+            UChar* newSegmentBuffer = static_cast<UChar*>(malloc(textBuffer.size() * sizeof(UChar)));
+            if (!newSegmentBuffer)
+                goto exit;
+            memcpy(newSegmentBuffer, textBuffer.data(), textBuffer.size() * sizeof(UChar));
+            if (!textSegments)
+                textSegments = new Vector<TextSegment>;
+            textSegments->append(make_pair(newSegmentBuffer, (unsigned)textBuffer.size()));
+            textBuffer.clear();
+        }
+        textBuffer.append(it.characters(), it.length());
+        bufferLength += it.length();
+    }
+
+    if (!bufferLength)
+        return 0;
+
+    // Since we know the size now, we can make a single buffer out of the pieces with one big alloc
+    result = static_cast<UChar*>(malloc(bufferLength * sizeof(UChar)));
+    if (!result)
+        goto exit;
+
+    {
+        UChar* resultPos = result;
+        if (textSegments) {
+            unsigned size = textSegments->size();
+            for (unsigned i = 0; i < size; ++i) {
+                const TextSegment& segment = textSegments->at(i);
+                memcpy(resultPos, segment.first, segment.second * sizeof(UChar));
+                resultPos += segment.second;
+            }
+        }
+        memcpy(resultPos, textBuffer.data(), textBuffer.size() * sizeof(UChar));
+    }
+
+exit:
+    if (textSegments) {
+        unsigned size = textSegments->size();
+        for (unsigned i = 0; i < size; ++i)
+            free(textSegments->at(i).first);
+        delete textSegments;
+    }
+    
+    if (isDisplayString && r->ownerDocument())
+        r->ownerDocument()->displayBufferModifiedByEncoding(result, bufferLength);
+
     return result;
 }
 
-PassRefPtr<Range> findPlainText(const Range *r, const String& s, bool forward, bool caseSensitive)
+String plainText(const Range* r)
 {
-    // FIXME: Can we do Boyer-Moore or equivalent instead for speed?
+    unsigned length;
+    UChar* buf = plainTextToMallocAllocatedBuffer(r, length, false);
+    if (!buf)
+        return "";
+    String result(buf, length);
+    free(buf);
+    return result;
+}
 
-    // FIXME: This code does not allow \n at the moment because of issues with <br>.
-    // Once we fix those, we can remove this check.
-    if (s.isEmpty() || s.find('\n') != -1) {
-        int exception = 0;
-        RefPtr<Range> result = r->cloneRange(exception);
-        result->collapse(forward, exception);
-        return result.release();
+static inline bool isAllCollapsibleWhitespace(const String& string)
+{
+    const UChar* characters = string.characters();
+    unsigned length = string.length();
+    for (unsigned i = 0; i < length; ++i) {
+        if (!isCollapsibleWhitespace(characters[i]))
+            return false;
     }
+    return true;
+}
 
-    CircularSearchBuffer buffer(s, caseSensitive);
+static PassRefPtr<Range> collapsedToBoundary(const Range* range, bool forward)
+{
+    ExceptionCode ec = 0;
+    RefPtr<Range> result = range->cloneRange(ec);
+    ASSERT(!ec);
+    result->collapse(!forward, ec);
+    ASSERT(!ec);
+    return result.release();
+}
 
-    bool found = false;
-    CharacterIterator rangeEnd;
+static size_t findPlainText(CharacterIterator& it, const String& target, bool forward, bool caseSensitive, size_t& matchStart)
+{
+    matchStart = 0;
+    size_t matchLength = 0;
 
-    {
-        CharacterIterator it(r);
-        while (1) {
-            // Fill the buffer.
-            while (int needed = buffer.neededCharacters()) {
-                if (it.atBreak()) {
-                    if (it.atEnd())
-                        goto done;
-                    buffer.clear();
-                }
-                int available = it.length();
-                int runLength = min(needed, available);
-                buffer.append(runLength, it.characters());
-                it.advance(runLength);
-            }
+    SearchBuffer buffer(target, caseSensitive);
 
-            // Do the search.
-            while (1) {
-                if (buffer.isMatch()) {
-                    // Compute the range for the result.
-                    found = true;
-                    rangeEnd = it;
-                    // If searching forward, stop on the first match.
-                    // If searching backward, don't stop, so we end up with the last match.
-                    if (forward)
-                        goto done;
-                }
-                if (it.atBreak())
-                    break;
-                buffer.append(it.characters()[0]);
-                it.advance(1);
-            }
-            buffer.clear();
+    while (!it.atEnd()) {
+        it.advance(buffer.append(it.characters(), it.length()));
+tryAgain:
+        size_t matchStartOffset;
+        if (size_t newMatchLength = buffer.search(matchStartOffset)) {
+            // Note that we found a match, and where we found it.
+            size_t lastCharacterInBufferOffset = it.characterOffset();
+            ASSERT(lastCharacterInBufferOffset >= matchStartOffset);
+            matchStart = lastCharacterInBufferOffset - matchStartOffset;
+            matchLength = newMatchLength;
+            // If searching forward, stop on the first match.
+            // If searching backward, don't stop, so we end up with the last match.
+            if (forward)
+                break;
+            goto tryAgain;
+        }
+        if (it.atBreak() && !buffer.atBreak()) {
+            buffer.reachedBreak();
+            goto tryAgain;
         }
     }
 
-done:
-    int exception = 0;
-    RefPtr<Range> result = r->cloneRange(exception);
-    if (!found)
-        result->collapse(!forward, exception);
-    else {
-        CharacterIterator it(r);
-        it.advance(rangeEnd.characterOffset() - buffer.length());
-        result->setStart(it.range()->startContainer(exception), it.range()->startOffset(exception), exception);
-        it.advance(buffer.length() - 1);
-        result->setEnd(it.range()->endContainer(exception), it.range()->endOffset(exception), exception);
+    return matchLength;
+}
+
+PassRefPtr<Range> findPlainText(const Range* range, const String& target, bool forward, bool caseSensitive)
+{
+    // We can't search effectively for a string that's entirely made of collapsible
+    // whitespace, so we won't even try. This also takes care of the empty string case.
+    if (isAllCollapsibleWhitespace(target))
+        return collapsedToBoundary(range, forward);
+
+    // First, find the text.
+    size_t matchStart;
+    size_t matchLength;
+    {
+        CharacterIterator findIterator(range, false, true);
+        matchLength = findPlainText(findIterator, target, forward, caseSensitive, matchStart);
+        if (!matchLength)
+            return collapsedToBoundary(range, forward);
     }
-    return result.release();
+
+    // Then, find the document position of the start and the end of the text.
+    CharacterIterator computeRangeIterator(range, false, true);
+    return characterSubrange(computeRangeIterator, matchStart, matchLength);
 }
 
 }

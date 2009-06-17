@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
@@ -18,12 +16,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HTML_HTMLInputElementImpl_H
-#define HTML_HTMLInputElementImpl_H
+#ifndef HTMLIsIndexElement_h
+#define HTMLIsIndexElement_h
 
 #include "HTMLInputElement.h"
 
@@ -32,7 +30,7 @@ namespace WebCore {
 class HTMLIsIndexElement : public HTMLInputElement
 {
 public:
-    HTMLIsIndexElement(Document *doc, HTMLFormElement *f = 0);
+    HTMLIsIndexElement(const QualifiedName&, Document *doc, HTMLFormElement *f = 0);
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
     virtual int tagPriority() const { return 0; }

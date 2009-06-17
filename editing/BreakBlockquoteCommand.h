@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,19 +23,22 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef break_blockquote_command_h__
-#define break_blockquote_command_h__
+#ifndef BreakBlockquoteCommand_h
+#define BreakBlockquoteCommand_h
 
 #include "CompositeEditCommand.h"
-#include "DeprecatedPtrList.h"
 
 namespace WebCore {
 
-class BreakBlockquoteCommand : public CompositeEditCommand
-{
+class BreakBlockquoteCommand : public CompositeEditCommand {
 public:
-    BreakBlockquoteCommand(Document *);
+    static PassRefPtr<BreakBlockquoteCommand> create(Document* document)
+    {
+        return adoptRef(new BreakBlockquoteCommand(document));
+    }
 
+private:
+    BreakBlockquoteCommand(Document*);
     virtual void doApply();
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2008 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,21 +26,23 @@
 #include "config.h"
 #include "HTMLInterchange.h"
 
-#include "Document.h"
+#include "CharacterNames.h"
+#include "Text.h"
 #include "TextIterator.h"
+#include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
 namespace {
 
-DeprecatedString convertedSpaceString() 
+String convertedSpaceString()
 {
-    static DeprecatedString convertedSpaceString;
-    if (convertedSpaceString.length() == 0) {
+    DEFINE_STATIC_LOCAL(String, convertedSpaceString, ());
+    if (convertedSpaceString.isNull()) {
         convertedSpaceString = "<span class=\"";
         convertedSpaceString += AppleConvertedSpace;
         convertedSpaceString += "\">";
-        convertedSpaceString += DeprecatedChar(0xa0);
+        convertedSpaceString.append(noBreakSpace);
         convertedSpaceString += "</span>";
     }
     return convertedSpaceString;
@@ -48,67 +50,63 @@ DeprecatedString convertedSpaceString()
 
 } // end anonymous namespace
 
-// FIXME: Can't really do this work without taking whitespace mode into account.
-// This means that eventually this function needs to be eliminated or at least have
-// its parameters changed because it can't do its work on the string without knowing
-// what parts are in what whitespace mode.
-DeprecatedString convertHTMLTextToInterchangeFormat(const DeprecatedString &in)
+String convertHTMLTextToInterchangeFormat(const String& in, const Text* node)
 {
-    DeprecatedString s;
+    // Assume all the text comes from node.
+    if (node->renderer() && node->renderer()->style()->preserveNewline())
+        return in;
 
-    unsigned int i = 0;
-    unsigned int consumed = 0;
+    Vector<UChar> s;
+
+    unsigned i = 0;
+    unsigned consumed = 0;
     while (i < in.length()) {
         consumed = 1;
-        if (isCollapsibleWhitespace(in[i].unicode())) {
+        if (isCollapsibleWhitespace(in[i])) {
             // count number of adjoining spaces
-            unsigned int j = i + 1;
-            while (j < in.length() && isCollapsibleWhitespace(in[j].unicode()))
+            unsigned j = i + 1;
+            while (j < in.length() && isCollapsibleWhitespace(in[j]))
                 j++;
-            unsigned int count = j - i;
+            unsigned count = j - i;
             consumed = count;
             while (count) {
-                unsigned int add = count % 3;
+                unsigned add = count % 3;
                 switch (add) {
                     case 0:
-                        s += convertedSpaceString();
-                        s += ' ';
-                        s += convertedSpaceString();
+                        append(s, convertedSpaceString());
+                        s.append(' ');
+                        append(s, convertedSpaceString());
                         add = 3;
                         break;
                     case 1:
                         if (i == 0 || i + 1 == in.length()) // at start or end of string
-                            s += convertedSpaceString();
+                            append(s, convertedSpaceString());
                         else
-                            s += ' ';
+                            s.append(' ');
                         break;
                     case 2:
                         if (i == 0) {
                              // at start of string
-                            s += convertedSpaceString();
-                            s += ' ';
-                        }
-                        else if (i + 2 == in.length()) {
+                            append(s, convertedSpaceString());
+                            s.append(' ');
+                        } else if (i + 2 == in.length()) {
                              // at end of string
-                            s += convertedSpaceString();
-                            s += convertedSpaceString();
-                        }
-                        else {
-                            s += convertedSpaceString();
-                            s += ' ';
+                            append(s, convertedSpaceString());
+                            append(s, convertedSpaceString());
+                        } else {
+                            append(s, convertedSpaceString());
+                            s.append(' ');
                         }
                         break;
                 }
                 count -= add;
             }
-        }
-        else {
-            s += in[i];
-        }
+        } else
+            s.append(in[i]);
         i += consumed;
     }
 
-    return s;
+    return String::adopt(s);
 }
 
-}
+} // namespace WebCore

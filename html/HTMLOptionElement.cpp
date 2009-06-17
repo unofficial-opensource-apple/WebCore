@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
@@ -19,32 +17,35 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #include "config.h"
 #include "HTMLOptionElement.h"
 
+#include "CSSStyleSelector.h"
 #include "Document.h"
 #include "ExceptionCode.h"
 #include "HTMLNames.h"
 #include "HTMLSelectElement.h"
 #include "RenderMenuList.h"
 #include "Text.h"
-#include "cssstyleselector.h"
+#include "NodeRenderStyle.h"
+#include <wtf/StdLibExtras.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLOptionElement::HTMLOptionElement(Document* doc, HTMLFormElement* f)
-    : HTMLGenericFormElement(optionTag, doc, f)
-    , m_selected(false)
+HTMLOptionElement::HTMLOptionElement(const QualifiedName& tagName, Document* doc, HTMLFormElement* f)
+    : HTMLFormControlElement(tagName, doc, f)
+    , m_data(this)
     , m_style(0)
 {
+    ASSERT(hasTagName(optionTag));
 }
 
 bool HTMLOptionElement::checkDTD(const Node* newChild)
@@ -54,55 +55,31 @@ bool HTMLOptionElement::checkDTD(const Node* newChild)
 
 void HTMLOptionElement::attach()
 {
-    RenderStyle* style = styleForRenderer(0);
-    setRenderStyle(style);
-    style->deref(document()->renderArena());
-    HTMLGenericFormElement::attach();
+    if (parentNode()->renderStyle())
+        setRenderStyle(styleForRenderer());
+    HTMLFormControlElement::attach();
 }
 
 void HTMLOptionElement::detach()
 {
-    if (m_style) {
-        m_style->deref(document()->renderArena());
-        m_style = 0;
-    }
-    HTMLGenericFormElement::detach();
+    m_style.clear();
+    HTMLFormControlElement::detach();
 }
 
 bool HTMLOptionElement::isFocusable() const
 {
-    return false;
+    return HTMLElement::isFocusable();
 }
 
 const AtomicString& HTMLOptionElement::type() const
 {
-    static const AtomicString option("option");
+    DEFINE_STATIC_LOCAL(const AtomicString, option, ("option"));
     return option;
 }
 
 String HTMLOptionElement::text() const
 {
-    String text;
-
-    // WinIE does not use the label attribute, so as a quirk, we ignore it.
-    if (!document()->inCompatMode()) {
-        String text = getAttribute(labelAttr);
-        if (!text.isEmpty())
-            return text;
-    }
-
-    const Node* n = firstChild();
-    while (n) {
-        if (n->nodeType() == TEXT_NODE || n->nodeType() == CDATA_SECTION_NODE)
-            text += n->nodeValue();
-        // skip script content
-        if (n->isElementNode() && n->hasTagName(HTMLNames::scriptTag))
-            n = n->traverseNextSibling(this);
-        else
-            n = n->traverseNextNode(this);
-    }
-
-    return text;
+    return OptionElement::collectOptionText(m_data, document());
 }
 
 void HTMLOptionElement::setText(const String &text, ExceptionCode& ec)
@@ -118,11 +95,18 @@ void HTMLOptionElement::setText(const String &text, ExceptionCode& ec)
     appendChild(new Text(document(), text), ec);
 }
 
+void HTMLOptionElement::accessKeyAction(bool)
+{
+    HTMLSelectElement* select = ownerSelectElement();
+    if (select)
+        select->accessKeySetSelectedIndex(index());
+}
+
 int HTMLOptionElement::index() const
 {
     // Let's do this dynamically. Might be a bit slow, but we're sure
     // we won't forget to update a member variable in some cases...
-    HTMLSelectElement *select = getSelect();
+    HTMLSelectElement* select = ownerSelectElement();
     if (select) {
         const Vector<HTMLElement*>& items = select->listItems();
         int l = items.size();
@@ -138,28 +122,21 @@ int HTMLOptionElement::index() const
     return 0;
 }
 
-void HTMLOptionElement::setIndex(int, ExceptionCode& ec)
-{
-    ec = NO_MODIFICATION_ALLOWED_ERR;
-    // ###
-}
-
 void HTMLOptionElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == selectedAttr)
-        m_selected = (!attr->isNull());
+        m_data.setSelected(!attr->isNull());
     else if (attr->name() == valueAttr)
-        m_value = attr->value();
+        m_data.setValue(attr->value());
+    else if (attr->name() == labelAttr)
+        m_data.setLabel(attr->value());
     else
-        HTMLGenericFormElement::parseMappedAttribute(attr);
+        HTMLFormControlElement::parseMappedAttribute(attr);
 }
 
 String HTMLOptionElement::value() const
 {
-    if ( !m_value.isNull() )
-        return m_value;
-    // Use the text if the value wasn't set.
-    return text().deprecatedString().stripWhiteSpace();
+    return OptionElement::collectOptionValue(m_data, document());
 }
 
 void HTMLOptionElement::setValue(const String& value)
@@ -167,27 +144,44 @@ void HTMLOptionElement::setValue(const String& value)
     setAttribute(valueAttr, value);
 }
 
+bool HTMLOptionElement::selected() const
+{
+    return m_data.selected();
+}
+
 void HTMLOptionElement::setSelected(bool selected)
 {
-    if (m_selected == selected)
+    if (m_data.selected() == selected)
         return;
-    m_selected = selected;
-    if (HTMLSelectElement* select = getSelect())
-        select->notifyOptionSelected(this, selected);
+
+    OptionElement::setSelectedState(m_data, selected);
+
+    if (HTMLSelectElement* select = ownerSelectElement())
+        select->setSelectedIndex(selected ? index() : -1, false);
 }
 
-void HTMLOptionElement::childrenChanged()
+void HTMLOptionElement::setSelectedState(bool selected)
 {
-   HTMLSelectElement *select = getSelect();
-   if (select)
-       select->childrenChanged();
+    OptionElement::setSelectedState(m_data, selected);
 }
 
-HTMLSelectElement* HTMLOptionElement::getSelect() const
+void HTMLOptionElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
+{
+   HTMLSelectElement* select = ownerSelectElement();
+   if (select)
+       select->childrenChanged(changedByParser);
+   HTMLFormControlElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+}
+
+HTMLSelectElement* HTMLOptionElement::ownerSelectElement() const
 {
     Node* select = parentNode();
     while (select && !select->hasTagName(selectTag))
         select = select->parentNode();
+
+    if (!select)
+        return 0;
+    
     return static_cast<HTMLSelectElement*>(select);
 }
 
@@ -203,7 +197,7 @@ void HTMLOptionElement::setDefaultSelected(bool b)
 
 String HTMLOptionElement::label() const
 {
-    return getAttribute(labelAttr);
+    return m_data.label();
 }
 
 void HTMLOptionElement::setLabel(const String& value)
@@ -211,31 +205,33 @@ void HTMLOptionElement::setLabel(const String& value)
     setAttribute(labelAttr, value);
 }
 
-void HTMLOptionElement::setRenderStyle(RenderStyle* newStyle)
+void HTMLOptionElement::setRenderStyle(PassRefPtr<RenderStyle> newStyle)
 {
-    RenderStyle* oldStyle = m_style;
     m_style = newStyle;
-    if (newStyle)
-        newStyle->ref();
-    if (oldStyle)
-        oldStyle->deref(document()->renderArena());
 }
 
-String HTMLOptionElement::optionText()
+RenderStyle* HTMLOptionElement::nonRendererRenderStyle() const 
+{ 
+    return m_style.get(); 
+}
+
+String HTMLOptionElement::textIndentedToRespectGroupLabel() const
 {
-    DeprecatedString itemText = text().deprecatedString();
-    if (itemText.isEmpty())
-        itemText = getAttribute(labelAttr).deprecatedString();
+    return OptionElement::collectOptionTextRespectingGroupLabel(m_data, document());
+}
+
+bool HTMLOptionElement::disabled() const
+{ 
+    return HTMLFormControlElement::disabled() || (parentNode() && static_cast<HTMLFormControlElement*>(parentNode())->disabled()); 
+}
+
+void HTMLOptionElement::insertedIntoDocument()
+{
+    HTMLSelectElement* select;
+    if (selected() && (select = ownerSelectElement()))
+        select->scrollToSelection();
     
-    itemText.replace('\\', document()->backslashAsCurrencySymbol());
-    // In WinIE, leading and trailing whitespace is ignored in options and optgroups. We match this behavior.
-    itemText = itemText.stripWhiteSpace();
-    // We want to collapse our whitespace too.  This will match other browsers.
-    itemText = itemText.simplifyWhiteSpace();
-    if (parentNode() && parentNode()->hasTagName(optgroupTag))
-        itemText.prepend("    ");
-        
-    return itemText;
+    HTMLFormControlElement::insertedIntoDocument();
 }
 
 } // namespace

@@ -1,11 +1,9 @@
 /*
-    This file is part of the KDE libraries
-
     Copyright (C) 1998 Lars Knoll (knoll@mpi-hd.mpg.de)
     Copyright (C) 2001 Dirk Mueller (mueller@kde.org)
     Copyright (C) 2002 Waldo Bastian (bastian@kde.org)
     Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
-    Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+    Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -19,117 +17,217 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
-    Boston, MA 02111-1307, USA.
-
-    This class provides all functionality needed for loading images, style sheets and html
-    pages from the web. It has a memory cache for these objects.
+    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301, USA.
 */
 
 #include "config.h"
 #include "CachedImage.h"
 
+#include "BitmapImage.h"
 #include "Cache.h"
 #include "CachedResourceClient.h"
 #include "CachedResourceClientWalker.h"
 #include "DocLoader.h"
-#include "Image.h"
-#include "LoaderFunctions.h"
+#include "Frame.h"
+#include "FrameView.h"
 #include "Request.h"
+#include "Settings.h"
+#include <wtf/CurrentTime.h>
+#include <wtf/StdLibExtras.h>
 #include <wtf/Vector.h>
 
-#include "Frame.h"
+#include "SystemMemory.h"
+
+#if PLATFORM(CG)
+#include "PDFDocumentImage.h"
+#endif
+
+#if ENABLE(SVG_AS_IMAGE)
+#include "SVGImage.h"
+#endif
 
 using std::max;
 
 namespace WebCore {
 
-CachedImage::CachedImage(DocLoader* docLoader, const String& url, CachePolicy cachePolicy)
-    : CachedResource(url, ImageResource, cachePolicy)
+CachedImage::CachedImage(const String& url)
+    : CachedResource(url, ImageResource)
+    , m_image(0)
+    , m_decodedDataDeletionTimer(this, &CachedImage::decodedDataDeletionTimerFired)
 {
-    m_image = 0;
-    m_errorOccurred = false;
     m_status = Unknown;
-    if (!docLoader || docLoader->autoLoadImages())  {
-    m_loading = true;
-        cache()->loader()->load(docLoader, this, true);
-    } else
-        m_loading = false;
+}
 
-    m_maxDataSize = 0;
-    if (docLoader && docLoader->frame()) {
-        m_maxDataSize = docLoader->frame()->maximumImageSize();
-    }
+CachedImage::CachedImage(Image* image)
+    : CachedResource(String(), ImageResource)
+    , m_image(image)
+    , m_decodedDataDeletionTimer(this, &CachedImage::decodedDataDeletionTimerFired)
+{
+    m_status = Cached;
+    m_loading = false;
 }
 
 CachedImage::~CachedImage()
 {
-    delete m_image;
 }
 
-void CachedImage::ref(CachedResourceClient* c)
+void CachedImage::decodedDataDeletionTimerFired(Timer<CachedImage>*)
 {
-    CachedResource::ref(c);
+    ASSERT(!hasClients());
+    destroyDecodedData();
+}
 
-    if (!imageRect().isEmpty())
+void CachedImage::load(DocLoader* docLoader)
+{
+    if (!docLoader || docLoader->autoLoadImages())
+        CachedResource::load(docLoader, true, false, true);
+    else
+        m_loading = false;
+}
+
+void CachedImage::addClient(CachedResourceClient* c)
+{
+    CachedResource::addClient(c);
+
+    if (m_decodedDataDeletionTimer.isActive())
+        m_decodedDataDeletionTimer.stop();
+    
+    if (m_data && !m_image && !m_errorOccurred) {
+        createImage();
+        m_image->setData(m_data, true);
+    }
+
+    if (m_image && !m_image->isNull())
         c->imageChanged(this);
 
     if (!m_loading)
         c->notifyFinished(this);
 }
 
-void CachedImage::allReferencesRemoved()
+void CachedImage::allClientsRemoved()
 {
     if (m_image && !m_errorOccurred)
         m_image->resetAnimation();
+    if (double interval = cache()->deadDecodedDataDeletionInterval())
+        m_decodedDataDeletionTimer.startOneShot(interval);
 }
 
 static Image* brokenImage()
 {
-    static Image* brokenImage;
-    if (!brokenImage)
-        brokenImage = Image::loadResource("missingImage");
-    return brokenImage;
+    DEFINE_STATIC_LOCAL(RefPtr<Image>, brokenImage, (Image::loadPlatformResource("missingImage")));
+    return brokenImage.get();
 }
 
 static Image* nullImage()
 {
-    static Image nullImage;
-    return &nullImage;
+    DEFINE_STATIC_LOCAL(RefPtr<BitmapImage>, nullImage, (BitmapImage::create()));
+    return nullImage.get();
 }
 
 Image* CachedImage::image() const
 {
+    ASSERT(!isPurgeable());
+
     if (m_errorOccurred)
         return brokenImage();
 
     if (m_image)
-        return m_image;
+        return m_image.get();
 
     return nullImage();
 }
 
-IntSize CachedImage::imageSize() const
+void CachedImage::setImageContainerSize(const IntSize& containerSize)
 {
-    return (m_image ? m_image->size() : IntSize());
+    if (m_image)
+        m_image->setContainerSize(containerSize);
 }
 
-IntRect CachedImage::imageRect() const
+bool CachedImage::usesImageContainerSize() const
 {
-    return (m_image ? m_image->rect() : IntRect());
+    if (m_image)
+        return m_image->usesContainerSize();
+
+    return false;
 }
 
-void CachedImage::notifyObservers()
+bool CachedImage::imageHasRelativeWidth() const
+{
+    if (m_image)
+        return m_image->hasRelativeWidth();
+
+    return false;
+}
+
+bool CachedImage::imageHasRelativeHeight() const
+{
+    if (m_image)
+        return m_image->hasRelativeHeight();
+
+    return false;
+}
+
+IntSize CachedImage::imageSize(float multiplier) const
+{
+    ASSERT(!isPurgeable());
+
+    if (!m_image)
+        return IntSize();
+    if (multiplier == 1.0f)
+        return m_image->size();
+        
+    // Don't let images that have a width/height >= 1 shrink below 1 when zoomed.
+    bool hasWidth = m_image->size().width() > 0;
+    bool hasHeight = m_image->size().height() > 0;
+    int width = m_image->size().width() * (m_image->hasRelativeWidth() ? 1.0f : multiplier);
+    int height = m_image->size().height() * (m_image->hasRelativeHeight() ? 1.0f : multiplier);
+    if (hasWidth)
+        width = max(1, width);
+    if (hasHeight)
+        height = max(1, height);
+    return IntSize(width, height);
+}
+
+IntRect CachedImage::imageRect(float multiplier) const
+{
+    ASSERT(!isPurgeable());
+
+    if (!m_image)
+        return IntRect();
+    if (multiplier == 1.0f || (!m_image->hasRelativeWidth() && !m_image->hasRelativeHeight()))
+        return m_image->rect();
+
+    float widthMultiplier = (m_image->hasRelativeWidth() ? 1.0f : multiplier);
+    float heightMultiplier = (m_image->hasRelativeHeight() ? 1.0f : multiplier);
+
+    // Don't let images that have a width/height >= 1 shrink below 1 when zoomed.
+    bool hasWidth = m_image->rect().width() > 0;
+    bool hasHeight = m_image->rect().height() > 0;
+
+    int width = static_cast<int>(m_image->rect().width() * widthMultiplier);
+    int height = static_cast<int>(m_image->rect().height() * heightMultiplier);
+    if (hasWidth)
+        width = max(1, width);
+    if (hasHeight)
+        height = max(1, height);
+
+    int x = static_cast<int>(m_image->rect().x() * widthMultiplier);
+    int y = static_cast<int>(m_image->rect().y() * heightMultiplier);
+
+    return IntRect(x, y, width, height);
+}
+
+void CachedImage::notifyObservers(const IntRect* changeRect)
 {
     CachedResourceClientWalker w(m_clients);
-    while (CachedResourceClient *c = w.next())
-        c->imageChanged(this);
+    while (CachedResourceClient* c = w.next())
+        c->imageChanged(this, changeRect);
 }
 
 void CachedImage::clear()
 {
     destroyDecodedData();
-    delete m_image;
     m_image = 0;
     setEncodedSize(0);
 }
@@ -137,31 +235,60 @@ void CachedImage::clear()
 inline void CachedImage::createImage()
 {
     // Create the image if it doesn't yet exist.
-    if (!m_image)
-#if __APPLE__
-        m_image = new Image(this, ResponseMIMEType(m_response) == "application/pdf");
-#else
-        m_image = new Image(this, false);
-        p->setShouldCacheDecodedImages(m_shouldCacheDecodedImages);
+    if (m_image)
+        return;
+#if PLATFORM(CG)
+    if (m_response.mimeType() == "application/pdf") {
+        m_image = PDFDocumentImage::create();
+        return;
+    }
 #endif
+#if ENABLE(SVG_AS_IMAGE)
+    if (m_response.mimeType() == "image/svg+xml") {
+        m_image = SVGImage::create(this);
+        return;
+    }
+#endif
+    m_image = BitmapImage::create(this);
 }
 
-Vector<char>& CachedImage::bufferData(const char* bytes, int addedSize, Request* request)
+size_t CachedImage::maximumDecodedImageSize()
 {
-    createImage();
-
-    // Add new bytes DIRECTLY to the buffer in the Image object.
-    Vector<char>& buffer = m_image->dataBuffer();
-
-    unsigned oldSize = buffer.size();
-    buffer.resize(oldSize + addedSize);
-    memcpy(buffer.data() + oldSize, bytes, addedSize);
-
-    return buffer;
+    Frame* frame = m_request ? m_request->docLoader()->frame() : 0;
+    if (!frame)
+        return 0;
+    Settings* settings = frame->settings();
+    return settings ? settings->maximumDecodedImageSize() : 0;
 }
 
-void CachedImage::data(Vector<char>& data, bool allDataReceived)
+bool CachedImage::checkOutOfMemory()
 {
+    CachedResourceClientWalker w(m_clients);
+    while (CachedResourceClient* c = w.next())
+        if (c->memoryLimitReached())
+            return true;
+    return false;
+}
+
+unsigned CachedImage::animatedImageSize()
+{
+    if (!m_image)
+        return 0;
+    return m_image->animatedImageSize();
+}
+    
+void CachedImage::stopAnimatedImage()
+{
+    if (!m_image)
+        return;
+    m_image->disableImageAnimation();
+}
+    
+    
+void CachedImage::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+{
+    m_data = data;
+
     createImage();
 
     bool sizeAvailable = false;
@@ -169,28 +296,31 @@ void CachedImage::data(Vector<char>& data, bool allDataReceived)
     // Have the image update its data from its internal buffer.
     // It will not do anything now, but will delay decoding until 
     // queried for info (like size or specific image frames).
-    sizeAvailable = m_image->setData(allDataReceived);
+    sizeAvailable = m_image->setData(m_data, allDataReceived);
 
     // Go ahead and tell our observers to try to draw if we have either
     // received all the data or the size is known.  Each chunk from the
     // network causes observers to repaint, which will force that chunk
     // to decode.
     if (sizeAvailable || allDataReceived) {
-        IntSize s = imageSize();
-        // Disallow loading images greater than maxDataSize
-        if (m_image->isNull() || (m_maxDataSize > 0 && s.width() * s.height() * 4 > m_maxDataSize)) {
-            m_errorOccurred = true;
-            notifyObservers();
+        size_t maxDecodedImageSize = maximumDecodedImageSize();
+        IntSize s = imageSize(1.0f);
+        size_t estimatedDecodedImageSize = s.width() * s.height() * 4; // no overflow check
+        if (m_image->isNull() || (maxDecodedImageSize > 0 && estimatedDecodedImageSize > maxDecodedImageSize) || checkOutOfMemory())
+        {
+            error();
             if (inCache())
                 cache()->remove(this);
-        } else
-            notifyObservers();
-
-            if (m_image) { 
-	            Vector<char>& imageBuffer = m_image->dataBuffer(); 
-	            setEncodedSize(imageBuffer.size()); 
-	        } 
+            return;
         }
+        
+        // It would be nice to only redraw the decoded band of the image, but with the current design
+        // (decoding delayed until painting) that seems hard.
+        notifyObservers();
+
+        if (m_image)
+            setEncodedSize(m_image->data() ? m_image->data()->size() : 0);
+    }
     
     if (allDataReceived) {
         m_loading = false;
@@ -202,6 +332,7 @@ void CachedImage::error()
 {
     clear();
     m_errorOccurred = true;
+    m_data.clear();
     notifyObservers();
     m_loading = false;
     checkNotify();
@@ -219,24 +350,15 @@ void CachedImage::checkNotify()
 
 void CachedImage::destroyDecodedData()
 {
-    if (m_image && !m_errorOccurred)
+    bool canDeleteImage = !m_image || (m_image->hasOneRef() && m_image->isBitmapImage());
+    if (isSafeToMakePurgeable() && canDeleteImage && !m_loading) {
+        // Image refs the data buffer so we should not make it purgeable while the image is alive. 
+        // Invoking addClient() will reconstruct the image object.
+        m_image = 0;
+        setDecodedSize(0);
+        makePurgeable(true);
+    } else if (m_image && !m_errorOccurred)
         m_image->destroyDecodedData();
-}
-
-unsigned CachedImage::decodedSize() const
-{
-    if (m_image && !m_errorOccurred)
-        return m_image->decodedSize();
-    return 0;
-}
-
-void CachedImage::decodedSizeChanging(const Image* image, int delta)
-{
-    if (image != m_image)
-        return;
-    
-    if (inCache() && referenced())
-        cache()->removeFromLiveResourcesList(this);
 }
 
 void CachedImage::decodedSizeChanged(const Image* image, int delta)
@@ -244,11 +366,19 @@ void CachedImage::decodedSizeChanged(const Image* image, int delta)
     if (image != m_image)
         return;
     
-    if (inCache()) {
-        cache()->adjustSize(referenced(), delta, delta);
-        if (referenced())
-            cache()->insertInLiveResourcesList(this);
-    }
+    setDecodedSize(decodedSize() + delta);
+}
+
+void CachedImage::didDraw(const Image* image)
+{
+    if (image != m_image)
+        return;
+    
+    double timeStamp = FrameView::currentPaintTimeStamp();
+    if (!timeStamp) // If didDraw is called outside of a Frame paint.
+        timeStamp = currentTime();
+    
+    CachedResource::didAccessDecodedData(timeStamp);
 }
 
 bool CachedImage::shouldPauseAnimation(const Image* image)
@@ -269,6 +399,44 @@ void CachedImage::animationAdvanced(const Image* image)
 {
     if (image == m_image)
         notifyObservers();
+}
+    
+bool CachedImage::shouldDecodeFrame(const Image* /*image*/, const IntSize& frameSize)
+{
+    unsigned fullFrameBytes = frameSize.width() * frameSize.height();
+
+    const unsigned smallImageThreshold = 258 * 256 * 4;
+    if (fullFrameBytes < smallImageThreshold)
+        return true;
+
+    if (hasEnoughMemoryFor(fullFrameBytes))
+        return true;
+
+    // Low on memory, lets try to prune the cache
+    cache()->prune();
+    if (hasEnoughMemoryFor(fullFrameBytes))
+        return true;
+
+    // We are still low on memory, lets try some aggressive pruning of live decoded resources
+    cache()->pruneLiveResources(true);
+#if ENABLE(DENY_LOW_MEMORY_IMAGE_DECODING)
+    if (hasEnoughMemoryFor(fullFrameBytes))
+        return true;
+
+    // Still looking bad, don't decode the image at all.
+    return false;
+#else
+    // So we allow decoding anyway. This might cause crash or jetsam but as long as WebKit
+    // suffers from memory growth problems there are situations where restarting is the only way
+    // to access the content user is trying to see.
+    return true;
+#endif
+}
+
+void CachedImage::changedInRect(const Image* image, const IntRect& rect)
+{
+    if (image == m_image)
+        notifyObservers(&rect);
 }
 
 } //namespace WebCore

@@ -1,10 +1,9 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
  * Copyright (C) 2003 Apple Computer, Inc.
+ *           (C) 2007 Rob Buis (buis@kde.org)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,88 +17,73 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "HTMLStyleElement.h"
 
 #include "Document.h"
 #include "HTMLNames.h"
-#include "MediaList.h"
-#include "MediaQueryEvaluator.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLStyleElement::HTMLStyleElement(Document* doc)
-    : HTMLElement(styleTag, doc)
+HTMLStyleElement::HTMLStyleElement(const QualifiedName& tagName, Document* doc, bool createdByParser)
+    : HTMLElement(tagName, doc)
     , m_loading(false)
+    , m_createdByParser(createdByParser)
 {
-}
-
-StyleSheet* HTMLStyleElement::sheet() const
-{
-    return m_sheet.get();
+    ASSERT(hasTagName(styleTag));
 }
 
 // other stuff...
 void HTMLStyleElement::parseMappedAttribute(MappedAttribute *attr)
 {
-    if (attr->name() == typeAttr)
-        m_type = attr->value().domString().lower();
-    else if (attr->name() == mediaAttr)
-        m_media = attr->value().deprecatedString().lower();
-    else
+    if (attr->name() == mediaAttr)
+        m_media = attr->value().string().lower();
+    else if (attr->name() == titleAttr && m_sheet)
+        m_sheet->setTitle(attr->value());
+     else
         HTMLElement::parseMappedAttribute(attr);
+}
+
+void HTMLStyleElement::finishParsingChildren()
+{
+    StyleElement::process(this);
+    StyleElement::sheet(this);
+    m_createdByParser = false;
+    HTMLElement::finishParsingChildren();
 }
 
 void HTMLStyleElement::insertedIntoDocument()
 {
     HTMLElement::insertedIntoDocument();
-    if (m_sheet)
-        document()->updateStyleSelector();
+
+    document()->addStyleSheetCandidateNode(this, m_createdByParser);
+    if (!m_createdByParser)
+        StyleElement::insertedIntoDocument(document(), this);
 }
 
 void HTMLStyleElement::removedFromDocument()
 {
     HTMLElement::removedFromDocument();
-    if (m_sheet)
-        document()->updateStyleSelector();
+    if (document()->renderer())
+        document()->removeStyleSheetCandidateNode(this);
+    StyleElement::removedFromDocument(document());
 }
 
-void HTMLStyleElement::childrenChanged()
+void HTMLStyleElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
-    String text = "";
+    if (!changedByParser)
+        StyleElement::process(this);
+    HTMLElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+}
 
-    for (Node* c = firstChild(); c; c = c->nextSibling())
-        if (c->nodeType() == TEXT_NODE || c->nodeType() == CDATA_SECTION_NODE || c->nodeType() == COMMENT_NODE)
-            text += c->nodeValue();
-
-    if (m_sheet) {
-        if (static_cast<CSSStyleSheet *>(m_sheet.get())->isLoading())
-            document()->stylesheetLoaded(); // Remove ourselves from the sheet list.
-        m_sheet = 0;
-    }
-
-    m_loading = false;
-    if (m_type.isEmpty() || m_type == "text/css") { // Type must be empty or CSS
-        RefPtr<MediaList> media = new MediaList((CSSStyleSheet*)0, m_media, true);
-        MediaQueryEvaluator screenEval("screen", true);
-        MediaQueryEvaluator printEval("print", true);
-        if (screenEval.eval(media.get()) || printEval.eval(media.get())) {
-            document()->addPendingSheet();
-            m_loading = true;
-            m_sheet = new CSSStyleSheet(this);
-            m_sheet->parseString(text, !document()->inCompatMode());
-            m_sheet->setMedia(media.get());
-            m_loading = false;
-        }
-    }
-
-    if (!isLoading() && m_sheet)
-        document()->stylesheetLoaded();
+StyleSheet* HTMLStyleElement::sheet()
+{
+    return StyleElement::sheet(this);
 }
 
 bool HTMLStyleElement::isLoading() const
@@ -111,10 +95,13 @@ bool HTMLStyleElement::isLoading() const
     return static_cast<CSSStyleSheet *>(m_sheet.get())->isLoading();
 }
 
-void HTMLStyleElement::sheetLoaded()
+bool HTMLStyleElement::sheetLoaded()
 {
-    if (!isLoading())
-        document()->stylesheetLoaded();
+    if (!isLoading()) {
+        document()->removePendingSheet();
+        return true;
+    }
+    return false;
 }
 
 bool HTMLStyleElement::disabled() const
@@ -127,24 +114,32 @@ void HTMLStyleElement::setDisabled(bool disabled)
     setAttribute(disabledAttr, disabled ? "" : 0);
 }
 
-String HTMLStyleElement::media() const
+const AtomicString& HTMLStyleElement::media() const
 {
     return getAttribute(mediaAttr);
 }
 
-void HTMLStyleElement::setMedia(const String &value)
+void HTMLStyleElement::setMedia(const AtomicString &value)
 {
     setAttribute(mediaAttr, value);
 }
 
-String HTMLStyleElement::type() const
+const AtomicString& HTMLStyleElement::type() const
 {
     return getAttribute(typeAttr);
 }
 
-void HTMLStyleElement::setType(const String &value)
+void HTMLStyleElement::setType(const AtomicString &value)
 {
     setAttribute(typeAttr, value);
+}
+
+void HTMLStyleElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) const
+{    
+    HTMLElement::addSubresourceAttributeURLs(urls);
+
+    if (StyleSheet* styleSheet = const_cast<HTMLStyleElement*>(this)->sheet())
+        styleSheet->addSubresourceStyleURLs(urls);
 }
 
 }

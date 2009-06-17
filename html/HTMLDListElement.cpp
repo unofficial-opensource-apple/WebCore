@@ -1,6 +1,4 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *
@@ -16,8 +14,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 #include "config.h"
@@ -29,9 +27,10 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLDListElement::HTMLDListElement(Document* doc)
-    : HTMLElement(HTMLNames::dlTag, doc)
+HTMLDListElement::HTMLDListElement(const QualifiedName& tagName, Document* doc)
+    : HTMLElement(tagName, doc)
 {
+    ASSERT(hasTagName(dlTag));
 }
 
 bool HTMLDListElement::compact() const

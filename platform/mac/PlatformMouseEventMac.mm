@@ -22,78 +22,137 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
-#import "GraphicsServices/GraphicsServices.h"
-#import "WKWindow.h"
+
 #import "config.h"
 #import "PlatformMouseEvent.h"
-#import "Screen.h"
 
-#import <GraphicsServices/GraphicsServices.h>
+#import "PlatformScreen.h"
 
 namespace WebCore {
 
-const PlatformMouseEvent::CurrentEventTag PlatformMouseEvent::currentEvent = {};
-
-    static MouseButton mouseButtonForEvent(GSEventRef event)
-    {
-        switch (GSEventGetType (event)) {
-            case kGSEventLeftMouseDown:
-            case kGSEventLeftMouseUp:
-            case kGSEventLeftMouseDragged:
-            default:
-                return LeftButton;
-        }
-    }
-    
-    static IntPoint positionForEvent(GSEventRef event)
-    {
-        if (GSEventIsMouseEventType (event) || GSEventGetType (event) == kGSEventScrollWheel)
-            return IntPoint (GSEventGetLocationInWindow (event));
-        return IntPoint ();
-    }
-
-static IntPoint globalPositionForEvent(GSEventRef event)
+static MouseButton mouseButtonForEvent(NSEvent *event)
 {
-    if (GSEventIsMouseEventType(event) || GSEventGetType(event) == kGSEventScrollWheel)
-        return IntPoint(GSEventGetLocationInWindow(event));
-    else
-        return IntPoint();
-}
-    
-static int clickCountForEvent(GSEventRef event)
-{
-    if (GSEventIsMouseEventType (event)) {
-        return GSEventGetClickCount (event);
+    switch ([event type]) {
+        case NSLeftMouseDown:
+        case NSLeftMouseUp:
+        case NSLeftMouseDragged:
+            return LeftButton;
+        case NSRightMouseDown:
+        case NSRightMouseUp:
+        case NSRightMouseDragged:
+            return RightButton;
+        case NSOtherMouseDown:
+        case NSOtherMouseUp:
+        case NSOtherMouseDragged:
+            return MiddleButton;
+        default:
+            return NoButton;
     }
-    return 0;
 }
-    
-    PlatformMouseEvent::PlatformMouseEvent(GSEventRef event)
-    : m_position(positionForEvent(event))
-    , m_globalPosition(globalPositionForEvent(event))
+
+static int clickCountForEvent(NSEvent *event)
+{
+    switch ([event type]) {
+        case NSLeftMouseDown:
+        case NSLeftMouseUp:
+        case NSLeftMouseDragged:
+        case NSRightMouseDown:
+        case NSRightMouseUp:
+        case NSRightMouseDragged:
+        case NSOtherMouseDown:
+        case NSOtherMouseUp:
+        case NSOtherMouseDragged:
+            return [event clickCount];
+        default:
+            return 0;
+    }
+}
+
+IntPoint globalPoint(const NSPoint& windowPoint, NSWindow* window)
+{
+    return IntPoint(flipScreenPoint([window convertBaseToScreen:windowPoint], screenForWindow(window)));
+}
+
+IntPoint pointForEvent(NSEvent *event)
+{
+    switch ([event type]) {
+        case NSLeftMouseDown:
+        case NSLeftMouseUp:
+        case NSLeftMouseDragged:
+        case NSRightMouseDown:
+        case NSRightMouseUp:
+        case NSRightMouseDragged:
+        case NSOtherMouseDown:
+        case NSOtherMouseUp:
+        case NSOtherMouseDragged:
+        case NSMouseMoved:
+        case NSScrollWheel:
+            // Note: This has its origin at the bottom left of the window.
+            // The Y coordinate gets flipped by ScrollView::viewportToContents.
+            // We should probably change both this and that to not use "bottom left origin" coordinates at all.
+            return IntPoint([event locationInWindow]);
+        default:
+            return IntPoint();
+    }
+}
+
+IntPoint globalPointForEvent(NSEvent *event)
+{
+    switch ([event type]) {
+        case NSLeftMouseDown:
+        case NSLeftMouseUp:
+        case NSLeftMouseDragged:
+        case NSRightMouseDown:
+        case NSRightMouseUp:
+        case NSRightMouseDragged:
+        case NSOtherMouseDown:
+        case NSOtherMouseUp:
+        case NSOtherMouseDragged:
+        case NSMouseMoved:
+        case NSScrollWheel:
+            return globalPoint([event locationInWindow], [event window]);
+        default:
+            return IntPoint();
+    }
+}
+
+static MouseEventType mouseEventForNSEvent(NSEvent* event) 
+{
+    switch ([event type]) {
+    case NSScrollWheel:
+        return MouseEventScroll;
+    case NSLeftMouseDragged:
+    case NSRightMouseDragged:
+    case NSOtherMouseDragged:
+    case NSMouseMoved:
+        return MouseEventMoved;
+    case NSLeftMouseDown:
+    case NSRightMouseDown:
+    case NSOtherMouseDown:
+        return MouseEventPressed;
+    case NSLeftMouseUp:
+    case NSRightMouseUp:
+    case NSOtherMouseUp:
+        return MouseEventReleased;
+    default:
+        return MouseEventMoved;
+    }
+}
+
+PlatformMouseEvent::PlatformMouseEvent(NSEvent* event)
+    : m_position(pointForEvent(event))
+    , m_globalPosition(globalPointForEvent(event))
     , m_button(mouseButtonForEvent(event))
+    , m_eventType(mouseEventForNSEvent(event))
     , m_clickCount(clickCountForEvent(event))
-    , m_shiftKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskShift)
-    , m_ctrlKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskControl)
-    , m_altKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskAlternate)
-    , m_metaKey(GSEventGetModifierFlags(event) & kGSEventFlagMaskCommand)
+    , m_shiftKey([event modifierFlags] & NSShiftKeyMask)
+    , m_ctrlKey([event modifierFlags] & NSControlKeyMask)
+    , m_altKey([event modifierFlags] & NSAlternateKeyMask)
+    , m_metaKey([event modifierFlags] & NSCommandKeyMask)
+    , m_timestamp([event timestamp])
+    , m_modifierFlags([event modifierFlags])
+    , m_eventNumber([event eventNumber])
 {
-}
-
-PlatformMouseEvent::PlatformMouseEvent(const CurrentEventTag&)
-    : m_button(LeftButton), m_clickCount(0), m_shiftKey(false), m_ctrlKey(false), m_altKey(false), m_metaKey(false)
-{
-        GSEventRef event = WKEventGetCurrentEvent();
-        if (event) {
-            m_position = positionForEvent(event);
-            m_globalPosition = globalPositionForEvent(event);
-            m_button = mouseButtonForEvent(event);
-            m_clickCount = clickCountForEvent(event);
-            m_shiftKey = GSEventGetModifierFlags(event) & kGSEventFlagMaskShift;
-            m_ctrlKey = GSEventGetModifierFlags(event) & kGSEventFlagMaskControl;
-            m_altKey = GSEventGetModifierFlags(event) & kGSEventFlagMaskAlternate;
-            m_metaKey = GSEventGetModifierFlags(event) & kGSEventFlagMaskCommand;
-        }
 }
 
 }

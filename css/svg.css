@@ -34,7 +34,7 @@
     to the bounds of the initial viewport.
 */
 svg:root {
-    overflow: visible !important
+    overflow: hidden !important
 }
 
 svg {
@@ -47,5 +47,19 @@ svg, symbol, marker, pattern {
 }
 
 text, foreignObject {
-    display: block !important
+    display: block
+}
+
+text, tspan, textPath {
+   white-space: nowrap
+}
+
+text, tspan, tref {
+   -webkit-text-size-adjust: none;
+}
+
+/* states */
+
+:focus {
+    outline: auto 5px -webkit-focus-ring-color
 }

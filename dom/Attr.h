@@ -1,11 +1,9 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -32,13 +30,6 @@
 
 namespace WebCore {
 
-
-// this has no counterpart in DOM, purely internal
-// representation of the nodevalue of an Attr.
-// the actual Attr (Attr) with its value as textchild
-// is only allocated on demand by the DOM bindings.
-// Any use of Attr inside khtml should be avoided.
-
 // Attr can have Text and EntityReference children
 // therefore it has to be a fullblown Node. The plan
 // is to dynamically allocate a textchild and store the
@@ -47,9 +38,8 @@ namespace WebCore {
 
 class Attr : public ContainerNode {
     friend class NamedAttrMap;
-
 public:
-    Attr(Element*, Document*, Attribute*);
+    Attr(Element*, Document*, PassRefPtr<Attribute>);
     ~Attr();
 
     // Call this after calling the constructor so the
@@ -67,9 +57,9 @@ public:
     // DOM methods overridden from parent classes
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
-    virtual const AtomicString& localName() const;
-    virtual const AtomicString& namespaceURI() const;
-    virtual const AtomicString& prefix() const;
+    const AtomicString& localName() const;
+    const AtomicString& namespaceURI() const;
+    const AtomicString& prefix() const;
     virtual void setPrefix(const AtomicString&, ExceptionCode&);
 
     virtual String nodeValue() const;
@@ -80,8 +70,7 @@ public:
     virtual bool isAttributeNode() const { return true; }
     virtual bool childTypeAllowed(NodeType);
 
-    virtual void childrenChanged();
-    virtual String toString() const;
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
     Attribute* attr() const { return m_attribute.get(); }
     const QualifiedName& qualifiedName() const { return m_attribute->name(); }
@@ -89,12 +78,19 @@ public:
     // An extension to get presentational information for attributes.
     CSSStyleDeclaration* style() { return m_attribute->style(); }
 
+    void setSpecified(bool specified) { m_specified = specified; }
+
 private:
+    virtual const AtomicString& virtualPrefix() const { return prefix(); }
+    virtual const AtomicString& virtualLocalName() const { return localName(); }
+    virtual const AtomicString& virtualNamespaceURI() const { return namespaceURI(); }
+
     Element* m_element;
     RefPtr<Attribute> m_attribute;
-    int m_ignoreChildrenChanged;
+    unsigned m_ignoreChildrenChanged : 31;
+    bool m_specified : 1;
 };
 
-} //namespace
+} // namespace WebCore
 
-#endif
+#endif // Attr_h

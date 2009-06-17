@@ -18,8 +18,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "HTMLPlugInElement.h"
@@ -27,32 +27,66 @@
 #include "CSSPropertyNames.h"
 #include "Document.h"
 #include "Frame.h"
+#include "FrameLoader.h"
 #include "FrameTree.h"
 #include "HTMLNames.h"
-#include "kjs_dom.h"
-#include "kjs_proxy.h"
+#include "Page.h"
+#include "RenderWidget.h"
+#include "ScriptController.h"
+#include "Settings.h"
+#include "Widget.h"
 
-#if PLATFORM(MAC)
-#include "FrameMac.h"
-#include <JavaScriptCore/npruntime_impl.h>
+#if ENABLE(NETSCAPE_PLUGIN_API)
+#include "npruntime_impl.h"
 #endif
-
-using KJS::ExecState;
-using KJS::JSLock;
-using KJS::JSValue;
-using KJS::Bindings::RootObject;
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
 HTMLPlugInElement::HTMLPlugInElement(const QualifiedName& tagName, Document* doc)
-    : HTMLElement(tagName, doc)
+    // FIXME: Always passing false as createdByParser is odd (see bug22851).
+    : HTMLFrameOwnerElement(tagName, doc, false)
+#if ENABLE(NETSCAPE_PLUGIN_API)
+    , m_NPObject(0)
+#endif
 {
 }
 
 HTMLPlugInElement::~HTMLPlugInElement()
 {
+    ASSERT(!m_instance); // cleared in detach()
+
+#if ENABLE(NETSCAPE_PLUGIN_API)
+    if (m_NPObject) {
+        _NPN_ReleaseObject(m_NPObject);
+        m_NPObject = 0;
+    }
+#endif
+}
+
+void HTMLPlugInElement::detach()
+{
+    m_instance.clear();
+    HTMLFrameOwnerElement::detach();
+}
+
+PassScriptInstance HTMLPlugInElement::getInstance() const
+{
+    Frame* frame = document()->frame();
+    if (!frame)
+        return 0;
+
+    // If the host dynamically turns off JavaScript (or Java) we will still return
+    // the cached allocated Bindings::Instance.  Not supporting this edge-case is OK.
+    if (m_instance)
+        return m_instance;
+
+    RenderWidget* renderWidget = renderWidgetForJSBindings();
+    if (renderWidget && renderWidget->widget())
+        m_instance = frame->script()->createScriptInstanceForWidget(renderWidget->widget());
+
+    return m_instance;
 }
 
 String HTMLPlugInElement::align() const
@@ -110,42 +144,57 @@ bool HTMLPlugInElement::mapToEntry(const QualifiedName& attrName, MappedAttribut
         return false;
     }
     
-    return HTMLElement::mapToEntry(attrName, result);
+    return HTMLFrameOwnerElement::mapToEntry(attrName, result);
 }
 
 void HTMLPlugInElement::parseMappedAttribute(MappedAttribute* attr)
 {
     if (attr->name() == widthAttr)
-        addCSSLength(attr, CSS_PROP_WIDTH, attr->value());
+        addCSSLength(attr, CSSPropertyWidth, attr->value());
     else if (attr->name() == heightAttr)
-        addCSSLength(attr, CSS_PROP_HEIGHT, attr->value());
+        addCSSLength(attr, CSSPropertyHeight, attr->value());
     else if (attr->name() == vspaceAttr) {
-        addCSSLength(attr, CSS_PROP_MARGIN_TOP, attr->value());
-        addCSSLength(attr, CSS_PROP_MARGIN_BOTTOM, attr->value());
+        addCSSLength(attr, CSSPropertyMarginTop, attr->value());
+        addCSSLength(attr, CSSPropertyMarginBottom, attr->value());
     } else if (attr->name() == hspaceAttr) {
-        addCSSLength(attr, CSS_PROP_MARGIN_LEFT, attr->value());
-        addCSSLength(attr, CSS_PROP_MARGIN_RIGHT, attr->value());
+        addCSSLength(attr, CSSPropertyMarginLeft, attr->value());
+        addCSSLength(attr, CSSPropertyMarginRight, attr->value());
     } else if (attr->name() == alignAttr)
         addHTMLAlignment(attr);
     else
-        HTMLElement::parseMappedAttribute(attr);
-}    
+        HTMLFrameOwnerElement::parseMappedAttribute(attr);
+}
 
 bool HTMLPlugInElement::checkDTD(const Node* newChild)
 {
-    return newChild->hasTagName(paramTag) || HTMLElement::checkDTD(newChild);
+    return newChild->hasTagName(paramTag) || HTMLFrameOwnerElement::checkDTD(newChild);
 }
 
-void HTMLPlugInElement::detach()
+void HTMLPlugInElement::defaultEventHandler(Event* event)
 {
-    if (Frame* parentFrame = document()->frame()) {
-        Frame* contentFrame = parentFrame->tree()->child(m_frameName);
-        if (contentFrame)
-            contentFrame->disconnectOwnerElement();
-    }
-    
-    HTMLElement::detach();
+    RenderObject* r = renderer();
+    if (!r || !r->isWidget())
+        return;
+
+    if (Widget* widget = static_cast<RenderWidget*>(r)->widget())
+        widget->handleEvent(event);
 }
 
+#if ENABLE(NETSCAPE_PLUGIN_API)
+
+NPObject* HTMLPlugInElement::getNPObject()
+{
+    ASSERT(document()->frame());
+    if (!m_NPObject)
+        m_NPObject = document()->frame()->script()->createScriptObjectForPluginElement(this);
+    return m_NPObject;
+}
+
+#endif /* ENABLE(NETSCAPE_PLUGIN_API) */
+
+void HTMLPlugInElement::updateWidgetCallback(Node* n)
+{
+    static_cast<HTMLPlugInElement*>(n)->updateWidget();
+}
 
 }

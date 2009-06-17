@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,40 +29,33 @@
 #include "config.h"
 #include "JSAttr.h"
 
-#include "Attr.h"
+#include "CSSHelper.h"
 #include "Document.h"
-#include "ExceptionCode.h"
-#include "HTMLFrameElement.h"
-#include "HTMLIFrameElement.h"
+#include "HTMLFrameElementBase.h"
 #include "HTMLNames.h"
-#include "PlatformString.h"
-#include "kjs_binding.h"
-#include "kjs_dom.h"
+
+using namespace JSC;
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-void JSAttr::setValue(KJS::ExecState* exec, KJS::JSValue* value)
+void JSAttr::setValue(ExecState* exec, JSValuePtr value)
 {
     Attr* imp = static_cast<Attr*>(impl());
     String attrValue = valueToStringWithNullCheck(exec, value);
 
     Element* ownerElement = imp->ownerElement();
-    if (ownerElement && ownerElement->hasTagName(iframeTag) && equalIgnoringCase(imp->name(), "src") && attrValue.startsWith("javascript:", false)) {
-        HTMLIFrameElement* frame = static_cast<HTMLIFrameElement*>(ownerElement);
-        if (!checkNodeSecurity(exec, frame->contentDocument()))
-            return;
-    }
-    if (ownerElement && ownerElement->hasTagName(frameTag) && equalIgnoringCase(imp->name(), "src") && attrValue.startsWith("javascript:", false)) {
-        HTMLFrameElement* frame = static_cast<HTMLFrameElement*>(ownerElement);
-        if (!checkNodeSecurity(exec, frame->contentDocument()))
-            return;
+    if (ownerElement && (ownerElement->hasTagName(iframeTag) || ownerElement->hasTagName(frameTag))) {
+        if (equalIgnoringCase(imp->name(), "src") && protocolIs(parseURL(attrValue), "javascript")) {
+            if (!checkNodeSecurity(exec, static_cast<HTMLFrameElementBase*>(ownerElement)->contentDocument()))
+                return;
+        }
     }
 
     ExceptionCode ec = 0;
     imp->setValue(attrValue, ec);
-    KJS::setDOMException(exec, ec);
+    setDOMException(exec, ec);
 }
 
 } // namespace WebCore

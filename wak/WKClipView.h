@@ -25,6 +25,7 @@ void WKClipViewInitialize (WKClipViewRef view);
 WKViewRef WKClipViewGetDocumentView (WKClipViewRef view);
 void WKClipViewSetDocumentView (WKClipViewRef view, WKViewRef documentView);
 
+bool WKClipViewCopiesOnScroll (WKClipViewRef view);
 void WKClipViewSetCopiesOnScroll (WKClipViewRef view, bool flag);
 
 CGRect WKClipViewGetDocumentVisibleRect (WKClipViewRef view);

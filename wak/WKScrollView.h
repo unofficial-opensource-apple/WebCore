@@ -11,17 +11,6 @@
 extern "C" {
 #endif
 
-#define ScrollerAlphaHidden     0.4
-#define ScrollerAlphaShown      0.8
-    
-#define WKScrollViewAllParts (WKScrollViewHorizontalScrollerPart | WKScrollViewVerticalScrollerPart)    
-    
-typedef enum WKScrollViewParts {
-    WKScrollViewNoPart = 0,
-    WKScrollViewHorizontalScrollerPart = 0x1,
-    WKScrollViewVerticalScrollerPart = 0x2
-} WKScrollViewParts;
-
 typedef bool (*WKScrollViewShouldScrollCallback)(WKScrollViewRef scrollView, CGPoint scrollPoint, void *userInfo);
 
 typedef struct _WKScrollViewContext {
@@ -35,11 +24,6 @@ struct WKScrollView {
     
     WKScrollViewContext scrollContext;
     WKClipViewRef contentView;
-    WKScrollerViewRef horizontalScroller;
-    WKScrollerViewRef verticalScroller;
-    
-    WKScrollViewParts parts;
-    WKScrollViewParts allowedParts;
     
     CGPoint mouseDownPoint;
     CGPoint lastDraggedPoint;
@@ -48,14 +32,8 @@ struct WKScrollView {
 
 extern WKClassInfo WKScrollViewClassInfo;
 
-WKScrollViewRef WKScrollViewCreateWithFrame (CGRect rect, WKScrollViewParts parts);
-void WKScrollViewInitialize (WKScrollViewRef view, WKScrollViewParts parts);
-
-WKScrollViewParts WKScrollViewGetParts (WKScrollViewRef view);
-void WKScrollViewSetParts (WKScrollViewRef view, WKScrollViewParts parts);
-
-WKScrollViewParts WKScrollViewGetAllowedParts (WKScrollViewRef view);
-void WKScrollViewSetAllowedParts (WKScrollViewRef view, WKScrollViewParts parts);
+WKScrollViewRef WKScrollViewCreateWithFrame (CGRect rect);
+void WKScrollViewInitialize (WKScrollViewRef view);
 
 WKClipViewRef WKScrollViewGetContentView (WKScrollViewRef view);
 void WKScrollViewSetContentView (WKScrollViewRef view, WKClipViewRef contentView);
@@ -68,9 +46,6 @@ void WKScrollViewTile (WKScrollViewRef view);
 void WKScrollViewAdjustScrollers (WKScrollViewRef view);
 
 bool WKScrollViewScrollToPoint(WKScrollViewRef view, CGPoint point);
-
-void WKScrollViewShowScrollers(WKScrollViewRef view);
-void WKScrollViewHideScrollers(WKScrollViewRef view);
 
 #ifdef __cplusplus
 }

@@ -1,10 +1,8 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
@@ -29,21 +27,21 @@
 
 namespace WebCore {
 
-using namespace EventNames;
-
 MouseEvent::MouseEvent()
     : m_button(0)
+    , m_buttonDown(false)
 {
 }
 
-MouseEvent::MouseEvent(const AtomicString& eventType, bool canBubble, bool cancelable, AbstractView* view,
+MouseEvent::MouseEvent(const AtomicString& eventType, bool canBubble, bool cancelable, PassRefPtr<AbstractView> view,
                        int detail, int screenX, int screenY, int pageX, int pageY,
                        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
-                       unsigned short button, EventTargetNode* relatedTarget,
-                       Clipboard* clipboard, bool isSimulated)
+                       unsigned short button, PassRefPtr<EventTargetNode> relatedTarget,
+                       PassRefPtr<Clipboard> clipboard, bool isSimulated)
     : MouseRelatedEvent(eventType, canBubble, cancelable, view, detail, screenX, screenY,
                         pageX, pageY, ctrlKey, altKey, shiftKey, metaKey, isSimulated)
-    , m_button(button)
+    , m_button(button == (unsigned short)-1 ? 0 : button)
+    , m_buttonDown(button != (unsigned short)-1)
     , m_relatedTarget(relatedTarget)
     , m_clipboard(clipboard)
 {
@@ -53,10 +51,10 @@ MouseEvent::~MouseEvent()
 {
 }
 
-void MouseEvent::initMouseEvent(const AtomicString& type, bool canBubble, bool cancelable, AbstractView* view,
+void MouseEvent::initMouseEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<AbstractView> view,
                                 int detail, int screenX, int screenY, int clientX, int clientY,
                                 bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
-                                unsigned short button, EventTargetNode* relatedTarget)
+                                unsigned short button, PassRefPtr<EventTargetNode> relatedTarget)
 {
     if (dispatched())
         return;
@@ -69,7 +67,8 @@ void MouseEvent::initMouseEvent(const AtomicString& type, bool canBubble, bool c
     m_altKey = altKey;
     m_shiftKey = shiftKey;
     m_metaKey = metaKey;
-    m_button = button;
+    m_button = button == (unsigned short)-1 ? 0 : button;
+    m_buttonDown = button != (unsigned short)-1;
     m_relatedTarget = relatedTarget;
 
     initCoordinates(clientX, clientY);
@@ -86,8 +85,8 @@ bool MouseEvent::isMouseEvent() const
 bool MouseEvent::isDragEvent() const
 {
     const AtomicString& t = type();
-    return t == dragenterEvent || t == dragoverEvent || t == dragleaveEvent || t == dropEvent
-               || t == dragstartEvent|| t == dragEvent || t == dragendEvent;
+    return t == eventNames().dragenterEvent || t == eventNames().dragoverEvent || t == eventNames().dragleaveEvent || t == eventNames().dropEvent
+               || t == eventNames().dragstartEvent|| t == eventNames().dragEvent || t == eventNames().dragendEvent;
 }
 
 int MouseEvent::which() const
@@ -101,13 +100,19 @@ int MouseEvent::which() const
 Node* MouseEvent::toElement() const
 {
     // MSIE extension - "the object toward which the user is moving the mouse pointer"
-    return (type() == mouseoutEvent) ? relatedTarget() : target();
+    if (type() == eventNames().mouseoutEvent) 
+        return relatedTarget();
+    
+    return target() ? target()->toNode() : 0;
 }
 
 Node* MouseEvent::fromElement() const
 {
     // MSIE extension - "object from which activation or the mouse pointer is exiting during the event" (huh?)
-    return (type() == mouseoutEvent) ? target() : relatedTarget();
+    if (type() != eventNames().mouseoutEvent)
+        return relatedTarget();
+    
+    return target() ? target()->toNode() : 0;
 }
 
 } // namespace WebCore

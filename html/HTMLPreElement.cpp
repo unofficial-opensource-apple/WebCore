@@ -17,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 #include "config.h"
@@ -55,7 +55,7 @@ void HTMLPreElement::parseMappedAttribute(MappedAttribute *attr)
         // property.
     } else if (attr->name() == wrapAttr) {
         if (!attr->value().isNull())
-            addCSSProperty(attr, CSS_PROP_WHITE_SPACE, CSS_VAL_PRE_WRAP);
+            addCSSProperty(attr, CSSPropertyWhiteSpace, CSSValuePreWrap);
     } else
         return HTMLElement::parseMappedAttribute(attr);
 }

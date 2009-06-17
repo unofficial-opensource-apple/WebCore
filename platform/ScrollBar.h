@@ -23,77 +23,143 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef ScrollBar_h
-#define ScrollBar_h
+#ifndef Scrollbar_h
+#define Scrollbar_h
 
+#include <wtf/RefCounted.h>
+#include "ScrollTypes.h"
+#include "Timer.h"
 #include "Widget.h"
-
-#ifdef __OBJC__
-@class NSScroller;
-#else
-class NSScroller;
-typedef int NSScrollerPart;
-#endif
+#include <wtf/MathExtras.h>
+#include <wtf/PassRefPtr.h>
 
 namespace WebCore {
 
-enum ScrollDirection {
-    ScrollUp,
-    ScrollDown,
-    ScrollLeft,
-    ScrollRight
-};
+class GraphicsContext;
+class IntRect;
+class ScrollbarClient;
+class ScrollbarTheme;
+class PlatformMouseEvent;
 
-enum ScrollGranularity {
-    ScrollByLine,
-    ScrollByPage,
-    ScrollByDocument,
-    ScrollByWheel
-};
+// These match the numbers we use over in WebKit (WebFrameView.m).
+const int cScrollbarPixelsPerLineStep =  40;
+const float cMouseWheelPixelsPerLineStep = 40.0f / 3.0f;
+const int cAmountToKeepWhenPaging = 40;
 
+class Scrollbar : public Widget, public RefCounted<Scrollbar> {
+protected:
+    Scrollbar(ScrollbarClient*, ScrollbarOrientation, ScrollbarControlSize, ScrollbarTheme* = 0);
 
-// COPIED FROM NSScroller.h
-
-enum {
-    NSScrollerNoPart			= 0,
-    NSScrollerDecrementPage		= 1,
-    NSScrollerKnob			= 2,
-    NSScrollerIncrementPage		= 3,
-    NSScrollerDecrementLine    		= 4,
-    NSScrollerIncrementLine	 	= 5,
-    NSScrollerKnobSlot			= 6
-};
-
-typedef unsigned int NSScrollerPart;
-
-
-enum ScrollBarOrientation { HorizontalScrollBar, VerticalScrollBar };
-
-class ScrollBar : public Widget {
 public:
-    ScrollBar(ScrollBarOrientation);
-    virtual ~ScrollBar();
+    virtual ~Scrollbar();
 
-    ScrollBarOrientation orientation() { return m_orientation; }
+    // Must be implemented by platforms that can't simply use the Scrollbar base class.  Right now the only platform that is not using the base class is GTK.
+    static PassRefPtr<Scrollbar> createNativeScrollbar(ScrollbarClient* client, ScrollbarOrientation orientation, ScrollbarControlSize size);
+    
+    void setClient(ScrollbarClient* client) { m_client = client; }
+    ScrollbarClient* client() const { return m_client; }
 
-    int value() { return m_currentPos; }
-    bool setValue(int v);
+    ScrollbarOrientation orientation() const { return m_orientation; }
+    
+    int value() const { return lroundf(m_currentPos); }
+    float currentPos() const { return m_currentPos; }
+    int pressedPos() const { return m_pressedPos; }
+    int visibleSize() const { return m_visibleSize; }
+    int totalSize() const { return m_totalSize; }
+    int maximum() const { return m_totalSize - m_visibleSize; }        
+    ScrollbarControlSize controlSize() const { return m_controlSize; }
 
-    void setSteps(int lineStep, int pageStep);
-    void setKnobProportion(int visibleSize, int totalSize);
+    int lineStep() const { return m_lineStep; }
+    int pageStep() const { return m_pageStep; }
+    float pixelStep() const { return m_pixelStep; }
     
-    bool scrollbarHit(NSScrollerPart);
-    void valueChanged();
+    ScrollbarPart pressedPart() const { return m_pressedPart; }
+    ScrollbarPart hoveredPart() const { return m_hoveredPart; }
+    virtual void setHoveredPart(ScrollbarPart);
+    virtual void setPressedPart(ScrollbarPart);
+
+    void setSteps(int lineStep, int pageStep, int pixelsPerStep = 1);
+    bool setValue(int);
+    void setProportion(int visibleSize, int totalSize);
+    void setPressedPos(int p) { m_pressedPos = p; }
+
+    bool scroll(ScrollDirection, ScrollGranularity, float multiplier = 1.0f);
     
-    bool scroll(ScrollDirection, ScrollGranularity, float multiplier = 1.0);
+    virtual void paint(GraphicsContext*, const IntRect& damageRect);
+
+    bool enabled() const { return m_enabled; }
+    virtual void setEnabled(bool e);
+
+    bool isWindowActive() const;
+
+    // These methods are used for platform scrollbars to give :hover feedback.  They will not get called
+    // when the mouse went down in a scrollbar, since it is assumed the scrollbar will start
+    // grabbing all events in that case anyway.
+    bool mouseExited();
     
-private:
-    ScrollBarOrientation m_orientation;
+    // Used by some platform scrollbars to know when they've been released from capture.
+    bool mouseUp();
+
+    bool mouseDown(const PlatformMouseEvent&);
+
+#if PLATFORM(QT)
+    // For platforms that wish to handle context menu events.
+    // FIXME: This is misplaced.  Normal hit testing should be used to populate a correct
+    // context menu.  There's no reason why the scrollbar should have to do it.
+    bool contextMenu(const PlatformMouseEvent& event);
+#endif
+
+    // Takes an event and accounts for any transforms that might occur on the scrollbar.  Returns
+    // a new event that has had all of the transforms applied.
+    PlatformMouseEvent transformEvent(const PlatformMouseEvent&);
+    
+    ScrollbarTheme* theme() const { return m_theme; }
+
+    virtual void setParent(ScrollView*);
+    virtual void setFrameRect(const IntRect&);
+
+    virtual void invalidateRect(const IntRect&);
+    
+    bool suppressInvalidation() const { return m_suppressInvalidation; }
+    void setSuppressInvalidation(bool s) { m_suppressInvalidation = s; }
+
+    virtual void styleChanged() { }
+
+protected:
+    virtual void updateThumbPosition();
+    virtual void updateThumbProportion();
+    
+    void autoscrollTimerFired(Timer<Scrollbar>*);
+    void startTimerIfNeeded(double delay);
+    void stopTimerIfNeeded();
+    void autoscrollPressedPart(double delay);
+    ScrollDirection pressedPartScrollDirection();
+    ScrollGranularity pressedPartScrollGranularity();
+    
+    void moveThumb(int pos);
+
+    ScrollbarClient* m_client;
+    ScrollbarOrientation m_orientation;
+    ScrollbarControlSize m_controlSize;
+    ScrollbarTheme* m_theme;
+    
     int m_visibleSize;
     int m_totalSize;
-    int m_currentPos;
+    float m_currentPos;
     int m_lineStep;
     int m_pageStep;
+    float m_pixelStep;
+
+    ScrollbarPart m_hoveredPart;
+    ScrollbarPart m_pressedPart;
+    int m_pressedPos;
+    
+    bool m_enabled;
+
+    Timer<Scrollbar> m_scrollTimer;
+    bool m_overlapsResizer;
+    
+    bool m_suppressInvalidation;
 };
 
 }

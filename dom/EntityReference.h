@@ -1,8 +1,6 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 2000 Peter Kelly (pmk@post.com)
- * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,32 +14,28 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef EntityReference_H
-#define EntityReference_H
+#ifndef EntityReference_h
+#define EntityReference_h
 
 #include "ContainerNode.h"
 
 namespace WebCore {
 
-class EntityReference : public ContainerNode
-{
+class EntityReference : public ContainerNode {
 public:
-    EntityReference(Document*);
-    EntityReference(Document*, StringImpl* entityName);
+    EntityReference(Document*, const String& entityName);
 
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
     virtual PassRefPtr<Node> cloneNode(bool deep);
-    virtual bool childTypeAllowed(NodeType);
-    virtual String toString() const;
 
 private:
-    RefPtr<StringImpl> m_entityName;
+    String m_entityName;
 };
 
 } //namespace

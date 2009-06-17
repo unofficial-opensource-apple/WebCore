@@ -7,23 +7,15 @@
 
 #import <Foundation/Foundation.h>
 
+#import "WAKClipView.h"
 #import "WAKView.h"
 #import "WebCoreFrameView.h"
-
-@interface WAKClipView : WAKView
-{
-}
-- (void)setDocumentView:(WAKView *)aView;
-- (id)documentView;
-- (void)setCopiesOnScroll:(BOOL)flag;
-- (CGRect)documentVisibleRect;
-@end
 
 @interface WAKScroller : WAKView
 + (float)scrollerWidth;
 @end
 
-@interface WAKScrollView : WAKView <WebCoreFrameView>
+@interface WAKScrollView : WAKView <WebCoreFrameScrollView>
 {
     WAKView *_documentView;  // Only here so the ObjC instance stays around.
     id _delegate;

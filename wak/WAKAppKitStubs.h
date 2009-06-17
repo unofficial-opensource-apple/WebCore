@@ -1,9 +1,15 @@
 //
 //  WAKAppKitStubs.h
 //
-//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, 2008, Apple Inc.  All rights reserved.
 //
 /* Unicodes we reserve for function keys on the keyboard,  OpenStep reserves the range 0xF700-0xF8FF for this purpose.  The availability of various keys will be system dependent. */
+
+// Include Platform.h so that other applications including this file don't have to.
+#ifndef WAKAppKitStubs_h
+#define WAKAppKitStubs_h
+
+#import <JavaScriptCore/Platform.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <Foundation/Foundation.h>
 
@@ -223,3 +229,6 @@ void WKBeep(void);
 #ifdef __cplusplus
 }
 #endif
+
+#endif
+

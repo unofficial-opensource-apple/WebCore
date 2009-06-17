@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,27 +23,32 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef __wrap_contents_in_dummy_span_command_h__
-#define __wrap_contents_in_dummy_span_command_h__
+#ifndef WrapContentsInDummySpanCommand_h
+#define WrapContentsInDummySpanCommand_h
 
 #include "EditCommand.h"
 
 namespace WebCore {
 
-class WrapContentsInDummySpanCommand : public EditCommand
-{
+class HTMLElement;
+
+class WrapContentsInDummySpanCommand : public SimpleEditCommand {
 public:
-    WrapContentsInDummySpanCommand(Document *, Element *);
-    virtual ~WrapContentsInDummySpanCommand() { }
+    static PassRefPtr<WrapContentsInDummySpanCommand> create(PassRefPtr<Element> element)
+    {
+        return adoptRef(new WrapContentsInDummySpanCommand(element));
+    }
+
+private:
+    WrapContentsInDummySpanCommand(PassRefPtr<Element>);
 
     virtual void doApply();
     virtual void doUnapply();
 
-private:
     RefPtr<Element> m_element;
-    RefPtr<Element> m_dummySpan;
+    RefPtr<HTMLElement> m_dummySpan;
 };
 
 } // namespace WebCore
 
-#endif // __wrap_contents_in_dummy_span_command_h__
+#endif // WrapContentsInDummySpanCommand_h

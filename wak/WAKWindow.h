@@ -1,9 +1,11 @@
 //
 //  WAKWindow.h
 //
-//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, 2009 Apple Inc.  All rights reserved.
 //
-//  Objective-C wrapper around a WKWindow
+
+#ifndef WAKWindow_h
+#define WAKWindow_h
 
 #import <Foundation/Foundation.h>
 
@@ -16,10 +18,24 @@
 #import "WKWindow.h"
 #import "WKContentObservation.h"
 
+@class CALayer;
+
+typedef enum {
+    kWAKWindowTilingModeNormal,
+    kWAKWindowTilingModeMinimal,
+    kWAKWindowTilingModePanning,
+    kWAKWindowTilingModeZooming,
+    kWAKWindowTilingModeDisabled
+} WAKWindowTilingMode;
+
 @interface WAKWindow : WAKResponder
 {
     WKWindowRef window;
 }
+// Create layer hosted window
+- (id)initWithLayer:(CALayer *)hostLayer;
+// Create unhosted window for manual painting
+- (id)initWithFrame:(CGRect)frame;
 
 - (void)setContentView:(WAKView *)aView;
 - (WAKView *)contentView;
@@ -35,7 +51,34 @@
 - (BOOL)makeFirstResponder:(NSResponder *)aResponder;
 - (WKWindowRef)_windowRef;
 - (void)setFrame:(NSRect)frameRect display:(BOOL)flag;
-- (void)sendEvent:(GSEventRef)event;
-- (void)sendEvent:(GSEventRef)anEvent contentChange:(WKContentChange *)aContentChange;
+- (void)sendGSEvent:(id)aGSEventRef;
+- (void)sendGSEvent:(id)aGSEventRef contentChange:(WKContentChange *)aContentChange;
+
+- (id)attachedSheet;
+
+- (BOOL)_needsToResetDragMargins;
+- (void)_setNeedsToResetDragMargins:(BOOL)flag;
+
+// Tiling support
+- (void)layoutTiles;
+- (void)layoutTilesNow;
+- (void)setNeedsDisplay;
+- (void)setNeedsDisplayInRect:(CGRect)rect;
+- (BOOL)tilesOpaque;
+- (void)setTilesOpaque:(BOOL)opaque;
+- (CGRect)visibleRect;
+- (void)removeAllNonVisibleTiles;
+- (void)removeAllTiles;
+- (void)setTilingMode:(WAKWindowTilingMode)mode;
+- (WAKWindowTilingMode)tilingMode;
+- (BOOL)hasPendingDraw;
+
+- (BOOL)useOrientationDependentFontAntialiasing;
+- (void)setUseOrientationDependentFontAntialiasing:(BOOL)aa;
++ (BOOL)hasLandscapeOrientation;
++ (void)setOrientationProvider:(id)provider;
 
 @end
+
+#endif
+

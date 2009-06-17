@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  * Copyright (C) 2003 Apple Computer, Inc.
@@ -17,12 +15,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HTMLBaseElement_H
-#define HTMLBaseElement_H
+#ifndef HTMLBaseElement_h
+#define HTMLBaseElement_h
 
 #include "HTMLElement.h"
 
@@ -31,14 +29,14 @@ namespace WebCore {
 class HTMLBaseElement : public HTMLElement
 {
 public:
-    HTMLBaseElement(Document*);
+    HTMLBaseElement(const QualifiedName&, Document*);
     ~HTMLBaseElement();
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
     virtual int tagPriority() const { return 0; }
 
     String href() const { return m_href; }
-    String target() const { return m_target; }
+    virtual String target() const { return m_target; }
 
     virtual void parseMappedAttribute(MappedAttribute*);
     virtual void insertedIntoDocument();

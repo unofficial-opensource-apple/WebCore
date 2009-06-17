@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
@@ -18,14 +16,15 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HTML_HTMLOptionElementImpl_H
-#define HTML_HTMLOptionElementImpl_H
+#ifndef HTMLOptionElement_h
+#define HTMLOptionElement_h
 
-#include "HTMLGenericFormElement.h"
+#include "HTMLFormControlElement.h"
+#include "OptionElement.h"
 
 namespace WebCore {
 
@@ -33,13 +32,12 @@ class HTMLSelectElement;
 class HTMLFormElement;
 class MappedAttribute;
 
-class HTMLOptionElement : public HTMLGenericFormElement
-{
+class HTMLOptionElement : public HTMLFormControlElement, public OptionElement {
     friend class HTMLSelectElement;
     friend class RenderMenuList;
 
 public:
-    HTMLOptionElement(Document*, HTMLFormElement* = 0);
+    HTMLOptionElement(const QualifiedName&, Document*, HTMLFormElement* = 0);
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusOptional; }
     virtual int tagPriority() const { return 2; }
@@ -48,8 +46,7 @@ public:
     virtual bool rendererIsNeeded(RenderStyle*) { return false; }
     virtual void attach();
     virtual void detach();
-    virtual RenderStyle* renderStyle() const { return m_style; }
-    virtual void setRenderStyle(RenderStyle*);
+    virtual void setRenderStyle(PassRefPtr<RenderStyle>);
     
     virtual const AtomicString& type() const;
 
@@ -57,31 +54,37 @@ public:
     void setText(const String&, ExceptionCode&);
 
     int index() const;
-    void setIndex(int, ExceptionCode&);
     virtual void parseMappedAttribute(MappedAttribute*);
 
-    String value() const;
+    virtual String value() const;
     void setValue(const String&);
 
-    bool selected() const { return m_selected; }
+    virtual bool selected() const;
     void setSelected(bool);
+    virtual void setSelectedState(bool);
 
-    HTMLSelectElement* getSelect() const;
+    HTMLSelectElement* ownerSelectElement() const;
 
-    virtual void childrenChanged();
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
     bool defaultSelected() const;
     void setDefaultSelected(bool);
 
     String label() const;
     void setLabel(const String&);
-    
-    String optionText();
 
+    virtual String textIndentedToRespectGroupLabel() const;
+
+    virtual bool disabled() const;
+    
+    virtual void insertedIntoDocument();
+    virtual void accessKeyAction(bool);
+    
 private:
-    String m_value;
-    bool m_selected;
-    RenderStyle* m_style;
+    virtual RenderStyle* nonRendererRenderStyle() const;
+
+    OptionElementData m_data;
+    RefPtr<RenderStyle> m_style;
 };
 
 } //namespace

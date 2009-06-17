@@ -1,8 +1,6 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,20 +14,29 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSValue_H
-#define CSSValue_H
+#ifndef CSSValue_h
+#define CSSValue_h
 
 #include "StyleBase.h"
 
+#include "CSSParserValues.h"
+#include "KURLHash.h"
+#include <wtf/ListHashSet.h>
+#include <wtf/RefPtr.h>
+
 namespace WebCore {
 
-class CSSValue : public StyleBase
-{
+class CSSStyleSheet;
+
+typedef int ExceptionCode;
+
+class CSSValue : public RefCounted<CSSValue> {
 public:
+    // FIXME: Change name to Type.
     enum UnitTypes {
         CSS_INHERIT = 0,
         CSS_PRIMITIVE_VALUE = 1,
@@ -38,16 +45,34 @@ public:
         CSS_INITIAL = 4
     };
 
-    CSSValue() : StyleBase(0) { }
+    virtual ~CSSValue() { }
 
+    // FIXME: Change this to return UnitTypes.
     virtual unsigned short cssValueType() const { return CSS_CUSTOM; }
-    virtual String cssText() const = 0;
-    void setCssText(const String&) { } // FIXME: Not implemented.
 
-    virtual bool isValue() { return true; }
-    virtual bool isFontValue() { return false; }
+    virtual String cssText() const = 0;
+    void setCssText(const String&, ExceptionCode&) { } // FIXME: Not implemented.
+
+    virtual bool isFontValue() const { return false; }
+    virtual bool isImageGeneratorValue() const { return false; }
+    virtual bool isImageValue() const { return false; }
+    virtual bool isImplicitInitialValue() const { return false; }
+    virtual bool isPrimitiveValue() const { return false; }
+    virtual bool isTimingFunctionValue() const { return false; }
+    virtual bool isValueList() const { return false; }
+    virtual bool isWebKitCSSTransformValue() const { return false; }
+
+#if ENABLE(SVG)
+    virtual bool isSVGColor() const { return false; }
+    virtual bool isSVGPaint() const { return false; }
+#endif
+
+    virtual bool isVariableDependentValue() const { return false; }
+    virtual CSSParserValue parserValue() const { ASSERT_NOT_REACHED(); return CSSParserValue(); }
+
+    virtual void addSubresourceStyleURLs(ListHashSet<KURL>&, const CSSStyleSheet*) { }
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSValue_h

@@ -43,7 +43,7 @@ public:
     Selection();
 
     Selection(const Position&, EAffinity);
-    Selection(const Position&, const Position&, EAffinity);
+    Selection(const Position&, const Position&, EAffinity = SEL_DEFAULT_AFFINITY);
 
     Selection(const Range*, EAffinity = SEL_DEFAULT_AFFINITY);
     
@@ -77,6 +77,8 @@ public:
 
     bool isBaseFirst() const { return m_baseIsFirst; }
 
+    void appendTrailingWhitespace();
+
     bool expandUsingGranularity(TextGranularity granularity);
     TextGranularity granularity() const { return m_granularity; }
 
@@ -85,13 +87,16 @@ public:
     Element* rootEditableElement() const;
     bool isContentEditable() const;
     bool isContentRichlyEditable() const;
-
+    Node* shadowTreeRootNode() const;
+    
     void debugPosition() const;
 
 #ifndef NDEBUG
     void formatForDebugger(char* buffer, unsigned length) const;
     void showTreeForThis() const;
 #endif
+
+    void setWithoutValidation(const Position&, const Position&);
 
 private:
     void validate();
@@ -112,7 +117,7 @@ private:
 
 inline bool operator==(const Selection& a, const Selection& b)
 {
-    return a.start() == b.start() && a.end() == b.end() && a.affinity() == b.affinity() && a.granularity() == b.granularity();
+    return a.start() == b.start() && a.end() == b.end() && a.affinity() == b.affinity() && a.granularity() == b.granularity() && a.isBaseFirst() == b.isBaseFirst();
 }
 
 inline bool operator!=(const Selection& a, const Selection& b)

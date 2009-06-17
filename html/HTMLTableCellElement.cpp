@@ -20,8 +20,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "HTMLTableCellElement.h"
@@ -32,7 +32,13 @@
 #include "HTMLTableElement.h"
 #include "RenderTableCell.h"
 
+using std::max;
+using std::min;
+
 namespace WebCore {
+
+// Clamp rowspan at 8k to match Firefox.
+static const int maxRowspan = 8190;
 
 using namespace HTMLNames;
 
@@ -82,46 +88,42 @@ void HTMLTableCellElement::parseMappedAttribute(MappedAttribute *attr)
 {
     if (attr->name() == rowspanAttr) {
         rSpan = !attr->isNull() ? attr->value().toInt() : 1;
-        if (rSpan < 1) rSpan = 1;
+        rSpan = max(1, min(rSpan, maxRowspan));
         if (renderer() && renderer()->isTableCell())
             static_cast<RenderTableCell*>(renderer())->updateFromElement();
     } else if (attr->name() == colspanAttr) {
         cSpan = !attr->isNull() ? attr->value().toInt() : 1;
-        if (cSpan < 1) cSpan = 1;
+        cSpan = max(1, cSpan);
         if (renderer() && renderer()->isTableCell())
             static_cast<RenderTableCell*>(renderer())->updateFromElement();
     } else if (attr->name() == nowrapAttr) {
         if (!attr->isNull())
-            addCSSProperty(attr, CSS_PROP_WHITE_SPACE, CSS_VAL__WEBKIT_NOWRAP);
+            addCSSProperty(attr, CSSPropertyWhiteSpace, CSSValueWebkitNowrap);
     } else if (attr->name() == widthAttr) {
         if (!attr->value().isEmpty()) {
             int widthInt = attr->value().toInt();
             if (widthInt > 0) // width="0" is ignored for compatibility with WinIE.
-                addCSSLength(attr, CSS_PROP_WIDTH, attr->value());
+                addCSSLength(attr, CSSPropertyWidth, attr->value());
         }
     } else if (attr->name() == heightAttr) {
         if (!attr->value().isEmpty()) {
             int heightInt = attr->value().toInt();
             if (heightInt > 0) // height="0" is ignored for compatibility with WinIE.
-                addCSSLength(attr, CSS_PROP_HEIGHT, attr->value());
+                addCSSLength(attr, CSSPropertyHeight, attr->value());
         }
     } else
         HTMLTablePartElement::parseMappedAttribute(attr);
 }
 
 // used by table cells to share style decls created by the enclosing table.
-CSSMutableStyleDeclaration* HTMLTableCellElement::additionalAttributeStyleDecl()
+void HTMLTableCellElement::additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>& results)
 {
     Node* p = parentNode();
     while (p && !p->hasTagName(tableTag))
         p = p->parentNode();
-
-    if (p) {
-        HTMLTableElement* table = static_cast<HTMLTableElement*>(p);
-        return table->getSharedCellDecl();
-    }
-
-    return 0;
+    if (!p)
+        return;
+    static_cast<HTMLTableElement*>(p)->addSharedCellDecls(results);
 }
 
 bool HTMLTableCellElement::isURLAttribute(Attribute *attr) const
@@ -257,6 +259,13 @@ String HTMLTableCellElement::width() const
 void HTMLTableCellElement::setWidth(const String &value)
 {
     setAttribute(widthAttr, value);
+}
+
+void HTMLTableCellElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) const
+{
+    HTMLTablePartElement::addSubresourceAttributeURLs(urls);
+
+    addSubresourceURL(urls, document()->completeURL(getAttribute(backgroundAttr)));
 }
 
 }

@@ -1,11 +1,9 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * (C) 1999 Lars Knoll (knoll@kde.org)
  * (C) 2000 Gunnstein Lye (gunnstein@netcom.no)
  * (C) 2000 Frederik Holljen (frederik.holljen@hig.no)
  * (C) 2001 Peter Kelly (pmk@post.com)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,39 +17,38 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef DOM2_RangeImpl_h_
-#define DOM2_RangeImpl_h_
+#ifndef Range_h
+#define Range_h
 
-#include "Shared.h"
-#include <wtf/Forward.h>
-#include <wtf/RefPtr.h>
+#include "RangeBoundaryPoint.h"
+#include <wtf/RefCounted.h>
+#include <wtf/Vector.h>
+
+#include "SelectionRect.h"
 
 namespace WebCore {
 
-typedef int ExceptionCode;
-
 class DocumentFragment;
-class Document;
-class Node;
-class Position;
-class String;
+class NodeWithIndex;
+class Text;
 
-const int RangeExceptionOffset = 200;
-const int RangeExceptionMax = 299;
-enum RangeExceptionCode { BAD_BOUNDARYPOINTS_ERR = RangeExceptionOffset + 1, INVALID_NODE_TYPE_ERR };
-
-class Range : public Shared<Range>
-{
+class Range : public RefCounted<Range> {
 public:
-    Range(Document*);
-    Range(Document*, Node* startContainer, int startOffset, Node* endContainer, int endOffset);
-    Range(Document*, const Position&, const Position&);
+    static PassRefPtr<Range> create(PassRefPtr<Document>);
+    static PassRefPtr<Range> create(PassRefPtr<Document>, PassRefPtr<Node> startContainer, int startOffset, PassRefPtr<Node> endContainer, int endOffset);
+    static PassRefPtr<Range> create(PassRefPtr<Document>, const Position&, const Position&);
     ~Range();
+
+    Document* ownerDocument() const { return m_ownerDocument.get(); }
+    Node* startContainer() const { return m_start.container(); }
+    int startOffset() const { return m_start.offset(); }
+    Node* endContainer() const { return m_end.container(); }
+    int endOffset() const { return m_end.offset(); }
 
     Node* startContainer(ExceptionCode&) const;
     int startOffset(ExceptionCode&) const;
@@ -61,22 +58,24 @@ public:
 
     Node* commonAncestorContainer(ExceptionCode&) const;
     static Node* commonAncestorContainer(Node* containerA, Node* containerB);
-    void setStart(Node* container, int offset, ExceptionCode&);
-    void setEnd(Node* container, int offset, ExceptionCode&);
+    void setStart(PassRefPtr<Node> container, int offset, ExceptionCode&);
+    void setEnd(PassRefPtr<Node> container, int offset, ExceptionCode&);
     void collapse(bool toStart, ExceptionCode&);
     bool isPointInRange(Node* refNode, int offset, ExceptionCode& ec);
     short comparePoint(Node* refNode, int offset, ExceptionCode& ec);
+    enum CompareResults { NODE_BEFORE, NODE_AFTER, NODE_BEFORE_AND_AFTER, NODE_INSIDE };
+    CompareResults compareNode(Node* refNode, ExceptionCode&);
     enum CompareHow { START_TO_START, START_TO_END, END_TO_END, END_TO_START };
     short compareBoundaryPoints(CompareHow, const Range* sourceRange, ExceptionCode&) const;
     static short compareBoundaryPoints(Node* containerA, int offsetA, Node* containerB, int offsetB);
     static short compareBoundaryPoints(const Position&, const Position&);
     bool boundaryPointsValid() const;
+    bool intersectsNode(Node* refNode, ExceptionCode&);
     void deleteContents(ExceptionCode&);
     PassRefPtr<DocumentFragment> extractContents(ExceptionCode&);
     PassRefPtr<DocumentFragment> cloneContents(ExceptionCode&);
     void insertNode(PassRefPtr<Node>, ExceptionCode&);
     String toString(ExceptionCode&) const;
-    String toString(bool convertBRsToNewlines, ExceptionCode&) const;
 
     String toHTML() const;
     String text() const;
@@ -84,7 +83,6 @@ public:
     PassRefPtr<DocumentFragment> createContextualFragment(const String& html, ExceptionCode&) const;
 
     void detach(ExceptionCode&);
-    bool isDetached() const;
     PassRefPtr<Range> cloneRange(ExceptionCode&) const;
 
     void setStartAfter(Node*, ExceptionCode&);
@@ -95,39 +93,51 @@ public:
     void surroundContents(PassRefPtr<Node>, ExceptionCode&);
     void setStartBefore(Node*, ExceptionCode&);
 
-    enum ActionType {
-        DELETE_CONTENTS,
-        EXTRACT_CONTENTS,
-        CLONE_CONTENTS
-    };
-    PassRefPtr<DocumentFragment> processContents(ActionType, ExceptionCode&);
+    const Position& startPosition() const { return m_start.position(); }
+    const Position& endPosition() const { return m_end.position(); }
 
-    Position startPosition() const;
-    Position endPosition() const;
-
-    Node* startNode() const;
-    Node* pastEndNode() const;
+    Node* firstNode() const;
+    Node* pastLastNode() const;
 
     Position editingStartPosition() const;
 
-#if !NDEBUG
-    void formatForDebugger(char *buffer, unsigned length) const;
+    Node* shadowTreeRootNode() const;
+
+    IntRect boundingBox();
+    void addLineBoxRects(Vector<IntRect>&, bool useSelectionHeight = false);
+    void collectSelectionRects(Vector<SelectionRect>&);
+
+    void nodeChildrenChanged(ContainerNode*);
+    void nodeWillBeRemoved(Node*);
+
+    void textInserted(Node*, unsigned offset, unsigned length);
+    void textRemoved(Node*, unsigned offset, unsigned length);
+    void textNodesMerged(NodeWithIndex& oldNode, unsigned offset);
+    void textNodeSplit(Text* oldNode);
+
+#ifndef NDEBUG
+    void formatForDebugger(char* buffer, unsigned length) const;
 #endif
 
     Document* document() const { return m_ownerDocument.get(); }
 
 private:
-    RefPtr<Document> m_ownerDocument;
-    RefPtr<Node> m_startContainer;
-    unsigned m_startOffset;
-    RefPtr<Node> m_endContainer;
-    unsigned m_endOffset;
-    bool m_detached;
+    Range(PassRefPtr<Document>);
+    Range(PassRefPtr<Document>, PassRefPtr<Node> startContainer, int startOffset, PassRefPtr<Node> endContainer, int endOffset);
 
-    void checkNodeWOffset(Node*, int offset, ExceptionCode&) const;
+    Node* checkNodeWOffset(Node*, int offset, ExceptionCode&) const;
     void checkNodeBA(Node*, ExceptionCode&) const;
     void checkDeleteExtract(ExceptionCode&);
     bool containedByReadOnly() const;
+    int maxStartOffset() const;
+    int maxEndOffset() const;
+
+    enum ActionType { DELETE_CONTENTS, EXTRACT_CONTENTS, CLONE_CONTENTS };
+    PassRefPtr<DocumentFragment> processContents(ActionType, ExceptionCode&);
+
+    RefPtr<Document> m_ownerDocument;
+    RangeBoundaryPoint m_start;
+    RangeBoundaryPoint m_end;
 };
 
 PassRefPtr<Range> rangeOfContents(Node*);

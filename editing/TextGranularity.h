@@ -23,14 +23,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef EDITING_TEXT_GRANULARITY_H
-#define EDITING_TEXT_GRANULARITY_H
+#ifndef TextGranularity_h
+#define TextGranularity_h
 
 namespace WebCore {
 
 // FIXME: This really should be broken up into more than one concept.
-// Frame doesn't neeed the 3 boundaries in this enum.
-// NOTE: This MUST match WebBridgeSelectionGranularity
+// Frame doesn't need the 3 boundaries in this enum.
 enum TextGranularity {
     CharacterGranularity,
     WordGranularity,

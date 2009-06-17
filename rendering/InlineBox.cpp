@@ -1,7 +1,5 @@
-/**
-* This file is part of the html renderer for KDE.
- *
- * Copyright (C) 2003, 2006 Apple Computer, Inc.
+/*
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,15 +13,18 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "InlineBox.h"
 
+#include "HitTestResult.h"
 #include "InlineFlowBox.h"
-#include "RootInlineBox.h"
 #include "RenderArena.h"
+#include "RenderBox.h"
+#include "RootInlineBox.h"
 
 using namespace std;
 
@@ -31,6 +32,16 @@ namespace WebCore {
     
 #ifndef NDEBUG
 static bool inInlineBoxDetach;
+#endif
+
+#ifndef NDEBUG
+
+InlineBox::~InlineBox()
+{
+    if (!m_hasBadParent && m_parent)
+        m_parent->setHasBadChildList();
+}
+
 #endif
 
 void InlineBox::remove()
@@ -60,7 +71,7 @@ void* InlineBox::operator new(size_t sz, RenderArena* renderArena) throw()
 
 void InlineBox::operator delete(void* ptr, size_t sz)
 {
-    assert(inInlineBoxDetach);
+    ASSERT(inInlineBoxDetach);
 
     // Stash size where destroy can find it.
     *(size_t *)ptr = sz;
@@ -76,12 +87,12 @@ void InlineBox::showTreeForThis() const
 
 int InlineBox::caretMinOffset() const 
 { 
-    return 0; 
+    return m_object->caretMinOffset(); 
 }
 
 int InlineBox::caretMaxOffset() const 
 { 
-    return 1; 
+    return m_object->caretMaxOffset(); 
 }
 
 unsigned InlineBox::caretMaxRenderedOffset() const 
@@ -98,44 +109,48 @@ void InlineBox::dirtyLineBoxes()
 
 void InlineBox::deleteLine(RenderArena* arena)
 {
-    if (!m_extracted)
-        m_object->setInlineBoxWrapper(0);
+    if (!m_extracted && m_object->isBox())
+        toRenderBox(m_object)->setInlineBoxWrapper(0);
     destroy(arena);
 }
 
 void InlineBox::extractLine()
 {
     m_extracted = true;
-    m_object->setInlineBoxWrapper(0);
+    if (m_object->isBox())
+        toRenderBox(m_object)->setInlineBoxWrapper(0);
 }
 
 void InlineBox::attachLine()
 {
     m_extracted = false;
-    m_object->setInlineBoxWrapper(this);
+    if (m_object->isBox())
+        toRenderBox(m_object)->setInlineBoxWrapper(this);
 }
 
 void InlineBox::adjustPosition(int dx, int dy)
 {
     m_x += dx;
     m_y += dy;
-    if (m_object->isReplaced() || m_object->isBR())
-        m_object->setPos(m_object->xPos() + dx, m_object->yPos() + dy);
+    if (m_object->isReplaced()) {
+        RenderBox* box = toRenderBox(m_object);
+        box->move(dx, dy);
+    }
 }
 
-void InlineBox::paint(RenderObject::PaintInfo& i, int tx, int ty)
+void InlineBox::paint(RenderObject::PaintInfo& paintInfo, int tx, int ty)
 {
-    if (!object()->shouldPaintWithinRoot(i) || (i.phase != PaintPhaseForeground && i.phase != PaintPhaseSelection))
+    if (!object()->shouldPaintWithinRoot(paintInfo) || (paintInfo.phase != PaintPhaseForeground && paintInfo.phase != PaintPhaseSelection))
         return;
 
     // Paint all phases of replaced elements atomically, as though the replaced element established its
     // own stacking context.  (See Appendix E.2, section 6.4 on inline block/table elements in the CSS2.1
     // specification.)
-    bool paintSelectionOnly = i.phase == PaintPhaseSelection;
-    RenderObject::PaintInfo info(i);
-    info.phase = paintSelectionOnly ? i.phase : PaintPhaseBlockBackground;
+    bool preservePhase = paintInfo.phase == PaintPhaseSelection || paintInfo.phase == PaintPhaseTextClip;
+    RenderObject::PaintInfo info(paintInfo);
+    info.phase = preservePhase ? paintInfo.phase : PaintPhaseBlockBackground;
     object()->paint(info, tx, ty);
-    if (!paintSelectionOnly) {
+    if (!preservePhase) {
         info.phase = PaintPhaseChildBlockBackgrounds;
         object()->paint(info, tx, ty);
         info.phase = PaintPhaseFloat;
@@ -147,24 +162,12 @@ void InlineBox::paint(RenderObject::PaintInfo& i, int tx, int ty)
     }
 }
 
-bool InlineBox::nodeAtPoint(RenderObject::NodeInfo& i, int x, int y, int tx, int ty)
+bool InlineBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, int x, int y, int tx, int ty)
 {
     // Hit test all phases of replaced elements atomically, as though the replaced element established its
     // own stacking context.  (See Appendix E.2, section 6.4 on inline block/table elements in the CSS2.1
     // specification.)
-    return object()->hitTest(i, x, y, tx, ty);
-}
-
-bool InlineBox::isChildOfParent()
-{
-    if (!m_parent)
-        return true;
-
-    for (InlineBox* box = m_parent->firstChild(); box; box = box->nextOnLine())
-        if (box == this)
-            return true;
-
-    return false;
+    return object()->hitTest(request, result, IntPoint(x, y), tx, ty);
 }
 
 RootInlineBox* InlineBox::root()
@@ -177,24 +180,32 @@ RootInlineBox* InlineBox::root()
 
 bool InlineBox::nextOnLineExists() const
 {
-    if (!parent())
-        return false;
-    
-    if (nextOnLine())
-        return true;
-    
-    return parent()->nextOnLineExists();
+    if (!m_determinedIfNextOnLineExists) {
+        m_determinedIfNextOnLineExists = true;
+
+        if (!parent())
+            m_nextOnLineExists = false;
+        else if (nextOnLine())
+            m_nextOnLineExists = true;
+        else
+            m_nextOnLineExists = parent()->nextOnLineExists();
+    }
+    return m_nextOnLineExists;
 }
 
 bool InlineBox::prevOnLineExists() const
 {
-    if (!parent())
-        return false;
-    
-    if (prevOnLine())
-        return true;
-    
-    return parent()->prevOnLineExists();
+    if (!m_determinedIfPrevOnLineExists) {
+        m_determinedIfPrevOnLineExists = true;
+        
+        if (!parent())
+            m_prevOnLineExists = false;
+        else if (prevOnLine())
+            m_prevOnLineExists = true;
+        else
+            m_prevOnLineExists = parent()->prevOnLineExists();
+    }
+    return m_prevOnLineExists;
 }
 
 InlineBox* InlineBox::firstLeafChild()
@@ -233,13 +244,13 @@ bool InlineBox::canAccommodateEllipsis(bool ltr, int blockEdge, int ellipsisWidt
     return !(boxRect.intersects(ellipsisRect));
 }
 
-int InlineBox::placeEllipsisBox(bool ltr, int blockEdge, int ellipsisWidth, bool&)
+int InlineBox::placeEllipsisBox(bool, int, int, bool&)
 {
     // Use -1 to mean "we didn't set the position."
     return -1;
 }
 
-}
+} // namespace WebCore
 
 #ifndef NDEBUG
 

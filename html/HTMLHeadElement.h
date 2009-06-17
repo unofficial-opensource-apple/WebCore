@@ -18,13 +18,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLHeadElement_H
-#define HTMLHeadElement_H
+#ifndef HTMLHeadElement_h
+#define HTMLHeadElement_h
 
 #include "HTMLElement.h"
 
@@ -33,11 +33,12 @@ namespace WebCore {
 class HTMLHeadElement : public HTMLElement
 {
 public:
-    HTMLHeadElement(Document*);
+    HTMLHeadElement(const QualifiedName&, Document*);
     ~HTMLHeadElement();
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusOptional; }
     virtual int tagPriority() const { return 10; }
+    virtual bool childAllowed(Node* newChild);
     virtual bool checkDTD(const Node* newChild);
 
     String profile() const;

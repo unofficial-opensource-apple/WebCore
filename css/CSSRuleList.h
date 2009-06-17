@@ -17,40 +17,52 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSRuleList_H
-#define CSSRuleList_H
+#ifndef CSSRuleList_h
+#define CSSRuleList_h
 
-#include "Shared.h"
-#include "DeprecatedPtrList.h"
+#include <wtf/PassRefPtr.h>
+#include <wtf/RefCounted.h>
+#include <wtf/RefPtr.h>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
 class CSSRule;
 class StyleList;
 
-class CSSRuleList : public Shared<CSSRuleList>
-{
+class CSSRuleList : public RefCounted<CSSRuleList> {
 public:
-    CSSRuleList();
-    CSSRuleList(StyleList*);
+    static PassRefPtr<CSSRuleList> create(StyleList* list, bool omitCharsetRules = false)
+    {
+        return adoptRef(new CSSRuleList(list, omitCharsetRules));
+    }
+    static PassRefPtr<CSSRuleList> create()
+    {
+        return adoptRef(new CSSRuleList);
+    }
     ~CSSRuleList();
 
-    unsigned length() const { return m_lstCSSRules.count(); }
-    CSSRule* item (unsigned index) { return m_lstCSSRules.at(index); }
+    unsigned length() const;
+    CSSRule* item(unsigned index);
 
-    /* not part of the DOM */
-    unsigned insertRule (CSSRule* rule, unsigned index);
-    void deleteRule (unsigned index);
-    void append(CSSRule* rule);
+    // FIXME: Not part of the DOM.  Only used by media rules.  We should be able to remove them if we changed media rules to work
+    // as StyleLists instead.
+    unsigned insertRule(CSSRule*, unsigned index);
+    void deleteRule(unsigned index);
+    void append(CSSRule*);
 
-protected:
-    DeprecatedPtrList<CSSRule> m_lstCSSRules;
+private:
+    CSSRuleList();
+    CSSRuleList(StyleList*, bool omitCharsetRules);
+
+    RefPtr<StyleList> m_list;
+    Vector<RefPtr<CSSRule> > m_lstCSSRules; // FIXME: Want to eliminate, but used by IE rules() extension and still used by media rules.
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSRuleList_h

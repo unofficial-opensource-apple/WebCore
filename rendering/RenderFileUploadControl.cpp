@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc.
+ * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,19 +13,21 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #include "config.h"
 #include "RenderFileUploadControl.h"
 
+#include "FileList.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
 #include "LocalizedStrings.h"
+#include "Page.h"
 #include "RenderButton.h"
 #include "RenderText.h"
 #include "RenderTheme.h"
@@ -68,25 +70,30 @@ RenderFileUploadControl::~RenderFileUploadControl()
         m_button->detach();
 }
 
-void RenderFileUploadControl::setStyle(RenderStyle* newStyle)
+void RenderFileUploadControl::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
-    // Force text-align to match the direction
-    if (newStyle->direction() == LTR)
-        newStyle->setTextAlign(LEFT);
-    else
-        newStyle->setTextAlign(RIGHT);
-
-    RenderBlock::setStyle(newStyle);
+    RenderBlock::styleDidChange(diff, oldStyle);
     if (m_button)
-        m_button->renderer()->setStyle(createButtonStyle(newStyle));
+        m_button->renderer()->setStyle(createButtonStyle(style()));
 
     setReplaced(isInline());
 }
 
 void RenderFileUploadControl::valueChanged()
 {
-    static_cast<HTMLInputElement*>(node())->onChange();
-    repaint();
+    // onChange may destroy this renderer
+
+    HTMLInputElement* inputElement = static_cast<HTMLInputElement*>(node());
+    inputElement->onChange();
+ 
+    // only repaint if it doesn't seem we have been destroyed
+        repaint();
+}
+
+bool RenderFileUploadControl::allowsMultipleFiles()
+{
+    HTMLInputElement* input = static_cast<HTMLInputElement*>(node());
+    return !input->getAttribute(multipleAttr).isNull();
 }
 
 void RenderFileUploadControl::click()
@@ -95,34 +102,38 @@ void RenderFileUploadControl::click()
 
 void RenderFileUploadControl::updateFromElement()
 {
+    HTMLInputElement* inputElement = static_cast<HTMLInputElement*>(node());
+    ASSERT(inputElement->inputType() == HTMLInputElement::FILE);
+    
     if (!m_button) {
-        m_button = new HTMLFileUploadInnerButtonElement(document(), node());
+        m_button = new HTMLFileUploadInnerButtonElement(document(), inputElement);
         m_button->setInputType("button");
-        //FIXME: use fileButtonChooseFileLabel()
-        m_button->setValue("Choose File");
-        RenderStyle* buttonStyle = createButtonStyle(style());
-        RenderObject* renderer = m_button->createRenderer(renderArena(), buttonStyle);
+        m_button->setValue(fileButtonChooseFileLabel());
+        RefPtr<RenderStyle> buttonStyle = createButtonStyle(style());
+        RenderObject* renderer = m_button->createRenderer(renderArena(), buttonStyle.get());
         m_button->setRenderer(renderer);
-        renderer->setStyle(buttonStyle);
+        renderer->setStyle(buttonStyle.release());
         renderer->updateFromElement();
         m_button->setAttached();
         m_button->setInDocument(true);
 
-        addChild(m_button->renderer());
+        addChild(renderer);
     }
+
     m_button->setDisabled(!theme()->isEnabled(this));
+
 }
 
 int RenderFileUploadControl::maxFilenameWidth() const
 {
-    return max(0, contentWidth() - m_button->renderer()->width() - afterButtonSpacing);
+    return max(0, contentWidth() - m_button->renderBox()->width() - afterButtonSpacing);
 }
 
-RenderStyle* RenderFileUploadControl::createButtonStyle(RenderStyle* parentStyle) const
+PassRefPtr<RenderStyle> RenderFileUploadControl::createButtonStyle(const RenderStyle* parentStyle) const
 {
-    RenderStyle* style = getPseudoStyle(RenderStyle::FILE_UPLOAD_BUTTON);
+    RefPtr<RenderStyle> style = getCachedPseudoStyle(RenderStyle::FILE_UPLOAD_BUTTON);
     if (!style) {
-        style = new (renderArena()) RenderStyle;
+        style = RenderStyle::create();
         if (parentStyle)
             style->inheritFrom(parentStyle);
     }
@@ -131,52 +142,73 @@ RenderStyle* RenderFileUploadControl::createButtonStyle(RenderStyle* parentStyle
     // without this setWhiteSpace.
     style->setWhiteSpace(NOWRAP);
 
-    return style;
+    return style.release();
 }
 
 void RenderFileUploadControl::paintObject(PaintInfo& paintInfo, int tx, int ty)
 {
+    if (style()->visibility() != VISIBLE)
+        return;
+    
+
     // Paint the children.
     RenderBlock::paintObject(paintInfo, tx, ty);
+
 }
 
-void RenderFileUploadControl::calcMinMaxWidth()
+void RenderFileUploadControl::calcPrefWidths()
 {
-    m_minWidth = 0;
-    m_maxWidth = 0;
+    ASSERT(prefWidthsDirty());
+
+    m_minPrefWidth = 0;
+    m_maxPrefWidth = 0;
 
     if (style()->width().isFixed() && style()->width().value() > 0)
-        m_minWidth = m_maxWidth = calcContentBoxWidth(style()->width().value());
+        m_minPrefWidth = m_maxPrefWidth = calcContentBoxWidth(style()->width().value());
     else {
         // Figure out how big the filename space needs to be for a given number of characters
         // (using "0" as the nominal character).
         const UChar ch = '0';
-        float charWidth = style()->font().floatWidth(TextRun(&ch, 1), TextStyle(0, 0, 0, false, false, false));
-        m_maxWidth = (int)ceilf(charWidth * defaultWidthNumChars);
+        float charWidth = style()->font().floatWidth(TextRun(&ch, 1, false, 0, 0, false, false, false));
+        m_maxPrefWidth = (int)ceilf(charWidth * defaultWidthNumChars);
     }
 
     if (style()->minWidth().isFixed() && style()->minWidth().value() > 0) {
-        m_maxWidth = max(m_maxWidth, calcContentBoxWidth(style()->minWidth().value()));
-        m_minWidth = max(m_minWidth, calcContentBoxWidth(style()->minWidth().value()));
+        m_maxPrefWidth = max(m_maxPrefWidth, calcContentBoxWidth(style()->minWidth().value()));
+        m_minPrefWidth = max(m_minPrefWidth, calcContentBoxWidth(style()->minWidth().value()));
     } else if (style()->width().isPercent() || (style()->width().isAuto() && style()->height().isPercent()))
-        m_minWidth = 0;
+        m_minPrefWidth = 0;
     else
-        m_minWidth = m_maxWidth;
+        m_minPrefWidth = m_maxPrefWidth;
 
     if (style()->maxWidth().isFixed() && style()->maxWidth().value() != undefinedLength) {
-        m_maxWidth = min(m_maxWidth, calcContentBoxWidth(style()->maxWidth().value()));
-        m_minWidth = min(m_minWidth, calcContentBoxWidth(style()->maxWidth().value()));
+        m_maxPrefWidth = min(m_maxPrefWidth, calcContentBoxWidth(style()->maxWidth().value()));
+        m_minPrefWidth = min(m_minPrefWidth, calcContentBoxWidth(style()->maxWidth().value()));
     }
 
     int toAdd = paddingLeft() + paddingRight() + borderLeft() + borderRight();
-    m_minWidth += toAdd;
-    m_maxWidth += toAdd;
+    m_minPrefWidth += toAdd;
+    m_maxPrefWidth += toAdd;
 
-    setMinMaxKnown();
+    setPrefWidthsDirty(false);
 }
 
+
+String RenderFileUploadControl::buttonValue()
+{
+    if (!m_button)
+        return String();
+    
+    return m_button->value();
+}
+
+String RenderFileUploadControl::fileTextValue()
+{
+    return "";
+}
+    
 HTMLFileUploadInnerButtonElement::HTMLFileUploadInnerButtonElement(Document* doc, Node* shadowParent)
-    : HTMLInputElement(doc)
+    : HTMLInputElement(inputTag, doc)
     , m_shadowParent(shadowParent)
 {
 }

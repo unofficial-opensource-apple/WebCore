@@ -1,11 +1,10 @@
-/* This file is part of the KDE project
-
+/*
    Copyright (C) 1997 Martin Jones (mjones@kde.org)
              (C) 1998 Waldo Bastian (bastian@kde.org)
              (C) 1998, 1999 Torben Weis (weis@kde.org)
              (C) 1999 Lars Knoll (knoll@kde.org)
              (C) 1999 Antti Koivisto (koivisto@kde.org)
-   Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+   Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -19,236 +18,262 @@
 
    You should have received a copy of the GNU Library General Public License
    along with this library; see the file COPYING.LIB.  If not, write to
-   the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
-   Boston, MA 02111-1307, USA.
+   the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+   Boston, MA 02110-1301, USA.
 */
 
-#ifndef FrameView_H
-#define FrameView_H
+#ifndef FrameView_h
+#define FrameView_h
 
-#include "ScrollView.h"
 #include "IntSize.h"
-#include "PlatformString.h"
+#include "RenderLayer.h"
+#include "ScrollView.h"
+#include <wtf/Forward.h>
+#include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
-class AtomicString;
-class CSSProperty;
-class CSSStyleSelector;
-class Clipboard;
-class DeprecatedStringList;
-class Document;
-class Element;
+class Color;
 class Event;
 class EventTargetNode;
 class Frame;
 class FrameViewPrivate;
-class GraphicsContext;
-class HTMLAnchorElement;
-class HTMLDocument;
-class HTMLElement;
-class HTMLFormElement;
-class HTMLFrameSetElement;
-class HTMLGenericFormElement;
-class HTMLTitleElement;
-class InlineBox;
 class IntRect;
-class PlatformKeyboardEvent;
-class FrameMac;
-class PlatformMouseEvent;
-class MouseEventWithHitTestResults;
 class Node;
-class RenderBox;
-class RenderView;
-class RenderLineEdit;
+class PlatformMouseEvent;
+class RenderLayer;
 class RenderObject;
-class RenderPart;
 class RenderPartObject;
-class RenderStyle;
-class RenderWidget;
-class PlatformWheelEvent;
+class ScheduledEvent;
 class String;
 
 template <typename T> class Timer;
 
-void applyRule(CSSProperty*);
-
 class FrameView : public ScrollView {
-    friend class CSSStyleSelector;
-    friend class Document;
-    friend class Frame;
-    friend class HTMLAnchorElement;
-    friend class HTMLDocument;
-    friend class HTMLFormElement;
-    friend class HTMLGenericFormElement;
-    friend class HTMLTitleElement;
-    friend class FrameMac;
-    friend class RenderBox;
-    friend class RenderView;
-    friend class RenderLineEdit;
-    friend class RenderObject;
-    friend class RenderPart;
-    friend class RenderPartObject;
-    friend class RenderWidget;
-    friend void applyRule(CSSProperty *prop);
-
 public:
+    friend class RenderView;
+
     FrameView(Frame*);
+    FrameView(Frame*, const IntSize& initialSize);
+
     virtual ~FrameView();
 
+    virtual HostWindow* hostWindow() const;
+    
+    virtual void invalidateRect(const IntRect&);
+
     Frame* frame() const { return m_frame.get(); }
-
-    int frameWidth() const { return m_size.width(); }
-
-    /**
-     * Gets/Sets the margin width/height
-     *
-     * A return value of -1 means the default value will be used.
-     */
-    int marginWidth() const { return m_margins.width(); }
-    int marginHeight() { return  m_margins.height(); }
-    void setMarginWidth(int);
-    void setMarginHeight(int);
-
-    virtual void setVScrollBarMode(ScrollBarMode);
-    virtual void setHScrollBarMode(ScrollBarMode);
-    virtual void setScrollBarsMode(ScrollBarMode);
-    
-    void print();
-
-    void layout(bool allowSubtree = true);
-
-    Node* layoutRoot() const;
-    int layoutCount() const;
-
-    bool needsFullRepaint() const;
-    
-    void addRepaintInfo(RenderObject*, const IntRect&);
-
-    void resetScrollBars();
-
-    void clear();
-
-public:
-    void clearPart();
-
-    void handleMousePressEvent(const PlatformMouseEvent&);
-    void handleMouseDoubleClickEvent(const PlatformMouseEvent&);
-    void handleMouseMoveEvent(const PlatformMouseEvent&);
-    void handleMouseReleaseEvent(const PlatformMouseEvent&);
-    void handleWheelEvent(PlatformWheelEvent&);
-
-    bool mousePressed();
-
-    void doAutoScroll();
-
-    bool updateDragAndDrop(const PlatformMouseEvent&, Clipboard*);
-    void cancelDragAndDrop(const PlatformMouseEvent&, Clipboard*);
-    bool performDragAndDrop(const PlatformMouseEvent&, Clipboard*);
-
-    void layoutTimerFired(Timer<FrameView>*);
-    void hoverTimerFired(Timer<FrameView>*);
-
-    void repaintRectangle(const IntRect& r, bool immediate);
-
-    bool isTransparent() const;
-    void setTransparent(bool isTransparent);
-    
-    void scheduleRelayout();
-    void scheduleRelayoutOfSubtree(Node*);
-    void unscheduleRelayout();
-    bool haveDelayedLayoutScheduled();
-    bool layoutPending() const;
-
-    void scheduleHoverStateUpdate();
-
-    void adjustViewSize();
-    void initScrollBars();
-    
-    void setHasBorder(bool);
-    bool hasBorder() const;
-    
-    void setResizingFrameSet(HTMLFrameSetElement *);
-
-#if __APPLE__
-    void updateDashboardRegions();
-#endif
-    void invalidateClick();
-
-    virtual void scrollPointRecursively(int x, int y);
-    virtual void setContentsPos(int x, int y);
-
-    void scheduleEvent(PassRefPtr<Event>, PassRefPtr<EventTargetNode>, bool tempEvent);
+    void clearFrame();
 
     void ref() { ++m_refCount; }
     void deref() { if (!--m_refCount) delete this; }
     bool hasOneRef() { return m_refCount == 1; }
+
+    int marginWidth() const { return m_margins.width(); } // -1 means default
+    int marginHeight() const { return m_margins.height(); } // -1 means default
+    void setMarginWidth(int);
+    void setMarginHeight(int);
+
+    virtual void setCanHaveScrollbars(bool);
+
+    virtual PassRefPtr<Scrollbar> createScrollbar(ScrollbarOrientation);
+
+    virtual void setContentsSize(const IntSize&);
+
+    void layout(bool allowSubtree = true);
+    bool didFirstLayout() const;
+    void layoutTimerFired(Timer<FrameView>*);
+    void scheduleRelayout();
+    void scheduleRelayoutOfSubtree(RenderObject*);
+    void unscheduleRelayout();
+    bool layoutPending() const;
+
+    RenderObject* layoutRoot(bool onlyDuringLayout = false) const;
+    int layoutCount() const { return m_layoutCount; }
+
+    // These two helper functions just pass through to the RenderView.
+    bool needsLayout() const;
+    void setNeedsLayout();
+
+    bool needsFullRepaint() const { return m_doFullRepaint; }
+    IntSize offsetInWindow() const;
+    void setFrameRect(const IntRect &rect);
+
+#if USE(ACCELERATED_COMPOSITING)
+    enum CompositingUpdate { NormalCompositingUpdate, ForcedCompositingUpdate };
+    void updateCompositingLayers(CompositingUpdate updateType = NormalCompositingUpdate);
+
+    // Called when changes to the GraphicsLayer hierarchy have to be synchronized with
+    // content rendered via the normal painting path.
+    void setNeedsOneShotDrawingSynchronization();
+#endif
+
+    void didMoveOnscreen();
+    void willMoveOffscreen();
+
+    void resetScrollbars();
+
+    void clear();
+
+    bool isTransparent() const;
+    void setTransparent(bool isTransparent);
+
+    Color baseBackgroundColor() const;
+    void setBaseBackgroundColor(Color);
+    void updateBackgroundRecursively(const Color&, bool);
+
+    bool shouldUpdateWhileOffscreen() const;
+    void setShouldUpdateWhileOffscreen(bool);
+
+    void adjustViewSize();
+    void initScrollbars();
+    void updateDefaultScrollbarState();
     
-private:
-    void cleared();
-    void scrollBarMoved();
+    virtual IntRect windowClipRect(bool clipToContents = true) const;
+    IntRect windowClipRectForLayer(const RenderLayer*, bool clipToLayerContents) const;
 
-    void resetCursor();
+    virtual bool isActive() const;
+    virtual void invalidateScrollbarRect(Scrollbar*, const IntRect&);
+    virtual void valueChanged(Scrollbar*);
+    virtual void getTickmarks(Vector<IntRect>&) const;
 
-    /**
-     * Get/set the CSS Media Type.
-     *
-     * Media type is set to "screen" for on-screen rendering and "print"
-     * during printing. Other media types lack the proper support in the
-     * renderer and are not activated. The DOM tree and the parser itself,
-     * however, properly handle other media types. To make them actually work
-     * you only need to enable the media type in the view and if necessary
-     * add the media type dependent changes to the renderer.
-     */
-    void setMediaType(const String&);
+    virtual IntRect windowResizerRect() const;
+
+    virtual void scrollRectIntoViewRecursively(const IntRect&);
+    virtual void setScrollPosition(const IntPoint&);
+
     String mediaType() const;
+    void setMediaType(const String&);
 
-    bool scrollTo(const IntRect&);
+    void setUseSlowRepaints();
 
-    void focusNextPrevNode(bool next);
+    void addSlowRepaintObject();
+    void removeSlowRepaintObject();
 
-    void useSlowRepaints();
+    void beginDeferredRepaints();
+    void endDeferredRepaints();
+    void checkStopDelayingDeferredRepaints();
+    void resetDeferredRepaintDelay();
 
-    void setIgnoreWheelEvents(bool e);
+#if ENABLE(DASHBOARD_SUPPORT)
+    void updateDashboardRegions();
+#endif
+    void updateControlTints();
 
+    void restoreScrollbar();
+
+    void scheduleEvent(PassRefPtr<Event>, PassRefPtr<EventTargetNode>);
+    void pauseScheduledEvents();
+    void resumeScheduledEvents();
+    void postLayoutTimerFired(Timer<FrameView>*);
+
+    bool wasScrolledByUser() const;
+    void setWasScrolledByUser(bool);
+
+    void addWidgetToUpdate(RenderPartObject*);
+    void removeWidgetToUpdate(RenderPartObject*);
+
+    virtual void paintContents(GraphicsContext*, const IntRect& damageRect);
+    void setPaintRestriction(PaintRestriction);
+    bool isPainting() const;
+    void setNodeToDraw(Node*);
+
+    static double currentPaintTimeStamp() { return sCurrentPaintTimeStamp; } // returns 0 if not painting
+    
+    void layoutIfNeededRecursive();
+
+    void setIsVisuallyNonEmpty() { m_isVisuallyNonEmpty = true; }
+
+private:
+    void reset();
     void init();
-
-    Node *nodeUnderMouse() const;
-
-    void restoreScrollBar();
-
-    DeprecatedStringList formCompletionItems(const String& name) const;
-    void addFormCompletionItem(const String& name, const String& value);
-
-    MouseEventWithHitTestResults prepareMouseEvent(bool readonly, bool active, bool mouseMove, const PlatformMouseEvent&);
-
-    bool dispatchMouseEvent(const AtomicString& eventType, Node* target,
-        bool cancelable, int clickCount, const PlatformMouseEvent&, bool setUnder);
-    bool dispatchDragEvent(const AtomicString& eventType, Node* target,
-        const PlatformMouseEvent&, Clipboard*);
-
-    void applyOverflowToViewport(RenderObject* o, ScrollBarMode& hMode, ScrollBarMode& vMode);
 
     virtual bool isFrameView() const;
 
-    void updateBorder();
+    bool useSlowRepaints() const;
+
+    void applyOverflowToViewport(RenderObject*, ScrollbarMode& hMode, ScrollbarMode& vMode);
 
     void updateOverflowStatus(bool horizontalOverflow, bool verticalOverflow);
+
     void dispatchScheduledEvents();
+    void performPostLayoutTasks();
+
+    virtual void repaintContentRectangle(const IntRect&, bool immediate);
+    virtual void contentsResized() { setNeedsLayout(); }
+    virtual void visibleContentsResized() { layout(); }
     
-    float minimumZoomFontSize();
-    CGSize visibleSize();
-        
+    void deferredRepaintTimerFired(Timer<FrameView>*);
+    void doDeferredRepaints();
+    void updateDeferredRepaintDelay();
+    double adjustedDeferredRepaintDelay() const;
+
+    static double sCurrentPaintTimeStamp; // used for detecting decoded resource thrash in the cache
+
     unsigned m_refCount;
-    
     IntSize m_size;
     IntSize m_margins;
-    
+    OwnPtr<HashSet<RenderPartObject*> > m_widgetUpdateSet;
     RefPtr<Frame> m_frame;
-    FrameViewPrivate* d;
+
+    bool m_doFullRepaint;
+    
+    ScrollbarMode m_vmode;
+    ScrollbarMode m_hmode;
+    bool m_useSlowRepaints;
+    unsigned m_slowRepaintObjectCount;
+
+    int m_borderX, m_borderY;
+
+    Timer<FrameView> m_layoutTimer;
+    bool m_delayedLayout;
+    RenderObject* m_layoutRoot;
+    
+    bool m_layoutSchedulingEnabled;
+    bool m_midLayout;
+    int m_layoutCount;
+
+    unsigned m_nestedLayoutCount;
+    Timer<FrameView> m_postLayoutTasksTimer;
+    bool m_firstLayoutCallbackPending;
+
+    bool m_firstLayout;
+    bool m_needToInitScrollbars;
+    bool m_isTransparent;
+    Color m_baseBackgroundColor;
+    IntSize m_lastLayoutSize;
+    float m_lastZoomFactor;
+
+    String m_mediaType;
+    
+    unsigned m_enqueueEvents;
+    Vector<ScheduledEvent*> m_scheduledEvents;
+    
+    bool m_overflowStatusDirty;
+    bool m_horizontalOverflow;
+    bool m_verticalOverflow;    
+    RenderObject* m_viewportRenderer;
+
+    bool m_wasScrolledByUser;
+    bool m_inProgrammaticScroll;
+    
+    unsigned m_deferringRepaints;
+    unsigned m_repaintCount;
+    Vector<IntRect> m_repaintRects;
+    Timer<FrameView> m_deferredRepaintTimer;
+    double m_deferredRepaintDelay;
+    double m_lastPaintTime;
+
+    bool m_shouldUpdateWhileOffscreen;
+
+    RefPtr<Node> m_nodeToDraw;
+    PaintRestriction m_paintRestriction;
+    bool m_isPainting;
+
+    bool m_isVisuallyNonEmpty;
+    bool m_firstVisuallyNonEmptyLayoutCallbackPending;
 };
 
-}
+} // namespace WebCore
 
-#endif
-
+#endif // FrameView_h

@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2004, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004-2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,100 +24,63 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#import <WebCore/DOMAttr.h>
 #import <WebCore/DOMCSS.h>
+#import <WebCore/DOMCSSStyleDeclaration.h>
+#import <WebCore/DOMDocument.h>
+#import <WebCore/DOMElement.h>
 #import <WebCore/DOMHTML.h>
+#import <WebCore/DOMHTMLAnchorElement.h>
+#import <WebCore/DOMHTMLAreaElement.h>
+#import <WebCore/DOMHTMLDocument.h>
+#import <WebCore/DOMHTMLElement.h>
+#import <WebCore/DOMHTMLEmbedElement.h>
+#import <WebCore/DOMHTMLImageElement.h>
+#import <WebCore/DOMHTMLInputElement.h>
+#import <WebCore/DOMHTMLLinkElement.h>
+#import <WebCore/DOMHTMLObjectElement.h>
+#import <WebCore/DOMNode.h>
+#import <WebCore/DOMRGBColor.h>
 #import <WebCore/DOMRange.h>
 
-@class NSColor;
+#import <CoreGraphics/CoreGraphics.h>
+
+@class NSArray;
 @class NSImage;
+@class NSURL;
 
-@interface DOMImplementation (DOMImplementationExtensions)
-- (DOMHTMLDocument *)createHTMLDocument:(NSString *)title;
-@end
-
-@interface DOMDocument (DOMDocumentCSSExtensions)
-- (DOMCSSStyleDeclaration *)createCSSStyleDeclaration;
-- (DOMCSSRuleList *)getMatchedCSSRules:(DOMElement *)elt :(NSString *)pseudoElt;
-@end
-
-@interface DOMHTMLDocument (DOMHTMLDocumentExtensions)
-- (DOMDocumentFragment *)createDocumentFragmentWithMarkupString:(NSString *)markupString baseURL:(NSURL *)baseURL;
-- (DOMDocumentFragment *)createDocumentFragmentWithText:(NSString *)text;
-@end
 
 @interface DOMHTMLElement (DOMHTMLElementExtensions)
-- (NSString *)innerHTML;
-- (void)setInnerHTML:(NSString *)innerHTML;
-- (NSString *)innerText;
-- (void)setInnerText:(NSString *)innerText;
-- (NSString *)outerHTML;
-- (void)setOuterHTML:(NSString *)outerHTML;
-- (NSString *)outerText;
-- (void)setOuterText:(NSString *)outerText;
-- (DOMHTMLCollection *)children;
-- (NSString *)contentEditable;
-- (void)setContentEditable:(NSString *)contentEditable;
-- (BOOL)isContentEditable;
-- (NSString *)titleDisplayString;
-
 - (int)scrollXOffset;
 - (int)scrollYOffset;
 - (void)setScrollXOffset:(int)x scrollYOffset:(int)y;
 - (void)setScrollXOffset:(int)x scrollYOffset:(int)y adjustForPurpleCaret:(BOOL)adjustForPurpleCaret;
 - (void)absolutePosition:(int *)x :(int *)y :(int *)w :(int *)h;
-
-- (int)offsetLeft;
-- (int)offsetTop;
-- (int)offsetWidth;
-- (int)offsetHeight;
-- (DOMHTMLElement *)offsetParent;
-
-- (int)clientWidth;
-- (int)clientHeight;
-
-- (int)scrollLeft;
-- (void)setScrollLeft:(int)scroll;
-- (int)scrollTop;
-- (void)setScrollTop:(int)scroll;
-- (int)scrollWidth;
-- (int)scrollHeight;
 @end
 
-@interface DOMHTMLElement (DOMHTMLElementTextFieldHack)
-- (void)setTextfieldText:(NSString *)text;
-@end
+typedef struct _WKQuad {
+    CGPoint p1;
+    CGPoint p2;
+    CGPoint p3;
+    CGPoint p4;
+} WKQuad;
 
-@interface DOMHTMLEmbedElement : DOMHTMLElement
-- (NSString *)align;
-- (void)setAlign:(NSString *)align;
-- (int)height;
-- (void)setHeight:(int)height;
-- (NSString *)name;
-- (void)setName:(NSString *)name;
-- (NSString *)src;
-- (void)setSrc:(NSString *)src;
-- (NSString *)type;
-- (void)setType:(NSString *)type;
-- (int)width;
-- (void)setWidth:(int)width;
-@end
+@interface WKQuadObject : NSObject
+{
+    WKQuad  _quad;
+}
 
-@interface DOMRGBColor (DOMRGBColorExtensions)
-- (DOMCSSPrimitiveValue *)alpha;
-@end
-
-@interface DOMAttr (DOMAttrExtensions)
-- (DOMCSSStyleDeclaration *)style;
-@end
-
-@interface DOMCSSStyleDeclaration (DOMCSSStyleDeclarationExtensions)
-- (NSString *)getPropertyShorthand:(NSString *)propertyName;
-- (BOOL)isPropertyImplicit:(NSString *)propertyName;
+- (id)initWithQuad:(WKQuad)quad;
+- (WKQuad)quad;
+- (CGRect)boundingBox;
 @end
 
 @interface DOMNode (DOMNodeExtensions)
-- (NSRect)boundingBox;
-- (NSArray *)lineBoxRects;
+- (CGRect)boundingBox;
+- (NSArray *)lineBoxRects WEBKIT_OBJC_METHOD_ANNOTATION(AVAILABLE_WEBKIT_VERSION_3_0_AND_LATER);
+
+- (WKQuad)absoluteQuad;
+- (NSArray *)lineBoxQuads;      // returns array of WKQuadObject
 
 - (NSURL *)hrefURL;
 - (CGRect)hrefFrame;
@@ -125,47 +89,22 @@
 - (NSString *)hrefTitle;
 - (CGRect)boundingFrame;
 - (CGRect)innerFrame;
+- (WKQuad)innerFrameQuad;       // takes transforms into account
 - (float)computedFontSize;
-- (void)simulateCompleteClick;
 - (DOMNode *)nextFocusNode;
 - (DOMNode *)previousFocusNode;
-
 @end
 
-@interface DOMRange (DOMRangeExtensions)
-- (NSString *)text;
+@interface DOMElement (DOMElementAppKitExtensions)
 @end
 
-@interface DOMElement (DOMElementExtensions)
-- (void)scrollIntoView:(BOOL)alignTop;
-- (void)scrollIntoViewIfNeeded:(BOOL)centerIfNeeded;
-@end
-
-@interface DOMHTMLInputElement (DOMHTMLInputElementExtensions)
-- (NSString *)altDisplayString;
-- (NSURL *)absoluteImageURL;
-@end
-
-@interface DOMHTMLImageElement (DOMHTMLImageElementExtensions)
-- (NSString *)altDisplayString;
-- (NSURL *)absoluteImageURL;
-@end
-
-@interface DOMHTMLObjectElement (DOMHTMLObjectElementExtensions)
-- (NSURL *)absoluteImageURL;
-@end
-
-@interface DOMHTMLAnchorElement (DOMHTMLAnchorElementExtensions)
-- (NSURL *)absoluteLinkURL;
+@interface DOMHTMLDocument (DOMHTMLDocumentExtensions)
+- (DOMDocumentFragment *)createDocumentFragmentWithMarkupString:(NSString *)markupString baseURL:(NSURL *)baseURL WEBKIT_OBJC_METHOD_ANNOTATION(AVAILABLE_WEBKIT_VERSION_3_0_AND_LATER);
+- (DOMDocumentFragment *)createDocumentFragmentWithText:(NSString *)text WEBKIT_OBJC_METHOD_ANNOTATION(AVAILABLE_WEBKIT_VERSION_3_0_AND_LATER);
 @end
 
 @interface DOMHTMLAreaElement (DOMHTMLAreaElementExtensions)
-- (NSURL *)absoluteLinkURL;
 - (CGRect)boundingFrameForOwner:(DOMNode *)anOwner;
-@end
-
-@interface DOMHTMLLinkElement (DOMHTMLLinkElementExtensions)
-- (NSURL *)absoluteLinkURL;
 @end
 
 @interface DOMHTMLSelectElement (DOMHTMLSelectElementExtensions)

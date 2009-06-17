@@ -6,7 +6,6 @@
 #import "WAKWindow.h"
 
 @interface WAKWindow (WAKPrivate)
-- (WKWindowRef)_windowRef;
 + (WAKWindow *)_wrapperForWindowRef:(WKWindowRef)_windowRef;
 @end
 

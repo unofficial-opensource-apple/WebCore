@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -13,8 +13,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -25,12 +25,18 @@
 #include "DocumentType.h"
 #include "DOMImplementation.h"
 #include "HTMLDocument.h"
+#include "JSDOMImplementation.h"
 
 namespace WebCore {
 
 DOMImplementationFront* implementationFront(Document* document)
 {
     return reinterpret_cast<DOMImplementationFront*>(document->implementation());
+}
+
+DOMImplementationFront* implementationFront(JSDOMImplementation* wrapper)
+{
+    return reinterpret_cast<DOMImplementationFront*>(wrapper->impl());
 }
 
 void DOMImplementationFront::ref()
@@ -58,9 +64,9 @@ PassRefPtr<Document> DOMImplementationFront::createDocument(const String& namesp
     return reinterpret_cast<DOMImplementation*>(this)->createDocument(namespaceURI, qualifiedName, type, ec);
 }
 
-DOMImplementationFront* DOMImplementationFront::getInterface(const String& feature) const
+DOMImplementationFront* DOMImplementationFront::getInterface(const String& feature)
 {
-    return reinterpret_cast<DOMImplementationFront*>(reinterpret_cast<const DOMImplementation*>(this)->getInterface(feature));
+    return reinterpret_cast<DOMImplementationFront*>(reinterpret_cast<DOMImplementation*>(this)->getInterface(feature));
 }
 
 PassRefPtr<CSSStyleSheet> DOMImplementationFront::createCSSStyleSheet(const String& title, const String& media, ExceptionCode& ec)

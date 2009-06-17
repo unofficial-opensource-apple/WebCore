@@ -27,38 +27,42 @@
 #import "WebCoreTextRenderer.h"
 
 #import "Font.h"
-#import "FontData.h"
-#import "WebFontCache.h"
-#import "IntPoint.h"
+#import "SimpleFontData.h"
 #import "GraphicsContext.h"
-
-#import "WKGraphics.h"
+#import "IntPoint.h"
+#import "WebFontCache.h"
 
 using namespace WebCore;
 
-using WebCore::GraphicsContext;
-
-void WebCoreDrawTextAtPoint(const UniChar* buffer, unsigned length, NSPoint point, GSFontRef font, CGColorRef textColor)
+void WebCoreDrawTextAtPoint(const UniChar* buffer, unsigned length, NSPoint point, NSFont* font, NSColor* textColor)
 {
+    NSGraphicsContext *nsContext = [NSGraphicsContext currentContext];
+    CGContextRef cgContext = (CGContextRef)[nsContext graphicsPort];
+    GraphicsContext graphicsContext(cgContext);    
+    // Safari doesn't flip the NSGraphicsContext before calling WebKit, yet WebCore requires a flipped graphics context.
+    BOOL flipped = [nsContext isFlipped];
+    if (!flipped)
+        CGContextScaleCTM(cgContext, 1.0f, -1.0f);
+    
     FontPlatformData f(font);
-    Font renderer(f);
+    Font renderer(f, ![[NSGraphicsContext currentContext] isDrawingToScreen]);
     TextRun run(buffer, length);
-    TextStyle style;
-    style.disableRoundingHacks();
-
-    GraphicsContext graphicsContext(static_cast<PlatformGraphicsContext*>(WKGetCurrentGraphicsContext()));
-    graphicsContext.setPenFromCGColor (textColor);
-    renderer.drawText(&graphicsContext, run, style, FloatPoint(point.x, point.y));
+    run.disableRoundingHacks();
+    CGFloat red, green, blue, alpha;
+    [[textColor colorUsingColorSpaceName:NSDeviceRGBColorSpace] getRed:&red green:&green blue:&blue alpha:&alpha];
+    graphicsContext.setFillColor(makeRGBA((int)(red * 255), (int)(green * 255), (int)(blue * 255), (int)(alpha * 255)));
+    renderer.drawText(&graphicsContext, run, FloatPoint(point.x, (flipped ? point.y : (-1.0f * point.y))));
+    if (!flipped)
+        CGContextScaleCTM(cgContext, 1.0f, -1.0f);
 }
 
-float WebCoreTextFloatWidth(const UniChar* buffer, unsigned length , GSFontRef font)
+float WebCoreTextFloatWidth(const UniChar* buffer, unsigned length , NSFont* font)
 {
     FontPlatformData f(font);
-    Font renderer(f);
+    Font renderer(f, ![[NSGraphicsContext currentContext] isDrawingToScreen]);
     TextRun run(buffer, length);
-    TextStyle style;
-    style.disableRoundingHacks();
-    return renderer.floatWidth(run, style);
+    run.disableRoundingHacks();
+    return renderer.floatWidth(run);
 }
 
 static bool gShouldUseFontSmoothing = true;
@@ -73,37 +77,17 @@ bool WebCoreShouldUseFontSmoothing()
     return gShouldUseFontSmoothing;
 }
 
-static CGFontSmoothingStyle gFontSmoothingStyle = kCGFontSmoothingStyleMedium;
-static CGFontAntialiasingStyle gFontAntialiasingStyle = kCGFontAntialiasingStyleUnfiltered;
-
-void WebCoreSetFontSmoothingStyle(CGFontSmoothingStyle newStyle)
+void WebCoreSetAlwaysUsesComplexTextCodePath(bool complex)
 {
-    gFontSmoothingStyle = newStyle;
+    Font::setCodePath(complex ? Font::Complex : Font::Auto);
 }
 
-CGFontSmoothingStyle WebCoreFontSmoothingStyle()
+bool WebCoreAlwaysUsesComplexTextCodePath()
 {
-    return gFontSmoothingStyle;
+    return Font::codePath() == Font::Complex;
 }
 
-void WebCoreSetFontAntialiasingStyle(CGFontAntialiasingStyle newStyle)
+NSFont* WebCoreFindFont(NSString* familyName, NSFontTraitMask traits, int weight, int size)
 {
-    gFontAntialiasingStyle = newStyle;
-}
-
-CGFontAntialiasingStyle WebCoreFontAntialiasingStyle()
-{
-    return gFontAntialiasingStyle;
-}
-
-
-void WebCoreSetAlwaysUseATSU(bool useATSU)
-{
-    Font::setAlwaysUseComplexPath(useATSU);
-}
-
-GSFontRef WebCoreFindFont(NSString* familyName, GSFontTraitMask traits, int size)
-{
-	return 0;
-//    return [WebFontCache fontWithFamily:familyName traits:traits size:size];
+    return [WebFontCache fontWithFamily:familyName traits:traits weight:weight size:size];
 }

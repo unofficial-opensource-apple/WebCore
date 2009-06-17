@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
@@ -20,13 +18,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLTableCaptionElement_H
-#define HTMLTableCaptionElement_H
+#ifndef HTMLTableCaptionElement_h
+#define HTMLTableCaptionElement_h
 
 #include "HTMLTablePartElement.h"
 
@@ -35,7 +33,7 @@ namespace WebCore {
 class HTMLTableCaptionElement : public HTMLTablePartElement
 {
 public:
-    HTMLTableCaptionElement(Document*);
+    HTMLTableCaptionElement(const QualifiedName&, Document*);
     
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
     virtual int tagPriority() const { return 5; }

@@ -18,13 +18,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLBodyElement_H
-#define HTMLBodyElement_H
+#ifndef HTMLBodyElement_h
+#define HTMLBodyElement_h
 
 #include "HTMLElement.h"
 
@@ -33,7 +33,7 @@ namespace WebCore {
 class HTMLBodyElement : public HTMLElement
 {
 public:
-    HTMLBodyElement(Document*);
+    HTMLBodyElement(const QualifiedName&, Document*);
     ~HTMLBodyElement();
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
@@ -69,6 +69,8 @@ public:
     
     int scrollHeight() const;
     int scrollWidth() const;
+    
+    virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
     
 protected:
     RefPtr<CSSMutableStyleDeclaration> m_linkDecl;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,7 +46,7 @@ bool ModifySelectionListLevelCommand::preservesTypingStyle() const
 }
 
 // This needs to be static so it can be called by canIncreaseSelectionListLevel and canDecreaseSelectionListLevel
-static bool getStartEndListChildren(const Selection& selection, Node** start, Node** end)
+static bool getStartEndListChildren(const Selection& selection, Node*& start, Node*& end)
 {
     if (selection.isNone())
         return false;
@@ -83,8 +83,8 @@ static bool getStartEndListChildren(const Selection& selection, Node** start, No
             endListChild = r->element();
     }
 
-    *start = startListChild;
-    *end = endListChild;
+    start = startListChild;
+    end = endListChild;
     return true;
 }
 
@@ -119,7 +119,7 @@ void ModifySelectionListLevelCommand::insertSiblingNodeRangeAfter(Node* startNod
     }
 }
 
-void ModifySelectionListLevelCommand::appendSiblingNodeRange(Node* startNode, Node* endNode, Node* newParent)
+void ModifySelectionListLevelCommand::appendSiblingNodeRange(Node* startNode, Node* endNode, Element* newParent)
 {
     Node* node = startNode;
     while (1) {
@@ -134,27 +134,21 @@ void ModifySelectionListLevelCommand::appendSiblingNodeRange(Node* startNode, No
     }
 }
 
-IncreaseSelectionListLevelCommand::IncreaseSelectionListLevelCommand(Document* document, EListType listType)
+IncreaseSelectionListLevelCommand::IncreaseSelectionListLevelCommand(Document* document, Type listType)
     : ModifySelectionListLevelCommand(document)
+    , m_listType(listType)
 {
-    m_listType = listType;
-    m_listElement = 0;
-}
-
-Node* IncreaseSelectionListLevelCommand::listElement()
-{
-    return m_listElement;
 }
 
 // This needs to be static so it can be called by canIncreaseSelectionListLevel
-static bool canIncreaseListLevel(const Selection& selection, Node** start, Node** end)
+static bool canIncreaseListLevel(const Selection& selection, Node*& start, Node*& end)
 {
     if (!getStartEndListChildren(selection, start, end))
         return false;
         
     // start must not be the first child (because you need a prior one
     // to increase relative to)
-    if (!(*start)->renderer()->previousSibling())
+    if (!start->renderer()->previousSibling())
         return false;
     
     return true;
@@ -178,20 +172,22 @@ void IncreaseSelectionListLevelCommand::doApply()
 {
     Node* startListChild;
     Node* endListChild;
-    if (!canIncreaseListLevel(endingSelection(), &startListChild, &endListChild))
+    if (!canIncreaseListLevel(endingSelection(), startListChild, endListChild))
         return;
 
     Node* previousItem = startListChild->renderer()->previousSibling()->element();
     if (isListElement(previousItem)) {
         // move nodes up into preceding list
-        appendSiblingNodeRange(startListChild, endListChild, previousItem);
+        appendSiblingNodeRange(startListChild, endListChild, static_cast<Element*>(previousItem));
         m_listElement = previousItem;
     } else {
         // create a sublist for the preceding element and move nodes there
-        RefPtr<Node> newParent;
+        RefPtr<Element> newParent;
         switch (m_listType) {
             case InheritedListType:
-                newParent = startListChild->parentNode()->cloneNode(false);
+                newParent = startListChild->parentElement();
+                if (newParent)
+                    newParent = newParent->cloneElement();
                 break;
             case OrderedList:
                 newParent = createOrderedListElement(document());
@@ -200,9 +196,9 @@ void IncreaseSelectionListLevelCommand::doApply()
                 newParent = createUnorderedListElement(document());
                 break;
         }
-        insertNodeBefore(newParent.get(), startListChild);
+        insertNodeBefore(newParent, startListChild);
         appendSiblingNodeRange(startListChild, endListChild, newParent.get());
-        m_listElement = newParent.get();
+        m_listElement = newParent.release();
     }
 }
 
@@ -210,29 +206,30 @@ bool IncreaseSelectionListLevelCommand::canIncreaseSelectionListLevel(Document* 
 {
     Node* startListChild;
     Node* endListChild;
-    
-    return canIncreaseListLevel(document->frame()->selection().selection(), &startListChild, &endListChild);
+    return canIncreaseListLevel(document->frame()->selection()->selection(), startListChild, endListChild);
 }
 
-static Node* increaseSelectionListLevelWithType(Document* document, EListType listType)
+PassRefPtr<Node> IncreaseSelectionListLevelCommand::increaseSelectionListLevelWithType(Document* document, Type listType)
 {
     ASSERT(document);
     ASSERT(document->frame());
-    IncreaseSelectionListLevelCommand* modCommand = new IncreaseSelectionListLevelCommand(document, listType);
-    EditCommandPtr cmd(modCommand);
-    cmd.apply();
-    return modCommand->listElement();
+    RefPtr<IncreaseSelectionListLevelCommand> modCommand = new IncreaseSelectionListLevelCommand(document, listType);
+    modCommand->apply();
+    return modCommand->m_listElement;
 }
 
-Node* IncreaseSelectionListLevelCommand::increaseSelectionListLevel(Document* document) {
+PassRefPtr<Node> IncreaseSelectionListLevelCommand::increaseSelectionListLevel(Document* document)
+{
     return increaseSelectionListLevelWithType(document, InheritedListType);
 }
 
-Node* IncreaseSelectionListLevelCommand::increaseSelectionListLevelOrdered(Document* document) {
+PassRefPtr<Node> IncreaseSelectionListLevelCommand::increaseSelectionListLevelOrdered(Document* document)
+{
     return increaseSelectionListLevelWithType(document, OrderedList);
 }
 
-Node* IncreaseSelectionListLevelCommand::increaseSelectionListLevelUnordered(Document* document) {
+PassRefPtr<Node> IncreaseSelectionListLevelCommand::increaseSelectionListLevelUnordered(Document* document)
+{
     return increaseSelectionListLevelWithType(document, UnorderedList);
 }
 
@@ -242,13 +239,13 @@ DecreaseSelectionListLevelCommand::DecreaseSelectionListLevelCommand(Document* d
 }
 
 // This needs to be static so it can be called by canDecreaseSelectionListLevel
-static bool canDecreaseListLevel(const Selection& selection, Node** start, Node** end)
+static bool canDecreaseListLevel(const Selection& selection, Node*& start, Node*& end)
 {
     if (!getStartEndListChildren(selection, start, end))
         return false;
     
     // there must be a destination list to move the items to
-    if (!isListElement((*start)->parentNode()->parentNode()))
+    if (!isListElement(start->parentNode()->parentNode()))
         return false;
         
     return true;
@@ -258,12 +255,12 @@ void DecreaseSelectionListLevelCommand::doApply()
 {
     Node* startListChild;
     Node* endListChild;
-    if (!canDecreaseListLevel(endingSelection(), &startListChild, &endListChild))
+    if (!canDecreaseListLevel(endingSelection(), startListChild, endListChild))
         return;
 
     Node* previousItem = startListChild->renderer()->previousSibling() ? startListChild->renderer()->previousSibling()->element() : 0;
     Node* nextItem = endListChild->renderer()->nextSibling() ? endListChild->renderer()->nextSibling()->element() : 0;
-    Node* listNode = startListChild->parentNode();
+    Element* listNode = startListChild->parentElement();
 
     if (!previousItem) {
         // at start of sublist, move the child(ren) to before the sublist
@@ -274,9 +271,9 @@ void DecreaseSelectionListLevelCommand::doApply()
     } else if (!nextItem) {
         // at end of list, move the child(ren) to after the sublist
         insertSiblingNodeRangeAfter(startListChild, endListChild, listNode);    
-    } else {
+    } else if (listNode) {
         // in the middle of list, split the list and move the children to the divide
-        splitElement(static_cast<Element*>(listNode), startListChild);
+        splitElement(listNode, startListChild);
         insertSiblingNodeRangeBefore(startListChild, endListChild, listNode);
     }
 }
@@ -285,17 +282,14 @@ bool DecreaseSelectionListLevelCommand::canDecreaseSelectionListLevel(Document* 
 {
     Node* startListChild;
     Node* endListChild;
-    
-    return canDecreaseListLevel(document->frame()->selection().selection(), &startListChild, &endListChild);
+    return canDecreaseListLevel(document->frame()->selection()->selection(), startListChild, endListChild);
 }
 
 void DecreaseSelectionListLevelCommand::decreaseSelectionListLevel(Document* document)
 {
     ASSERT(document);
     ASSERT(document->frame());
-    DecreaseSelectionListLevelCommand* modCommand = new DecreaseSelectionListLevelCommand(document);
-    EditCommandPtr cmd(modCommand);
-    cmd.apply();
+    applyCommand(new DecreaseSelectionListLevelCommand(document));
 }
 
 }

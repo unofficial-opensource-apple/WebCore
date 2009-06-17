@@ -1,8 +1,6 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,38 +14,64 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef CSSValueList_H
-#define CSSValueList_H
+#ifndef CSSValueList_h
+#define CSSValueList_h
 
 #include "CSSValue.h"
-#include "DeprecatedPtrList.h"
 #include <wtf/PassRefPtr.h>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
-class CSSValueList : public CSSValue
-{
+class CSSParserValueList;
+
+class CSSValueList : public CSSValue {
 public:
+    static PassRefPtr<CSSValueList> createCommaSeparated()
+    {
+        return adoptRef(new CSSValueList(false));
+    }
+    static PassRefPtr<CSSValueList> createSpaceSeparated()
+    {
+        return adoptRef(new CSSValueList(true));
+    }
+    static PassRefPtr<CSSValueList> createFromParserValueList(CSSParserValueList* list)
+    {
+        return adoptRef(new CSSValueList(list));
+    }
+
     virtual ~CSSValueList();
 
-    unsigned length() const { return m_values.count(); }
-    CSSValue* item (unsigned index) { return m_values.at(index); }
+    size_t length() const { return m_values.size(); }
+    CSSValue* item(unsigned);
+    CSSValue* itemWithoutBoundsCheck(unsigned index) { return m_values[index].get(); }
 
-    virtual bool isValueList() { return true; }
+    void append(PassRefPtr<CSSValue>);
+    void prepend(PassRefPtr<CSSValue>);
+
+    virtual String cssText() const;
+
+    CSSParserValueList* createParserValueList() const;
+
+    virtual void addSubresourceStyleURLs(ListHashSet<KURL>&, const CSSStyleSheet*);
+
+protected:
+    CSSValueList(bool isSpaceSeparated);
+    CSSValueList(CSSParserValueList*);
+
+private:
+    virtual bool isValueList() const { return true; }
 
     virtual unsigned short cssValueType() const;
 
-    void append(PassRefPtr<CSSValue>);
-    virtual String cssText() const;
-
-protected:
-    DeprecatedPtrList<CSSValue> m_values;
+    Vector<RefPtr<CSSValue> > m_values;
+    bool m_isSpaceSeparated;
 };
 
-} // namespace
+} // namespace WebCore
 
-#endif
+#endif // CSSValueList_h

@@ -1,8 +1,6 @@
 /*
- * This file is part of the HTML widget for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -16,63 +14,73 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef RenderReplaced_H
-#define RenderReplaced_H
+#ifndef RenderReplaced_h
+#define RenderReplaced_h
 
 #include "RenderBox.h"
 
 namespace WebCore {
 
-class FrameView;
-class Position;
-class Widget;
-
-class RenderReplaced : public RenderBox
-{
+class RenderReplaced : public RenderBox {
 public:
     RenderReplaced(Node*);
+    RenderReplaced(Node*, const IntSize& intrinsicSize);
+    virtual ~RenderReplaced();
 
     virtual const char* renderName() const { return "RenderReplaced"; }
 
-    virtual short lineHeight(bool firstLine, bool isRootLineBox = false) const;
-    virtual short baselinePosition(bool firstLine, bool isRootLineBox = false) const;
+    virtual int lineHeight(bool firstLine, bool isRootLineBox = false) const;
+    virtual int baselinePosition(bool firstLine, bool isRootLineBox = false) const;
 
-    virtual void calcMinMaxWidth();
+    virtual void calcPrefWidths();
+    
+    virtual void layout();
+    virtual int minimumReplacedHeight() const { return 0; }
 
-    bool shouldPaint(PaintInfo&, int& tx, int& ty);
-    virtual void paint(PaintInfo&, int tx, int ty) = 0;
+    virtual void paint(PaintInfo&, int tx, int ty);
+    virtual void paintReplaced(PaintInfo&, int /*tx*/, int /*ty*/) { }
 
-    virtual int intrinsicWidth() const { return m_intrinsicWidth; }
-    virtual int intrinsicHeight() const { return m_intrinsicHeight; }
+    virtual IntSize intrinsicSize() const;
 
-    void setIntrinsicWidth(int w) { m_intrinsicWidth = w; }
-    void setIntrinsicHeight(int h) { m_intrinsicHeight = h; }
+    virtual int overflowHeight(bool includeInterior = true) const;
+    virtual int overflowWidth(bool includeInterior = true) const;
+    virtual int overflowLeft(bool includeInterior = true) const;
+    virtual int overflowTop(bool includeInterior = true) const;
+    virtual IntRect overflowRect(bool includeInterior = true) const;
 
-    virtual int caretMinOffset() const;
-    virtual int caretMaxOffset() const;
+    virtual IntRect clippedOverflowRectForRepaint(RenderBox* repaintContainer);
+
     virtual unsigned caretMaxRenderedOffset() const;
     virtual VisiblePosition positionForCoordinates(int x, int y);
     
     virtual bool canBeSelectionLeaf() const { return true; }
     virtual SelectionState selectionState() const { return static_cast<SelectionState>(m_selectionState); }
     virtual void setSelectionState(SelectionState);
-    virtual IntRect selectionRect();
-    bool isSelected();
+    virtual IntRect selectionRectForRepaint(RenderBox* repaintContainer, bool clipToVisibleContent = true);
+
+    bool isSelected() const;
 
 protected:
-    int m_intrinsicWidth;
-    int m_intrinsicHeight;
+    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
+
+    void setIntrinsicSize(const IntSize&);
+    virtual void intrinsicSizeChanged();
+
+    bool shouldPaint(PaintInfo&, int& tx, int& ty);
+    void adjustOverflowForBoxShadowAndReflect();
+    IntRect localSelectionRect(bool checkWhetherSelected = true) const;
+
+private:
+    IntSize m_intrinsicSize;
     
     unsigned m_selectionState : 3; // SelectionState
+    bool m_hasOverflow : 1;
 };
-
-
-
 
 }
 

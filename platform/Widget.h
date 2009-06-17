@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2008 Collabora Ltd.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,144 +24,185 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef WEBCORE_PLATFORM_WIDGET_H_
-#define WEBCORE_PLATFORM_WIDGET_H_
+#ifndef Widget_h
+#define Widget_h
 
-#if __APPLE__
+#include <wtf/Platform.h>
+
+#ifndef NSView
+#define NSView WAKView
+#endif
+
+#if PLATFORM(MAC)
 #ifdef __OBJC__
 @class NSView;
+@class NSWindow;
 #else
 class NSView;
+class NSWindow;
 #endif
-#endif
-
-#if WIN32
-typedef struct HWND__ *HWND;
-typedef struct HINSTANCE__ *HINSTANCE;
+typedef NSView* PlatformWidget;
 #endif
 
-#if PLATFORM(GDK)
+#if PLATFORM(WIN)
+typedef struct HWND__* HWND;
+typedef HWND PlatformWidget;
+#endif
+
+#if PLATFORM(GTK)
 typedef struct _GdkDrawable GdkDrawable;
+typedef struct _GtkWidget GtkWidget;
+typedef struct _GtkContainer GtkContainer;
+typedef GtkWidget* PlatformWidget;
 #endif
+
+#if PLATFORM(QT)
+#include <qglobal.h>
+QT_BEGIN_NAMESPACE
+class QWidget;
+QT_END_NAMESPACE
+typedef QWidget* PlatformWidget;
+#endif
+
+#if PLATFORM(WX)
+class wxWindow;
+typedef wxWindow* PlatformWidget;
+#endif
+
+#if PLATFORM(CHROMIUM)
+#include "PlatformWidget.h"
+#endif
+
+#include "IntPoint.h"
+#include "IntRect.h"
+#include "IntSize.h"
 
 namespace WebCore {
 
-    class Cursor;
-    class Font;
-    class GraphicsContext;
-    class IntPoint;
-    class IntRect;
-    class IntSize;
-    class WidgetClient;
-    class WidgetPrivate;
+class Cursor;
+class Event;
+class Font;
+class GraphicsContext;
+class PlatformMouseEvent;
+class ScrollView;
+class WidgetClient;
+class WidgetPrivate;
 
-    class Widget {
-    public:
+// The Widget class serves as a base class for three kinds of objects:
+// (1) Scrollable areas (ScrollView)
+// (2) Scrollbars (Scrollbar)
+// (3) Plugins (PluginView)
+//
+// A widget may or may not be backed by a platform-specific object (e.g., HWND on Windows, NSView on Mac, QWidget on Qt).
+//
+// Widgets are connected in a hierarchy, with the restriction that plugins and scrollbars are always leaves of the
+// tree.  Only ScrollViews can have children (and therefore the Widget class has no concept of children).
+//
+// The rules right now for which widgets get platform-specific objects are as follows:
+// ScrollView - Mac
+// Scrollbar - Mac, Gtk
+// Plugin - Mac, Windows (windowed only), Qt (windowed only, widget is an HWND on windows), Gtk (windowed only)
+//
+class Widget {
+public:
+    Widget(PlatformWidget = 0);
+    virtual ~Widget();
+    
+    PlatformWidget platformWidget() const { return m_widget; }
+    void setPlatformWidget(PlatformWidget widget)
+    { 
+        if (widget != m_widget) {
+            releasePlatformWidget();
+            m_widget = widget;
+            retainPlatformWidget();
+        }
+    }
 
-        enum FocusPolicy {
-            NoFocus = 0,
-            TabFocus = 0x1,
-            ClickFocus = 0x2,
-            StrongFocus = 0x3,
-            WheelFocus = 0x7
-        };
+    int x() const { return frameRect().x(); }
+    int y() const { return frameRect().y(); }
+    int width() const { return frameRect().width(); }
+    int height() const { return frameRect().height(); }
+    IntSize size() const { return frameRect().size(); }
+    IntPoint pos() const { return frameRect().location(); }
 
-        Widget();
-        virtual ~Widget();
+    virtual void setFrameRect(const IntRect&);
+    virtual IntRect frameRect() const;
+    IntRect boundsRect() const { return IntRect(0, 0, width(),  height()); }
 
-        virtual IntSize sizeHint() const;
-        
-        virtual void setEnabled(bool);
-        virtual bool isEnabled() const;
+    void resize(int w, int h) { setFrameRect(IntRect(x(), y(), w, h)); }
+    void resize(const IntSize& s) { setFrameRect(IntRect(pos(), s)); }
+    void move(int x, int y) { setFrameRect(IntRect(x, y, width(), height())); }
+    void move(const IntPoint& p) { setFrameRect(IntRect(p, size())); }
 
-        int x() const;
-        int y() const;
-        int width() const;
-        int height() const;
-        IntSize size() const;
-        void resize(int, int);
-        void resize(const IntSize&);
-        IntPoint pos() const;
-        void move(int, int);
-        void move(const IntPoint&);
+    virtual void paint(GraphicsContext*, const IntRect&);
+    void invalidate() { invalidateRect(boundsRect()); }
+    virtual void invalidateRect(const IntRect&) = 0;
 
-        virtual void paint(GraphicsContext*, const IntRect&);
+    virtual void setFocus();
 
-        virtual IntRect frameGeometry() const;
-        virtual void setFrameGeometry(const IntRect&);
+    void setCursor(const Cursor&);
+    Cursor cursor();
 
-        virtual int baselinePosition(int height) const; // relative to the top of the widget
+    virtual void show();
+    virtual void hide();
+    bool isSelfVisible() const { return m_selfVisible; } // Whether or not we have been explicitly marked as visible or not.
+    bool isParentVisible() const { return m_parentVisible; } // Whether or not our parent is visible.
+    bool isVisible() const { return m_selfVisible && m_parentVisible; } // Whether or not we are actually visible.
+    virtual void setParentVisible(bool visible) { m_parentVisible = visible; }
+    void setSelfVisible(bool v) { m_selfVisible = v; }
 
-        virtual IntPoint mapFromGlobal(const IntPoint&) const;
+    void setIsSelected(bool);
 
-        float scaleFactor() const;
+    virtual bool isFrameView() const { return false; }
+    virtual bool isPluginView() const { return false; }
 
-        bool hasFocus() const;
-        void setFocus();
-        void clearFocus();
-        virtual bool checksDescendantsForFocus() const;
+    void removeFromParent();
+    virtual void setParent(ScrollView* view);
+    ScrollView* parent() const { return m_parent; }
+    ScrollView* root() const;
 
-        virtual FocusPolicy focusPolicy() const;
+    virtual void handleEvent(Event*) { }
 
-        const Font& font() const;
-        virtual void setFont(const Font&);
+    // It is important for cross-platform code to realize that Mac has flipped coordinates.  Therefore any code
+    // that tries to convert the location of a rect using the point-based convertFromContainingWindow will end
+    // up with an inaccurate rect.  Always make sure to use the rect-based convertFromContainingWindow method
+    // when converting window rects.
+    IntRect convertToContainingWindow(const IntRect&) const;
+    IntPoint convertToContainingWindow(const IntPoint&) const;
+    IntPoint convertFromContainingWindow(const IntPoint&) const; // See comment above about when not to use this method.
+    IntRect convertFromContainingWindow(const IntRect&) const;
 
-        void setCursor(const Cursor&);
-        Cursor cursor();
+    virtual void frameRectsChanged() {}
 
-        void show();
-        void hide();
+#if PLATFORM(MAC)
+    NSView* getOuterView() const;
+    
+    static void beforeMouseDown(NSView*, Widget*);
+    static void afterMouseDown(NSView*, Widget*);
 
-        virtual void populate() {}
-
-        GraphicsContext* lockDrawingFocus();
-        void unlockDrawingFocus(GraphicsContext*);
-        void enableFlushDrawing();
-        void disableFlushDrawing();
-
-        void setIsSelected(bool);
-
-        void setClient(WidgetClient*);
-        WidgetClient* client() const;
-
-        virtual bool isFrameView() const;
-
-#if WIN32
-        Widget(HWND);
-        HWND windowHandle() const;
-        void setWindowHandle(HWND);
-        // The global DLL or application instance used for all WebCore windows.
-        static HINSTANCE instanceHandle;
+    void removeFromSuperview();
 #endif
+    void addToSuperview(NSView* superview);
 
-#if PLATFORM(GDK)
-      Widget(GdkDrawable* drawable);
-      virtual void setDrawable(GdkDrawable* drawable);
-      GdkDrawable* drawable() const;
+private:
+    void init(PlatformWidget); // Must be called by all Widget constructors to initialize cross-platform data.
+
+    void releasePlatformWidget();
+    void retainPlatformWidget();
+    
+private:
+    ScrollView* m_parent;
+    PlatformWidget m_widget;
+    bool m_selfVisible;
+    bool m_parentVisible;
+    
+    IntRect m_frame; // Not used when a native widget exists.
+
+#if PLATFORM(MAC) || PLATFORM(GTK)
+    WidgetPrivate* m_data;
 #endif
+};
 
-#if __APPLE__
-        Widget(NSView* view);
+} // namespace WebCore
 
-        NSView* getView() const;
-        NSView* getOuterView() const;
-        void setView(NSView*);
-        
-        void sendConsumedMouseUp();
-        
-        static void beforeMouseDown(NSView*);
-        static void afterMouseDown(NSView*);
-
-        void addToSuperview(NSView* superview);
-        void removeFromSuperview();
-
-        static void setDeferFirstResponderChanges(bool);
-#endif
-
-    private:
-        WidgetPrivate* data;
-    };
-
-}
-
-#endif
+#endif // Widget_h

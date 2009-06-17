@@ -1,11 +1,9 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,8 +17,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "Attr.h"
@@ -32,31 +30,34 @@
 
 namespace WebCore {
 
-Attr::Attr(Element* element, Document* docPtr, Attribute* a)
-    : ContainerNode(docPtr),
-      m_element(element),
-      m_attribute(a),
-      m_ignoreChildrenChanged(0)
+Attr::Attr(Element* element, Document* docPtr, PassRefPtr<Attribute> a)
+    : ContainerNode(docPtr)
+    , m_element(element)
+    , m_attribute(a)
+    , m_ignoreChildrenChanged(0)
+    , m_specified(true)  
 {
-    assert(!m_attribute->attr());
+    ASSERT(!m_attribute->attr());
     m_attribute->m_impl = this;
-    m_specified = true;
 }
 
 Attr::~Attr()
 {
-    assert(m_attribute->attr() == this);
+    ASSERT(m_attribute->attr() == this);
     m_attribute->m_impl = 0;
 }
 
 void Attr::createTextChild()
 {
-    assert(refCount());
+    ASSERT(refCount());
     if (!m_attribute->value().isEmpty()) {
-        ExceptionCode ec = 0;
-        m_ignoreChildrenChanged++;
-        appendChild(document()->createTextNode(m_attribute->value().impl()), ec);
-        m_ignoreChildrenChanged--;
+        RefPtr<Text> textNode = document()->createTextNode(m_attribute->value().string());
+
+        // This does everything appendChild() would do in this situation (assuming m_ignoreChildrenChanged was set),
+        // but much more efficiently.
+        textNode->setParent(this);
+        setFirstChild(textNode.get());
+        setLastChild(textNode.get());
     }
 }
 
@@ -87,6 +88,7 @@ const AtomicString& Attr::prefix() const
 
 void Attr::setPrefix(const AtomicString &_prefix, ExceptionCode& ec)
 {
+    ec = 0;
     checkSetPrefix(_prefix, ec);
     if (ec)
         return;
@@ -99,38 +101,20 @@ String Attr::nodeValue() const
     return value();
 }
 
-void Attr::setValue( const String& v, ExceptionCode& ec)
+void Attr::setValue(const String& v, ExceptionCode&)
 {
-    ec = 0;
-
-    // do not interprete entities in the string, its literal!
-
-    // NO_MODIFICATION_ALLOWED_ERR: Raised when the node is readonly
-    if (isReadOnlyNode()) {
-        ec = NO_MODIFICATION_ALLOWED_ERR;
-        return;
-    }
-
-    // ### what to do on 0 ?
-    if (v.isNull()) {
-        ec = DOMSTRING_SIZE_ERR;
-        return;
-    }
-
-    int e = 0;
     m_ignoreChildrenChanged++;
     removeChildren();
-    appendChild(document()->createTextNode(v.impl()), e);
-    m_ignoreChildrenChanged--;
-    
     m_attribute->setValue(v.impl());
+    createTextChild();
+    m_ignoreChildrenChanged--;
+
     if (m_element)
         m_element->attributeChanged(m_attribute.get());
 }
 
 void Attr::setNodeValue(const String& v, ExceptionCode& ec)
 {
-    // NO_MODIFICATION_ALLOWED_ERR: taken care of by setValue()
     setValue(v, ec);
 }
 
@@ -153,13 +137,13 @@ bool Attr::childTypeAllowed(NodeType type)
     }
 }
 
-void Attr::childrenChanged()
+void Attr::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
-    Node::childrenChanged();
-    
     if (m_ignoreChildrenChanged > 0)
         return;
-    
+ 
+    Node::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+
     // FIXME: We should include entity references in the value
     
     String val = "";
@@ -171,29 +155,6 @@ void Attr::childrenChanged()
     m_attribute->setValue(val.impl());
     if (m_element)
         m_element->attributeChanged(m_attribute.get());
-}
-
-String Attr::toString() const
-{
-    String result;
-
-    result += nodeName();
-
-    // FIXME: substitute entities for any instances of " or ' --
-    // maybe easier to just use text value and ignore existing
-    // entity refs?
-
-    if (firstChild() != NULL) {
-        result += "=\"";
-
-        for (Node *child = firstChild(); child != NULL; child = child->nextSibling()) {
-            result += child->toString();
-        }
-        
-        result += "\"";
-    }
-
-    return result;
 }
 
 }

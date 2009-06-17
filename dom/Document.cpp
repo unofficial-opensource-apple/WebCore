@@ -1,10 +1,11 @@
-/**
- * This file is part of the DOM implementation for KDE.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ *           (C) 2006 Alexey Proskuryakov (ap@webkit.org)
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2008 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2008 David Levin (levin@chromium.org)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,117 +19,182 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
 #include "config.h"
 #include "Document.h"
 
 #include "AXObjectCache.h"
+#include "AnimationController.h"
 #include "CDATASection.h"
+#include "CSSHelper.h"
+#include "CSSStyleSelector.h"
 #include "CSSStyleSheet.h"
 #include "CSSValueKeywords.h"
+#include "CString.h"
+#include "CachedCSSStyleSheet.h"
 #include "Comment.h"
+#include "Console.h"
+#include "CookieJar.h"
 #include "DOMImplementation.h"
-#include "Decoder.h"
+#include "DOMTimer.h"
+#include "DOMWindow.h"
 #include "DocLoader.h"
 #include "DocumentFragment.h"
+#include "DocumentLoader.h"
 #include "DocumentType.h"
 #include "EditingText.h"
+#include "Editor.h"
 #include "EntityReference.h"
 #include "Event.h"
+#include "EventHandler.h"
 #include "EventListener.h"
 #include "EventNames.h"
 #include "ExceptionCode.h"
+#include "FocusController.h"
 #include "Frame.h"
+#include "FrameLoader.h"
 #include "FrameTree.h"
+#include "FrameView.h"
+#include "HTMLAnchorElement.h"
 #include "HTMLBodyElement.h"
+#include "HTMLCanvasElement.h"
 #include "HTMLDocument.h"
 #include "HTMLElementFactory.h"
-#include "HTMLImageLoader.h"
+#include "HTMLFrameOwnerElement.h"
+#include "HTMLHeadElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLLinkElement.h"
 #include "HTMLMapElement.h"
 #include "HTMLNameCollection.h"
 #include "HTMLNames.h"
 #include "HTMLStyleElement.h"
-#include "JSEditor.h"
+#include "HTMLTitleElement.h"
+#include "HTTPParsers.h"
+#include "HistoryItem.h"
+#include "HitTestRequest.h"
+#include "HitTestResult.h"
+#include "ImageLoader.h"
+#include "InspectorController.h"
+#include "JSDOMBinding.h"
 #include "KeyboardEvent.h"
 #include "Logging.h"
+#include "MessageEvent.h"
 #include "MouseEvent.h"
 #include "MouseEventWithHitTestResults.h"
 #include "MutationEvent.h"
 #include "NameNodeList.h"
 #include "NodeFilter.h"
 #include "NodeIterator.h"
+#include "NodeWithIndex.h"
+#include "OverflowEvent.h"
+#include "Page.h"
 #include "PlatformKeyboardEvent.h"
 #include "ProcessingInstruction.h"
+#include "ProgressEvent.h"
 #include "RegisteredEventListener.h"
-#include "RegularExpression.h"
 #include "RenderArena.h"
 #include "RenderView.h"
 #include "RenderWidget.h"
+#include "ScriptController.h"
+#include "ScriptController.h"
+#include "SecurityOrigin.h"
 #include "SegmentedString.h"
 #include "SelectionController.h"
-#include "StringHash.h"
+#include "Settings.h"
 #include "StyleSheetList.h"
-#include "SystemTime.h"
+#include "TextEvent.h"
 #include "TextIterator.h"
+#include "TextResourceDecoder.h"
+#include "Timer.h"
 #include "TreeWalker.h"
 #include "UIEvent.h"
-#include "csshelper.h"
-#include "cssstyleselector.h"
-#include "kjs_binding.h"
-#include "kjs_proxy.h"
+#include "WebKitAnimationEvent.h"
+#include "WebKitTransitionEvent.h"
+#include "WheelEvent.h"
+#include "XMLHttpRequest.h"
+#include "XMLNames.h"
 #include "XMLTokenizer.h"
-#include "xmlhttprequest.h"
+#include <wtf/CurrentTime.h>
+#include <wtf/HashFunctions.h>
+#include <wtf/MainThread.h>
+#include <wtf/PassRefPtr.h>
+#include <wtf/StdLibExtras.h>
 
-#if XPATH_SUPPORT
+#if ENABLE(DATABASE)
+#include "Database.h"
+#include "DatabaseThread.h"
+#endif
+
+#if ENABLE(DOM_STORAGE)
+#include "StorageEvent.h"
+#endif
+
+#if ENABLE(XPATH)
 #include "XPathEvaluator.h"
 #include "XPathExpression.h"
 #include "XPathNSResolver.h"
 #include "XPathResult.h"
 #endif
 
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
 #include "XSLTProcessor.h"
 #endif
 
-#ifndef KHTML_NO_XBL
-#include "xbl_binding_manager.h"
-using XBL::XBLBindingManager;
+#if ENABLE(XBL)
+#include "XBLBindingManager.h"
 #endif
 
-#if SVG_SUPPORT
+#if ENABLE(SVG)
 #include "SVGDocumentExtensions.h"
 #include "SVGElementFactory.h"
 #include "SVGZoomEvent.h"
 #include "SVGStyleElement.h"
-#include "KSVGTimeScheduler.h"
 #endif
 
+#if ENABLE(TOUCH_EVENTS)
+#include "GestureEvent.h"
+#include "TouchEvent.h"
+#endif
+
+#include "CachedImage.h"
+#include "ChromeClient.h"
 #include "Element.h"
-#include "Page.h"
-#include "HTMLTokenizer.h"
+#include "Geolocation.h"
 #include "HTMLParserErrorCodes.h"
+#include "HTMLTokenizer.h"
+#include "Navigator.h"
+#include "Page.h"
+#include "WKContentObservation.h"
 #include "WKUtilities.h"
+#include <wtf/UnusedParam.h>
+
+#if ENABLE(WML)
+#include "WMLDocument.h"
+#include "WMLElement.h"
+#include "WMLElementFactory.h"
+#include "WMLNames.h"
+#endif
 
 using namespace std;
+using namespace WTF;
+using namespace Unicode;
 
 namespace WebCore {
 
-using namespace EventNames;
 using namespace HTMLNames;
 
 // #define INSTRUMENT_LAYOUT_SCHEDULING 1
 
+// This amount of time must have elapsed before we will even consider scheduling a layout without a delay.
+// FIXME: For faster machines this value can really be lowered to 200.  250 is adequate, but a little high
+// for dual G5s. :)
+const int cLayoutScheduleThreshold = 250;
 
 // Use 1 to represent the document's default form.
-HTMLFormElement* const defaultForm = (HTMLFormElement*) 1;
-
-// Golden ratio - arbitrary start value to avoid mapping all 0's to all 0's
-static const unsigned PHI = 0x9e3779b9U;
+static HTMLFormElement* const defaultForm = reinterpret_cast<HTMLFormElement*>(1);
 
 // DOM Level 2 says (letters added):
 //
@@ -156,8 +222,8 @@ static inline bool isValidNameStart(UChar32 c)
         return true;
 
     // rules (a) and (f) above
-    const uint32_t nameStartMask = U_GC_LL_MASK | U_GC_LU_MASK | U_GC_LO_MASK | U_GC_LT_MASK | U_GC_NL_MASK;
-    if (!(U_GET_GC_MASK(c) & nameStartMask))
+    const uint32_t nameStartMask = Letter_Lowercase | Letter_Uppercase | Letter_Other | Letter_Titlecase | Number_Letter;
+    if (!(Unicode::category(c) & nameStartMask))
         return false;
 
     // rule (c) above
@@ -165,8 +231,8 @@ static inline bool isValidNameStart(UChar32 c)
         return false;
 
     // rule (d) above
-    UDecompositionType decompType = static_cast<UDecompositionType>(u_getIntPropertyValue(c, UCHAR_DECOMPOSITION_TYPE));
-    if (decompType == U_DT_FONT || decompType == U_DT_COMPAT)
+    DecompositionType decompType = decompositionType(c);
+    if (decompType == DecompositionFont || decompType == DecompositionCompat)
         return false;
 
     return true;
@@ -187,8 +253,8 @@ static inline bool isValidNamePart(UChar32 c)
         return true;
 
     // rules (b) and (f) above
-    const uint32_t otherNamePartMask = U_GC_MC_MASK | U_GC_ME_MASK | U_GC_MN_MASK | U_GC_LM_MASK | U_GC_ND_MASK;
-    if (!(U_GET_GC_MASK(c) & otherNamePartMask))
+    const uint32_t otherNamePartMask = Mark_NonSpacing | Mark_Enclosing | Mark_SpacingCombining | Letter_Modifier | Number_DecimalDigit;
+    if (!(Unicode::category(c) & otherNamePartMask))
         return false;
 
     // rule (c) above
@@ -196,77 +262,127 @@ static inline bool isValidNamePart(UChar32 c)
         return false;
 
     // rule (d) above
-    UDecompositionType decompType = static_cast<UDecompositionType>(u_getIntPropertyValue(c, UCHAR_DECOMPOSITION_TYPE));
-    if (decompType == U_DT_FONT || decompType == U_DT_COMPAT)
+    DecompositionType decompType = decompositionType(c);
+    if (decompType == DecompositionFont || decompType == DecompositionCompat)
         return false;
 
     return true;
 }
 
-DeprecatedPtrList<Document> * Document::changedDocuments = 0;
+static Widget* widgetForNode(Node* focusedNode)
+{
+    if (!focusedNode)
+        return 0;
+    RenderObject* renderer = focusedNode->renderer();
+    if (!renderer || !renderer->isWidget())
+        return 0;
+    return static_cast<RenderWidget*>(renderer)->widget();
+}
 
-// FrameView might be 0
-Document::Document(DOMImplementation* impl, FrameView *v)
+static bool acceptsEditingFocus(Node *node)
+{
+    ASSERT(node);
+    ASSERT(node->isContentEditable());
+
+    Node *root = node->rootEditableElement();
+    Frame* frame = node->document()->frame();
+    if (!frame || !root)
+        return false;
+
+    return frame->editor()->shouldBeginEditing(rangeOfContents(root).get());
+}
+
+static HashSet<Document*>* changedDocuments = 0;
+
+Document::Document(Frame* frame, bool isXHTML)
     : ContainerNode(0)
-    , m_implementation(impl)
+#if ENABLE(TOUCH_EVENTS)
+    , m_inTouchEventHandling(false)
+    , m_touchEventRegionsDirty(false)
+    , m_touchEventsChangedTimer(this, &Document::touchEventsChangedTimerFired)
+#endif
     , m_domtree_version(0)
-    , m_styleSheets(new StyleSheetList)
+    , m_styleSheets(StyleSheetList::create(this))
+    , m_frameElementsShouldIgnoreScrolling(false)
     , m_title("")
     , m_titleSetExplicitly(false)
     , m_imageLoadEventTimer(this, &Document::imageLoadEventTimerFired)
-#if !KHTML_NO_XBL
-    , m_bindingManager(new XBLBindingManager(this))
-#endif
-#ifdef KHTML_XSLT
+    , m_updateFocusAppearanceTimer(this, &Document::updateFocusAppearanceTimerFired)
+#if ENABLE(XSLT)
     , m_transformSource(0)
 #endif
-    , m_domainWasSetInDOM(false)
+    , m_xmlVersion("1.0")
+    , m_xmlStandalone(false)
+#if ENABLE(XBL)
+    , m_bindingManager(new XBLBindingManager(this))
+#endif
     , m_savedRenderer(0)
     , m_secureForms(0)
     , m_designMode(inherit)
     , m_selfOnlyRefCount(0)
-#if SVG_SUPPORT
+#if ENABLE(SVG)
     , m_svgExtensions(0)
 #endif
-#if __APPLE__
+#if ENABLE(DASHBOARD_SUPPORT)
     , m_hasDashboardRegions(false)
     , m_dashboardRegionsDirty(false)
 #endif
     , m_accessKeyMapValid(false)
     , m_createRenderers(true)
     , m_inPageCache(false)
+    , m_useSecureKeyboardEntryWhenActive(false)
+    , m_isXHTML(isXHTML)
+    , m_numNodeListCaches(0)
+#if ENABLE(DATABASE)
+    , m_hasOpenDatabases(false)
+#endif
+    , m_usingGeolocation(false)
+#if USE(LOW_BANDWIDTH_DISPLAY)
+    , m_inLowBandwidthDisplay(false)
+#endif
     , m_scrollEventListenerCount(0)
+    , m_totalImageDataSize(0)
+    , m_animatedImageDataCount(0)
 {
     m_document.resetSkippingRef(this);
 
     m_printing = false;
+    
+    m_ignoreAutofocus = false;
 
-    m_view = v;
+    m_frame = frame;
     m_renderArena = 0;
 
+    m_axObjectCache = 0;
     
-    m_docLoader = new DocLoader(v ? v->frame() : 0, this);
+    m_docLoader = new DocLoader(this);
 
     visuallyOrdered = false;
-    m_loadingSheet = false;
     m_bParsing = false;
     m_docChanged = false;
     m_tokenizer = 0;
+    m_wellFormed = false;
 
-    pMode = Strict;
-    hMode = XHtml;
+    setParseMode(Strict);
+
     m_textColor = Color::black;
     m_listenerTypes = 0;
     m_inDocument = true;
-    m_styleSelectorDirty = false;
     m_inStyleRecalc = false;
     m_closeAfterStyleRecalc = false;
     m_usesDescendantRules = false;
     m_usesSiblingRules = false;
-
-    m_styleSelector = new CSSStyleSelector(this, m_usersheet, m_styleSheets.get(), !inCompatMode());
+    m_usesFirstLineRules = false;
+    m_usesFirstLetterRules = false;
+    m_usesBeforeAfterRules = false;
+    m_gotoAnchorNeededAfterStylesheetsLoad = false;
+ 
+    m_styleSelector = 0;
+    m_didCalculateStyleSelector = false;
     m_pendingStylesheets = 0;
     m_ignorePendingStylesheets = false;
+    m_hasNodesWithPlaceholderStyle = false;
+    m_pendingSheetLayout = NoLayoutWithPendingSheets;
 
     m_cssTarget = 0;
 
@@ -278,9 +394,8 @@ Document::Document(DOMImplementation* impl, FrameView *v)
     m_startTime = currentTime();
     m_overMinimumLayoutThreshold = false;
     
-    m_jsEditor = 0;
-
-    initSecurityPolicyURL();
+    initSecurityContext();
+    initDNSPrefetch();
 
     static int docID = 0;
     m_docID = docID++;
@@ -288,22 +403,26 @@ Document::Document(DOMImplementation* impl, FrameView *v)
 
 void Document::removedLastRef()
 {
+    ASSERT(!m_deletionHasBegun);
     if (m_selfOnlyRefCount) {
-        // if removing a child removes the last self-only ref, we don't
+        // If removing a child removes the last self-only ref, we don't
         // want the document to be destructed until after
         // removeAllChildren returns, so we guard ourselves with an
-        // extra self-only ref
+        // extra self-only ref.
 
         DocPtr<Document> guard(this);
-        
-        // we must make sure not to be retaining any of our children through
-        // these extra pointers or we will create a reference cycle
+
+        // We must make sure not to be retaining any of our children through
+        // these extra pointers or we will create a reference cycle.
         m_docType = 0;
-        m_focusNode = 0;
+        m_focusedNode = 0;
         m_hoverNode = 0;
         m_activeNode = 0;
         m_titleElement = 0;
         m_documentElement = 0;
+        
+        // To avoid unnecessary hash lookups during teardown
+        m_documentImages.clear();
 
         removeAllChildren();
 
@@ -312,22 +431,30 @@ void Document::removedLastRef()
 
         delete m_tokenizer;
         m_tokenizer = 0;
-    } else
+
+        m_cssCanvasElements.clear();
+
+#ifndef NDEBUG
+        m_inRemovedLastRefFunction = false;
+#endif
+    } else {
+#ifndef NDEBUG
+        m_deletionHasBegun = true;
+#endif
         delete this;
+    }
 }
 
 Document::~Document()
 {
-    assert(!renderer());
-    assert(!m_inPageCache);
-    assert(m_savedRenderer == 0);
+    ASSERT(!renderer());
+    ASSERT(!m_inPageCache);
+    ASSERT(!m_savedRenderer);
+    ASSERT(m_ranges.isEmpty());
 
-#if SVG_SUPPORT
-    delete m_svgExtensions;
-#endif
+    removeAllEventListeners();
 
-    XMLHttpRequest::detachRequests(this);
-    KJS::ScriptInterpreter::forgetAllDOMNodesForDocument(this);
+    forgetAllDOMNodesForDocument(this);
 
     if (m_docChanged && changedDocuments)
         changedDocuments->remove(this);
@@ -341,24 +468,35 @@ Document::~Document()
         m_renderArena = 0;
     }
 
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
     xmlFreeDoc((xmlDocPtr)m_transformSource);
 #endif
 
-#ifndef KHTML_NO_XBL
+#if ENABLE(XBL)
     delete m_bindingManager;
 #endif
 
     deleteAllValues(m_markers);
 
+    clearAXObjectCache();
+
     m_decoder = 0;
     
-    if (m_jsEditor) {
-        delete m_jsEditor;
-        m_jsEditor = 0;
+    unsigned count = sizeof(m_nameCollectionInfo) / sizeof(m_nameCollectionInfo[0]);
+    for (unsigned i = 0; i < count; i++)
+        deleteAllValues(m_nameCollectionInfo[i]);
+
+#if ENABLE(DATABASE)
+    if (m_databaseThread) {
+        ASSERT(m_databaseThread->terminationRequested());
+        m_databaseThread = 0;
     }
-    
-    deleteAllValues(m_selectedRadioButtons);
+#endif
+
+    if (m_styleSheets)
+        m_styleSheets->documentDestroyed();
+
+    m_document = 0;
 }
 
 void Document::resetLinkColor()
@@ -378,42 +516,54 @@ void Document::resetActiveLinkColor()
 
 void Document::setDocType(PassRefPtr<DocumentType> docType)
 {
+    // This should never be called more than once.
+    // Note: This is not a public DOM method and can only be called by the parser.
+    ASSERT(!m_docType || !docType);
+    if (m_docType && docType)
+        return;
     m_docType = docType;
-    if (Frame* f = frame())
-        f->didReceiveDocType();
-}
-
-DocumentType *Document::doctype() const
-{
-    return m_docType.get();
+    if (m_docType)
+        m_docType->setDocument(this);
+    determineParseMode();
+    if (page())
+        page()->chrome()->client()->didReceiveDocType(frame());
 }
 
 DOMImplementation* Document::implementation() const
 {
+    if (!m_implementation)
+        m_implementation = DOMImplementation::create();
     return m_implementation.get();
 }
 
-void Document::childrenChanged()
+void Document::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
-    // invalidate the document element we have cached in case it was replaced
+    ContainerNode::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+    
+    // Invalidate the document element we have cached in case it was replaced.
     m_documentElement = 0;
 }
 
-Element* Document::documentElement() const
+void Document::cacheDocumentElement() const
 {
-    if (!m_documentElement) {
-        Node* n = firstChild();
-        while (n && !n->isElementNode())
-            n = n->nextSibling();
-        m_documentElement = static_cast<Element*>(n);
-    }
-
-    return m_documentElement.get();
+    ASSERT(!m_documentElement);
+    Node* n = firstChild();
+    while (n && !n->isElementNode())
+        n = n->nextSibling();
+    m_documentElement = static_cast<Element*>(n);
 }
 
-PassRefPtr<Element> Document::createElement(const String &name, ExceptionCode& ec)
+PassRefPtr<Element> Document::createElement(const AtomicString& name, ExceptionCode& ec)
 {
-    return createElementNS(nullAtom, name, ec);
+    if (!isValidName(name)) {
+        ec = INVALID_CHARACTER_ERR;
+        return 0;
+    }
+
+    if (m_isXHTML)
+        return HTMLElementFactory::createHTMLElement(QualifiedName(nullAtom, name, xhtmlNamespaceURI), this, 0, false);
+
+    return createElement(QualifiedName(nullAtom, name, nullAtom), false, ec);
 }
 
 PassRefPtr<DocumentFragment> Document::createDocumentFragment()
@@ -421,17 +571,17 @@ PassRefPtr<DocumentFragment> Document::createDocumentFragment()
     return new DocumentFragment(document());
 }
 
-PassRefPtr<Text> Document::createTextNode(const String &data)
+PassRefPtr<Text> Document::createTextNode(const String& data)
 {
     return new Text(this, data);
 }
 
-PassRefPtr<Comment> Document::createComment (const String &data)
+PassRefPtr<Comment> Document::createComment(const String& data)
 {
     return new Comment(this, data);
 }
 
-PassRefPtr<CDATASection> Document::createCDATASection(const String &data, ExceptionCode& ec)
+PassRefPtr<CDATASection> Document::createCDATASection(const String& data, ExceptionCode& ec)
 {
     if (isHTMLDocument()) {
         ec = NOT_SUPPORTED_ERR;
@@ -440,7 +590,7 @@ PassRefPtr<CDATASection> Document::createCDATASection(const String &data, Except
     return new CDATASection(this, data);
 }
 
-PassRefPtr<ProcessingInstruction> Document::createProcessingInstruction(const String &target, const String &data, ExceptionCode& ec)
+PassRefPtr<ProcessingInstruction> Document::createProcessingInstruction(const String& target, const String& data, ExceptionCode& ec)
 {
     if (!isValidName(target)) {
         ec = INVALID_CHARACTER_ERR;
@@ -453,7 +603,7 @@ PassRefPtr<ProcessingInstruction> Document::createProcessingInstruction(const St
     return new ProcessingInstruction(this, target, data);
 }
 
-PassRefPtr<EntityReference> Document::createEntityReference(const String &name, ExceptionCode& ec)
+PassRefPtr<EntityReference> Document::createEntityReference(const String& name, ExceptionCode& ec)
 {
     if (!isValidName(name)) {
         ec = INVALID_CHARACTER_ERR;
@@ -463,24 +613,28 @@ PassRefPtr<EntityReference> Document::createEntityReference(const String &name, 
         ec = NOT_SUPPORTED_ERR;
         return 0;
     }
-    return new EntityReference(this, name.impl());
+    return new EntityReference(this, name);
 }
 
-PassRefPtr<EditingText> Document::createEditingTextNode(const String &text)
+PassRefPtr<EditingText> Document::createEditingTextNode(const String& text)
 {
     return new EditingText(this, text);
 }
 
 PassRefPtr<CSSStyleDeclaration> Document::createCSSStyleDeclaration()
 {
-    return new CSSMutableStyleDeclaration;
+    return CSSMutableStyleDeclaration::create();
 }
 
 PassRefPtr<Node> Document::importNode(Node* importedNode, bool deep, ExceptionCode& ec)
 {
     ec = 0;
     
-    if (!importedNode) {
+    if (!importedNode
+#if ENABLE(SVG) && ENABLE(DASHBOARD_SUPPORT)
+        || (importedNode->isSVGElement() && page() && page()->settings()->usesDashboardBackwardCompatibilityMode())
+#endif
+        ) {
         ec = NOT_SUPPORTED_ERR;
         return 0;
     }
@@ -497,10 +651,10 @@ PassRefPtr<Node> Document::importNode(Node* importedNode, bool deep, ExceptionCo
         case COMMENT_NODE:
             return createComment(importedNode->nodeValue());
         case ELEMENT_NODE: {
-            Element *oldElement = static_cast<Element *>(importedNode);
+            Element* oldElement = static_cast<Element*>(importedNode);
             RefPtr<Element> newElement = createElementNS(oldElement->namespaceURI(), oldElement->tagQName().toString(), ec);
                         
-            if (ec != 0)
+            if (ec)
                 return 0;
 
             NamedAttrMap* attrs = oldElement->attributes(true);
@@ -509,7 +663,7 @@ PassRefPtr<Node> Document::importNode(Node* importedNode, bool deep, ExceptionCo
                 for (unsigned i = 0; i < length; i++) {
                     Attribute* attr = attrs->attributeItem(i);
                     newElement->setAttribute(attr->name(), attr->value().impl(), ec);
-                    if (ec != 0)
+                    if (ec)
                         return 0;
                 }
             }
@@ -519,22 +673,43 @@ PassRefPtr<Node> Document::importNode(Node* importedNode, bool deep, ExceptionCo
             if (deep) {
                 for (Node* oldChild = oldElement->firstChild(); oldChild; oldChild = oldChild->nextSibling()) {
                     RefPtr<Node> newChild = importNode(oldChild, true, ec);
-                    if (ec != 0)
+                    if (ec)
                         return 0;
                     newElement->appendChild(newChild.release(), ec);
-                    if (ec != 0)
+                    if (ec)
                         return 0;
                 }
             }
 
             return newElement.release();
         }
-        case ATTRIBUTE_NODE:
+        case ATTRIBUTE_NODE: {
+            RefPtr<Attr> newAttr = new Attr(0, this, static_cast<Attr*>(importedNode)->attr()->clone());
+            newAttr->createTextChild();
+            return newAttr.release();
+        }
+        case DOCUMENT_FRAGMENT_NODE: {
+            DocumentFragment* oldFragment = static_cast<DocumentFragment*>(importedNode);
+            RefPtr<DocumentFragment> newFragment = createDocumentFragment();
+            if (deep) {
+                for (Node* oldChild = oldFragment->firstChild(); oldChild; oldChild = oldChild->nextSibling()) {
+                    RefPtr<Node> newChild = importNode(oldChild, true, ec);
+                    if (ec)
+                        return 0;
+                    newFragment->appendChild(newChild.release(), ec);
+                    if (ec)
+                        return 0;
+                }
+            }
+            
+            return newFragment.release();
+        }
         case ENTITY_NODE:
+        case NOTATION_NODE:
+            // FIXME: It should be possible to import these node types, however in DOM3 the DocumentType is readonly, so there isn't much sense in doing that.
+            // Ability to add these imported nodes to a DocumentType will be considered for addition to a future release of the DOM.
         case DOCUMENT_NODE:
         case DOCUMENT_TYPE_NODE:
-        case DOCUMENT_FRAGMENT_NODE:
-        case NOTATION_NODE:
         case XPATH_NAMESPACE_NODE:
             break;
     }
@@ -550,7 +725,12 @@ PassRefPtr<Node> Document::adoptNode(PassRefPtr<Node> source, ExceptionCode& ec)
         ec = NOT_SUPPORTED_ERR;
         return 0;
     }
-    
+
+    if (source->isReadOnlyNode()) {
+        ec = NO_MODIFICATION_ALLOWED_ERR;
+        return 0;
+    }
+
     switch (source->nodeType()) {
         case ENTITY_NODE:
         case NOTATION_NODE:
@@ -563,7 +743,7 @@ PassRefPtr<Node> Document::adoptNode(PassRefPtr<Node> source, ExceptionCode& ec)
             Attr* attr = static_cast<Attr*>(source.get());
             if (attr->ownerElement())
                 attr->ownerElement()->removeAttributeNode(attr, ec);
-            attr->m_specified = true;
+            attr->setSpecified(true);
             break;
         }       
         default:
@@ -571,56 +751,95 @@ PassRefPtr<Node> Document::adoptNode(PassRefPtr<Node> source, ExceptionCode& ec)
                 source->parentNode()->removeChild(source.get(), ec);
     }
                 
-    for (Node* node = source.get(); node; node = node->traverseNextNode(source.get())) {
-        KJS::ScriptInterpreter::updateDOMNodeDocument(node, node->document(), this);
+    for (Node* node = source.get(); node; node = node->traverseNextNode(source.get()))
         node->setDocument(this);
-    }
 
     return source;
 }
 
-PassRefPtr<Element> Document::createElementNS(const String &_namespaceURI, const String &qualifiedName, ExceptionCode& ec)
+bool Document::hasPrefixNamespaceMismatch(const QualifiedName& qName)
 {
-    // FIXME: We'd like a faster code path that skips this check for calls from inside the engine where the name is known to be valid.
-    String prefix, localName;
-    if (!parseQualifiedName(qualifiedName, prefix, localName)) {
-        ec = INVALID_CHARACTER_ERR;
-        return 0;
-    }
+    DEFINE_STATIC_LOCAL(const AtomicString, xmlnsNamespaceURI, ("http://www.w3.org/2000/xmlns/"));
+    DEFINE_STATIC_LOCAL(const AtomicString, xmlns, ("xmlns"));
+    DEFINE_STATIC_LOCAL(const AtomicString, xml, ("xml"));
 
+    // These checks are from DOM Core Level 2, createElementNS
+    // http://www.w3.org/TR/DOM-Level-2-Core/core.html#ID-DocCrElNS
+    if (!qName.prefix().isEmpty() && qName.namespaceURI().isNull()) // createElementNS(null, "html:div")
+        return true;
+    if (qName.prefix() == xml && qName.namespaceURI() != XMLNames::xmlNamespaceURI) // createElementNS("http://www.example.com", "xml:lang")
+        return true;
+
+    // Required by DOM Level 3 Core and unspecified by DOM Level 2 Core:
+    // http://www.w3.org/TR/2004/REC-DOM-Level-3-Core-20040407/core.html#ID-DocCrElNS
+    // createElementNS("http://www.w3.org/2000/xmlns/", "foo:bar"), createElementNS(null, "xmlns:bar")
+    if ((qName.prefix() == xmlns && qName.namespaceURI() != xmlnsNamespaceURI) || (qName.prefix() != xmlns && qName.namespaceURI() == xmlnsNamespaceURI))
+        return true;
+
+    return false;
+}
+
+// FIXME: This should really be in a possible ElementFactory class
+PassRefPtr<Element> Document::createElement(const QualifiedName& qName, bool createdByParser, ExceptionCode& ec)
+{
     RefPtr<Element> e;
-    QualifiedName qName = QualifiedName(AtomicString(prefix), AtomicString(localName), AtomicString(_namespaceURI));
-    
+
     // FIXME: Use registered namespaces and look up in a hash to find the right factory.
-    if (_namespaceURI == xhtmlNamespaceURI) {
-        e = HTMLElementFactory::createHTMLElement(qName.localName(), this, 0, false);
-        if (e && !prefix.isNull()) {
-            e->setPrefix(qName.prefix(), ec);
-            if (ec)
-                return 0;
-        }
-    }
-#if SVG_SUPPORT
-    else if (_namespaceURI == SVGNames::svgNamespaceURI)
-        e = SVGElementFactory::createSVGElement(qName, this, false);
+    if (qName.namespaceURI() == xhtmlNamespaceURI)
+        e = HTMLElementFactory::createHTMLElement(qName, this, 0, createdByParser);
+#if ENABLE(SVG)
+    else if (qName.namespaceURI() == SVGNames::svgNamespaceURI)
+        e = SVGElementFactory::createSVGElement(qName, this, createdByParser);
+#endif
+#if ENABLE(WML)
+    else if (qName.namespaceURI() == WMLNames::wmlNamespaceURI || isWMLDocument())
+        e = WMLElementFactory::createWMLElement(qName, this, createdByParser);
 #endif
     
     if (!e)
         e = new Element(qName, document());
     
+    // FIXME: The element factories should be fixed to not ignore qName.prefix()
+    // Instead they should pass the entire qName into element creation so we don't
+    // need to manually set the prefix after creation.
+    // Then this code can become ASSERT(qName == e.qname());
+    // and Document::createElement can stop taking ExceptionCode& as well.
+    if (e && !qName.prefix().isNull()) {
+        ec = 0;
+        e->setPrefix(qName.prefix(), ec);
+        if (ec)
+            return 0;
+    }
+    
     return e.release();
 }
 
-Element *Document::getElementById(const AtomicString& elementId) const
+PassRefPtr<Element> Document::createElementNS(const String& namespaceURI, const String& qualifiedName, ExceptionCode& ec)
 {
-    if (elementId.length() == 0)
+    String prefix, localName;
+    if (!parseQualifiedName(qualifiedName, prefix, localName, ec))
         return 0;
 
-    Element *element = m_elementsById.get(elementId.impl());
+    QualifiedName qName(prefix, localName, namespaceURI);
+    if (hasPrefixNamespaceMismatch(qName)) {
+        ec = NAMESPACE_ERR;
+        return 0;
+    }
+
+    return createElement(qName, false, ec);
+}
+
+Element* Document::getElementById(const AtomicString& elementId) const
+{
+    if (elementId.isEmpty())
+        return 0;
+
+    Element* element = m_elementsById.get(elementId.impl());
     if (element)
         return element;
-        
+
     if (m_duplicateIds.contains(elementId.impl())) {
+        // We know there's at least one node with this id, but we don't know what the first one is.
         for (Node *n = traverseNextNode(); n != 0; n = n->traverseNextNode()) {
             if (n->isElementNode()) {
                 element = static_cast<Element*>(n);
@@ -631,6 +850,7 @@ Element *Document::getElementById(const AtomicString& elementId) const
                 }
             }
         }
+        ASSERT_NOT_REACHED();
     }
     return 0;
 }
@@ -638,7 +858,7 @@ Element *Document::getElementById(const AtomicString& elementId) const
 String Document::readyState() const
 {
     if (Frame* f = frame()) {
-        if (f->isComplete()) 
+        if (f->loader()->isComplete()) 
             return "complete";
         if (parsing()) 
             return "loading";
@@ -651,15 +871,15 @@ String Document::readyState() const
 
 String Document::inputEncoding() const
 {
-    if (Decoder* d = decoder())
-        return d->encodingName();
+    if (TextResourceDecoder* d = decoder())
+        return d->encoding().name();
     return String();
 }
 
 String Document::defaultCharset() const
 {
-    if (Frame* f = frame())
-        return f->settings()->encoding();
+    if (Settings* settings = this->settings())
+        return settings->defaultTextEncodingName();
     return String();
 }
 
@@ -667,7 +887,40 @@ void Document::setCharset(const String& charset)
 {
     if (!decoder())
         return;
-    decoder()->setEncodingName(charset.deprecatedString().ascii(), Decoder::UserChosenEncoding);
+    decoder()->setEncoding(charset, TextResourceDecoder::UserChosenEncoding);
+}
+
+void Document::setXMLVersion(const String& version, ExceptionCode& ec)
+{
+    if (!implementation()->hasFeature("XML", String())) {
+        ec = NOT_SUPPORTED_ERR;
+        return;
+    }
+   
+    // FIXME: Also raise NOT_SUPPORTED_ERR if the version is set to a value that is not supported by this Document.
+
+    m_xmlVersion = version;
+}
+
+void Document::setXMLStandalone(bool standalone, ExceptionCode& ec)
+{
+    if (!implementation()->hasFeature("XML", String())) {
+        ec = NOT_SUPPORTED_ERR;
+        return;
+    }
+
+    m_xmlStandalone = standalone;
+}
+
+void Document::setDocumentURI(const String& uri)
+{
+    m_documentURI = uri;
+    updateBaseURL();
+}
+
+KURL Document::baseURI() const
+{
+    return m_baseURL;
 }
 
 Element* Document::elementFromPoint(int x, int y) const
@@ -675,10 +928,11 @@ Element* Document::elementFromPoint(int x, int y) const
     if (!renderer())
         return 0;
 
-    RenderObject::NodeInfo nodeInfo(true, true);
-    renderer()->layer()->hitTest(nodeInfo, IntPoint(x, y)); 
+    HitTestRequest request(true, true);
+    HitTestResult result(IntPoint(x, y));
+    renderView()->layer()->hitTest(request, result); 
 
-    Node* n = nodeInfo.innerNode();
+    Node* n = result.innerNode();
     while (n && !n->isElementNode())
         n = n->parentNode();
     if (n)
@@ -688,10 +942,28 @@ Element* Document::elementFromPoint(int x, int y) const
 
 void Document::addElementById(const AtomicString& elementId, Element* element)
 {
-    if (!m_elementsById.contains(elementId.impl()))
-        m_elementsById.set(elementId.impl(), element);
-    else
+    typedef HashMap<AtomicStringImpl*, Element*>::iterator iterator;
+    if (!m_duplicateIds.contains(elementId.impl())) {
+        // Fast path. The ID is not already in m_duplicateIds, so we assume that it's
+        // also not already in m_elementsById and do an add. If that add succeeds, we're done.
+        pair<iterator, bool> addResult = m_elementsById.add(elementId.impl(), element);
+        if (addResult.second)
+            return;
+        // The add failed, so this ID was already cached in m_elementsById.
+        // There are multiple elements with this ID. Remove the m_elementsById
+        // cache for this ID so getElementById searches for it next time it is called.
+        m_elementsById.remove(addResult.first);
         m_duplicateIds.add(elementId.impl());
+    } else {
+        // There are multiple elements with this ID. If it exists, remove the m_elementsById
+        // cache for this ID so getElementById searches for it next time it is called.
+        iterator cachedItem = m_elementsById.find(elementId.impl());
+        if (cachedItem != m_elementsById.end()) {
+            m_elementsById.remove(cachedItem);
+            m_duplicateIds.add(elementId.impl());
+        }
+    }
+    m_duplicateIds.add(elementId.impl());
 }
 
 void Document::removeElementById(const AtomicString& elementId, Element* element)
@@ -723,17 +995,27 @@ Element* Document::getElementByAccessKey(const String& key) const
 void Document::updateTitle()
 {
     if (Frame* f = frame())
-        f->setTitle(m_title);
+        f->loader()->setTitle(m_title);
 }
 
-void Document::setTitle(const String& title, Node* titleElement)
+void Document::setTitle(const String& title, Element* titleElement)
 {
     if (!titleElement) {
         // Title set by JavaScript -- overrides any title elements.
         m_titleSetExplicitly = true;
-        m_titleElement = 0;
+        if (!isHTMLDocument())
+            m_titleElement = 0;
+        else if (!m_titleElement) {
+            if (HTMLElement* headElement = head()) {
+                ExceptionCode ec = 0;
+                m_titleElement = createElement("title", ec);
+                ASSERT(!ec);
+                headElement->appendChild(m_titleElement, ec);
+                ASSERT(!ec);
+            }
+        }
     } else if (titleElement != m_titleElement) {
-        if (m_titleElement)
+        if (m_titleElement || m_titleSetExplicitly)
             // Only allow the first title element to change the title -- others have no effect.
             return;
         m_titleElement = titleElement;
@@ -744,17 +1026,30 @@ void Document::setTitle(const String& title, Node* titleElement)
 
     m_title = title;
     updateTitle();
+
+    if (m_titleSetExplicitly && m_titleElement && m_titleElement->hasTagName(titleTag))
+        static_cast<HTMLTitleElement*>(m_titleElement.get())->setText(m_title);
 }
 
-void Document::removeTitle(Node* titleElement)
+void Document::removeTitle(Element* titleElement)
 {
     if (m_titleElement != titleElement)
         return;
 
-    // FIXME: Ideally we might want this to search for the first remaining title element, and use it.
     m_titleElement = 0;
+    m_titleSetExplicitly = false;
 
-    if (!m_title.isEmpty()) {
+    // Update title based on first title element in the head, if one exists.
+    if (HTMLElement* headElement = head()) {
+        for (Node* e = headElement->firstChild(); e; e = e->nextSibling())
+            if (e->hasTagName(titleTag)) {
+                HTMLTitleElement* titleElement = static_cast<HTMLTitleElement*>(e);
+                setTitle(titleElement->text(), titleElement);
+                break;
+            }
+    }
+
+    if (!m_titleElement && !m_title.isEmpty()) {
         m_title = "";
         updateTitle();
     }
@@ -770,14 +1065,24 @@ Node::NodeType Document::nodeType() const
     return DOCUMENT_NODE;
 }
 
-Frame* Document::frame() const 
+FrameView* Document::view() const
 {
-    return m_view ? m_view->frame() : 0; 
+    return m_frame ? m_frame->view() : 0;
+}
+
+Page* Document::page() const
+{
+    return m_frame ? m_frame->page() : 0;    
+}
+
+Settings* Document::settings() const
+{
+    return m_frame ? m_frame->settings() : 0;
 }
 
 PassRefPtr<Range> Document::createRange()
 {
-    return new Range(this);
+    return Range::create(this);
 }
 
 PassRefPtr<NodeIterator> Document::createNodeIterator(Node* root, unsigned whatToShow, 
@@ -787,7 +1092,7 @@ PassRefPtr<NodeIterator> Document::createNodeIterator(Node* root, unsigned whatT
         ec = NOT_SUPPORTED_ERR;
         return 0;
     }
-    return new NodeIterator(root, whatToShow, filter, expandEntityReferences);
+    return NodeIterator::create(root, whatToShow, filter, expandEntityReferences);
 }
 
 PassRefPtr<TreeWalker> Document::createTreeWalker(Node *root, unsigned whatToShow, 
@@ -797,7 +1102,7 @@ PassRefPtr<TreeWalker> Document::createTreeWalker(Node *root, unsigned whatToSho
         ec = NOT_SUPPORTED_ERR;
         return 0;
     }
-    return new TreeWalker(root, whatToShow, filter, expandEntityReferences);
+    return TreeWalker::create(root, whatToShow, filter, expandEntityReferences);
 }
 
 void Document::setDocumentChanged(bool b)
@@ -805,8 +1110,8 @@ void Document::setDocumentChanged(bool b)
     if (b) {
         if (!m_docChanged) {
             if (!changedDocuments)
-                changedDocuments = new DeprecatedPtrList<Document>;
-            changedDocuments->append(this);
+                changedDocuments = new HashSet<Document*>;
+            changedDocuments->add(this);
         }
         if (m_accessKeyMapValid) {
             m_accessKeyMapValid = false;
@@ -822,74 +1127,85 @@ void Document::setDocumentChanged(bool b)
 
 void Document::recalcStyle(StyleChange change)
 {
+    // we should not enter style recalc while painting
+    if (frame() && frame()->view() && frame()->view()->isPainting()) {
+        ASSERT(!frame()->view()->isPainting());
+        return;
+    }
+    
     if (m_inStyleRecalc)
         return; // Guard against re-entrancy. -dwh
-        
+
     m_inStyleRecalc = true;
+    suspendPostAttachCallbacks();
     
     ASSERT(!renderer() || renderArena());
     if (!renderer() || !renderArena())
         goto bail_out;
 
     if (change == Force) {
-        RenderStyle* oldStyle = renderer()->style();
-        if (oldStyle)
-            oldStyle->ref();
-        RenderStyle* _style = new (m_renderArena) RenderStyle();
-        _style->ref();
-        _style->setDisplay(BLOCK);
-        _style->setVisuallyOrdered(visuallyOrdered);
-        // ### make the font stuff _really_ work!!!!
-
+        // style selector may set this again during recalc
+        m_hasNodesWithPlaceholderStyle = false;
+        
+        RefPtr<RenderStyle> documentStyle = RenderStyle::create();
+        documentStyle->setDisplay(BLOCK);
+        documentStyle->setVisuallyOrdered(visuallyOrdered);
+        documentStyle->setZoom(frame()->pageZoomFactor());
+        m_styleSelector->setStyle(documentStyle);
+    
         FontDescription fontDescription;
         fontDescription.setUsePrinterFont(printing());
-        if (m_view) {
-            const Settings *settings = m_view->frame()->settings();
+        if (Settings* settings = this->settings()) {
+            fontDescription.setRenderingMode(settings->fontRenderingMode());
             if (printing() && !settings->shouldPrintBackgrounds())
-                _style->setForceBackgroundsToWhite(true);
-            const AtomicString& stdfont = settings->stdFontName();
+                documentStyle->setForceBackgroundsToWhite(true);
+            const AtomicString& stdfont = settings->standardFontFamily();
             if (!stdfont.isEmpty()) {
                 fontDescription.firstFamily().setFamily(stdfont);
                 fontDescription.firstFamily().appendFamily(0);
             }
-            m_styleSelector->setFontSize(fontDescription, m_styleSelector->fontSizeForKeyword(CSS_VAL_MEDIUM, inCompatMode()));
+            fontDescription.setKeywordSize(CSSValueMedium - CSSValueXxSmall + 1);
+            m_styleSelector->setFontSize(fontDescription, m_styleSelector->fontSizeForKeyword(CSSValueMedium, inCompatMode(), false));
         }
 
-        _style->setFontDescription(fontDescription);
-        _style->font().update();
+        documentStyle->setFontDescription(fontDescription);
+        documentStyle->font().update(m_styleSelector->fontSelector());
         if (inCompatMode())
-            _style->setHtmlHacks(true); // enable html specific rendering tricks
+            documentStyle->setHtmlHacks(true); // enable html specific rendering tricks
 
-        StyleChange ch = diff(_style, oldStyle);
+        StyleChange ch = diff(documentStyle.get(), renderer()->style());
         if (renderer() && ch != NoChange)
-            renderer()->setStyle(_style);
+            renderer()->setStyle(documentStyle.release());
         if (change != Force)
             change = ch;
-
-        _style->deref(m_renderArena);
-        if (oldStyle)
-            oldStyle->deref(m_renderArena);
     }
 
-    for (Node* n = fastFirstChild(); n; n = n->nextSibling())
+    for (Node* n = firstChild(); n; n = n->nextSibling())
         if (change >= Inherit || n->hasChangedChild() || n->changed())
             n->recalcStyle(change);
-    
-    if (changed() && m_view)
-        m_view->layout();
-    else if (m_view && !m_view->layoutPending()) {
-        updateLayout();
+
+    if (view()) {
+        if (changed())
+            view()->layout();
+#if USE(ACCELERATED_COMPOSITING)
+        else {
+            bool layoutPending = view()->layoutPending() || renderer()->needsLayout();
+            // If we didn't update compositing layers because of layout(), we need to do so here.
+            if (!layoutPending)
+                view()->updateCompositingLayers();
+        }
+#endif
     }
-    
 
 bail_out:
-    setChanged(false);
+    setChanged(NoStyleChange);
     setHasChangedChild(false);
     setDocumentChanged(false);
     
+    resumePostAttachCallbacks();
     m_inStyleRecalc = false;
     
-    // If we wanted to emit the implicitClose() during recalcStyle, do so now that we're finished.
+    // If we wanted to call implicitClose() during recalcStyle, do so now that we're finished.
     if (m_closeAfterStyleRecalc) {
         m_closeAfterStyleRecalc = false;
         implicitClose();
@@ -898,8 +1214,17 @@ bail_out:
 
 void Document::updateRendering()
 {
-    if (hasChangedChild())
-        recalcStyle(NoChange);
+    if (!hasChangedChild() || inPageCache())
+        return;
+        
+    if (m_frame)
+        m_frame->animation()->beginAnimationUpdate();
+        
+    recalcStyle(NoChange);
+    
+    // Tell the animation controller that updateRendering is finished and it can do any post-processing
+    if (m_frame)
+        m_frame->animation()->endAnimationUpdate();
 }
 
 void Document::updateDocumentsRendering()
@@ -907,7 +1232,11 @@ void Document::updateDocumentsRendering()
     if (!changedDocuments)
         return;
 
-    while (Document* doc = changedDocuments->take()) {
+    while (changedDocuments->size()) {
+        HashSet<Document*>::iterator it = changedDocuments->begin();
+        Document* doc = *it;
+        changedDocuments->remove(it);
+        
         doc->m_docChanged = false;
         doc->updateRendering();
     }
@@ -915,12 +1244,15 @@ void Document::updateDocumentsRendering()
 
 void Document::updateLayout()
 {
-    // FIXME: Dave Hyatt's pretty sure we can remove this because layout calls recalcStyle as needed.
+    if (Element* oe = ownerElement())
+        oe->document()->updateLayout();
+
     updateRendering();
 
     // Only do a layout if changes have occurred that make it necessary.      
-    if (m_view && renderer() && (m_view->layoutPending() || renderer()->needsLayout()))
-        m_view->layout();
+    FrameView* v = view();
+    if (v && renderer() && (v->layoutPending() || renderer()->needsLayout()))
+        v->layout();
 }
 
 // FIXME: This is a bad idea and needs to be removed eventually.
@@ -935,7 +1267,20 @@ void Document::updateLayoutIgnorePendingStylesheets()
     
     if (!haveStylesheetsLoaded()) {
         m_ignorePendingStylesheets = true;
-        updateStyleSelector();    
+        // FIXME: We are willing to attempt to suppress painting with outdated style info only once.  Our assumption is that it would be
+        // dangerous to try to stop it a second time, after page content has already been loaded and displayed
+        // with accurate style information.  (Our suppression involves blanking the whole page at the
+        // moment.  If it were more refined, we might be able to do something better.)
+        // It's worth noting though that this entire method is a hack, since what we really want to do is
+        // suspend JS instead of doing a layout with inaccurate information.
+        if (body() && !body()->renderer() && m_pendingSheetLayout == NoLayoutWithPendingSheets) {
+            m_pendingSheetLayout = DidLayoutWithPendingSheets;
+            updateStyleSelector();
+        } else if (m_hasNodesWithPlaceholderStyle)
+            // If new nodes have been added or style recalc has been done with style sheets still pending, some nodes 
+            // may not have had their real style calculated yet. Normally this gets cleaned when style sheets arrive 
+            // but here we need up-to-date style immediatly.
+            recalcStyle(Force);
     }
 
     updateLayout();
@@ -945,14 +1290,25 @@ void Document::updateLayoutIgnorePendingStylesheets()
 
 void Document::attach()
 {
-    assert(!attached());
-    assert(!m_inPageCache);
+    ASSERT(!attached());
+    ASSERT(!m_inPageCache);
+    ASSERT(!m_axObjectCache);
 
     if (!m_renderArena)
         m_renderArena = new RenderArena();
     
     // Create the rendering tree
-    setRenderer(new (m_renderArena) RenderView(this, m_view));
+    setRenderer(new (m_renderArena) RenderView(this, view()));
+#if USE(ACCELERATED_COMPOSITING)
+    renderView()->didMoveOnscreen();
+#endif
+
+    if (!m_styleSelector) {
+        bool matchAuthorAndUserStyles = true;
+        if (Settings* docSettings = settings())
+            matchAuthorAndUserStyles = docSettings->authorAndUserStylesEnabled();
+        m_styleSelector = new CSSStyleSelector(this, userStyleSheet(), m_styleSheets.get(), m_mappedElementSheet.get(), !inCompatMode(), matchAuthorAndUserStyles);
+    }
 
     recalcStyle(Force);
 
@@ -966,16 +1322,24 @@ void Document::attach()
 
 void Document::detach()
 {
-    if (m_focusNode && m_focusNode->isElementNode()) frame()->formElementDidBlur(static_cast<Element *>(m_focusNode.get()));
+    ASSERT(attached());
+    ASSERT(!m_inPageCache);
+
+    if (m_focusedNode && m_focusedNode->isElementNode())
+        frame()->formElementDidBlur(static_cast<Element *>(m_focusedNode.get()));
+
+    clearAXObjectCache();
+    stopActiveDOMObjects();
+    
     RenderObject* render = renderer();
 
+    // Send out documentWillBecomeInactive() notifications to registered elements,
+    // in order to stop media elements
+    documentWillBecomeInactive();
+    
     // indicate destruction mode,  i.e. attached() but renderer == 0
     setRenderer(0);
     
-    if (m_inPageCache) {
-        return;
-    }
-
     // Empty out these lists as a performance optimization, since detaching
     // all the individual render objects will cause all the RenderImage
     // objects to remove themselves from the lists.
@@ -983,15 +1347,20 @@ void Document::detach()
     m_imageLoadEventDispatchingList.clear();
     
     m_hoverNode = 0;
-    m_focusNode = 0;
+    m_focusedNode = 0;
     m_activeNode = 0;
 
     ContainerNode::detach();
 
     if (render)
         render->destroy();
-
-    m_view = 0;
+    
+    // This is required, as our Frame might delete itself as soon as it detaches
+    // us. However, this violates Node::detach() symantics, as it's never
+    // possible to re-attach. Eventually Document::detach() should be renamed,
+    // or this setting of the frame to 0 could be made explicit in each of the
+    // callers of Document::detach().
+    m_frame = 0;
 
     // do this before the arena is cleared, which is needed to deref the RenderStyle on TextAutoSizingKey
     m_textAutoSizedNodes.clear();
@@ -1002,9 +1371,48 @@ void Document::detach()
     }
 }
 
+void Document::suspendActiveDOMObjects()
+{
+    ScriptExecutionContext::suspendActiveDOMObjects();
+
+    if (domWindow() && usingGeolocation())
+        domWindow()->navigator()->geolocation()->suspend();
+
+    if (WebThreadCountOfObservedContentModifiers() > 0)
+        if (frame() && frame()->page() && frame()->page()->chrome() && frame()->page()->chrome()->client())
+            frame()->page()->chrome()->client()->clearContentChangeObservers(frame());
+}
+
+void Document::resumeActiveDOMObjects()
+{
+    ScriptExecutionContext::resumeActiveDOMObjects();
+
+    if (domWindow() && usingGeolocation())
+        domWindow()->navigator()->geolocation()->resume();
+    
+    // FIXME: DDK: Do we need to add content change observers back here?
+}
+
+void Document::stopActiveDOMObjects()
+{
+    ScriptExecutionContext::stopActiveDOMObjects();
+
+    if (domWindow() && usingGeolocation())
+        domWindow()->navigator()->geolocation()->suspend();
+
+    if (WebThreadCountOfObservedContentModifiers() > 0)
+        if (frame() && frame()->page() && frame()->page()->chrome() && frame()->page()->chrome()->client())
+            frame()->page()->chrome()->client()->clearContentChangeObservers(frame());
+}
+
 void Document::removeAllEventListenersFromAllNodes()
 {
+    size_t size = m_windowEventListeners.size();
+    for (size_t i = 0; i < size; ++i)
+        m_windowEventListeners[i]->setRemoved(true);
     m_windowEventListeners.clear();
+    setTouchEventListenersDirty(true);
+    m_touchEventListeners.clear();
     removeAllDisconnectedNodeEventListeners();
     for (Node *n = this; n; n = n->traverseNextNode()) {
         if (!n->isEventTargetNode())
@@ -1031,6 +1439,62 @@ void Document::removeAllDisconnectedNodeEventListeners()
     m_disconnectedNodesWithEventListeners.clear();
 }
 
+RenderView* Document::renderView() const
+{
+    return static_cast<RenderView*>(renderer());
+}
+
+void Document::clearAXObjectCache()
+{
+    // clear cache in top document
+    if (m_axObjectCache) {
+        delete m_axObjectCache;
+        m_axObjectCache = 0;
+        return;
+    }
+    
+    // ask the top-level document to clear its cache
+    Document* doc = topDocument();
+    if (doc != this)
+        doc->clearAXObjectCache();
+}
+
+AXObjectCache* Document::axObjectCache() const
+{
+    // The only document that actually has a AXObjectCache is the top-level
+    // document.  This is because we need to be able to get from any WebCoreAXObject
+    // to any other WebCoreAXObject on the same page.  Using a single cache allows
+    // lookups across nested webareas (i.e. multiple documents).
+    
+    if (m_axObjectCache) {
+        // return already known top-level cache
+        if (!ownerElement())
+            return m_axObjectCache;
+        
+        // In some pages with frames, the cache is created before the sub-webarea is
+        // inserted into the tree.  Here, we catch that case and just toss the old
+        // cache and start over.
+        // NOTE: This recovery may no longer be needed. I have been unable to trigger
+        // it again. See rdar://5794454
+        // FIXME: Can this be fixed when inserting the subframe instead of now?
+        // FIXME: If this function was called to get the cache in order to remove
+        // an AXObject, we are now deleting the cache as a whole and returning a
+        // new empty cache that does not contain the AXObject! That should actually
+        // be OK. I am concerned about other cases like this where accessing the
+        // cache blows away the AXObject being operated on.
+        delete m_axObjectCache;
+        m_axObjectCache = 0;
+    }
+
+    // ask the top-level document for its cache
+    Document* doc = topDocument();
+    if (doc != this)
+        return doc->axObjectCache();
+    
+    // this is the top-level document, so install a new cache
+    m_axObjectCache = new AXObjectCache;
+    return m_axObjectCache;
+}
 
 void Document::setVisuallyOrdered()
 {
@@ -1039,59 +1503,32 @@ void Document::setVisuallyOrdered()
         renderer()->style()->setVisuallyOrdered(true);
 }
 
-void Document::updateSelection()
+Tokenizer* Document::createTokenizer()
 {
-    if (!renderer())
-        return;
+    // FIXME: this should probably pass the frame instead
+    return new XMLTokenizer(this, view());
+}
+
+void Document::open(Document* ownerDocument)
+{
+    if (ownerDocument) {
+        setURL(ownerDocument->url());
+        m_cookieURL = ownerDocument->cookieURL();
+        ScriptExecutionContext::setSecurityOrigin(ownerDocument->securityOrigin());
+    }
+
+    if (m_frame) {
+        if (m_frame->loader()->isLoadingMainResource() || (tokenizer() && tokenizer()->executingScript()))
+            return;
     
-    RenderView *canvas = static_cast<RenderView*>(renderer());
-    SelectionController s = frame()->selection();
-        
-    if (!s.isRange())
-        canvas->clearSelection();
-    else {
-        // Use the rightmost candidate for the start of the selection, and the leftmost candidate for the end of the selection.
-        // Example: foo <a>bar</a>.  Imagine that a line wrap occurs after 'foo', and that 'bar' is selected.   If we pass [foo, 3]
-        // as the start of the selection, the selection painting code will think that content on the line containing 'foo' is selected
-        // and will fill the gap before 'bar'.
-        Position startPos = s.selection().visibleStart().deepEquivalent();
-        if (startPos.downstream().inRenderedContent())
-            startPos = startPos.downstream();
-        Position endPos = s.selection().visibleEnd().deepEquivalent();
-        if (endPos.upstream().inRenderedContent())
-            endPos = endPos.upstream();
-        
-        // We can get into a state where the selection endpoints map to the same VisiblePosition when a selection is deleted
-        // because we don't yet notify the SelectionController of text removal.
-        if (startPos.isNotNull() && endPos.isNotNull() && s.selection().visibleStart() != s.selection().visibleEnd()) {
-            RenderObject *startRenderer = startPos.node()->renderer();
-            RenderObject *endRenderer = endPos.node()->renderer();
-            static_cast<RenderView*>(renderer())->setSelection(startRenderer, startPos.offset(), endRenderer, endPos.offset());
-        }
+        if (m_frame->loader()->state() == FrameStateProvisional)
+            m_frame->loader()->stopAllLoaders();
     }
     
-}
-
-Tokenizer *Document::createTokenizer()
-{
-    return newXMLTokenizer(this, m_view);
-}
-
-void Document::open()
-{
-    if ((frame() && frame()->isLoadingMainResource()) || (tokenizer() && tokenizer()->executingScript()))
-        return;
-
     implicitOpen();
 
-    if (frame())
-        frame()->didExplicitOpen();
-
-    // This is work that we should probably do in clear(), but we can't have it
-    // happen when implicitOpen() is called unless we reorganize Frame code.
-    setURL(DeprecatedString());
-    if (Document *parent = parentDocument())
-        setBaseURL(parent->baseURL());
+    if (m_frame)
+        m_frame->loader()->didExplicitOpen();
 }
 
 void Document::cancelParsing()
@@ -1114,11 +1551,16 @@ void Document::implicitOpen()
     clear();
     m_tokenizer = createTokenizer();
     setParsing(true);
+
+    // If we reload, the animation controller sticks around and has
+    // a stale animation time. We need to update it here.
+    if (m_frame && m_frame->animation())
+        m_frame->animation()->beginAnimationUpdate();
 }
 
 HTMLElement* Document::body()
 {
-    Node *de = documentElement();
+    Node* de = documentElement();
     if (!de)
         return 0;
     
@@ -1128,17 +1570,53 @@ HTMLElement* Document::body()
         if (i->hasTagName(framesetTag))
             return static_cast<HTMLElement*>(i);
         
-        if (i->hasTagName(bodyTag))
+        if (i->hasTagName(bodyTag) && !body)
             body = i;
     }
-    return static_cast<HTMLElement *>(body);
+    return static_cast<HTMLElement*>(body);
+}
+
+void Document::setBody(PassRefPtr<HTMLElement> newBody, ExceptionCode& ec)
+{
+    if (!newBody || !documentElement()) { 
+        ec = HIERARCHY_REQUEST_ERR;
+        return;
+    }
+
+    HTMLElement* b = body();
+    if (!b)
+        documentElement()->appendChild(newBody, ec);
+    else
+        documentElement()->replaceChild(newBody, b, ec);
+}
+
+HTMLHeadElement* Document::head()
+{
+    Node* de = documentElement();
+    if (!de)
+        return 0;
+
+    for (Node* e = de->firstChild(); e; e = e->nextSibling())
+        if (e->hasTagName(headTag))
+            return static_cast<HTMLHeadElement*>(e);
+
+    return 0;
 }
 
 void Document::close()
 {
-    if (frame())
-        frame()->endIfNotLoading();
-    implicitClose();
+    Frame* frame = this->frame();
+    if (frame) {
+        // This code calls implicitClose() if all loading has completed.
+        FrameLoader* frameLoader = frame->loader();
+        frameLoader->endIfNotLoadingMainResource();
+        frameLoader->checkCompleted();
+    } else {
+        // Because we have no frame, we don't know if all loading has completed,
+        // so we just call implicitClose() immediately. FIXME: This might fire
+        // the load event prematurely <http://bugs.webkit.org/show_bug.cgi?id=14568>.
+        implicitClose();
+    }
 }
 
 void Document::implicitClose()
@@ -1149,7 +1627,7 @@ void Document::implicitClose()
         return;
     }
 
-    bool wasLocationChangePending = frame() && frame()->isScheduledLocationChangePending();
+    bool wasLocationChangePending = frame() && frame()->loader()->isScheduledLocationChangePending();
     bool doload = !parsing() && m_tokenizer && !m_processingLoadEvent && !wasLocationChangePending;
     
     if (!doload)
@@ -1157,30 +1635,43 @@ void Document::implicitClose()
 
     m_processingLoadEvent = true;
 
+    m_wellFormed = m_tokenizer && m_tokenizer->wellFormed();
+
     // We have to clear the tokenizer, in case someone document.write()s from the
     // onLoad event handler, as in Radar 3206524.
     delete m_tokenizer;
     m_tokenizer = 0;
 
-    // Create a body element if we don't already have one.
-    // In the case of Radar 3758785, the window.onload was set in some javascript, but never fired because there was no body.  
-    // This behavior now matches Firefox and IE.
-    HTMLElement *body = this->body();
-    if (!body && isHTMLDocument()) {
-        Node *de = documentElement();
-        if (de) {
-            body = new HTMLBodyElement(this);
+    // Parser should have picked up all preloads by now
+    m_docLoader->clearPreloads();
+
+    // Create a body element if we don't already have one. See Radar 3758785.
+    if (!this->body() && isHTMLDocument()) {
+        if (Node* documentElement = this->documentElement()) {
             ExceptionCode ec = 0;
-            de->appendChild(body, ec);
-            if (ec != 0)
-                body = 0;
+            documentElement->appendChild(new HTMLBodyElement(bodyTag, this), ec);
+            ASSERT(!ec);
         }
     }
-    
+
+    // FIXME: We kick off the icon loader when the Document is done parsing.
+    // There are earlier opportunities we could start it:
+    //  -When the <head> finishes parsing
+    //  -When any new HTMLLinkElement is inserted into the document
+    // But those add a dynamic component to the favicon that has UI 
+    // ramifications, and we need to decide what is the Right Thing To Do(tm)
+    Frame* f = frame();
+    if (f)
+        f->loader()->startIconLoader();
+
+    // Resume the animations (or start them)
+    if (f)
+        f->animation()->resumeAnimations(this);
+
     dispatchImageLoadEventsNow();
-    this->dispatchWindowEvent(loadEvent, false, false);
-    if (Frame *p = frame())
-        p->handledOnloadEvents();
+    this->dispatchWindowEvent(eventNames().loadEvent, false, false);
+    if (f)
+        f->loader()->handledOnloadEvents();
 #ifdef INSTRUMENT_LAYOUT_SCHEDULING
     if (!ownerElement())
         printf("onload fired at %d\n", elapsedTime());
@@ -1188,19 +1679,23 @@ void Document::implicitClose()
 
     m_processingLoadEvent = false;
 
+    // An event handler may have removed the frame
+    if (!frame())
+        return;
+
     // Make sure both the initial layout and reflow happen after the onload
     // fires. This will improve onload scores, and other browsers do it.
     // If they wanna cheat, we can too. -dwh
 
-    if (frame() && frame()->isScheduledLocationChangePending() && elapsedTime() < (int)(frame()->layoutInterval() * 1000)) {
+    if (frame()->loader()->isScheduledLocationChangePending() && elapsedTime() < settings()->layoutInterval())
+    {
         // Just bail out. Before or during the onload we were shifted to another page.
         // The old i-Bench suite does this. When this happens don't bother painting or laying out.        
         view()->unscheduleRelayout();
         return;
     }
 
-    if (frame())
-        frame()->checkEmitLoadEvent();
+    frame()->loader()->checkCallImplicitClose();
 
     // Now do our painting/layout, but only if we aren't in a subframe or if we're in a subframe
     // that has been sized already.  Otherwise, our view size would be incorrect, so doing any 
@@ -1211,9 +1706,22 @@ void Document::implicitClose()
         // Always do a layout after loading if needed.
         if (view() && renderer() && (!renderer()->firstChild() || renderer()->needsLayout()))
             view()->layout();
+            
+        // Paint immediately after the document is ready.  We do this to ensure that any timers set by the
+        // onload don't have a chance to fire before we would have painted.  To avoid over-flushing we only
+        // worry about this for the top-level document.  For platforms that use native widgets for ScrollViews, this
+        // call does nothing (Mac, wx).
+        // FIXME: This causes a timing issue with the dispatchDidFinishLoad delegate callback on Mac, so think
+        // before enabling it, even if Mac becomes viewless later.
+        // See <rdar://problem/5092361>
+        if (view() && !ownerElement())
+            view()->hostWindow()->paint();
     }
 
-#if SVG_SUPPORT
+    if (f && renderer() && this == topDocument() && AXObjectCache::accessibilityEnabled())
+        axObjectCache()->postNotificationToElement(renderer(), "AXLoadComplete");
+
+#if ENABLE(SVG)
     // FIXME: Officially, time 0 is when the outermost <svg> receives its
     // SVGLoad event, but we don't implement those yet.  This is close enough
     // for now.  In some cases we should have fired earlier.
@@ -1236,13 +1744,14 @@ void Document::setParsing(bool b)
 
 bool Document::shouldScheduleLayout()
 {
-    // We can update layout if:
-    // (a) we actually need a layout
-    // (b) our stylesheets are all loaded
-    // (c) we have a <body>
-    return (renderer() && renderer()->needsLayout() && haveStylesheetsLoaded() &&
-            documentElement() && documentElement()->renderer() &&
-            (!documentElement()->hasTagName(htmlTag) || body()));
+    // This function will only be called when FrameView thinks a layout is needed.
+    // This enforces a couple extra rules.
+    //
+    //    (a) Only schedule a layout once the stylesheets are loaded.
+    //    (b) Only schedule layout once we have a body element.
+
+    return haveStylesheetsLoaded()
+        && body() || (documentElement() && !documentElement()->hasTagName(htmlTag));
 }
 
 int Document::minimumLayoutDelay()
@@ -1250,12 +1759,11 @@ int Document::minimumLayoutDelay()
     if (m_overMinimumLayoutThreshold)
         return 0;
     
-    int cLayoutScheduleThreshold = (int)(frame()->layoutInterval() * 1000);
     int elapsed = elapsedTime();
-    m_overMinimumLayoutThreshold = elapsed > cLayoutScheduleThreshold;
+    m_overMinimumLayoutThreshold = elapsed > settings()->layoutInterval();
     
     // We'll want to schedule the timer to fire at the minimum layout threshold.
-    return max(0, cLayoutScheduleThreshold - elapsed);
+    return max(0, settings()->layoutInterval() - elapsed);
 }
 
 int Document::elapsedTime() const
@@ -1263,12 +1771,7 @@ int Document::elapsedTime() const
     return static_cast<int>((currentTime() - m_startTime) * 1000);
 }
 
-void Document::write(const String &text)
-{
-    write(text.deprecatedString());
-}
-
-void Document::write(const DeprecatedString &text)
+void Document::write(const String& text, Document* ownerDocument)
 {
 #ifdef INSTRUMENT_LAYOUT_SCHEDULING
     if (!ownerElement())
@@ -1276,11 +1779,11 @@ void Document::write(const DeprecatedString &text)
 #endif
     
     if (!m_tokenizer) {
-        open();
-        assert(m_tokenizer);
+        open(ownerDocument);
+        ASSERT(m_tokenizer);
         if (!m_tokenizer)
             return;
-        write(DeprecatedString("<html>"));
+        write("<html>", ownerDocument);
     }
     m_tokenizer->write(text, false);
     
@@ -1290,10 +1793,10 @@ void Document::write(const DeprecatedString &text)
 #endif    
 }
 
-void Document::writeln(const String &text)
+void Document::writeln(const String& text, Document* ownerDocument)
 {
-    write(text);
-    write(String("\n"));
+    write(text, ownerDocument);
+    write("\n", ownerDocument);
 }
 
 void Document::finishParsing()
@@ -1319,25 +1822,70 @@ void Document::clear()
 
     removeChildren();
 
+    size_t size = m_windowEventListeners.size();
+    for (size_t i = 0; i < size; ++i)
+        m_windowEventListeners[i]->setRemoved(true);
     m_windowEventListeners.clear();
+    setTouchEventListenersDirty(true);
+    m_touchEventListeners.clear();
 }
 
-void Document::setURL(const DeprecatedString& url)
+const KURL& Document::virtualURL() const
 {
-    m_url = url;
-    if (m_styleSelector)
-        m_styleSelector->setEncodedURL(m_url);
+    return m_url;
 }
 
-void Document::setStyleSheet(const String &url, const String &sheet)
+KURL Document::virtualCompleteURL(const String& url) const
 {
-    m_sheet = new CSSStyleSheet(this, url);
-    m_sheet->parseString(sheet);
-    m_loadingSheet = false;
+    return completeURL(url);
+}
+
+void Document::setURL(const KURL& url)
+{
+    const KURL& newURL = url.isEmpty() ? blankURL() : url;
+    if (newURL == m_url)
+        return;
+
+    m_url = newURL;
+    m_documentURI = m_url.string();
+    updateBaseURL();
+}
+
+void Document::setBaseElementURL(const KURL& baseElementURL)
+{ 
+    m_baseElementURL = baseElementURL;
+    updateBaseURL();
+}
+
+void Document::updateBaseURL()
+{
+    // DOM 3 Core: When the Document supports the feature "HTML" [DOM Level 2 HTML], the base URI is computed using
+    // first the value of the href attribute of the HTML BASE element if any, and the value of the documentURI attribute
+    // from the Document interface otherwise.
+    if (m_baseElementURL.isEmpty()) {
+        // The documentURI attribute is an arbitrary string. DOM 3 Core does not specify how it should be resolved,
+        // so we use a null base URL.
+        m_baseURL = KURL(KURL(), documentURI());
+    } else
+        m_baseURL = m_baseElementURL;
+    if (!m_baseURL.isValid())
+        m_baseURL = KURL();
+
+    if (m_elemSheet)
+        m_elemSheet->setHref(m_baseURL.string());
+    if (m_mappedElementSheet)
+        m_mappedElementSheet->setHref(m_baseURL.string());
+}
+
+void Document::setCSSStyleSheet(const String& url, const String& charset, const CachedCSSStyleSheet* sheet)
+{
+    m_sheet = CSSStyleSheet::create(this, url, charset);
+    m_sheet->parseString(sheet->sheetText());
 
     updateStyleSelector();
 }
 
+#if FRAME_LOADS_USER_STYLESHEET
 void Document::setUserStyleSheet(const String& sheet)
 {
     if (m_usersheet != sheet) {
@@ -1345,218 +1893,150 @@ void Document::setUserStyleSheet(const String& sheet)
         updateStyleSelector();
     }
 }
+#endif
+
+String Document::userStyleSheet() const
+{
+#if FRAME_LOADS_USER_STYLESHEET
+    return m_usersheet;
+#else
+    Page* page = this->page();
+    if (!page)
+        return String();
+    return page->userStyleSheet();
+#endif
+}
 
 CSSStyleSheet* Document::elementSheet()
 {
     if (!m_elemSheet)
-        m_elemSheet = new CSSStyleSheet(this, baseURL());
+        m_elemSheet = CSSStyleSheet::create(this, m_baseURL.string());
     return m_elemSheet.get();
 }
 
-void Document::determineParseMode(const DeprecatedString &/*str*/)
+CSSStyleSheet* Document::mappedElementSheet()
 {
-    // For XML documents use strict parse mode.  HTML docs will override this method to
-    // determine their parse mode.
-    pMode = Strict;
-    hMode = XHtml;
+    if (!m_mappedElementSheet)
+        m_mappedElementSheet = CSSStyleSheet::create(this, m_baseURL.string());
+    return m_mappedElementSheet.get();
 }
 
-Node *Document::nextFocusNode(Node *fromNode)
+static Node* nextNodeWithExactTabIndex(Node* start, int tabIndex, KeyboardEvent* event)
 {
-    unsigned short fromTabIndex;
-
-    if (!fromNode) {
-        // No starting node supplied; begin with the top of the document
-        Node *n;
-
-        int lowestTabIndex = 65535;
-        for (n = this; n != 0; n = n->traverseNextNode()) {
-            if (n->isKeyboardFocusable()) {
-                if ((n->tabIndex() > 0) && (n->tabIndex() < lowestTabIndex))
-                    lowestTabIndex = n->tabIndex();
-            }
-        }
-
-        if (lowestTabIndex == 65535)
-            lowestTabIndex = 0;
-
-        // Go to the first node in the document that has the desired tab index
-        for (n = this; n != 0; n = n->traverseNextNode()) {
-            if (n->isKeyboardFocusable() && (n->tabIndex() == lowestTabIndex))
-                return n;
-        }
-
-        return 0;
-    }
-    else {
-        fromTabIndex = fromNode->tabIndex();
-    }
-
-    if (fromTabIndex == 0) {
-        // Just need to find the next selectable node after fromNode (in document order) that doesn't have a tab index
-        Node *n = fromNode->traverseNextNode();
-        while (n && !(n->isKeyboardFocusable() && n->tabIndex() == 0))
-            n = n->traverseNextNode();
-        return n;
-    }
-    else {
-        // Find the lowest tab index out of all the nodes except fromNode, that is greater than or equal to fromNode's
-        // tab index. For nodes with the same tab index as fromNode, we are only interested in those that come after
-        // fromNode in document order.
-        // If we don't find a suitable tab index, the next focus node will be one with a tab index of 0.
-        unsigned short lowestSuitableTabIndex = 65535;
-        Node *n;
-
-        bool reachedFromNode = false;
-        for (n = this; n != 0; n = n->traverseNextNode()) {
-            if (n->isKeyboardFocusable() &&
-                ((reachedFromNode && (n->tabIndex() >= fromTabIndex)) ||
-                 (!reachedFromNode && (n->tabIndex() > fromTabIndex))) &&
-                (n->tabIndex() < lowestSuitableTabIndex) &&
-                (n != fromNode)) {
-
-                // We found a selectable node with a tab index at least as high as fromNode's. Keep searching though,
-                // as there may be another node which has a lower tab index but is still suitable for use.
-                lowestSuitableTabIndex = n->tabIndex();
-            }
-
-            if (n == fromNode)
-                reachedFromNode = true;
-        }
-
-        if (lowestSuitableTabIndex == 65535) {
-            // No next node with a tab index -> just take first node with tab index of 0
-            Node *n = this;
-            while (n && !(n->isKeyboardFocusable() && n->tabIndex() == 0))
-                n = n->traverseNextNode();
+    // Search is inclusive of start
+    for (Node* n = start; n; n = n->traverseNextNode())
+        if (n->isKeyboardFocusable(event) && n->tabIndex() == tabIndex)
             return n;
-        }
-
-        // Search forwards from fromNode
-        for (n = fromNode->traverseNextNode(); n != 0; n = n->traverseNextNode()) {
-            if (n->isKeyboardFocusable() && (n->tabIndex() == lowestSuitableTabIndex))
-                return n;
-        }
-
-        // The next node isn't after fromNode, start from the beginning of the document
-        for (n = this; n != fromNode; n = n->traverseNextNode()) {
-            if (n->isKeyboardFocusable() && (n->tabIndex() == lowestSuitableTabIndex))
-                return n;
-        }
-
-        assert(false); // should never get here
-        return 0;
-    }
+    
+    return 0;
 }
 
-Node *Document::previousFocusNode(Node *fromNode)
+static Node* previousNodeWithExactTabIndex(Node* start, int tabIndex, KeyboardEvent* event)
 {
-    Node *lastNode = this;
-    while (lastNode->lastChild())
-        lastNode = lastNode->lastChild();
+    // Search is inclusive of start
+    for (Node* n = start; n; n = n->traversePreviousNode())
+        if (n->isKeyboardFocusable(event) && n->tabIndex() == tabIndex)
+            return n;
+    
+    return 0;
+}
 
-    if (!fromNode) {
-        // No starting node supplied; begin with the very last node in the document
-        Node *n;
-
-        int highestTabIndex = 0;
-        for (n = lastNode; n != 0; n = n->traversePreviousNode()) {
-            if (n->isKeyboardFocusable()) {
-                if (n->tabIndex() == 0)
-                    return n;
-                else if (n->tabIndex() > highestTabIndex)
-                    highestTabIndex = n->tabIndex();
-            }
+static Node* nextNodeWithGreaterTabIndex(Node* start, int tabIndex, KeyboardEvent* event)
+{
+    // Search is inclusive of start
+    int winningTabIndex = SHRT_MAX + 1;
+    Node* winner = 0;
+    for (Node* n = start; n; n = n->traverseNextNode())
+        if (n->isKeyboardFocusable(event) && n->tabIndex() > tabIndex && n->tabIndex() < winningTabIndex) {
+            winner = n;
+            winningTabIndex = n->tabIndex();
         }
+    
+    return winner;
+}
 
-        // No node with a tab index of 0; just go to the last node with the highest tab index
-        for (n = lastNode; n != 0; n = n->traversePreviousNode()) {
-            if (n->isKeyboardFocusable() && (n->tabIndex() == highestTabIndex))
-                return n;
+static Node* previousNodeWithLowerTabIndex(Node* start, int tabIndex, KeyboardEvent* event)
+{
+    // Search is inclusive of start
+    int winningTabIndex = 0;
+    Node* winner = 0;
+    for (Node* n = start; n; n = n->traversePreviousNode())
+        if (n->isKeyboardFocusable(event) && n->tabIndex() < tabIndex && n->tabIndex() > winningTabIndex) {
+            winner = n;
+            winningTabIndex = n->tabIndex();
         }
+    
+    return winner;
+}
 
-        return 0;
-    }
-    else {
-        unsigned short fromTabIndex = fromNode->tabIndex();
-
-        if (fromTabIndex == 0) {
-            // Find the previous selectable node before fromNode (in document order) that doesn't have a tab index
-            Node *n = fromNode->traversePreviousNode();
-            while (n && !(n->isKeyboardFocusable() && n->tabIndex() == 0))
-                n = n->traversePreviousNode();
-            if (n)
-                return n;
-
-            // No previous nodes with a 0 tab index, go to the last node in the document that has the highest tab index
-            int highestTabIndex = 0;
-            for (n = this; n != 0; n = n->traverseNextNode()) {
-                if (n->isKeyboardFocusable() && (n->tabIndex() > highestTabIndex))
-                    highestTabIndex = n->tabIndex();
-            }
-
-            if (highestTabIndex == 0)
-                return 0;
-
-            for (n = lastNode; n != 0; n = n->traversePreviousNode()) {
-                if (n->isKeyboardFocusable() && (n->tabIndex() == highestTabIndex))
+Node* Document::nextFocusableNode(Node* start, KeyboardEvent* event)
+{
+    if (start) {
+        // If a node is excluded from the normal tabbing cycle, the next focusable node is determined by tree order
+        if (start->tabIndex() < 0) {
+            for (Node* n = start->traverseNextNode(); n; n = n->traverseNextNode())
+                if (n->isKeyboardFocusable(event) && n->tabIndex() >= 0)
                     return n;
-            }
+        }
+    
+        // First try to find a node with the same tabindex as start that comes after start in the document.
+        if (Node* winner = nextNodeWithExactTabIndex(start->traverseNextNode(), start->tabIndex(), event))
+            return winner;
 
-            assert(false); // should never get here
+        if (start->tabIndex() == 0)
+            // We've reached the last node in the document with a tabindex of 0. This is the end of the tabbing order.
             return 0;
-        }
-        else {
-            // Find the lowest tab index out of all the nodes except fromNode, that is less than or equal to fromNode's
-            // tab index. For nodes with the same tab index as fromNode, we are only interested in those before
-            // fromNode.
-            // If we don't find a suitable tab index, then there will be no previous focus node.
-            unsigned short highestSuitableTabIndex = 0;
-            Node *n;
-
-            bool reachedFromNode = false;
-            for (n = this; n != 0; n = n->traverseNextNode()) {
-                if (n->isKeyboardFocusable() &&
-                    ((!reachedFromNode && (n->tabIndex() <= fromTabIndex)) ||
-                     (reachedFromNode && (n->tabIndex() < fromTabIndex)))  &&
-                    (n->tabIndex() > highestSuitableTabIndex) &&
-                    (n != fromNode)) {
-
-                    // We found a selectable node with a tab index no higher than fromNode's. Keep searching though, as
-                    // there may be another node which has a higher tab index but is still suitable for use.
-                    highestSuitableTabIndex = n->tabIndex();
-                }
-
-                if (n == fromNode)
-                    reachedFromNode = true;
-            }
-
-            if (highestSuitableTabIndex == 0) {
-                // No previous node with a tab index. Since the order specified by HTML is nodes with tab index > 0
-                // first, this means that there is no previous node.
-                return 0;
-            }
-
-            // Search backwards from fromNode
-            for (n = fromNode->traversePreviousNode(); n != 0; n = n->traversePreviousNode()) {
-                if (n->isKeyboardFocusable() && (n->tabIndex() == highestSuitableTabIndex))
-                    return n;
-            }
-            // The previous node isn't before fromNode, start from the end of the document
-            for (n = lastNode; n != fromNode; n = n->traversePreviousNode()) {
-                if (n->isKeyboardFocusable() && (n->tabIndex() == highestSuitableTabIndex))
-                    return n;
-            }
-
-            assert(false); // should never get here
-            return 0;
-        }
     }
+
+    // Look for the first node in the document that:
+    // 1) has the lowest tabindex that is higher than start's tabindex (or 0, if start is null), and
+    // 2) comes first in the document, if there's a tie.
+    if (Node* winner = nextNodeWithGreaterTabIndex(this, start ? start->tabIndex() : 0, event))
+        return winner;
+
+    // There are no nodes with a tabindex greater than start's tabindex,
+    // so find the first node with a tabindex of 0.
+    return nextNodeWithExactTabIndex(this, 0, event);
+}
+
+Node* Document::previousFocusableNode(Node* start, KeyboardEvent* event)
+{
+    Node* last;
+    for (last = this; last->lastChild(); last = last->lastChild())
+        ; // Empty loop.
+
+    // First try to find the last node in the document that comes before start and has the same tabindex as start.
+    // If start is null, find the last node in the document with a tabindex of 0.
+    Node* startingNode;
+    int startingTabIndex;
+    if (start) {
+        startingNode = start->traversePreviousNode();
+        startingTabIndex = start->tabIndex();
+    } else {
+        startingNode = last;
+        startingTabIndex = 0;
+    }
+    
+    // However, if a node is excluded from the normal tabbing cycle, the previous focusable node is determined by tree order
+    if (startingTabIndex < 0) {
+        for (Node* n = startingNode; n; n = n->traversePreviousNode())
+            if (n->isKeyboardFocusable(event) && n->tabIndex() >= 0)
+                return n;        
+    }
+
+    if (Node* winner = previousNodeWithExactTabIndex(startingNode, startingTabIndex, event))
+        return winner;
+
+    // There are no nodes before start with the same tabindex as start, so look for a node that:
+    // 1) has the highest non-zero tabindex (that is less than start's tabindex), and
+    // 2) comes last in the document, if there's a tie.
+    startingTabIndex = (start && start->tabIndex()) ? start->tabIndex() : SHRT_MAX;
+    return previousNodeWithLowerTabIndex(last, startingTabIndex, event);
 }
 
 int Document::nodeAbsIndex(Node *node)
 {
-    assert(node->document() == this);
+    ASSERT(node->document() == this);
 
     int absIndex = 0;
     for (Node *n = node; n && n != this; n = n->traversePreviousNode())
@@ -1573,11 +2053,11 @@ Node *Document::nodeWithAbsIndex(int absIndex)
     return n;
 }
 
-void Document::processHttpEquiv(const String &equiv, const String &content)
+void Document::processHttpEquiv(const String& equiv, const String& content)
 {
-    assert(!equiv.isNull() && !content.isNull());
+    ASSERT(!equiv.isNull() && !content.isNull());
 
-    Frame *frame = this->frame();
+    Frame* frame = this->frame();
 
     if (equalIgnoringCase(equiv, "default-style")) {
         // The preferred style set has been overridden as per section 
@@ -1590,69 +2070,48 @@ void Document::processHttpEquiv(const String &equiv, const String &content)
         m_preferredStylesheetSet = content;
         updateStyleSelector();
     } else if (equalIgnoringCase(equiv, "refresh")) {
-        // get delay and url
-        DeprecatedString str = content.deprecatedString().stripWhiteSpace();
-        int pos = str.find(RegularExpression("[;,]"));
-        if (pos == -1)
-            pos = str.find(RegularExpression("[ \t]"));
-
-        if (pos == -1) // There can be no url (David)
-        {
-            bool ok = false;
-            int delay = 0;
-            delay = str.toInt(&ok);
-            // We want a new history item if the refresh timeout > 1 second
-            if (ok && frame)
-                frame->scheduleRedirection(delay, frame->url().url(), delay <= 1);
-        } else {
-            double delay = 0;
-            bool ok = false;
-            delay = str.left(pos).stripWhiteSpace().toDouble(&ok);
-
-            pos++;
-            while(pos < (int)str.length() && str[pos].isSpace()) pos++;
-            str = str.mid(pos);
-            if (str.find("url", 0,  false) == 0)
-                str = str.mid(3);
-            str = str.stripWhiteSpace();
-            if (str.length() && str[0] == '=')
-                str = str.mid(1).stripWhiteSpace();
-            str = parseURL(String(str)).deprecatedString();
-            if (ok && frame)
-                // We want a new history item if the refresh timeout > 1 second
-                frame->scheduleRedirection(delay, completeURL(str), delay <= 1);
+        double delay;
+        String url;
+        if (frame && parseHTTPRefresh(content, true, delay, url)) {
+            if (url.isEmpty())
+                url = frame->loader()->url().string();
+            else
+                url = completeURL(url).string();
+            frame->loader()->scheduleHTTPRedirection(delay, url);
         }
-    } else if ((equalIgnoringCase(equiv, "pragma") || equalIgnoringCase(equiv, "cache-control")) && frame) {
-        DeprecatedString str = content.deprecatedString().lower().stripWhiteSpace();
-        KURL url = frame->url();
     } else if (equalIgnoringCase(equiv, "set-cookie")) {
-        // ### FIXME: make setCookie work on XML documents too; e.g. in case of <html:meta .....>
+        // FIXME: make setCookie work on XML documents too; e.g. in case of <html:meta .....>
         if (isHTMLDocument())
-            static_cast<HTMLDocument *>(this)->setCookie(content);
+            static_cast<HTMLDocument*>(this)->setCookie(content);
+    } else if (equalIgnoringCase(equiv, "content-language"))
+        setContentLanguage(content);
+    else if (equalIgnoringCase(equiv, "x-dns-prefetch-control"))
+        parseDNSPrefetchControlHeader(content);
+    else if (equalIgnoringCase(equiv, "x-frame-options")) {
+        FrameLoader* frameLoader = frame->loader();
+        if (frameLoader->shouldInterruptLoadForXFrameOptions(content, url())) {
+            frameLoader->stopAllLoaders();
+            frameLoader->scheduleHTTPRedirection(0, blankURL());
+        }
     }
 }
 
 
-static void reportViewportWarning(Document * aDocument, ViewportErrorCode anErrorCode, const String& aReplacement)
+static void reportViewportWarning(Document *aDocument, ViewportErrorCode anErrorCode, const String& aReplacement)
 {
     Tokenizer * tokenizer = aDocument->tokenizer();
-    
+
     Frame * frame = aDocument->frame();
     if (!frame)
         return;
-    
-    Page * page = frame->page();
-    
-    if (page) {
-        
-        String message = viewportErrorMessageTemplate(anErrorCode);
-        message.replace("%replacement", aReplacement);
-        
-        page->chrome()->addMessageToConsole(HTMLMessageSource, viewportErrorMessageLevel(anErrorCode), message, tokenizer ? tokenizer->lineNumber() + 1 : 0, aDocument->URL());
-    }
+
+    String message = viewportErrorMessageTemplate(anErrorCode);
+    message.replace("%replacement", aReplacement);
+
+    frame->domWindow()->console()->addMessage(HTMLMessageSource, viewportErrorMessageLevel(anErrorCode), message, tokenizer ? tokenizer->lineNumber() + 1 : 0, aDocument->url().string());
 }
 
-static void setViewportFeature(const String& keyString, const String& valueString, Document * aDocument, void* userData)
+static void setViewportFeature(const String& keyString, const String& valueString, Document *aDocument, void* userData)
 {
     ViewportArguments &arguments = *((ViewportArguments*)userData);
     float value = -1;
@@ -1672,7 +2131,7 @@ static void setViewportFeature(const String& keyString, const String& valueStrin
     else if (equalIgnoringCase(valueString, "default"))
         value = -2;
     else if (valueString.length() != 0) // listing a key with no value is shorthand for key=default
-        value = valueString.deprecatedString().toDouble();
+        value = valueString.toFloat();
 
     if (keyString == "initial-scale")
         arguments.initialScale = value;
@@ -1709,11 +2168,12 @@ static void setViewportFeature(const String& keyString, const String& valueStrin
         reportViewportWarning(aDocument, UnrecognizedViewportArgumentError, keyString);
 }
 
-static void setParserFeature(const String& keyString, const String& valueString, Document * aDocument, void* userData)
+static void setParserFeature(const String& keyString, const String& valueString, Document *aDocument, void* userData)
 {
+    UNUSED_PARAM(aDocument);
     Document* document = (Document *)userData;
     if ((keyString == "telephone") && equalIgnoringCase(valueString, "no")) {
-        document->setTelephoneNumberParsingEnabled(false);
+        document->settings()->setTelephoneNumberParsingEnabled(false);
     }
 }
 
@@ -1723,7 +2183,7 @@ static bool isSeparator(::UChar c)
     return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '=' || c == ',' || c == '\0';
 }
 
-void Document::processArguments(const String & features, void *userData, void (*argumentsCallback)(const String& keyString, const String& valueString, Document * aDocument, void* userData))
+void Document::processArguments(const String & features, void *userData, void (*argumentsCallback)(const String& keyString, const String& valueString, Document *aDocument, void* userData))
 {
     // Tread lightly in this code -- it was specifically designed to mimic Win IE's parsing behavior.
     int keyBegin, keyEnd;
@@ -1779,12 +2239,15 @@ void Document::processViewport(const String & features)
     assert(!features.isNull());
     
     Frame *frame = this->frame();
+    if (!frame)
+        return;
     
     ViewportArguments arguments;
 
     processArguments(features, &arguments, setViewportFeature);
 
-    frame->didReceiveViewportArguments(arguments);
+    if (frame->page())
+        frame->page()->chrome()->client()->didReceiveViewportArguments(frame, arguments);
 }
 
 void Document::processFormatDetection(const String & features)
@@ -1795,21 +2258,20 @@ void Document::processFormatDetection(const String & features)
 }
 
 
-MouseEventWithHitTestResults Document::prepareMouseEvent(bool readonly, bool active, bool mouseMove,
-                                                         const IntPoint& point, const PlatformMouseEvent& event)
+MouseEventWithHitTestResults Document::prepareMouseEvent(const HitTestRequest& request, const IntPoint& documentPoint, const PlatformMouseEvent& event)
 {
+    ASSERT(!renderer() || renderer()->isRenderView());
+
     if (!renderer())
-        return MouseEventWithHitTestResults(event, 0, false);
+        return MouseEventWithHitTestResults(event, HitTestResult(IntPoint()));
 
-    assert(renderer()->isRenderView());
-    RenderObject::NodeInfo renderInfo(readonly, active, mouseMove);
-    renderer()->layer()->hitTest(renderInfo, point);
+    HitTestResult result(documentPoint);
+    renderView()->layer()->hitTest(request, result);
 
-    if (!readonly)
+    if (!request.readonly)
         updateRendering();
 
-    bool isOverLink = renderInfo.URLElement() && !renderInfo.URLElement()->getAttribute(hrefAttr).isNull();
-    return MouseEventWithHitTestResults(event, renderInfo.innerNode(), isOverLink);
+    return MouseEventWithHitTestResults(event, result);
 }
 
 // DOM Section 1.1.1
@@ -1841,6 +2303,91 @@ bool Document::childTypeAllowed(NodeType type)
     return false;
 }
 
+bool Document::canReplaceChild(Node* newChild, Node* oldChild)
+{
+    if (!oldChild)
+        // ContainerNode::replaceChild will raise a NOT_FOUND_ERR.
+        return true;
+
+    if (oldChild->nodeType() == newChild->nodeType())
+        return true;
+
+    int numDoctypes = 0;
+    int numElements = 0;
+
+    // First, check how many doctypes and elements we have, not counting
+    // the child we're about to remove.
+    for (Node* c = firstChild(); c; c = c->nextSibling()) {
+        if (c == oldChild)
+            continue;
+        
+        switch (c->nodeType()) {
+            case DOCUMENT_TYPE_NODE:
+                numDoctypes++;
+                break;
+            case ELEMENT_NODE:
+                numElements++;
+                break;
+            default:
+                break;
+        }
+    }
+    
+    // Then, see how many doctypes and elements might be added by the new child.
+    if (newChild->nodeType() == DOCUMENT_FRAGMENT_NODE) {
+        for (Node* c = firstChild(); c; c = c->nextSibling()) {
+            switch (c->nodeType()) {
+                case ATTRIBUTE_NODE:
+                case CDATA_SECTION_NODE:
+                case DOCUMENT_FRAGMENT_NODE:
+                case DOCUMENT_NODE:
+                case ENTITY_NODE:
+                case ENTITY_REFERENCE_NODE:
+                case NOTATION_NODE:
+                case TEXT_NODE:
+                case XPATH_NAMESPACE_NODE:
+                    return false;
+                case COMMENT_NODE:
+                case PROCESSING_INSTRUCTION_NODE:
+                    break;
+                case DOCUMENT_TYPE_NODE:
+                    numDoctypes++;
+                    break;
+                case ELEMENT_NODE:
+                    numElements++;
+                    break;
+            }
+        }
+    } else {
+        switch (newChild->nodeType()) {
+            case ATTRIBUTE_NODE:
+            case CDATA_SECTION_NODE:
+            case DOCUMENT_FRAGMENT_NODE:
+            case DOCUMENT_NODE:
+            case ENTITY_NODE:
+            case ENTITY_REFERENCE_NODE:
+            case NOTATION_NODE:
+            case TEXT_NODE:
+            case XPATH_NAMESPACE_NODE:
+                return false;
+            case COMMENT_NODE:
+            case PROCESSING_INSTRUCTION_NODE:
+                return true;
+            case DOCUMENT_TYPE_NODE:
+                numDoctypes++;
+                break;
+            case ELEMENT_NODE:
+                numElements++;
+                break;
+        }                
+    }
+        
+    if (numElements > 1 || numDoctypes > 1)
+        return false;
+    
+    return true;
+}
+
 PassRefPtr<Node> Document::cloneNode(bool /*deep*/)
 {
     // Spec says cloning Document nodes is "implementation dependent"
@@ -1855,43 +2402,56 @@ StyleSheetList* Document::styleSheets()
 
 String Document::preferredStylesheetSet() const
 {
-  return m_preferredStylesheetSet;
+    return m_preferredStylesheetSet;
 }
 
 String Document::selectedStylesheetSet() const
 {
-  return m_selectedStylesheetSet;
+    return m_selectedStylesheetSet;
 }
 
 void Document::setSelectedStylesheetSet(const String& aString)
 {
-  m_selectedStylesheetSet = aString;
-  updateStyleSelector();
-  if (renderer())
-    renderer()->repaint();
+    m_selectedStylesheetSet = aString;
+    updateStyleSelector();
+    if (renderer())
+        renderer()->repaint();
 }
 
 // This method is called whenever a top-level stylesheet has finished loading.
-void Document::stylesheetLoaded()
+void Document::removePendingSheet()
 {
-  // Make sure we knew this sheet was pending, and that our count isn't out of sync.
-  assert(m_pendingStylesheets > 0);
+    // Make sure we knew this sheet was pending, and that our count isn't out of sync.
+    ASSERT(m_pendingStylesheets > 0);
 
-  m_pendingStylesheets--;
-  
+    m_pendingStylesheets--;
+    
 #ifdef INSTRUMENT_LAYOUT_SCHEDULING
-  if (!ownerElement())
-      printf("Stylesheet loaded at time %d. %d stylesheets still remain.\n", elapsedTime(), m_pendingStylesheets);
+    if (!ownerElement())
+        printf("Stylesheet loaded at time %d. %d stylesheets still remain.\n", elapsedTime(), m_pendingStylesheets);
 #endif
 
-  updateStyleSelector();    
+    updateStyleSelector();
+    
+    if (!m_pendingStylesheets && m_tokenizer)
+        m_tokenizer->executeScriptsWaitingForStylesheets();
+
+    if (!m_pendingStylesheets && m_gotoAnchorNeededAfterStylesheetsLoad && m_frame)
+        m_frame->loader()->gotoAnchor();
 }
 
 void Document::updateStyleSelector()
 {
-    // Don't bother updating, since we haven't loaded all our style info yet.
-    if (!haveStylesheetsLoaded())
+    // Don't bother updating, since we haven't loaded all our style info yet
+    // and haven't calculated the style selector for the first time.
+    if (!m_didCalculateStyleSelector && !haveStylesheetsLoaded())
         return;
+
+    if (didLayoutWithPendingStylesheets() && m_pendingStylesheets <= 0) {
+        m_pendingSheetLayout = IgnoreLayoutWithPendingSheets;
+        if (renderer())
+            renderer()->repaint();
+    }
 
 #ifdef INSTRUMENT_LAYOUT_SCHEDULING
     if (!ownerElement())
@@ -1907,16 +2467,45 @@ void Document::updateStyleSelector()
 #endif
 
     if (renderer()) {
-        renderer()->setNeedsLayoutAndMinMaxRecalc();
+        renderer()->setNeedsLayoutAndPrefWidthsRecalc();
         if (view())
             view()->scheduleRelayout();
     }
 }
 
-
-DeprecatedStringList Document::availableStyleSheets() const
+void Document::addStyleSheetCandidateNode(Node* node, bool createdByParser)
 {
-    return m_availableSheets;
+    // Until the <body> exists, we have no choice but to compare document positions,
+    // since styles outside of the body and head continue to be shunted into the head
+    // (and thus can shift to end up before dynamically added DOM content that is also
+    // outside the body).
+    if ((createdByParser && body()) || m_styleSheetCandidateNodes.isEmpty()) {
+        m_styleSheetCandidateNodes.add(node);
+        return;
+    }
+
+    // Determine an appropriate insertion point.
+    ListHashSet<Node*>::iterator begin = m_styleSheetCandidateNodes.begin();
+    ListHashSet<Node*>::iterator end = m_styleSheetCandidateNodes.end();
+    ListHashSet<Node*>::iterator it = end;
+    Node* followingNode = 0;
+    do {
+        --it;
+        Node* n = *it;
+        unsigned short position = n->compareDocumentPosition(node);
+        if (position == DOCUMENT_POSITION_FOLLOWING) {
+            m_styleSheetCandidateNodes.insertBefore(followingNode, node);
+            return;
+        }
+        followingNode = n;
+    } while (it != begin);
+    
+    m_styleSheetCandidateNodes.insertBefore(followingNode, node);
+}
+
+void Document::removeStyleSheetCandidateNode(Node* node)
+{
+    m_styleSheetCandidateNodes.remove(node);
 }
 
 void Document::recalcStyleSelector()
@@ -1924,19 +2513,26 @@ void Document::recalcStyleSelector()
     if (!renderer() || !attached())
         return;
 
-    DeprecatedPtrList<StyleSheet> oldStyleSheets = m_styleSheets->styleSheets;
-    m_styleSheets->styleSheets.clear();
-    m_availableSheets.clear();
-    Node *n;
-    for (n = this; n; n = n->traverseNextNode()) {
-        StyleSheet *sheet = 0;
+    StyleSheetVector sheets;
 
-        if (n->nodeType() == PROCESSING_INSTRUCTION_NODE)
-        {
+    bool matchAuthorAndUserStyles = true;
+    if (Settings* settings = this->settings())
+        matchAuthorAndUserStyles = settings->authorAndUserStylesEnabled();
+
+    ListHashSet<Node*>::iterator begin = m_styleSheetCandidateNodes.begin();
+    ListHashSet<Node*>::iterator end = m_styleSheetCandidateNodes.end();
+    if (!matchAuthorAndUserStyles)
+        end = begin;
+    for (ListHashSet<Node*>::iterator it = begin; it != end; ++it) {
+        Node* n = *it;
+
+        StyleSheet* sheet = 0;
+
+        if (n->nodeType() == PROCESSING_INSTRUCTION_NODE) {
             // Processing instruction (XML documents only)
             ProcessingInstruction* pi = static_cast<ProcessingInstruction*>(n);
             sheet = pi->sheet();
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
             // Don't apply XSL transforms to already transformed documents -- <rdar://problem/4132806>
             if (pi->isXSL() && !transformSourceDocument()) {
                 // Don't apply XSL transforms until loading is finished.
@@ -1945,8 +2541,7 @@ void Document::recalcStyleSelector()
                 return;
             }
 #endif
-            if (!sheet && !pi->localHref().isEmpty())
-            {
+            if (!sheet && !pi->localHref().isEmpty()) {
                 // Processing instruction with reference to an element in this document - e.g.
                 // <?xml-stylesheet href="#mystyle">, with the element
                 // <foo id="mystyle">heading { color: red; }</foo> at some location in
@@ -1954,36 +2549,53 @@ void Document::recalcStyleSelector()
                 Element* elem = getElementById(pi->localHref().impl());
                 if (elem) {
                     String sheetText("");
-                    Node *c;
-                    for (c = elem->firstChild(); c; c = c->nextSibling()) {
+                    for (Node* c = elem->firstChild(); c; c = c->nextSibling()) {
                         if (c->nodeType() == TEXT_NODE || c->nodeType() == CDATA_SECTION_NODE)
                             sheetText += c->nodeValue();
                     }
 
-                    CSSStyleSheet *cssSheet = new CSSStyleSheet(this);
+                    RefPtr<CSSStyleSheet> cssSheet = CSSStyleSheet::create(this);
                     cssSheet->parseString(sheetText);
-                    pi->setStyleSheet(cssSheet);
-                    sheet = cssSheet;
+                    pi->setCSSStyleSheet(cssSheet);
+                    sheet = cssSheet.get();
                 }
             }
-
-        }
-        else if (n->isHTMLElement() && (n->hasTagName(linkTag) || n->hasTagName(styleTag))) {
-            HTMLElement *e = static_cast<HTMLElement *>(n);
-            DeprecatedString title = e->getAttribute(titleAttr).deprecatedString();
+        } else if (n->isHTMLElement() && (n->hasTagName(linkTag) || n->hasTagName(styleTag))
+#if ENABLE(SVG)
+            ||  (n->isSVGElement() && n->hasTagName(SVGNames::styleTag))
+#endif
+        ) {
+            Element* e = static_cast<Element*>(n);
+            AtomicString title = e->getAttribute(titleAttr);
             bool enabledViaScript = false;
             if (e->hasLocalName(linkTag)) {
                 // <LINK> element
                 HTMLLinkElement* l = static_cast<HTMLLinkElement*>(n);
-                if (l->isLoading() || l->isDisabled())
+                if (l->isDisabled())
                     continue;
-                if (!l->sheet())
-                    title = DeprecatedString::null;
                 enabledViaScript = l->isEnabledViaScript();
+                if (l->isLoading()) {
+                    // it is loading but we should still decide which style sheet set to use
+                    if (!enabledViaScript && !title.isEmpty() && m_preferredStylesheetSet.isEmpty()) {
+                        const AtomicString& rel = e->getAttribute(relAttr);
+                        if (!rel.contains("alternate")) {
+                            m_preferredStylesheetSet = title;
+                            m_selectedStylesheetSet = title;
+                        }
+                    }
+                    continue;
+                }
+                if (!l->sheet())
+                    title = nullAtom;
             }
 
             // Get the current preferred styleset.  This is the
             // set of sheets that will be enabled.
+#if ENABLE(SVG)
+            if (n->isSVGElement() && n->hasTagName(SVGNames::styleTag))
+                sheet = static_cast<SVGStyleElement*>(n)->sheet();
+            else
+#endif
             if (e->hasLocalName(linkTag))
                 sheet = static_cast<HTMLLinkElement*>(n)->sheet();
             else
@@ -2000,68 +2612,26 @@ void Document::recalcStyleSelector()
                     // we are NOT an alternate sheet, then establish
                     // us as the preferred set.  Otherwise, just ignore
                     // this sheet.
-                    DeprecatedString rel = e->getAttribute(relAttr).deprecatedString();
+                    AtomicString rel = e->getAttribute(relAttr);
                     if (e->hasLocalName(styleTag) || !rel.contains("alternate"))
                         m_preferredStylesheetSet = m_selectedStylesheetSet = title;
                 }
-                      
-                if (!m_availableSheets.contains(title))
-                    m_availableSheets.append(title);
-                
+
                 if (title != m_preferredStylesheetSet)
                     sheet = 0;
             }
         }
-#if SVG_SUPPORT
-        else if (n->isSVGElement() && n->hasTagName(SVGNames::styleTag)) {
-            DeprecatedString title;
-            // <STYLE> element
-            SVGStyleElement *s = static_cast<SVGStyleElement*>(n);
-            if (!s->isLoading()) {
-                sheet = s->sheet();
-                if(sheet)
-                    title = s->getAttribute(SVGNames::titleAttr).deprecatedString();
-            }
 
-            if (!title.isEmpty() && m_preferredStylesheetSet.isEmpty())
-                m_preferredStylesheetSet = m_selectedStylesheetSet = title;
-
-            if (!title.isEmpty()) {
-                if (title != m_preferredStylesheetSet)
-                    sheet = 0; // don't use it
-
-                title = title.replace('&', "&&");
-
-                if (!m_availableSheets.contains(title))
-                    m_availableSheets.append(title);
-            }
-       }
-#endif
-
-        if (sheet) {
-            sheet->ref();
-            m_styleSheets->styleSheets.append(sheet);
-        }
-    
-        // For HTML documents, stylesheets are not allowed within/after the <BODY> tag. So we
-        // can stop searching here.
-        if (isHTMLDocument() && n->hasTagName(bodyTag))
-            break;
+        if (sheet)
+            sheets.append(sheet);
     }
 
-    // De-reference all the stylesheets in the old list
-    DeprecatedPtrListIterator<StyleSheet> it(oldStyleSheets);
-    for (; it.current(); ++it)
-        it.current()->deref();
+    m_styleSheets->swap(sheets);
 
     // Create a new style selector
     delete m_styleSelector;
-    String usersheet = m_usersheet;
-    if (m_view && m_view->mediaType() == "print")
-        usersheet += m_printSheet;
-    m_styleSelector = new CSSStyleSelector(this, usersheet, m_styleSheets.get(), !inCompatMode());
-    m_styleSelector->setEncodedURL(m_url);
-    m_styleSelectorDirty = false;
+    m_styleSelector = new CSSStyleSelector(this, userStyleSheet(), m_styleSheets.get(), m_mappedElementSheet.get(), !inCompatMode(), matchAuthorAndUserStyles);
+    m_didCalculateStyleSelector = true;
 }
 
 void Document::setHoverNode(PassRefPtr<Node> newHoverNode)
@@ -2074,6 +2644,26 @@ void Document::setActiveNode(PassRefPtr<Node> newActiveNode)
     m_activeNode = newActiveNode;
 }
 
+void Document::focusedNodeRemoved()
+{
+    setFocusedNode(0);
+}
+
+void Document::removeFocusedNodeOfSubtree(Node* node, bool amongChildrenOnly)
+{
+    if (!m_focusedNode || this->inPageCache()) // If the document is in the page cache, then we don't need to clear out the focused node.
+        return;
+        
+    bool nodeInSubtree = false;
+    if (amongChildrenOnly)
+        nodeInSubtree = m_focusedNode->isDescendantOf(node);
+    else
+        nodeInSubtree = (m_focusedNode == node) || m_focusedNode->isDescendantOf(node);
+    
+    if (nodeInSubtree)
+        document()->focusedNodeRemoved();
+}
+
 void Document::hoveredNodeDetached(Node* node)
 {
     if (!m_hoverNode || (node != m_hoverNode && (!m_hoverNode->isTextNode() || node != m_hoverNode->parent())))
@@ -2082,8 +2672,8 @@ void Document::hoveredNodeDetached(Node* node)
     m_hoverNode = node->parent();
     while (m_hoverNode && !m_hoverNode->renderer())
         m_hoverNode = m_hoverNode->parent();
-    if (view())
-        view()->scheduleHoverStateUpdate();
+    if (frame())
+        frame()->eventHandler()->scheduleHoverStateUpdate();
 }
 
 void Document::activeChainNodeDetached(Node* node)
@@ -2096,163 +2686,110 @@ void Document::activeChainNodeDetached(Node* node)
         m_activeNode = m_activeNode->parent();
 }
 
-bool Document::relinquishesEditingFocus(Node *node)
-{
-    assert(node);
-    assert(node->isContentEditable());
-
-    Node *root = node->rootEditableElement();
-    if (!frame() || !root)
-        return false;
-
-    return frame()->shouldEndEditing(rangeOfContents(root).get());
-}
-
-bool Document::acceptsEditingFocus(Node *node)
-{
-    assert(node);
-    assert(node->isContentEditable());
-
-    Node *root = node->rootEditableElement();
-    if (!frame() || !root)
-        return false;
-
-    return frame()->shouldBeginEditing(rangeOfContents(root).get());
-}
-
-void Document::didBeginEditing()
-{
-    if (!frame())
-        return;
-    
-    frame()->didBeginEditing();
-}
-
-void Document::didEndEditing()
-{
-    if (!frame())
-        return;
-    
-    frame()->didEndEditing();
-}
-
-#if __APPLE__
-const DeprecatedValueList<DashboardRegionValue> & Document::dashboardRegions() const
+#if ENABLE(DASHBOARD_SUPPORT)
+const Vector<DashboardRegionValue>& Document::dashboardRegions() const
 {
     return m_dashboardRegions;
 }
 
-void Document::setDashboardRegions (const DeprecatedValueList<DashboardRegionValue>& regions)
+void Document::setDashboardRegions(const Vector<DashboardRegionValue>& regions)
 {
     m_dashboardRegions = regions;
-    setDashboardRegionsDirty (false);
+    setDashboardRegionsDirty(false);
 }
 #endif
 
-static Widget *widgetForNode(Node *focusNode)
-{
-    if (!focusNode)
-        return 0;
-    RenderObject *renderer = focusNode->renderer();
-    if (!renderer || !renderer->isWidget())
-        return 0;
-    return static_cast<RenderWidget*>(renderer)->widget();
-}
-
-bool Document::setFocusNode(PassRefPtr<Node> newFocusNode)
+bool Document::setFocusedNode(PassRefPtr<Node> newFocusedNode)
 {    
-    // Make sure newFocusNode is actually in this document
-    if (newFocusNode && (newFocusNode->document() != this))
+    // Make sure newFocusedNode is actually in this document
+    if (newFocusedNode && (newFocusedNode->document() != this))
         return true;
 
-    if (m_focusNode == newFocusNode)
+    if (m_focusedNode == newFocusedNode)
         return true;
 
-    if (m_focusNode && m_focusNode.get() == m_focusNode->rootEditableElement() && !relinquishesEditingFocus(m_focusNode.get()))
+    if (m_inPageCache)
         return false;
-        
+
     bool focusChangeBlocked = false;
-    RefPtr<Node> oldFocusNode = m_focusNode;
-    m_focusNode = 0;
-    clearSelectionIfNeeded(newFocusNode.get());
+    RefPtr<Node> oldFocusedNode = m_focusedNode;
+    m_focusedNode = 0;
 
     // Remove focus from the existing focus node (if any)
-    if (oldFocusNode && !oldFocusNode->m_inDetach) { 
-        if (oldFocusNode->active())
-            oldFocusNode->setActive(false);
+    if (oldFocusedNode && !oldFocusedNode->m_inDetach) { 
+        if (oldFocusedNode->active())
+            oldFocusedNode->setActive(false);
 
-        oldFocusNode->setFocus(false);
+        oldFocusedNode->setFocus(false);
                 
         // Dispatch a change event for text fields or textareas that have been edited
-        RenderObject *r = static_cast<RenderObject*>(oldFocusNode.get()->renderer());
+        RenderObject* r = static_cast<RenderObject*>(oldFocusedNode.get()->renderer());
         if (r && (r->isTextArea() || r->isTextField()) && r->isEdited()) {
-            EventTargetNodeCast(oldFocusNode.get())->dispatchHTMLEvent(changeEvent, true, false);
-            if ((r = static_cast<RenderObject*>(oldFocusNode.get()->renderer())))
+            EventTargetNodeCast(oldFocusedNode.get())->dispatchEventForType(eventNames().changeEvent, true, false);
+            if ((r = static_cast<RenderObject*>(oldFocusedNode.get()->renderer())))
                 r->setEdited(false);
         }
 
         // Dispatch the blur event and let the node do any other blur related activities (important for text fields)
-        EventTargetNodeCast(oldFocusNode.get())->dispatchBlurEvent();
+        EventTargetNodeCast(oldFocusedNode.get())->dispatchBlurEvent();
 
-        if (m_focusNode) {
+        if (m_focusedNode) {
             // handler shifted focus
             focusChangeBlocked = true;
-            newFocusNode = 0;
+            newFocusedNode = 0;
         }
-        clearSelectionIfNeeded(newFocusNode.get());
-        EventTargetNodeCast(oldFocusNode.get())->dispatchUIEvent(DOMFocusOutEvent);
-        if (m_focusNode) {
+        EventTargetNodeCast(oldFocusedNode.get())->dispatchUIEvent(eventNames().DOMFocusOutEvent);
+        if (m_focusedNode) {
             // handler shifted focus
             focusChangeBlocked = true;
-            newFocusNode = 0;
+            newFocusedNode = 0;
         }
-        clearSelectionIfNeeded(newFocusNode.get());
-        if ((oldFocusNode.get() == this) && oldFocusNode->hasOneRef())
+        if ((oldFocusedNode.get() == this) && oldFocusedNode->hasOneRef())
             return true;
             
-        if (oldFocusNode.get() == oldFocusNode->rootEditableElement())
-            didEndEditing();
+        if (oldFocusedNode.get() == oldFocusedNode->rootEditableElement())
+            frame()->editor()->didEndEditing();
     }
 
-    if (newFocusNode) {
-        if (newFocusNode == newFocusNode->rootEditableElement() && !acceptsEditingFocus(newFocusNode.get())) {
+    if (newFocusedNode) {
+        if (newFocusedNode == newFocusedNode->rootEditableElement() && !acceptsEditingFocus(newFocusedNode.get())) {
             // delegate blocks focus change
             focusChangeBlocked = true;
-            goto SetFocusNodeDone;
+            goto SetFocusedNodeDone;
         }
         // Set focus on the new node
-        m_focusNode = newFocusNode.get();
+        m_focusedNode = newFocusedNode.get();
 
         // Dispatch the focus event and let the node do any other focus related activities (important for text fields)
-        EventTargetNodeCast(m_focusNode.get())->dispatchFocusEvent();
+        EventTargetNodeCast(m_focusedNode.get())->dispatchFocusEvent();
 
-        if (m_focusNode != newFocusNode) {
+        if (m_focusedNode != newFocusedNode) {
             // handler shifted focus
             focusChangeBlocked = true;
-            goto SetFocusNodeDone;
+            goto SetFocusedNodeDone;
         }
-        EventTargetNodeCast(m_focusNode.get())->dispatchUIEvent(DOMFocusInEvent);
-        if (m_focusNode != newFocusNode) { 
+        EventTargetNodeCast(m_focusedNode.get())->dispatchUIEvent(eventNames().DOMFocusInEvent);
+        if (m_focusedNode != newFocusedNode) { 
             // handler shifted focus
             focusChangeBlocked = true;
-            goto SetFocusNodeDone;
+            goto SetFocusedNodeDone;
         }
-        m_focusNode->setFocus();
-        
-        if (m_focusNode.get() == m_focusNode->rootEditableElement())
-            didBeginEditing();
-        
+        m_focusedNode->setFocus();
+
+        if (m_focusedNode.get() == m_focusedNode->rootEditableElement())
+            frame()->editor()->didBeginEditing();
+
         // eww, I suck. set the qt focus correctly
         // ### find a better place in the code for this
         if (view()) {
-            Widget *focusWidget = widgetForNode(m_focusNode.get());
+            Widget *focusWidget = widgetForNode(m_focusedNode.get());
             if (focusWidget) {
                 // Make sure a widget has the right size before giving it focus.
                 // Otherwise, we are testing edge cases of the Widget code.
                 // Specifically, in WebCore this does not work well for text fields.
                 updateLayout();
                 // Re-get the widget in case updating the layout changed things.
-                focusWidget = widgetForNode(m_focusNode.get());
+                focusWidget = widgetForNode(m_focusedNode.get());
             }
             if (focusWidget)
                 focusWidget->setFocus();
@@ -2262,24 +2799,11 @@ bool Document::setFocusNode(PassRefPtr<Node> newFocusNode)
    }
 
 
-SetFocusNodeDone:
+SetFocusedNodeDone:
     updateRendering();
     return !focusChangeBlocked;
-}
-
-void Document::clearSelectionIfNeeded(Node *newFocusNode)
-{
-    if (!frame())
-        return;
-
-    // Clear the selection when changing the focus node to null or to a node that is not 
-    // contained by the current selection.
-    Node *startContainer = frame()->selection().start().node();
-    if (!newFocusNode || (startContainer && startContainer != newFocusNode && !(startContainer->isAncestor(newFocusNode)) && startContainer->shadowAncestorNode() != newFocusNode))
-        // FIXME: 6498 Should just be able to call m_frame->selection().clear()
-        frame()->setSelection(SelectionController());
-}
-
+  }
+  
 void Document::setCSSTarget(Node* n)
 {
     if (m_cssTarget)
@@ -2296,7 +2820,7 @@ Node* Document::getCSSTarget() const
 
 void Document::attachNodeIterator(NodeIterator *ni)
 {
-    m_nodeIterators.append(ni);
+    m_nodeIterators.add(ni);
 }
 
 void Document::detachNodeIterator(NodeIterator *ni)
@@ -2304,214 +2828,367 @@ void Document::detachNodeIterator(NodeIterator *ni)
     m_nodeIterators.remove(ni);
 }
 
-void Document::notifyBeforeNodeRemoval(Node *n)
+void Document::nodeChildrenChanged(ContainerNode* container)
 {
-    if (Frame* f = frame()) {
-        f->selection().nodeWillBeRemoved(n);
-        f->dragCaret().nodeWillBeRemoved(n);
+    if (!page() || !page()->settings()->rangeMutationDisabledForOldAppleMail()) {
+        HashSet<Range*>::const_iterator end = m_ranges.end();
+        for (HashSet<Range*>::const_iterator it = m_ranges.begin(); it != end; ++it)
+            (*it)->nodeChildrenChanged(container);
     }
-    DeprecatedPtrListIterator<NodeIterator> it(m_nodeIterators);
-    for (; it.current(); ++it)
-        it.current()->notifyBeforeNodeRemoval(n);
 }
 
-DOMWindow* Document::defaultView() const
+void Document::nodeWillBeRemoved(Node* n)
+{
+    HashSet<NodeIterator*>::const_iterator nodeIteratorsEnd = m_nodeIterators.end();
+    for (HashSet<NodeIterator*>::const_iterator it = m_nodeIterators.begin(); it != nodeIteratorsEnd; ++it)
+        (*it)->nodeWillBeRemoved(n);
+
+    if (!page() || !page()->settings()->rangeMutationDisabledForOldAppleMail()) {
+        HashSet<Range*>::const_iterator rangesEnd = m_ranges.end();
+        for (HashSet<Range*>::const_iterator it = m_ranges.begin(); it != rangesEnd; ++it)
+            (*it)->nodeWillBeRemoved(n);
+    }
+
+    if (Frame* frame = this->frame()) {
+        frame->selection()->nodeWillBeRemoved(n);
+        frame->dragCaretController()->nodeWillBeRemoved(n);
+    }
+}
+
+void Document::textInserted(Node* text, unsigned offset, unsigned length)
+{
+    if (!page() || !page()->settings()->rangeMutationDisabledForOldAppleMail()) {
+        HashSet<Range*>::const_iterator end = m_ranges.end();
+        for (HashSet<Range*>::const_iterator it = m_ranges.begin(); it != end; ++it)
+            (*it)->textInserted(text, offset, length);
+    }
+
+    // Update the markers for spelling and grammar checking.
+    shiftMarkers(text, offset, length);
+}
+
+void Document::textRemoved(Node* text, unsigned offset, unsigned length)
+{
+    if (!page() || !page()->settings()->rangeMutationDisabledForOldAppleMail()) {
+        HashSet<Range*>::const_iterator end = m_ranges.end();
+        for (HashSet<Range*>::const_iterator it = m_ranges.begin(); it != end; ++it)
+            (*it)->textRemoved(text, offset, length);
+    }
+
+    // Update the markers for spelling and grammar checking.
+    removeMarkers(text, offset, length);
+    shiftMarkers(text, offset + length, 0 - length);
+}
+
+void Document::textNodesMerged(Text* oldNode, unsigned offset)
+{
+    if (!page() || !page()->settings()->rangeMutationDisabledForOldAppleMail()) {
+        NodeWithIndex oldNodeWithIndex(oldNode);
+        HashSet<Range*>::const_iterator end = m_ranges.end();
+        for (HashSet<Range*>::const_iterator it = m_ranges.begin(); it != end; ++it)
+            (*it)->textNodesMerged(oldNodeWithIndex, offset);
+    }
+
+    // FIXME: This should update markers for spelling and grammar checking.
+}
+
+void Document::textNodeSplit(Text* oldNode)
+{
+    if (!page() || !page()->settings()->rangeMutationDisabledForOldAppleMail()) {
+        HashSet<Range*>::const_iterator end = m_ranges.end();
+        for (HashSet<Range*>::const_iterator it = m_ranges.begin(); it != end; ++it)
+            (*it)->textNodeSplit(oldNode);
+    }
+
+    // FIXME: This should update markers for spelling and grammar checking.
+}
+
+// FIXME: eventually, this should return a DOMWindow stored in the document.
+DOMWindow* Document::domWindow() const
 {
     if (!frame())
         return 0;
-    
     return frame()->domWindow();
 }
 
-PassRefPtr<Event> Document::createEvent(const String &eventType, ExceptionCode& ec)
+PassRefPtr<Event> Document::createEvent(const String& eventType, ExceptionCode& ec)
 {
-    if (eventType == "UIEvents" || eventType == "UIEvent")
-        return new UIEvent();
-    if (eventType == "MouseEvents" || eventType == "MouseEvent")
-        return new MouseEvent();
-    if (eventType == "MutationEvents" || eventType == "MutationEvent")
-        return new MutationEvent();
-    if (eventType == "KeyboardEvents" || eventType == "KeyboardEvent")
-        return new KeyboardEvent();
-    if (eventType == "HTMLEvents" || eventType == "Event" || eventType == "Events")
-        return new Event();
-#if SVG_SUPPORT
+    if (eventType == "Event" || eventType == "Events" || eventType == "HTMLEvents")
+        return Event::create();
+    if (eventType == "KeyboardEvent" || eventType == "KeyboardEvents")
+        return KeyboardEvent::create();
+    if (eventType == "MessageEvent")
+        return MessageEvent::create();
+    if (eventType == "MouseEvent" || eventType == "MouseEvents")
+        return MouseEvent::create();
+    if (eventType == "MutationEvent" || eventType == "MutationEvents")
+        return MutationEvent::create();
+    if (eventType == "OverflowEvent")
+        return OverflowEvent::create();
+    if (eventType == "ProgressEvent")
+        return ProgressEvent::create();
+#if ENABLE(DOM_STORAGE)
+    if (eventType == "StorageEvent")
+        return StorageEvent::create();
+#endif
+    if (eventType == "TextEvent")
+        return TextEvent::create();
+    if (eventType == "UIEvent" || eventType == "UIEvents")
+        return UIEvent::create();
+    if (eventType == "WebKitAnimationEvent")
+        return WebKitAnimationEvent::create();
+    if (eventType == "WebKitTransitionEvent")
+        return WebKitTransitionEvent::create();
+    if (eventType == "WheelEvent")
+        return WheelEvent::create();
+#if ENABLE(SVG)
     if (eventType == "SVGEvents")
-        return new Event();
+        return Event::create();
     if (eventType == "SVGZoomEvents")
-        return new SVGZoomEvent();
+        return SVGZoomEvent::create();
+#endif
+#if ENABLE(TOUCH_EVENTS)
+    if (eventType == "TouchEvent")
+        return TouchEvent::create();
+    if (eventType == "GestureEvent")
+        return GestureEvent::create();
 #endif
     ec = NOT_SUPPORTED_ERR;
     return 0;
 }
 
-CSSStyleDeclaration *Document::getOverrideStyle(Element */*elt*/, const String &/*pseudoElt*/)
+void Document::addListenerTypeIfNeeded(const AtomicString& eventType)
 {
-    return 0; // ###
+    if (eventType == eventNames().DOMSubtreeModifiedEvent)
+        addListenerType(DOMSUBTREEMODIFIED_LISTENER);
+    else if (eventType == eventNames().DOMNodeInsertedEvent)
+        addListenerType(DOMNODEINSERTED_LISTENER);
+    else if (eventType == eventNames().DOMNodeRemovedEvent)
+        addListenerType(DOMNODEREMOVED_LISTENER);
+    else if (eventType == eventNames().DOMNodeRemovedFromDocumentEvent)
+        addListenerType(DOMNODEREMOVEDFROMDOCUMENT_LISTENER);
+    else if (eventType == eventNames().DOMNodeInsertedIntoDocumentEvent)
+        addListenerType(DOMNODEINSERTEDINTODOCUMENT_LISTENER);
+    else if (eventType == eventNames().DOMAttrModifiedEvent)
+        addListenerType(DOMATTRMODIFIED_LISTENER);
+    else if (eventType == eventNames().DOMCharacterDataModifiedEvent)
+        addListenerType(DOMCHARACTERDATAMODIFIED_LISTENER);
+    else if (eventType == eventNames().overflowchangedEvent)
+        addListenerType(OVERFLOWCHANGED_LISTENER);
+    else if (eventType == eventNames().webkitAnimationStartEvent)
+        addListenerType(ANIMATIONSTART_LISTENER);
+    else if (eventType == eventNames().webkitAnimationEndEvent)
+        addListenerType(ANIMATIONEND_LISTENER);
+    else if (eventType == eventNames().webkitAnimationIterationEvent)
+        addListenerType(ANIMATIONITERATION_LISTENER);
+    else if (eventType == eventNames().webkitTransitionEndEvent)
+        addListenerType(TRANSITIONEND_LISTENER);
 }
 
-void Document::handleWindowEvent(Event *evt, bool useCapture)
+CSSStyleDeclaration* Document::getOverrideStyle(Element*, const String&)
+{
+    return 0;
+}
+
+void Document::handleWindowEvent(Event* event, bool useCapture)
 {
     if (m_windowEventListeners.isEmpty())
         return;
         
-    // if any html event listeners are registered on the window, then dispatch them here
-    RegisteredEventListenerList listenersCopy = m_windowEventListeners;
-    RegisteredEventListenerList::iterator it = listenersCopy.begin();
-    
-    for (; it != listenersCopy.end(); ++it)
-        if ((*it)->eventType() == evt->type() && (*it)->useCapture() == useCapture && !(*it)->removed()) 
-            (*it)->listener()->handleEvent(evt, true);
-}
-
-
-void Document::defaultEventHandler(Event *evt)
-{
-    // handle accesskey
-    if (evt->type() == keydownEvent) {
-        KeyboardEvent* kevt = static_cast<KeyboardEvent *>(evt);
-        if (kevt->ctrlKey()) {
-            const PlatformKeyboardEvent* ev = kevt->keyEvent();
-            String key = (ev ? ev->unmodifiedText() : kevt->keyIdentifier()).lower();
-            Element* elem = getElementByAccessKey(key);
-            if (elem) {
-                elem->accessKeyAction(false);
-                evt->setDefaultHandled();
-            }
-        }
+    // If any HTML event listeners are registered on the window, dispatch them here.
+    RegisteredEventListenerVector listenersCopy = m_windowEventListeners;
+    size_t size = listenersCopy.size();
+    for (size_t i = 0; i < size; ++i) {
+        RegisteredEventListener& r = *listenersCopy[i];
+        if (r.eventType() == event->type() && r.useCapture() == useCapture && !r.removed())
+            r.listener()->handleEvent(event, true);
     }
 }
 
-void Document::setHTMLWindowEventListener(const AtomicString &eventType, PassRefPtr<EventListener> listener)
+void Document::setWindowInlineEventListenerForType(const AtomicString& eventType, PassRefPtr<EventListener> listener)
 {
     // If we already have it we don't want removeWindowEventListener to delete it
-    removeHTMLWindowEventListener(eventType);
+    removeWindowInlineEventListenerForType(eventType);
     if (listener)
         addWindowEventListener(eventType, listener, false);
 }
 
-EventListener *Document::getHTMLWindowEventListener(const AtomicString &eventType)
+EventListener* Document::windowInlineEventListenerForType(const AtomicString& eventType)
 {
-    RegisteredEventListenerList::iterator it = m_windowEventListeners.begin();
-       for (; it != m_windowEventListeners.end(); ++it)
-        if ( (*it)->eventType() == eventType && (*it)->listener()->isHTMLEventListener())
-            return (*it)->listener();
+    size_t size = m_windowEventListeners.size();
+    for (size_t i = 0; i < size; ++i) {
+        RegisteredEventListener& r = *m_windowEventListeners[i];
+        if (r.eventType() == eventType && r.listener()->isInline())
+            return r.listener();
+    }
     return 0;
 }
 
-void Document::removeHTMLWindowEventListener(const AtomicString &eventType)
+void Document::removeWindowInlineEventListenerForType(const AtomicString& eventType)
 {
-    RegisteredEventListenerList::iterator it = m_windowEventListeners.begin();
-    for (; it != m_windowEventListeners.end(); ++it)
-        if ( (*it)->eventType() == eventType && (*it)->listener()->isHTMLEventListener()) {
-            m_windowEventListeners.remove(it);
-            if (eventType == scrollEvent)
+    size_t size = m_windowEventListeners.size();
+    for (size_t i = 0; i < size; ++i) {
+        RegisteredEventListener& r = *m_windowEventListeners[i];
+        if (r.eventType() == eventType && r.listener()->isInline()) {
+            if (eventType == eventNames().unloadEvent)
+                removePendingFrameUnloadEventCount();
+            else if (eventType == eventNames().beforeunloadEvent)
+                removePendingFrameBeforeUnloadEventCount();
+            r.setRemoved(true);
+            m_windowEventListeners.remove(i);
+            if (eventType == eventNames().scrollEvent)
                 decrementScrollEventListenersCount();
             return;
         }
+    }
 }
 
 
 void Document::incrementScrollEventListenersCount()
 {
     if (++m_scrollEventListenerCount == 1 && this == topDocument())
-        frame()->setNeedsScrollNotifications(true);
+        if (frame()->page())
+            frame()->page()->chrome()->client()->setNeedsScrollNotifications(frame(), true);
 }
 
 void Document::decrementScrollEventListenersCount()
 {
     if (--m_scrollEventListenerCount == 0 && this == topDocument())
-        frame()->setNeedsScrollNotifications(false);
+        if (frame()->page())
+            frame()->page()->chrome()->client()->setNeedsScrollNotifications(frame(), false);
 }
 
 
-void Document::addWindowEventListener(const AtomicString &eventType, PassRefPtr<EventListener> listener, bool useCapture)
+void Document::addWindowEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
 {
+    if (eventType == eventNames().unloadEvent)
+        addPendingFrameUnloadEventCount();
+    else if (eventType == eventNames().beforeunloadEvent)
+        addPendingFrameBeforeUnloadEventCount();
     // Remove existing identical listener set with identical arguments.
     // The DOM 2 spec says that "duplicate instances are discarded" in this case.
     removeWindowEventListener(eventType, listener.get(), useCapture);
-    m_windowEventListeners.append(new RegisteredEventListener(eventType, listener, useCapture));
-    
-    if (eventType == scrollEvent)
-        incrementScrollEventListenersCount();
+    addListenerTypeIfNeeded(eventType);
+    m_windowEventListeners.append(RegisteredEventListener::create(eventType, listener, useCapture));
 
+    if (eventType == eventNames().scrollEvent)
+        incrementScrollEventListenersCount();
 }
 
-void Document::removeWindowEventListener(const AtomicString &eventType, EventListener *listener, bool useCapture)
+void Document::removeWindowEventListener(const AtomicString& eventType, EventListener* listener, bool useCapture)
 {
-    RegisteredEventListener rl(eventType, listener, useCapture);
-    RegisteredEventListenerList::iterator it = m_windowEventListeners.begin();
-    for (; it != m_windowEventListeners.end(); ++it)
-        if (*(*it) == rl) {
-            m_windowEventListeners.remove(it);
-            if (eventType == scrollEvent)
+    size_t size = m_windowEventListeners.size();
+    for (size_t i = 0; i < size; ++i) {
+        RegisteredEventListener& r = *m_windowEventListeners[i];
+        if (r.eventType() == eventType && r.listener() == listener && r.useCapture() == useCapture) {
+            if (eventType == eventNames().unloadEvent)
+                removePendingFrameUnloadEventCount();
+            else if (eventType == eventNames().beforeunloadEvent)
+                removePendingFrameBeforeUnloadEventCount();
+            r.setRemoved(true);
+            m_windowEventListeners.remove(i);
+            if (eventType == eventNames().scrollEvent)
                 decrementScrollEventListenersCount();
             return;
         }
+    }
 }
 
-bool Document::hasWindowEventListener(const AtomicString &eventType)
+bool Document::hasWindowEventListener(const AtomicString& eventType)
 {
-    RegisteredEventListenerList::iterator it = m_windowEventListeners.begin();
-    for (; it != m_windowEventListeners.end(); ++it)
-        if ((*it)->eventType() == eventType) {
+    size_t size = m_windowEventListeners.size();
+    for (size_t i = 0; i < size; ++i) {
+        if (m_windowEventListeners[i]->eventType() == eventType)
             return true;
-        }
+    }
     return false;
 }
 
-PassRefPtr<EventListener> Document::createHTMLEventListener(const String& functionName, const String& code, Node *node)
+void Document::addPendingFrameUnloadEventCount() 
 {
-    if (Frame* frm = frame())
-        if (KJSProxy* proxy = frm->jScript())
-            return proxy->createHTMLEventHandler(functionName, code, node);
-    return 0;
+    if (m_frame)
+         m_frame->eventHandler()->addPendingFrameUnloadEventCount();
 }
 
-void Document::setHTMLWindowEventListener(const AtomicString& eventType, Attribute* attr)
+void Document::removePendingFrameUnloadEventCount() 
 {
-    setHTMLWindowEventListener(eventType,
-        createHTMLEventListener(attr->localName().domString(), attr->value(), 0));
+    if (m_frame)
+        m_frame->eventHandler()->removePendingFrameUnloadEventCount();
 }
 
-void Document::dispatchImageLoadEventSoon(HTMLImageLoader *image)
+void Document::addPendingFrameBeforeUnloadEventCount() 
+{
+    if (m_frame)
+         m_frame->eventHandler()->addPendingFrameBeforeUnloadEventCount();
+}
+
+void Document::removePendingFrameBeforeUnloadEventCount() 
+{
+    if (m_frame)
+        m_frame->eventHandler()->removePendingFrameBeforeUnloadEventCount();
+}
+
+PassRefPtr<EventListener> Document::createEventListener(const String& functionName, const String& code, Node* node)
+{
+    Frame* frm = frame();
+    if (!frm || !frm->script()->isEnabled())
+        return 0;
+
+#if ENABLE(SVG)
+    if (node ? node->isSVGElement() : isSVGDocument())
+        return frm->script()->createSVGEventHandler(functionName, code, node);
+#endif
+
+    // We may want to treat compound document event handlers in a different way, in future.
+    return frm->script()->createInlineEventListener(functionName, code, node);
+}
+
+void Document::setWindowInlineEventListenerForTypeAndAttribute(const AtomicString& eventType, Attribute* attr)
+{
+    setWindowInlineEventListenerForType(eventType, createEventListener(attr->localName().string(), attr->value(), 0));
+}
+
+void Document::dispatchImageLoadEventSoon(ImageLoader* image)
 {
     m_imageLoadEventDispatchSoonList.append(image);
     if (!m_imageLoadEventTimer.isActive())
         m_imageLoadEventTimer.startOneShot(0);
 }
 
-void Document::removeImage(HTMLImageLoader* image)
+void Document::removeImage(ImageLoader* image)
 {
     // Remove instances of this image from both lists.
     // Use loops because we allow multiple instances to get into the lists.
-    while (m_imageLoadEventDispatchSoonList.removeRef(image)) { }
-    while (m_imageLoadEventDispatchingList.removeRef(image)) { }
+    size_t size = m_imageLoadEventDispatchSoonList.size();
+    for (size_t i = 0; i < size; ++i) {
+        if (m_imageLoadEventDispatchSoonList[i] == image)
+            m_imageLoadEventDispatchSoonList[i] = 0;
+    }
+    size = m_imageLoadEventDispatchingList.size();
+    for (size_t i = 0; i < size; ++i) {
+        if (m_imageLoadEventDispatchingList[i] == image)
+            m_imageLoadEventDispatchingList[i] = 0;
+    }
     if (m_imageLoadEventDispatchSoonList.isEmpty())
         m_imageLoadEventTimer.stop();
 }
 
 void Document::dispatchImageLoadEventsNow()
 {
-    // need to avoid re-entering this function; if new dispatches are
+    // Need to avoid re-entering this function; if new dispatches are
     // scheduled before the parent finishes processing the list, they
-    // will set a timer and eventually be processed
-    if (!m_imageLoadEventDispatchingList.isEmpty()) {
+    // will set a timer and eventually be processed.
+    if (!m_imageLoadEventDispatchingList.isEmpty())
         return;
-    }
 
     m_imageLoadEventTimer.stop();
-    
+
     m_imageLoadEventDispatchingList = m_imageLoadEventDispatchSoonList;
     m_imageLoadEventDispatchSoonList.clear();
-    for (DeprecatedPtrListIterator<HTMLImageLoader> it(m_imageLoadEventDispatchingList); it.current();) {
-        HTMLImageLoader* image = it.current();
-        // Must advance iterator *before* dispatching call.
-        // Otherwise, it might be advanced automatically if dispatching the call had a side effect
-        // of destroying the current HTMLImageLoader, and then we would advance past the *next* item,
-        // missing one altogether.
-        ++it;
-        image->dispatchLoadEvent();
+    size_t size = m_imageLoadEventDispatchingList.size();
+    for (size_t i = 0; i < size; ++i) {
+        if (ImageLoader* image = m_imageLoadEventDispatchingList[i])
+            image->dispatchLoadEvent();
     }
     m_imageLoadEventDispatchingList.clear();
 }
@@ -2521,81 +3198,113 @@ void Document::imageLoadEventTimerFired(Timer<Document>*)
     dispatchImageLoadEventsNow();
 }
 
-Element *Document::ownerElement() const
+Element* Document::ownerElement() const
 {
     if (!frame())
         return 0;
     return frame()->ownerElement();
 }
 
+String Document::cookie() const
+{
+    if (page() && !page()->cookieEnabled())
+        return String();
+
+    KURL cookieURL = this->cookieURL();
+    if (cookieURL.isEmpty())
+        return String();
+
+    return cookies(this, cookieURL);
+}
+
+void Document::setCookie(const String& value)
+{
+    if (page() && !page()->cookieEnabled())
+        return;
+
+    KURL cookieURL = this->cookieURL();
+    if (cookieURL.isEmpty())
+        return;
+
+    setCookies(this, cookieURL, policyBaseURL(), value);
+}
+
 String Document::referrer() const
 {
     if (frame())
-        return frame()->incomingReferrer();
-    
+        return frame()->loader()->referrer();
     return String();
 }
 
 String Document::domain() const
 {
-    if (m_domain.isEmpty()) // not set yet (we set it on demand to save time and space)
-        m_domain = KURL(URL()).host(); // Initially set to the host
-    return m_domain;
+    return securityOrigin()->domain();
 }
 
 void Document::setDomain(const String& newDomain)
 {
-    m_domainWasSetInDOM = true;
-
-    // Not set yet (we set it on demand to save time and space)
-    // Initially set to the host
-    if (m_domain.isEmpty())
-        m_domain = KURL(URL()).host();
-
     // Both NS and IE specify that changing the domain is only allowed when
     // the new domain is a suffix of the old domain.
 
-    // FIXME: We should add logging indicating why a domain was not allowed. 
+    // FIXME: We should add logging indicating why a domain was not allowed.
 
-    int oldLength = m_domain.length();
-    int newLength = newDomain.length();
-    // e.g. newDomain=kde.org (7) and m_domain=www.kde.org (11)
-    if (newLength < oldLength) {
-        String test = m_domain.copy();
-        // Check that it's a subdomain, not e.g. "de.org"
-        if (test[oldLength - newLength - 1] == '.') {
-            // Now test is "kde.org" from m_domain
-            // and we check that it's the same thing as newDomain
-            test.remove(0, oldLength - newLength);
-            if (test == newDomain)
-                m_domain = newDomain;
-        }
+    // If the new domain is the same as the old domain, still call
+    // securityOrigin()->setDomainForDOM. This will change the
+    // security check behavior. For example, if a page loaded on port 8000
+    // assigns its current domain using document.domain, the page will
+    // allow other pages loaded on different ports in the same domain that
+    // have also assigned to access this page.
+    if (equalIgnoringCase(domain(), newDomain)) {
+        securityOrigin()->setDomainFromDOM(newDomain);
+        if (m_frame)
+            m_frame->script()->updateSecurityOrigin();
+        return;
     }
+
+    int oldLength = domain().length();
+    int newLength = newDomain.length();
+    // e.g. newDomain = webkit.org (10) and domain() = www.webkit.org (14)
+    if (newLength >= oldLength)
+        return;
+
+    String test = domain();
+    // Check that it's a subdomain, not e.g. "ebkit.org"
+    if (test[oldLength - newLength - 1] != '.')
+        return;
+
+    // Now test is "webkit.org" from domain()
+    // and we check that it's the same thing as newDomain
+    test.remove(0, oldLength - newLength);
+    if (test != newDomain)
+        return;
+
+    securityOrigin()->setDomainFromDOM(newDomain);
+    if (m_frame)
+        m_frame->script()->updateSecurityOrigin();
 }
 
-void Document::setDomainInternal(const String& newDomain)
+String Document::lastModified() const
 {
-    m_domainWasSetInDOM = false;
-    m_domain = newDomain;
+    Frame* f = frame();
+    if (!f)
+        return String();
+    DocumentLoader* loader = f->loader()->documentLoader();
+    if (!loader)
+        return String();
+    return loader->response().httpHeaderField("Last-Modified");
 }
 
-bool Document::isValidName(const String &name)
+static bool isValidNameNonASCII(const UChar* characters, unsigned length)
 {
-    const UChar* s = reinterpret_cast<const UChar*>(name.characters());
-    unsigned length = name.length();
-
-    if (length == 0)
-        return false;
-
     unsigned i = 0;
 
     UChar32 c;
-    U16_NEXT(s, i, length, c)
+    U16_NEXT(characters, i, length, c)
     if (!isValidNameStart(c))
         return false;
 
     while (i < length) {
-        U16_NEXT(s, i, length, c)
+        U16_NEXT(characters, i, length, c)
         if (!isValidNamePart(c))
             return false;
     }
@@ -2603,43 +3312,85 @@ bool Document::isValidName(const String &name)
     return true;
 }
 
-bool Document::parseQualifiedName(const String &qualifiedName, String &prefix, String &localName)
+static inline bool isValidNameASCII(const UChar* characters, unsigned length)
+{
+    UChar c = characters[0];
+    if (!(isASCIIAlpha(c) || c == ':' || c == '_'))
+        return false;
+
+    for (unsigned i = 1; i < length; ++i) {
+        c = characters[i];
+        if (!(isASCIIAlphanumeric(c) || c == ':' || c == '_' || c == '-' || c == '.'))
+            return false;
+    }
+
+    return true;
+}
+
+bool Document::isValidName(const String& name)
+{
+    unsigned length = name.length();
+    if (!length)
+        return false;
+
+    const UChar* characters = name.characters();
+    return isValidNameASCII(characters, length) || isValidNameNonASCII(characters, length);
+}
+
+bool Document::parseQualifiedName(const String& qualifiedName, String& prefix, String& localName, ExceptionCode& ec)
 {
     unsigned length = qualifiedName.length();
 
-    if (length == 0)
+    if (length == 0) {
+        ec = INVALID_CHARACTER_ERR;
         return false;
+    }
 
     bool nameStart = true;
     bool sawColon = false;
     int colonPos = 0;
 
-    const UChar* s = reinterpret_cast<const UChar*>(qualifiedName.characters());
+    const UChar* s = qualifiedName.characters();
     for (unsigned i = 0; i < length;) {
         UChar32 c;
         U16_NEXT(s, i, length, c)
         if (c == ':') {
-            if (sawColon)
+            if (sawColon) {
+                ec = NAMESPACE_ERR;
                 return false; // multiple colons: not allowed
+            }
             nameStart = true;
             sawColon = true;
             colonPos = i - 1;
         } else if (nameStart) {
-            if (!isValidNameStart(c))
+            if (!isValidNameStart(c)) {
+                ec = INVALID_CHARACTER_ERR;
                 return false;
+            }
             nameStart = false;
         } else {
-            if (!isValidNamePart(c))
+            if (!isValidNamePart(c)) {
+                ec = INVALID_CHARACTER_ERR;
                 return false;
+            }
         }
     }
 
     if (!sawColon) {
         prefix = String();
-        localName = qualifiedName.copy();
+        localName = qualifiedName;
     } else {
         prefix = qualifiedName.substring(0, colonPos);
-        localName = qualifiedName.substring(colonPos + 1, length - (colonPos + 1));
+        if (prefix.isEmpty()) {
+            ec = NAMESPACE_ERR;
+            return false;
+        }
+        localName = qualifiedName.substring(colonPos + 1);
+    }
+
+    if (localName.isEmpty()) {
+        ec = NAMESPACE_ERR;
+        return false;
     }
 
     return true;
@@ -2647,9 +3398,13 @@ bool Document::parseQualifiedName(const String &qualifiedName, String &prefix, S
 
 void Document::addImageMap(HTMLMapElement* imageMap)
 {
+    const AtomicString& name = imageMap->getName();
+    if (!name.impl())
+        return;
+
     // Add the image map, unless there's already another with that name.
     // "First map wins" is the rule other browsers seem to implement.
-    m_imageMapsByName.add(imageMap->getName().impl(), imageMap);
+    m_imageMapsByName.add(name.impl(), imageMap);
 }
 
 void Document::removeImageMap(HTMLMapElement* imageMap)
@@ -2659,55 +3414,40 @@ void Document::removeImageMap(HTMLMapElement* imageMap)
     // FIXME: Use a HashCountedSet as we do for IDs to find the first remaining map
     // once a map has been removed.
     const AtomicString& name = imageMap->getName();
+    if (!name.impl())
+        return;
+
     ImageMapsByName::iterator it = m_imageMapsByName.find(name.impl());
     if (it != m_imageMapsByName.end() && it->second == imageMap)
         m_imageMapsByName.remove(it);
 }
 
-HTMLMapElement *Document::getImageMap(const String& URL) const
+HTMLMapElement *Document::getImageMap(const String& url) const
 {
-    if (URL.isNull())
+    if (url.isNull())
         return 0;
-    int hashPos = URL.find('#');
-    AtomicString name = (hashPos < 0 ? URL : URL.substring(hashPos + 1)).impl();
-    return m_imageMapsByName.get(name.impl());
+    int hashPos = url.find('#');
+    String name = (hashPos < 0 ? url : url.substring(hashPos + 1)).impl();
+    AtomicString mapName = isHTMLDocument() ? name.lower() : name;
+    return m_imageMapsByName.get(mapName.impl());
 }
 
-void Document::setDecoder(Decoder *decoder)
+void Document::setDecoder(PassRefPtr<TextResourceDecoder> decoder)
 {
     m_decoder = decoder;
 }
 
-UChar Document::backslashAsCurrencySymbol() const
+KURL Document::completeURL(const String& url) const
 {
+    // Always return a null URL when passed a null string.
+    // FIXME: Should we change the KURL constructor to have this behavior?
+    // See also [CSS]StyleSheet::completeURL(const String&)
+    if (url.isNull())
+        return KURL();
+    const KURL& baseURL = ((m_baseURL.isEmpty() || m_baseURL == blankURL()) && parentDocument()) ? parentDocument()->baseURL() : m_baseURL;
     if (!m_decoder)
-        return '\\';
-    return m_decoder->encoding().backslashAsCurrencySymbol();
-}
-
-DeprecatedString Document::completeURL(const DeprecatedString &URL)
-{
-    // If both the URL and base URL are empty, like they are for documents
-    // created using DOMImplementation::createDocument, just return the passed in URL.
-    // (We do this because URL() returns "about:blank" for empty URLs.
-    if (m_url.isEmpty() && m_baseURL.isEmpty())
-        return URL;
-    
-    if (!m_decoder)
-        return KURL(baseURL(), URL).url();
-    return KURL(baseURL(), URL, m_decoder->encoding()).url();
-}
-
-String Document::completeURL(const String &URL)
-{
-    if (URL.isNull())
-        return URL;
-    return completeURL(URL.deprecatedString());
-}
-
-bool Document::inPageCache()
-{
-    return m_inPageCache;
+        return KURL(baseURL, url);
+    return KURL(baseURL, url, m_decoder->encoding());
 }
 
 void Document::setInPageCache(bool flag)
@@ -2719,8 +3459,8 @@ void Document::setInPageCache(bool flag)
     if (flag) {
         ASSERT(m_savedRenderer == 0);
         m_savedRenderer = renderer();
-        if (m_view)
-            m_view->resetScrollBars();
+        if (FrameView* v = view())
+            v->resetScrollbars();
     } else {
         ASSERT(renderer() == 0 || renderer() == m_savedRenderer);
         ASSERT(m_renderArena);
@@ -2729,37 +3469,67 @@ void Document::setInPageCache(bool flag)
     }
 }
 
-void Document::registerForDidRestoreFromCacheCallback(Element* e)
+void Document::documentWillBecomeInactive() 
 {
-    m_didRestorePageCallbackSet.add(e);
+#if USE(ACCELERATED_COMPOSITING)
+    if (renderer())
+        renderView()->willMoveOffscreen();
+#endif
+
+    HashSet<Element*>::iterator end = m_documentActivationCallbackElements.end();
+    for (HashSet<Element*>::iterator i = m_documentActivationCallbackElements.begin(); i != end; ++i)
+        (*i)->documentWillBecomeInactive();
 }
 
-void Document::unregisterForDidRestoreFromCacheCallback(Element* e)
+void Document::documentDidBecomeActive() 
 {
-    m_didRestorePageCallbackSet.remove(e);
+    HashSet<Element*>::iterator end = m_documentActivationCallbackElements.end();
+    for (HashSet<Element*>::iterator i = m_documentActivationCallbackElements.begin(); i != end; ++i)
+        (*i)->documentDidBecomeActive();
+
+#if USE(ACCELERATED_COMPOSITING)
+    if (renderer())
+        renderView()->didMoveOnscreen();
+#endif
 }
 
-void Document::didRestoreFromCache()
+void Document::registerForDocumentActivationCallbacks(Element* e)
 {
-    HashSet<Element*>::iterator it = m_didRestorePageCallbackSet.begin();
-    for (; it != m_didRestorePageCallbackSet.end(); ++it) 
-        (*it)->didRestoreFromCache();
+    m_documentActivationCallbackElements.add(e);
 }
 
-void Document::secureFormAdded()
+void Document::unregisterForDocumentActivationCallbacks(Element* e)
 {
-    m_secureForms++;
+    m_documentActivationCallbackElements.remove(e);
+
+    // We normally count scroll event listeners as a page
+    // is loaded, using the m_scrollEventListenerCount variable.
+    // As soon as m_scrollEventListenerCount is greater than zero
+    // we call setNeedsScrollNotifications(true).
+    //
+    // When we restore from the cache, m_scrollEventListenerCount
+    // is already set---we don't go through the usual counting
+    // procedure.  So we need to call setNeedsScrollNotifications(true)
+    // if m_scrollEventListenerCount > 0.
+    if (m_frame && m_scrollEventListenerCount > 0 && m_frame->page())
+        m_frame->page()->chrome()->client()->setNeedsScrollNotifications(frame(), true);
 }
 
-void Document::secureFormRemoved()
+void Document::mediaVolumeDidChange() 
 {
-    assert(m_secureForms > 0);
-    m_secureForms--;
+    HashSet<Element*>::iterator end = m_mediaVolumeCallbackElements.end();
+    for (HashSet<Element*>::iterator i = m_mediaVolumeCallbackElements.begin(); i != end; ++i)
+        (*i)->mediaVolumeDidChange();
 }
 
-bool Document::hasSecureForm() const
+void Document::registerForMediaVolumeCallbacks(Element* e)
 {
-    return m_secureForms > 0;
+    m_mediaVolumeCallbackElements.add(e);
+}
+
+void Document::unregisterForMediaVolumeCallbacks(Element* e)
+{
+    m_mediaVolumeCallbackElements.remove(e);
 }
 
 void Document::setShouldCreateRenderers(bool f)
@@ -2772,95 +3542,92 @@ bool Document::shouldCreateRenderers()
     return m_createRenderers;
 }
 
-String Document::toString() const
-{
-    String result;
-
-    for (Node *child = firstChild(); child != NULL; child = child->nextSibling()) {
-        result += child->toString();
-    }
-
-    return result;
-}
-
 // Support for Javascript execCommand, and related methods
 
-JSEditor *Document::jsEditor()
+static Editor::Command command(Document* document, const String& commandName, bool userInterface = false)
 {
-    if (!m_jsEditor)
-        m_jsEditor = new JSEditor(this);
-    return m_jsEditor;
+    Frame* frame = document->frame();
+    if (!frame || frame->document() != document)
+        return Editor::Command();
+    return frame->editor()->command(commandName,
+        userInterface ? CommandFromDOMWithUserInterface : CommandFromDOM);
 }
 
-bool Document::execCommand(const String &command, bool userInterface, const String &value)
+bool Document::execCommand(const String& commandName, bool userInterface, const String& value)
 {
-    return jsEditor()->execCommand(command, userInterface, value);
+    return command(this, commandName, userInterface).execute(value);
 }
 
-bool Document::queryCommandEnabled(const String &command)
+bool Document::queryCommandEnabled(const String& commandName)
 {
-    return jsEditor()->queryCommandEnabled(command);
+    return command(this, commandName).isEnabled();
 }
 
-bool Document::queryCommandIndeterm(const String &command)
+bool Document::queryCommandIndeterm(const String& commandName)
 {
-    return jsEditor()->queryCommandIndeterm(command);
+    return command(this, commandName).state() == MixedTriState;
 }
 
-bool Document::queryCommandState(const String &command)
+bool Document::queryCommandState(const String& commandName)
 {
-    return jsEditor()->queryCommandState(command);
+    return command(this, commandName).state() != FalseTriState;
 }
 
-bool Document::queryCommandSupported(const String &command)
+bool Document::queryCommandSupported(const String& commandName)
 {
-    return jsEditor()->queryCommandSupported(command);
+    return command(this, commandName).isSupported();
 }
 
-String Document::queryCommandValue(const String &command)
+String Document::queryCommandValue(const String& commandName)
 {
-    return jsEditor()->queryCommandValue(command);
+    return command(this, commandName).value();
 }
 
-static IntRect placeholderRectForMarker(void)
+static IntRect placeholderRectForMarker()
 {
-    return IntRect(-1,-1,-1,-1);
+    return IntRect(-1, -1, -1, -1);
 }
 
-void Document::addMarker(Range *range, DocumentMarker::MarkerType type)
+void Document::addMarker(Range *range, DocumentMarker::MarkerType type, String description)
 {
     // Use a TextIterator to visit the potentially multiple nodes the range covers.
     for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
         RefPtr<Range> textPiece = markedText.range();
         int exception = 0;
-        DocumentMarker marker = {type, textPiece->startOffset(exception), textPiece->endOffset(exception)};
+        DocumentMarker marker = {type, textPiece->startOffset(exception), textPiece->endOffset(exception), description};
         addMarker(textPiece->startContainer(exception), marker);
     }
 }
 
-void Document::removeMarkers(Range *range, DocumentMarker::MarkerType markerType)
+void Document::removeMarkers(Range* range, DocumentMarker::MarkerType markerType)
 {
-    // Use a TextIterator to visit the potentially multiple nodes the range covers.
-    for (TextIterator markedText(range); !markedText.atEnd(); markedText.advance()) {
-        RefPtr<Range> textPiece = markedText.range();
-        int exception = 0;
-        unsigned startOffset = textPiece->startOffset(exception);
-        unsigned length = textPiece->endOffset(exception) - startOffset + 1;
-        removeMarkers(textPiece->startContainer(exception), startOffset, length, markerType);
+    if (m_markers.isEmpty())
+        return;
+
+    ExceptionCode ec = 0;
+    Node* startContainer = range->startContainer(ec);
+    Node* endContainer = range->endContainer(ec);
+
+    Node* pastLastNode = range->pastLastNode();
+    for (Node* node = range->firstNode(); node != pastLastNode; node = node->traverseNextNode()) {
+        int startOffset = node == startContainer ? range->startOffset(ec) : 0;
+        int endOffset = node == endContainer ? range->endOffset(ec) : INT_MAX;
+        int length = endOffset - startOffset;
+        removeMarkers(node, startOffset, length, markerType);
     }
 }
 
-// Markers are stored in order sorted by their location.  They do not overlap each other, as currently
-// required by the drawing code in RenderText.cpp.
+// Markers are stored in order sorted by their start offset.
+// Markers of the same type do not overlap each other.
 
-void Document::addMarker(Node *node, DocumentMarker newMarker) 
+void Document::addMarker(Node* node, DocumentMarker newMarker) 
 {
-    assert(newMarker.endOffset >= newMarker.startOffset);
+    ASSERT(newMarker.endOffset >= newMarker.startOffset);
     if (newMarker.endOffset == newMarker.startOffset)
         return;
-    
+
     MarkerMapVectorPair* vectorPair = m_markers.get(node);
-    
+
     if (!vectorPair) {
         vectorPair = new MarkerMapVectorPair;
         vectorPair->first.append(newMarker);
@@ -2869,36 +3636,46 @@ void Document::addMarker(Node *node, DocumentMarker newMarker)
     } else {
         Vector<DocumentMarker>& markers = vectorPair->first;
         Vector<IntRect>& rects = vectorPair->second;
-        ASSERT(markers.size() == rects.size());
-        Vector<DocumentMarker>::iterator it;
-        for (it = markers.begin(); it != markers.end();) {
-            DocumentMarker marker = *it;
-            
-            if (newMarker.endOffset < marker.startOffset+1) {
-                // This is the first marker that is completely after newMarker, and disjoint from it.
-                // We found our insertion point.
+        size_t numMarkers = markers.size();
+        ASSERT(numMarkers == rects.size());
+        size_t i;
+        // Iterate over all markers whose start offset is less than or equal to the new marker's.
+        // If one of them is of the same type as the new marker and touches it or intersects with it
+        // (there is at most one), remove it and adjust the new marker's start offset to encompass it.
+        for (i = 0; i < numMarkers; ++i) {
+            DocumentMarker marker = markers[i];
+            if (marker.startOffset > newMarker.startOffset)
                 break;
-            } else if (newMarker.startOffset > marker.endOffset) {
-                // maker is before newMarker, and disjoint from it.  Keep scanning.
-                it++;
-            } else if (newMarker == marker) {
-                // already have this one, NOP
-                return;
-            } else {
-                // marker and newMarker intersect or touch - merge them into newMarker
-                newMarker.startOffset = min(newMarker.startOffset, marker.startOffset);
-                newMarker.endOffset = max(newMarker.endOffset, marker.endOffset);
-                // remove old one, we'll add newMarker later
-                unsigned removalIndex = it - markers.begin();
-                markers.remove(removalIndex);
-                rects.remove(removalIndex);
-                // it points to the next marker to consider
+            if (marker.type == newMarker.type && marker.endOffset >= newMarker.startOffset) {
+                newMarker.startOffset = marker.startOffset;
+                markers.remove(i);
+                rects.remove(i);
+                numMarkers--;
+                break;
             }
         }
-        // at this point it points to the node before which we want to insert
-        unsigned insertionIndex = it - markers.begin();
-        markers.insert(insertionIndex, newMarker);
-        rects.insert(insertionIndex, placeholderRectForMarker());
+        size_t j = i;
+        // Iterate over all markers whose end offset is less than or equal to the new marker's,
+        // removing markers of the same type as the new marker which touch it or intersect with it,
+        // adjusting the new marker's end offset to cover them if necessary.
+        while (j < numMarkers) {
+            DocumentMarker marker = markers[j];
+            if (marker.startOffset > newMarker.endOffset)
+                break;
+            if (marker.type == newMarker.type) {
+                markers.remove(j);
+                rects.remove(j);
+                if (newMarker.endOffset <= marker.endOffset) {
+                    newMarker.endOffset = marker.endOffset;
+                    break;
+                }
+                numMarkers--;
+            } else
+                j++;
+        }
+        // At this point i points to the node before which we want to insert.
+        markers.insert(i, newMarker);
+        rects.insert(i, placeholderRectForMarker());
     }
     
     // repaint the affected node
@@ -2921,10 +3698,9 @@ void Document::copyMarkers(Node *srcNode, unsigned startOffset, int length, Node
 
     bool docDirty = false;
     unsigned endOffset = startOffset + length - 1;
-    Vector<DocumentMarker>::iterator it;
     Vector<DocumentMarker>& markers = vectorPair->first;
-    for (it = markers.begin(); it != markers.end(); ++it) {
-        DocumentMarker marker = *it;
+    for (size_t i = 0; i != markers.size(); ++i) {
+        DocumentMarker marker = markers[i];
 
         // stop if we are now past the specified range
         if (marker.startOffset > endOffset)
@@ -2951,7 +3727,7 @@ void Document::copyMarkers(Node *srcNode, unsigned startOffset, int length, Node
         dstNode->renderer()->repaint();
 }
 
-void Document::removeMarkers(Node *node, unsigned startOffset, int length, DocumentMarker::MarkerType markerType)
+void Document::removeMarkers(Node* node, unsigned startOffset, int length, DocumentMarker::MarkerType markerType)
 {
     if (length <= 0)
         return;
@@ -2964,18 +3740,17 @@ void Document::removeMarkers(Node *node, unsigned startOffset, int length, Docum
     Vector<IntRect>& rects = vectorPair->second;
     ASSERT(markers.size() == rects.size());
     bool docDirty = false;
-    unsigned endOffset = startOffset + length - 1;
-    Vector<DocumentMarker>::iterator it;
-    for (it = markers.begin(); it < markers.end();) {
-        DocumentMarker marker = *it;
+    unsigned endOffset = startOffset + length;
+    for (size_t i = 0; i < markers.size();) {
+        DocumentMarker marker = markers[i];
 
         // markers are returned in order, so stop if we are now past the specified range
-        if (marker.startOffset > endOffset)
+        if (marker.startOffset >= endOffset)
             break;
         
         // skip marker that is wrong type or before target
         if (marker.endOffset < startOffset || (marker.type != markerType && markerType != DocumentMarker::AllMarkers)) {
-            it++;
+            i++;
             continue;
         }
 
@@ -2983,29 +3758,25 @@ void Document::removeMarkers(Node *node, unsigned startOffset, int length, Docum
         docDirty = true;
 
         // pitch the old marker and any associated rect
-        unsigned removalIndex = it - markers.begin();
-        markers.remove(removalIndex);
-        rects.remove(removalIndex);
-        // it now points to the next node
+        markers.remove(i);
+        rects.remove(i);
         
         // add either of the resulting slices that are left after removing target
         if (startOffset > marker.startOffset) {
             DocumentMarker newLeft = marker;
             newLeft.endOffset = startOffset;
-            unsigned insertionIndex = it - markers.begin();
-            markers.insert(insertionIndex, newLeft);
-            rects.insert(insertionIndex, placeholderRectForMarker());
-            // it now points to the newly-inserted node, but we want to skip that one
-            it++;
+            markers.insert(i, newLeft);
+            rects.insert(i, placeholderRectForMarker());
+            // i now points to the newly-inserted node, but we want to skip that one
+            i++;
         }
         if (marker.endOffset > endOffset) {
             DocumentMarker newRight = marker;
             newRight.startOffset = endOffset;
-            unsigned insertionIndex = it - markers.begin();
-            markers.insert(insertionIndex, newRight);
-            rects.insert(insertionIndex, placeholderRectForMarker());
-            // it now points to the newly-inserted node, but we want to skip that one
-            it++;
+            markers.insert(i, newRight);
+            rects.insert(i, placeholderRectForMarker());
+            // i now points to the newly-inserted node, but we want to skip that one
+            i++;
         }
     }
 
@@ -3018,6 +3789,38 @@ void Document::removeMarkers(Node *node, unsigned startOffset, int length, Docum
     // repaint the affected node
     if (docDirty && node->renderer())
         node->renderer()->repaint();
+}
+
+DocumentMarker* Document::markerContainingPoint(const IntPoint& point, DocumentMarker::MarkerType markerType)
+{
+    // outer loop: process each node that contains any markers
+    MarkerMap::iterator end = m_markers.end();
+    for (MarkerMap::iterator nodeIterator = m_markers.begin(); nodeIterator != end; ++nodeIterator) {
+        // inner loop; process each marker in this node
+        MarkerMapVectorPair* vectorPair = nodeIterator->second;
+        Vector<DocumentMarker>& markers = vectorPair->first;
+        Vector<IntRect>& rects = vectorPair->second;
+        ASSERT(markers.size() == rects.size());
+        unsigned markerCount = markers.size();
+        for (unsigned markerIndex = 0; markerIndex < markerCount; ++markerIndex) {
+            DocumentMarker& marker = markers[markerIndex];
+            
+            // skip marker that is wrong type
+            if (marker.type != markerType && markerType != DocumentMarker::AllMarkers)
+                continue;
+            
+            IntRect& r = rects[markerIndex];
+            
+            // skip placeholder rects
+            if (r == placeholderRectForMarker())
+                continue;
+            
+            if (r.contains(point))
+                return &marker;
+        }
+    }
+    
+    return 0;
 }
 
 Vector<DocumentMarker> Document::markersForNode(Node* node)
@@ -3060,7 +3863,6 @@ Vector<IntRect> Document::renderedRectsForMarkers(DocumentMarker::MarkerType mar
     return result;
 }
 
-
 void Document::removeMarkers(Node* node)
 {
     MarkerMap::iterator i = m_markers.find(node);
@@ -3086,19 +3888,18 @@ void Document::removeMarkers(DocumentMarker::MarkerType markerType)
         Vector<DocumentMarker>& markers = vectorPair->first;
         Vector<IntRect>& rects = vectorPair->second;
         ASSERT(markers.size() == rects.size());
-        Vector<DocumentMarker>::iterator markerIterator;
-        for (markerIterator = markers.begin(); markerIterator != markers.end();) {
-            DocumentMarker marker = *markerIterator;
+        for (size_t i = 0; i != markers.size();) {
+            DocumentMarker marker = markers[i];
 
             // skip nodes that are not of the specified type
             if (marker.type != markerType && markerType != DocumentMarker::AllMarkers) {
-                ++markerIterator;
+                ++i;
                 continue;
             }
 
             // pitch the old marker
-            markers.remove(markerIterator - markers.begin());
-            rects.remove(markerIterator - markers.begin());
+            markers.remove(i);
+            rects.remove(i);
             nodeNeedsRepaint = true;
             // markerIterator now points to the next node
         }
@@ -3130,10 +3931,9 @@ void Document::repaintMarkers(DocumentMarker::MarkerType markerType)
         // inner loop: process each marker in the current node
         MarkerMapVectorPair* vectorPair = i->second;
         Vector<DocumentMarker>& markers = vectorPair->first;
-        Vector<DocumentMarker>::iterator markerIterator;
         bool nodeNeedsRepaint = false;
-        for (markerIterator = markers.begin(); markerIterator != markers.end(); ++markerIterator) {
-            DocumentMarker marker = *markerIterator;
+        for (size_t i = 0; i != markers.size(); ++i) {
+            DocumentMarker marker = markers[i];
             
             // skip nodes that are not of the specified type
             if (marker.type == markerType || markerType == DocumentMarker::AllMarkers) {
@@ -3201,17 +4001,16 @@ void Document::shiftMarkers(Node *node, unsigned startOffset, int delta, Documen
     ASSERT(markers.size() == rects.size());
     
     bool docDirty = false;
-    Vector<DocumentMarker>::iterator it;
-    for (it = markers.begin(); it != markers.end(); ++it) {
-        DocumentMarker &marker = *it;
+    for (size_t i = 0; i != markers.size(); ++i) {
+        DocumentMarker &marker = markers[i];
         if (marker.startOffset >= startOffset && (markerType == DocumentMarker::AllMarkers || marker.type == markerType)) {
-            assert((int)marker.startOffset + delta >= 0);
+            ASSERT((int)marker.startOffset + delta >= 0);
             marker.startOffset += delta;
             marker.endOffset += delta;
             docDirty = true;
             
             // Marker moved, so previously-computed rendered rectangle is now invalid
-            rects[it - markers.begin()] = placeholderRectForMarker();
+            rects[i] = placeholderRectForMarker();
         }
     }
     
@@ -3220,20 +4019,28 @@ void Document::shiftMarkers(Node *node, unsigned startOffset, int delta, Documen
         node->renderer()->repaint();
 }
 
-#ifdef KHTML_XSLT
+#if ENABLE(XSLT)
 
 void Document::applyXSLTransform(ProcessingInstruction* pi)
 {
-    RefPtr<XSLTProcessor> processor = new XSLTProcessor;
-    processor->setXSLStylesheet(static_cast<XSLStyleSheet*>(pi->sheet()));
-    
-    DeprecatedString resultMIMEType;
-    DeprecatedString newSource;
-    DeprecatedString resultEncoding;
+    RefPtr<XSLTProcessor> processor = XSLTProcessor::create();
+    processor->setXSLStyleSheet(static_cast<XSLStyleSheet*>(pi->sheet()));
+    String resultMIMEType;
+    String newSource;
+    String resultEncoding;
     if (!processor->transformToString(this, resultMIMEType, newSource, resultEncoding))
         return;
     // FIXME: If the transform failed we should probably report an error (like Mozilla does).
-    processor->createDocumentFromSource(newSource, resultEncoding, resultMIMEType, this, view());
+    processor->createDocumentFromSource(newSource, resultEncoding, resultMIMEType, this, frame());
+}
+
+void Document::setTransformSource(void* doc)
+{
+    if (doc == m_transformSource)
+        return;
+
+    xmlFreeDoc((xmlDocPtr)m_transformSource);
+    m_transformSource = doc;
 }
 
 #endif
@@ -3252,7 +4059,7 @@ bool Document::inDesignMode() const
 {
     for (const Document* d = this; d; d = d->parentDocument()) {
         if (d->m_designMode != inherit)
-            return d->m_designMode;      
+            return d->m_designMode;
     }
     return false;
 }
@@ -3272,240 +4079,225 @@ Document *Document::topDocument() const
 {
     Document *doc = const_cast<Document *>(this);
     Element *element;
-    while ((element = doc->ownerElement()) != 0)
+    while ((element = doc->ownerElement()))
         doc = element->document();
     
     return doc;
 }
 
-PassRefPtr<Attr> Document::createAttributeNS(const String &namespaceURI, const String &qualifiedName, ExceptionCode& ec)
+PassRefPtr<Attr> Document::createAttributeNS(const String& namespaceURI, const String& qualifiedName, ExceptionCode& ec, bool shouldIgnoreNamespaceChecks)
 {
-    if (qualifiedName.isNull()) {
+    String prefix, localName;
+    if (!parseQualifiedName(qualifiedName, prefix, localName, ec))
+        return 0;
+
+    QualifiedName qName(prefix, localName, namespaceURI);
+    if (!shouldIgnoreNamespaceChecks && hasPrefixNamespaceMismatch(qName)) {
         ec = NAMESPACE_ERR;
         return 0;
     }
 
-    String localName = qualifiedName;
-    String prefix;
-    int colonpos;
-    if ((colonpos = qualifiedName.find(':')) >= 0) {
-        prefix = qualifiedName.copy();
-        localName = qualifiedName.copy();
-        prefix.truncate(colonpos);
-        localName.remove(0, colonpos+1);
-    }
-
-    if (!isValidName(localName)) {
-        ec = INVALID_CHARACTER_ERR;
+    // Spec: DOM Level 2 Core: http://www.w3.org/TR/DOM-Level-2-Core/core.html#ID-DocCrAttrNS
+    if (!shouldIgnoreNamespaceChecks && qName.localName() == "xmlns" && qName.namespaceURI() != "http://www.w3.org/2000/xmlns/") {
+        ec = NAMESPACE_ERR;
         return 0;
     }
-    
+
     // FIXME: Assume this is a mapped attribute, since createAttribute isn't namespace-aware.  There's no harm to XML
     // documents if we're wrong.
-    return new Attr(0, this, new MappedAttribute(QualifiedName(prefix.impl(), 
-                                                                       localName.impl(),
-                                                                       namespaceURI.impl()), String("").impl()));
+    return new Attr(0, this, MappedAttribute::create(qName, StringImpl::empty()));
 }
 
-#if SVG_SUPPORT
+#if ENABLE(SVG)
 const SVGDocumentExtensions* Document::svgExtensions()
 {
-    return m_svgExtensions;
+    return m_svgExtensions.get();
 }
 
 SVGDocumentExtensions* Document::accessSVGExtensions()
 {
     if (!m_svgExtensions)
-        m_svgExtensions = new SVGDocumentExtensions(this);
-    return m_svgExtensions;
+        m_svgExtensions.set(new SVGDocumentExtensions(this));
+    return m_svgExtensions.get();
 }
 #endif
 
-void Document::radioButtonChecked(HTMLInputElement *caller, HTMLFormElement *form)
-{
-    // Without a name, there is no group.
-    if (caller->name().isEmpty())
-        return;
-    if (!form)
-        form = defaultForm;
-    // Uncheck the currently selected item
-    NameToInputMap* formRadioButtons = m_selectedRadioButtons.get(form);
-    if (!formRadioButtons) {
-        formRadioButtons = new NameToInputMap;
-        m_selectedRadioButtons.set(form, formRadioButtons);
-    }
-    
-    HTMLInputElement* currentCheckedRadio = formRadioButtons->get(caller->name().impl());
-    if (currentCheckedRadio && currentCheckedRadio != caller)
-        currentCheckedRadio->setChecked(false);
-
-    formRadioButtons->set(caller->name().impl(), caller);
-}
-
-HTMLInputElement* Document::checkedRadioButtonForGroup(AtomicStringImpl* name, HTMLFormElement *form)
-{
-    if (!form)
-        form = defaultForm;
-    NameToInputMap* formRadioButtons = m_selectedRadioButtons.get(form);
-    if (!formRadioButtons)
-        return 0;
-    
-    return formRadioButtons->get(name);
-}
-
-void Document::removeRadioButtonGroup(AtomicStringImpl* name, HTMLFormElement *form)
-{
-    if (!form)
-        form = defaultForm;
-    NameToInputMap* formRadioButtons = m_selectedRadioButtons.get(form);
-    if (formRadioButtons) {
-        formRadioButtons->remove(name);
-        if (formRadioButtons->isEmpty()) {
-            m_selectedRadioButtons.remove(form);
-            delete formRadioButtons;
-        }
-    }
-}
-
 PassRefPtr<HTMLCollection> Document::images()
 {
-    return new HTMLCollection(this, HTMLCollection::DocImages);
+    return HTMLCollection::create(this, HTMLCollection::DocImages);
 }
 
 PassRefPtr<HTMLCollection> Document::applets()
 {
-    return new HTMLCollection(this, HTMLCollection::DocApplets);
+    return HTMLCollection::create(this, HTMLCollection::DocApplets);
 }
 
 PassRefPtr<HTMLCollection> Document::embeds()
 {
-    return new HTMLCollection(this, HTMLCollection::DocEmbeds);
+    return HTMLCollection::create(this, HTMLCollection::DocEmbeds);
+}
+
+PassRefPtr<HTMLCollection> Document::plugins()
+{
+    // This is an alias for embeds() required for the JS DOM bindings.
+    return HTMLCollection::create(this, HTMLCollection::DocEmbeds);
 }
 
 PassRefPtr<HTMLCollection> Document::objects()
 {
-    return new HTMLCollection(this, HTMLCollection::DocObjects);
+    return HTMLCollection::create(this, HTMLCollection::DocObjects);
 }
 
 PassRefPtr<HTMLCollection> Document::scripts()
 {
-    return new HTMLCollection(this, HTMLCollection::DocScripts);
+    return HTMLCollection::create(this, HTMLCollection::DocScripts);
 }
 
 PassRefPtr<HTMLCollection> Document::links()
 {
-    return new HTMLCollection(this, HTMLCollection::DocLinks);
+    return HTMLCollection::create(this, HTMLCollection::DocLinks);
 }
 
 PassRefPtr<HTMLCollection> Document::forms()
 {
-    return new HTMLCollection(this, HTMLCollection::DocForms);
+    return HTMLCollection::create(this, HTMLCollection::DocForms);
 }
 
 PassRefPtr<HTMLCollection> Document::anchors()
 {
-    return new HTMLCollection(this, HTMLCollection::DocAnchors);
+    return HTMLCollection::create(this, HTMLCollection::DocAnchors);
 }
 
 PassRefPtr<HTMLCollection> Document::all()
 {
-    return new HTMLCollection(this, HTMLCollection::DocAll);
+    return HTMLCollection::create(this, HTMLCollection::DocAll);
 }
 
 PassRefPtr<HTMLCollection> Document::windowNamedItems(const String &name)
 {
-    return new HTMLNameCollection(this, HTMLCollection::WindowNamedItems, name);
+    return HTMLNameCollection::create(this, HTMLCollection::WindowNamedItems, name);
 }
 
 PassRefPtr<HTMLCollection> Document::documentNamedItems(const String &name)
 {
-    return new HTMLNameCollection(this, HTMLCollection::DocumentNamedItems, name);
+    return HTMLNameCollection::create(this, HTMLCollection::DocumentNamedItems, name);
 }
 
-HTMLCollection::CollectionInfo* Document::nameCollectionInfo(HTMLCollection::Type type, const String& name)
+HTMLCollection::CollectionInfo* Document::nameCollectionInfo(HTMLCollection::Type type, const AtomicString& name)
 {
-    HashMap<AtomicStringImpl*, HTMLCollection::CollectionInfo>& map = m_nameCollectionInfo[type - HTMLCollection::UnnamedCollectionTypes];
-    
-    AtomicString atomicName(name);
-    
-    HashMap<AtomicStringImpl*, HTMLCollection::CollectionInfo>::iterator iter = map.find(atomicName.impl());
+    ASSERT(type >= HTMLCollection::FirstNamedDocumentCachedType);
+    unsigned index = type - HTMLCollection::FirstNamedDocumentCachedType;
+    ASSERT(index < HTMLCollection::NumNamedDocumentCachedTypes);
+
+    NamedCollectionMap& map = m_nameCollectionInfo[index];
+    NamedCollectionMap::iterator iter = map.find(name.impl());
     if (iter == map.end())
-        iter = map.add(atomicName.impl(), HTMLCollection::CollectionInfo()).first;
-    
-    return &iter->second;
-}
-
-PassRefPtr<NameNodeList> Document::getElementsByName(const String &elementName)
-{
-    return new NameNodeList(this, elementName);
+        iter = map.add(name.impl(), new HTMLCollection::CollectionInfo).first;
+    return iter->second;
 }
 
 void Document::finishedParsing()
 {
     setParsing(false);
+
+    ExceptionCode ec = 0;
+    dispatchEvent(Event::create(eventNames().DOMContentLoadedEvent, true, false), ec);
+
     if (Frame* f = frame())
-        f->finishedParsing();
+        f->loader()->finishedParsing();
 }
 
 Vector<String> Document::formElementsState() const
 {
     Vector<String> stateVector;
-    stateVector.reserveCapacity(m_formElementsWithState.size() * 3);
-    typedef HashSet<HTMLGenericFormElement*>::const_iterator Iterator;
+    stateVector.reserveInitialCapacity(m_formElementsWithState.size() * 3);
+    typedef ListHashSet<FormControlElementWithState*>::const_iterator Iterator;
     Iterator end = m_formElementsWithState.end();
     for (Iterator it = m_formElementsWithState.begin(); it != end; ++it) {
-        HTMLGenericFormElement* e = *it;
-        stateVector.append(e->name().domString());
-        stateVector.append(e->type().domString());
-        stateVector.append(e->stateValue());
+        FormControlElementWithState* e = *it;
+        String value;
+        if (e->saveState(value)) {
+            FormControlElement* formControlElement = e->toFormControlElement();
+            ASSERT(formControlElement);
+
+            stateVector.append(formControlElement->name().string());
+            stateVector.append(formControlElement->type().string());
+            stateVector.append(value);
+        }
     }
     return stateVector;
 }
 
-bool Document::telephoneNumberParsingEnabled = false;
-
-void Document::setTelephoneNumberParsingEnabled(bool enabled)
-{
-    telephoneNumberParsingEnabled = enabled;
-}
-
-bool Document::isTelephoneNumberParsingEnabled()
-{
-    return telephoneNumberParsingEnabled;
-}
-
 unsigned Document::formElementsCharacterCount() const
 {
-    typedef HashSet<HTMLGenericFormElement*>::const_iterator Iterator;
+    typedef ListHashSet<FormControlElementWithState*>::const_iterator Iterator;
     Iterator end = m_formElementsWithState.end();
     unsigned charCount = 0;
     for (Iterator it = m_formElementsWithState.begin(); it != end; ++it) {
-        HTMLGenericFormElement* e = *it;
-        if (e->hasLocalName(inputTag)) {
-            HTMLInputElement *input = static_cast<HTMLInputElement*>(e);
-            if (input->isTextField()) {
-                charCount += input->value().length();
+        FormControlElementWithState* e = *it;
+        String value;
+        if (e->saveState(value)) {
+            FormControlElement* formControlElement = e->toFormControlElement();
+            ASSERT(formControlElement);
+
+            if (formControlElement->type() == "text") {
+                charCount += value.length();
             }
         }
     }
     return charCount;
 }
 
-#if XPATH_SUPPORT
+void Document::addAutoCorrectMarker(const Range *range, const String& word, const String& correction)
+{
+    ExceptionCode ec = 0;
+    Node* node = range->startContainer(ec);
+    ASSERT(!ec);
+    int offset = range->startOffset(ec);
+    ASSERT(!ec);
+    VisiblePosition start(node, offset, VP_DEFAULT_AFFINITY);
+    if (start.isNull())
+        return;
+    VisiblePosition end(start);
+
+    SelectionController sel;
+    unsigned max = std::min(word.length(), correction.length());
+    for (unsigned i = 0; i < max; i++) {
+        if (word.characters()[i] != correction.characters()[i]) {
+            end = end.next();
+        }
+        else if (start != end) {
+            sel.moveTo(start, end);
+            addMarker(sel.toRange().get(), DocumentMarker::Spelling);
+            start = end.next();
+            end = start;
+        }
+        else {
+            start = start.next();
+            end = start;
+        }
+    }
+    if (start != end) {
+        sel.moveTo(start, end);
+        addMarker(sel.toRange().get(), DocumentMarker::Spelling);    
+    }
+}
+
+#if ENABLE(XPATH)
 
 PassRefPtr<XPathExpression> Document::createExpression(const String& expression,
                                                        XPathNSResolver* resolver,
                                                        ExceptionCode& ec)
 {
     if (!m_xpathEvaluator)
-        m_xpathEvaluator = new XPathEvaluator;
+        m_xpathEvaluator = XPathEvaluator::create();
     return m_xpathEvaluator->createExpression(expression, resolver, ec);
 }
 
 PassRefPtr<XPathNSResolver> Document::createNSResolver(Node* nodeResolver)
 {
     if (!m_xpathEvaluator)
-        m_xpathEvaluator = new XPathEvaluator;
+        m_xpathEvaluator = XPathEvaluator::create();
     return m_xpathEvaluator->createNSResolver(nodeResolver);
 }
 
@@ -3517,11 +4309,11 @@ PassRefPtr<XPathResult> Document::evaluate(const String& expression,
                                            ExceptionCode& ec)
 {
     if (!m_xpathEvaluator)
-        m_xpathEvaluator = new XPathEvaluator;
+        m_xpathEvaluator = XPathEvaluator::create();
     return m_xpathEvaluator->evaluate(expression, contextNode, resolver, type, result, ec);
 }
 
-#endif // XPATH_SUPPORT
+#endif // ENABLE(XPATH)
 
 void Document::setStateForNewFormElements(const Vector<String>& stateVector)
 {
@@ -3594,7 +4386,7 @@ FormElementKey& FormElementKey::operator=(const FormElementKey& other)
 
 void FormElementKey::ref() const
 {
-    if (name() && name() != HashTraits<AtomicStringImpl*>::deletedValue())
+    if (name())
         name()->ref();
     if (type())
         type()->ref();
@@ -3602,7 +4394,7 @@ void FormElementKey::ref() const
 
 void FormElementKey::deref() const
 {
-    if (name() && name() != HashTraits<AtomicStringImpl*>::deletedValue())
+    if (name())
         name()->deref();
     if (type())
         type()->deref();
@@ -3614,7 +4406,7 @@ unsigned FormElementKeyHash::hash(const FormElementKey& k)
 
     unsigned l = sizeof(k) / (sizeof(uint16_t) * 2);
     const uint16_t* s = reinterpret_cast<const uint16_t*>(&k);
-    uint32_t hash = PHI;
+    uint32_t hash = WTF::stringHashingStartValue;
 
     // Main loop
     for (; l > 0; l--) {
@@ -3641,9 +4433,204 @@ unsigned FormElementKeyHash::hash(const FormElementKey& k)
     return hash;
 }
 
-FormElementKey FormElementKeyHashTraits::deletedValue()
+void Document::setIconURL(const String& iconURL, const String& type)
 {
-    return HashTraits<AtomicStringImpl*>::deletedValue();
+    // FIXME - <rdar://problem/4727645> - At some point in the future, we might actually honor the "type" 
+    if (m_iconURL.isEmpty())
+        m_iconURL = iconURL;
+    else if (!type.isEmpty())
+        m_iconURL = iconURL;
+}
+
+void Document::setUseSecureKeyboardEntryWhenActive(bool usesSecureKeyboard)
+{
+    if (m_useSecureKeyboardEntryWhenActive == usesSecureKeyboard)
+        return;
+        
+    m_useSecureKeyboardEntryWhenActive = usesSecureKeyboard;
+    m_frame->updateSecureKeyboardEntryIfActive();
+}
+
+bool Document::useSecureKeyboardEntryWhenActive() const
+{
+    return m_useSecureKeyboardEntryWhenActive;
+}
+
+void Document::initSecurityContext()
+{
+    if (securityOrigin() && !securityOrigin()->isEmpty())
+        return;  // m_securityOrigin has already been initialized.
+
+    if (!m_frame) {
+        // No source for a security context.
+        // This can occur via document.implementation.createDocument().
+        m_cookieURL = KURL("");
+        ScriptExecutionContext::setSecurityOrigin(SecurityOrigin::createEmpty());
+        return;
+    }
+
+    // In the common case, create the security context from the currently
+    // loading URL.
+    const KURL& url = m_frame->loader()->url();
+    m_cookieURL = url;
+    ScriptExecutionContext::setSecurityOrigin(SecurityOrigin::create(url));
+
+    if (FrameLoader::allowSubstituteDataAccessToLocal()) {
+        // If this document was loaded with substituteData, then the document can
+        // load local resources.  See https://bugs.webkit.org/show_bug.cgi?id=16756
+        // and https://bugs.webkit.org/show_bug.cgi?id=19760 for further
+        // discussion.
+        DocumentLoader* documentLoader = m_frame->loader()->documentLoader();
+        if (documentLoader && documentLoader->substituteData().isValid())
+            securityOrigin()->grantLoadLocalResources();
+    }
+
+    if (!securityOrigin()->isEmpty())
+        return;
+
+    // If we do not obtain a meaningful origin from the URL, then we try to
+    // find one via the frame hierarchy.
+
+    Frame* ownerFrame = m_frame->tree()->parent();
+    if (!ownerFrame)
+        ownerFrame = m_frame->loader()->opener();
+
+    if (ownerFrame && ownerFrame->document()) {
+        m_cookieURL = ownerFrame->document()->cookieURL();
+        // We alias the SecurityOrigins to match Firefox, see Bug 15313
+        // https://bugs.webkit.org/show_bug.cgi?id=15313
+        ScriptExecutionContext::setSecurityOrigin(ownerFrame->document()->securityOrigin());
+    }
+}
+
+void Document::setSecurityOrigin(SecurityOrigin* securityOrigin)
+{
+    ScriptExecutionContext::setSecurityOrigin(securityOrigin);
+    // FIXME: Find a better place to enable DNS prefetch, which is a loader concept,
+    // not applicable to arbitrary documents.
+    initDNSPrefetch();
+}
+
+void Document::updateFocusAppearanceSoon()
+{
+    if (!m_updateFocusAppearanceTimer.isActive())
+        m_updateFocusAppearanceTimer.startOneShot(0);
+}
+
+void Document::cancelFocusAppearanceUpdate()
+{
+    m_updateFocusAppearanceTimer.stop();
+}
+
+void Document::updateFocusAppearanceTimerFired(Timer<Document>*)
+{
+    Node* node = focusedNode();
+    if (!node)
+        return;
+    if (!node->isElementNode())
+        return;
+
+    updateLayout();
+
+    Element* element = static_cast<Element*>(node);
+    if (element->isFocusable())
+        element->updateFocusAppearance(false);
+}
+
+// FF method for accessing the selection added for compatability.
+DOMSelection* Document::getSelection() const
+{
+    return frame() ? frame()->domWindow()->getSelection() : 0;
+}
+
+#if ENABLE(DATABASE)
+
+void Document::addOpenDatabase(Database* database)
+{
+    if (!m_openDatabaseSet)
+        m_openDatabaseSet.set(new DatabaseSet);
+
+    ASSERT(!m_openDatabaseSet->contains(database));
+    m_openDatabaseSet->add(database);
+}
+
+void Document::removeOpenDatabase(Database* database)
+{
+    ASSERT(m_openDatabaseSet && m_openDatabaseSet->contains(database));
+    if (!m_openDatabaseSet)
+        return;
+        
+    m_openDatabaseSet->remove(database);
+}
+
+DatabaseThread* Document::databaseThread()
+{
+    if (!m_databaseThread && !m_hasOpenDatabases) {
+        // Create the database thread on first request - but not if at least one database was already opened,
+        // because in that case we already had a database thread and terminated it and should not create another.
+        m_databaseThread = DatabaseThread::create();
+        if (!m_databaseThread->start())
+            m_databaseThread = 0;
+    }
+
+    return m_databaseThread.get();
+}
+
+void Document::stopDatabases()
+{
+    if (m_openDatabaseSet) {
+        DatabaseSet::iterator i = m_openDatabaseSet->begin();
+        DatabaseSet::iterator end = m_openDatabaseSet->end();
+        for (; i != end; ++i) {
+            (*i)->stop();
+            if (m_databaseThread)
+                m_databaseThread->unscheduleDatabaseTasks(*i);
+        }
+    }
+    
+    if (m_databaseThread)
+        m_databaseThread->requestTermination();
+}
+
+#endif
+
+#if ENABLE(WML)
+void Document::resetWMLPageState()
+{
+    if (WMLPageState* pageState = wmlPageStateForDocument(this))
+        pageState->reset();
+}
+#endif
+
+void Document::attachRange(Range* range)
+{
+    ASSERT(!m_ranges.contains(range));
+    m_ranges.add(range);
+}
+
+void Document::detachRange(Range* range)
+{
+    ASSERT(m_ranges.contains(range));
+    m_ranges.remove(range);
+}
+
+CanvasRenderingContext2D* Document::getCSSCanvasContext(const String& type, const String& name, int width, int height)
+{
+    HTMLCanvasElement* result = getCSSCanvasElement(name);
+    if (!result)
+        return 0;
+    result->setSize(IntSize(width, height));
+    return result->getContext(type);
+}
+
+HTMLCanvasElement* Document::getCSSCanvasElement(const String& name)
+{
+    RefPtr<HTMLCanvasElement> result = m_cssCanvasElements.get(name).get();
+    if (!result) {
+        result = new HTMLCanvasElement(canvasTag, this);
+        m_cssCanvasElements.set(name, result);
+    }
+    return result.get();
 }
 
 TextAutoSizingKey::TextAutoSizingKey() : m_style(0), m_doc(0)
@@ -3685,12 +4672,17 @@ void TextAutoSizingKey::ref() const
 void TextAutoSizingKey::deref() const
 {
     if (isValidStyle() && isValidDoc() && m_doc->renderArena())
-        m_style->deref(m_doc->renderArena());
+        m_style->deref();
 }
 
-TextAutoSizingKey TextAutoSizingTraits::deletedValue()
+void TextAutoSizingTraits::constructDeletedValue(TextAutoSizingKey& slot)
 {
-    return TextAutoSizingKey(TextAutoSizingKey::deletedKeyStyle(), TextAutoSizingKey::deletedKeyDoc());
+    new (&slot) TextAutoSizingKey(TextAutoSizingKey::deletedKeyStyle(), TextAutoSizingKey::deletedKeyDoc());
+}
+
+bool TextAutoSizingTraits::isDeletedValue(const TextAutoSizingKey& value)
+{
+    return value.style() == TextAutoSizingKey::deletedKeyStyle() && value.doc() == TextAutoSizingKey::deletedKeyDoc();
 }
 
 int TextAutoSizingValue::numNodes() const
@@ -3698,16 +4690,16 @@ int TextAutoSizingValue::numNodes() const
     return m_autoSizedNodes.size();
 }
 
-void TextAutoSizingValue::addNode(Node *node, float size)
+void TextAutoSizingValue::addNode(Node* node, float size)
 {
-    assert (node);
-    assert (node->renderer());
-    RenderText *renderText = static_cast<RenderText*>(node->renderer());
+    ASSERT(node);
+    ASSERT(node->renderer());
+    RenderText* renderText = static_cast<RenderText*>(node->renderer());
     renderText->setCandidateComputedTextSize(size);
     m_autoSizedNodes.add(node);
 }
 
-#define MAX_SCALE_INCREASE 1.7
+#define MAX_SCALE_INCREASE 1.7f
 
 bool TextAutoSizingValue::adjustNodeSizes()
 {
@@ -3720,22 +4712,21 @@ bool TextAutoSizingValue::adjustNodeSizes()
     HashSet<RefPtr<Node> >::iterator end = m_autoSizedNodes.end();
     for (HashSet<RefPtr<Node> >::iterator i = m_autoSizedNodes.begin(); i != end; ++i) {
         RefPtr<Node> autoSizingNode = *i;
-        RenderText *text = static_cast<RenderText*>(autoSizingNode->renderer());
-        if (!text || text->style() && !text->style()->textSizeAdjust().isAuto()) {
+        RenderText* text = static_cast<RenderText*>(autoSizingNode->renderer());
+        if (!text || (text->style() && !text->style()->textSizeAdjust().isAuto()) || !text->candidateComputedTextSize()) {
             // remove node.
-            nodesForRemoval.append (autoSizingNode);
+            nodesForRemoval.append(autoSizingNode);
             objectsRemoved = true;
         }
     }
 
-    int i, count = nodesForRemoval.size();
-    for (i = 0; i < count; i++) {
-        m_autoSizedNodes.remove (nodesForRemoval[i]);
-    }
+    unsigned count = nodesForRemoval.size();
+    for (unsigned i = 0; i < count; i++)
+        m_autoSizedNodes.remove(nodesForRemoval[i]);
     
     // If we only have one piece of text with the style on the page don't 
     // adjust it's size.
-    if (m_autoSizedNodes.size() == 1)
+    if (m_autoSizedNodes.size() <= 1)
         return objectsRemoved;
 
     // Compute average size
@@ -3743,19 +4734,19 @@ bool TextAutoSizingValue::adjustNodeSizes()
     end = m_autoSizedNodes.end();
     for (HashSet<RefPtr<Node> >::iterator i = m_autoSizedNodes.begin(); i != end; ++i) {
         RefPtr<Node> autoSizingNode = *i;
-        RenderText *renderText = static_cast<RenderText*>(autoSizingNode->renderer());
+        RenderText* renderText = static_cast<RenderText*>(autoSizingNode->renderer());
         cumulativeSize += renderText->candidateComputedTextSize();
-    }
-    float averageSize = roundf(cumulativeSize/m_autoSizedNodes.size());
+    }   
+
+    float averageSize = roundf(cumulativeSize / m_autoSizedNodes.size());
     
     // Adjust sizes
     bool firstPass = true;
     end = m_autoSizedNodes.end();
     for (HashSet<RefPtr<Node> >::iterator i = m_autoSizedNodes.begin(); i != end; ++i) {
-        RefPtr<Node> autoSizingNode = *i;
-        RenderText *text = static_cast<RenderText*>(autoSizingNode->renderer());
+        RefPtr<Node>& autoSizingNode = *i;
+        RenderText* text = static_cast<RenderText*>(autoSizingNode->renderer());
         if (text && text->style()->fontDescription().computedSize() != averageSize) {
-            
             float specifiedSize = text->style()->fontDescription().specifiedSize();
             float scaleChange = averageSize / specifiedSize;
             if (scaleChange > MAX_SCALE_INCREASE && firstPass) {
@@ -3764,16 +4755,16 @@ bool TextAutoSizingValue::adjustNodeSizes()
                 scaleChange = averageSize / specifiedSize;
             }
 
-            RenderStyle* style = new (text->renderArena()) RenderStyle(*text->style());
+            RefPtr<RenderStyle> style = RenderStyle::clone(text->style());
             FontDescription fontDescription = style->fontDescription();
             fontDescription.setComputedSize(averageSize);
             style->setFontDescription(fontDescription);
-            style->font().update();
-            text->setStyle(style);
+            style->font().update(autoSizingNode->document()->styleSelector()->fontSelector());
+            text->setStyle(style.release());
 
             // Resize the line height of the parent.
-            RenderObject *parentRenderer = text->parent();
-            const RenderStyle *parentStyle = parentRenderer->style();
+            RenderObject* parentRenderer = text->parent();
+            const RenderStyle* parentStyle = parentRenderer->style();
             Length lineHeightLength = parentStyle->specifiedLineHeight();
 
             int specifiedLineHeight = 0;
@@ -3784,32 +4775,64 @@ bool TextAutoSizingValue::adjustNodeSizes()
 
             int lineHeight = specifiedLineHeight * scaleChange;            
             if (!lineHeightLength.isFixed() || lineHeightLength.value() != lineHeight) {
-                RenderStyle* newParentStyle = new (text->renderArena()) RenderStyle(*parentStyle);
+                RefPtr<RenderStyle> newParentStyle = RenderStyle::clone(parentStyle);
                 newParentStyle->setLineHeight(Length(lineHeight, Fixed));
                 newParentStyle->setSpecifiedLineHeight(lineHeightLength);
                 newParentStyle->setFontDescription(fontDescription);
-                newParentStyle->font().update();
-                parentRenderer->setStyle(newParentStyle);          
+                newParentStyle->font().update(autoSizingNode->document()->styleSelector()->fontSelector());
+                parentRenderer->setStyle(newParentStyle.release());          
             }
         }
     }
     
     return objectsRemoved;
 }
+    
+void TextAutoSizingValue::reset()
+{
+    HashSet<RefPtr<Node> >::iterator end = m_autoSizedNodes.end();
+    for (HashSet<RefPtr<Node> >::iterator i = m_autoSizedNodes.begin(); i != end; ++i) {
+        RefPtr<Node>& autoSizingNode = *i;
+        RenderText* text = static_cast<RenderText*>(autoSizingNode->renderer());
+        if (!text)
+            continue;
+        // Rest the font size back to the original specified size
+        FontDescription fontDescription = text->style()->fontDescription();
+        float originalSize = fontDescription.specifiedSize();
+        if (fontDescription.computedSize() != originalSize) {
+            fontDescription.setComputedSize(originalSize);
+            RefPtr<RenderStyle> style = RenderStyle::clone(text->style());
+            style->setFontDescription(fontDescription);
+            style->font().update(autoSizingNode->document()->styleSelector()->fontSelector());
+            text->setStyle(style.release());
+        }
+        // Reset the line height of the parent.
+        RenderObject* parentRenderer = text->parent();
+        if (!parentRenderer)
+            continue;
+        const RenderStyle* parentStyle = parentRenderer->style();
+        Length originalLineHeight = parentStyle->specifiedLineHeight();   
+        if (originalLineHeight != parentStyle->lineHeight()) {
+            RefPtr<RenderStyle> newParentStyle = RenderStyle::clone(parentStyle);
+            newParentStyle->setLineHeight(originalLineHeight);
+            newParentStyle->setFontDescription(fontDescription);
+            newParentStyle->font().update(autoSizingNode->document()->styleSelector()->fontSelector());
+            parentRenderer->setStyle(newParentStyle.release());          
+        }
+    }
+}
 
-void Document::addAutoSizingNode (Node *node, float candidateSize)
+void Document::addAutoSizingNode(Node* node, float candidateSize)
 {
     TextAutoSizingKey key(node->renderer()->style(), document());
     RefPtr<TextAutoSizingValue> value;
     
     // Do we already have a collection of nodes associated with
     // this style?  If not create one.
-    if (m_textAutoSizedNodes.contains(key)) {
+    if (m_textAutoSizedNodes.contains(key))
         value = m_textAutoSizedNodes.get(key);
-    }
     else {
-        TextAutoSizingValue *v = new TextAutoSizingValue();
-        value = v;
+        value = TextAutoSizingValue::create();
         m_textAutoSizedNodes.set(key, value);
     }
     
@@ -3823,51 +4846,197 @@ void Document::validateAutoSizingNodes ()
     TextAutoSizingMap::iterator end = m_textAutoSizedNodes.end();
     for (TextAutoSizingMap::iterator i = m_textAutoSizedNodes.begin(); i != end; ++i) {
         TextAutoSizingKey key = i->first;
-        RefPtr<TextAutoSizingValue> value;
+        RefPtr<TextAutoSizingValue> value = i->second;
         // Update all the nodes in the collection to reflect the new
         // candidate size.
-        value = m_textAutoSizedNodes.get(key);
         if (!value)
             continue;
         
-        value->adjustNodeSizes ();
-        if (value->numNodes() == 0) {
-            nodesForRemoval.append (key);
-        }
+        value->adjustNodeSizes();
+        if (!value->numNodes())
+            nodesForRemoval.append(key);
     }
-    int i, count = nodesForRemoval.size();
-    for (i = 0; i < count; i++) {
-        m_textAutoSizedNodes.remove (nodesForRemoval[i]);
+    unsigned count = nodesForRemoval.size();
+    for (unsigned i = 0; i < count; i++)
+        m_textAutoSizedNodes.remove(nodesForRemoval[i]);
+}
+    
+void Document::resetAutoSizingNodes()
+{
+    TextAutoSizingMap::iterator end = m_textAutoSizedNodes.end();
+    for (TextAutoSizingMap::iterator i = m_textAutoSizedNodes.begin(); i != end; ++i) {
+        RefPtr<TextAutoSizingValue> value = i->second;
+        if (value)
+            value->reset();
+    }
+    m_textAutoSizedNodes.clear();
+}
+
+void Document::incrementTotalImageDataSize(CachedImage* image)
+{
+    if (m_documentImages.add(image).second)
+        m_totalImageDataSize += image->encodedSize();
+}
+
+void Document::decrementTotalImageDataSize(CachedImage* image)
+{
+    if (m_documentImages.isEmpty())
+        return;
+    HashCountedSet<CachedImage*>::iterator it = m_documentImages.find(image);
+    if (it == m_documentImages.end())
+        return;
+    if (it->second == 1)
+        m_totalImageDataSize -= image->encodedSize();
+    m_documentImages.remove(it);
+}
+
+unsigned long Document::totalImageDataSize()
+{
+    // This is not fully accurate, it not include CSS loaded images for example
+    return m_totalImageDataSize;
+}        
+
+void Document::incrementAnimatedImageDataCount(unsigned count)
+{
+    m_animatedImageDataCount += count;
+}
+
+unsigned long Document::animatedImageDataCount()
+{
+    return m_animatedImageDataCount;
+}        
+    
+
+void Document::initDNSPrefetch()
+{
+    m_haveExplicitlyDisabledDNSPrefetch = false;
+    m_isDNSPrefetchEnabled = securityOrigin()->protocol() == "http";
+
+    // Inherit DNS prefetch opt-out from parent frame    
+    if (Document* parent = parentDocument()) {
+        if (!parent->isDNSPrefetchEnabled())
+            m_isDNSPrefetchEnabled = false;
     }
 }
 
-
-void Document::initSecurityPolicyURL()
+void Document::parseDNSPrefetchControlHeader(const String& dnsPrefetchControl)
 {
-    Frame* f = frame();
-    if (!f)
+    if (equalIgnoringCase(dnsPrefetchControl, "on") && !m_haveExplicitlyDisabledDNSPrefetch) {
+        m_isDNSPrefetchEnabled = true;
         return;
+    }
 
-    m_securityPolicyURL = f->url();
+    m_isDNSPrefetchEnabled = false;
+    m_haveExplicitlyDisabledDNSPrefetch = true;
+}
 
-    // javascript: URLs create document using the "about" protocol
-    if (!m_securityPolicyURL.isEmpty() && !equalIgnoringCase(m_securityPolicyURL.protocol(), "about"))
+void Document::addTimeout(int timeoutId, DOMTimer* timer)
+{
+    ASSERT(!m_timeouts.contains(timeoutId));
+    m_timeouts.set(timeoutId, timer);
+}
+
+void Document::removeTimeout(int timeoutId)
+{
+    m_timeouts.remove(timeoutId);
+}
+
+DOMTimer* Document::findTimeout(int timeoutId)
+{
+    return m_timeouts.get(timeoutId);
+}
+
+void Document::reportException(const String& errorMessage, int lineNumber, const String& sourceURL)
+{
+    if (DOMWindow* window = domWindow())
+        window->console()->addMessage(JSMessageSource, ErrorMessageLevel, errorMessage, lineNumber, sourceURL);
+}
+
+void Document::addMessage(MessageDestination destination, MessageSource source, MessageLevel level, const String& message, unsigned lineNumber, const String& sourceURL)
+{
+    switch (destination) {
+    case ConsoleDestination:
+        if (DOMWindow* window = domWindow())
+            window->console()->addMessage(source, level, message, lineNumber, sourceURL);
         return;
+    }
+    ASSERT_NOT_REACHED();
+}
 
-    Frame* openerFrame = 0;
-    if (f->tree()->parent())
-        openerFrame = f->tree()->parent();
-    else if (f->opener())
-        openerFrame = f->opener();
+void Document::resourceRetrievedByXMLHttpRequest(unsigned long identifier, const ScriptString& sourceString)
+{
+    UNUSED_PARAM(identifier);
+    UNUSED_PARAM(sourceString);
+}
 
-    if (!openerFrame)
-        return;
+class ScriptExecutionContextTaskTimer : public TimerBase {
+public:
+    ScriptExecutionContextTaskTimer(PassRefPtr<Document> context, PassRefPtr<ScriptExecutionContext::Task> task)
+        : m_context(context)
+        , m_task(task)
+    {
+    }
 
-    Document* openerDocument = openerFrame->document();
-    if (!openerDocument)
-        return;
+private:
+    virtual void fired()
+    {
+        m_task->performTask(m_context.get());
+        delete this;
+    }
 
-    m_securityPolicyURL = openerDocument->securityPolicyURL();
+    RefPtr<Document> m_context;
+    RefPtr<ScriptExecutionContext::Task> m_task;
+};
+
+struct PerformTaskContext {
+    PerformTaskContext(ScriptExecutionContext* scriptExecutionContext, PassRefPtr<ScriptExecutionContext::Task> task)
+        : scriptExecutionContext(scriptExecutionContext)
+        , task(task)
+    {
+    }
+
+    ScriptExecutionContext* scriptExecutionContext; // The context should exist until task execution.
+    RefPtr<ScriptExecutionContext::Task> task;
+};
+
+static void performTask(void* ctx)
+{
+    PerformTaskContext* ptctx = reinterpret_cast<PerformTaskContext*>(ctx);
+    ptctx->task->performTask(ptctx->scriptExecutionContext);
+    delete ptctx;
+}
+
+void Document::postTask(PassRefPtr<Task> task)
+{
+    if (isMainThread()) {
+        ScriptExecutionContextTaskTimer* timer = new ScriptExecutionContextTaskTimer(static_cast<Document*>(this), task);
+        timer->startOneShot(0);
+    } else {
+        callOnMainThread(performTask, new PerformTaskContext(this, task));
+    }
+}
+
+Element* Document::findAnchor(const String& name)
+{
+    if (name.isEmpty())
+        return 0;
+    if (Element* element = getElementById(name))
+        return element;
+    for (Node* node = this; node; node = node->traverseNextNode()) {
+        if (node->hasTagName(aTag)) {
+            HTMLAnchorElement* anchor = static_cast<HTMLAnchorElement*>(node);
+            if (inCompatMode()) {
+                // Quirks mode, case insensitive comparison of names.
+                if (equalIgnoringCase(anchor->name(), name))
+                    return anchor;
+            } else {
+                // Strict mode, names need to match exactly.
+                if (anchor->name() == name)
+                    return anchor;
+            }
+        }
+    }
+    return 0;
 }
 
 } // namespace WebCore

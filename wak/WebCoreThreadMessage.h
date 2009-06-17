@@ -2,7 +2,7 @@
  *  WebCoreThreadMessage.h
  *  WebCore
  *
- *  Copyright (C) 2006, 2007, Apple Inc.  All rights reserved.
+ *  Copyright (C) 2006, 2007, 2008, Apple Inc.  All rights reserved.
  *
  */
 
@@ -10,24 +10,36 @@
 
 #ifdef __OBJC__
 #import <WebCore/WebCoreThread.h>
-#define WebThreadAdoptAndReleaseIfNeeded \
-    if (WebThreadIsEnabled() && WebThreadNotCurrent() && [self retainCount] == 1) \
-        WebThreadAdoptAndRelease(self); \
-    else
-//      [super release];  // code using this macro should call this method.
 #endif // __OBJC__
 
 #if defined(__cplusplus)
 extern "C" {
 #endif    
 
+//
+// Release an object on the main thread.
+//
+@interface NSObject(WebCoreThreadAdditions)
+- (void)releaseOnMainThread;
+@end
+
+// Register a class for deallocation on the WebThread
+void WebCoreObjCDeallocOnWebThread(Class cls);
+
 // Asynchronous from main thread to web thread.
-void WebThreadCallAPI(id target, SEL selector, ...);
+void WebThreadCallAPI(NSInvocation *invocation);
 void WebThreadAdoptAndRelease(id obj);
 
-// Synchronous from web thread to main thread.
-void WebThreadCallDelegate(id target, SEL selector, ...);
+// Synchronous from web thread to main thread, or main thread to main thread.
+void WebThreadCallDelegate(NSInvocation *invocation);
 void WebThreadPostNotification(NSString *name, id object, id userInfo);
+
+// Asynchronous from web thread to main thread, but synchronous when called on the main thread.
+void WebThreadCallDelegateAsync(NSInvocation *invocation);
+void WebThreadPostNotificationAsync(NSString *name, id object, id userInfo);
+
+// Convenience method for creating an NSInvocation object
+NSInvocation *WebThreadCreateNSInvocation(id target, SEL selector);
 
 #if defined(__cplusplus)
 }

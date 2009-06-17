@@ -1,7 +1,5 @@
 /*
- * This file is part of the line box implementation for KDE.
- *
- * Copyright (C) 2003, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -15,30 +13,44 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef InlineFlowBox_H
-#define InlineFlowBox_H
+#ifndef InlineFlowBox_h
+#define InlineFlowBox_h
 
 #include "InlineRunBox.h"
 
 namespace WebCore {
 
-class InlineFlowBox : public InlineRunBox
-{
+class HitTestResult;
+
+struct HitTestRequest;
+
+class InlineFlowBox : public InlineRunBox {
 public:
     InlineFlowBox(RenderObject* obj)
-    :InlineRunBox(obj)
+        : InlineRunBox(obj)
+        , m_firstChild(0)
+        , m_lastChild(0)
+        , m_maxHorizontalVisualOverflow(0)
+#ifndef NDEBUG
+        , m_hasBadChildList(false)
+#endif
     {
-        m_firstChild = 0;
-        m_lastChild = 0;
-        m_includeLeftEdge = m_includeRightEdge = false;
-        m_hasTextChildren = false;
-        m_maxHorizontalShadow = 0;
+        // Internet Explorer and Firefox always create a marker for list items, even when the list-style-type is none.  We do not make a marker
+        // in the list-style-type: none case, since it is wasteful to do so.  However, in order to match other browsers we have to pretend like
+        // an invisible marker exists.  The side effect of having an invisible marker is that the quirks mode behavior of shrinking lines with no
+        // text children must not apply.  This change also means that gaps will exist between image bullet list items.  Even when the list bullet
+        // is an image, the line is still considered to be immune from the quirk.
+        m_hasTextChildren = obj->style()->display() == LIST_ITEM;
     }
+
+#ifndef NDEBUG
+    virtual ~InlineFlowBox();
+#endif
 
     RenderFlow* flowObject();
 
@@ -46,61 +58,64 @@ public:
 
     InlineFlowBox* prevFlowBox() const { return static_cast<InlineFlowBox*>(m_prevLine); }
     InlineFlowBox* nextFlowBox() const { return static_cast<InlineFlowBox*>(m_nextLine); }
-    
-    InlineBox* firstChild() { return m_firstChild; }
-    InlineBox* lastChild() { return m_lastChild; }
+
+    InlineBox* firstChild() { checkConsistency(); return m_firstChild; }
+    InlineBox* lastChild() { checkConsistency(); return m_lastChild; }
 
     virtual InlineBox* firstLeafChild();
     virtual InlineBox* lastLeafChild();
-    InlineBox* firstLeafChildAfterBox(InlineBox* start=0);
-    InlineBox* lastLeafChildBeforeBox(InlineBox* start=0);
-        
-    virtual void setConstructed() {
-        InlineBox::setConstructed();
-        if (m_firstChild)
-            m_firstChild->setConstructed();
-    }
-    void addToLine(InlineBox* child);
+    InlineBox* firstLeafChildAfterBox(InlineBox* start = 0);
+    InlineBox* lastLeafChildBeforeBox(InlineBox* start = 0);
 
-    virtual void deleteLine(RenderArena* arena);
+    virtual void setConstructed()
+    {
+        InlineBox::setConstructed();
+        if (firstChild())
+            firstChild()->setConstructed();
+    }
+
+    void addToLine(InlineBox* child);
+    virtual void deleteLine(RenderArena*);
     virtual void extractLine();
     virtual void attachLine();
     virtual void adjustPosition(int dx, int dy);
 
     virtual void clearTruncation();
-    
-    virtual void paintBackgroundAndBorder(RenderObject::PaintInfo& i, int _tx, int _ty);
-    void paintBackgrounds(GraphicsContext* p, const Color& c, const BackgroundLayer* bgLayer,
-                          int my, int mh, int _tx, int _ty, int w, int h);
-    void paintBackground(GraphicsContext* p, const Color& c, const BackgroundLayer* bgLayer,
-                         int my, int mh, int _tx, int _ty, int w, int h);
-    virtual void paintDecorations(RenderObject::PaintInfo& i, int _tx, int _ty, bool paintedChildren = false);
-    virtual void paint(RenderObject::PaintInfo& i, int _tx, int _ty);
-    virtual bool nodeAtPoint(RenderObject::NodeInfo& i, int x, int y, int tx, int ty);
+
+    virtual void paintBoxDecorations(RenderObject::PaintInfo&, int tx, int ty);
+    virtual void paintMask(RenderObject::PaintInfo&, int tx, int ty);
+    void paintFillLayers(const RenderObject::PaintInfo&, const Color&, const FillLayer*,
+                         int my, int mh, int tx, int ty, int w, int h, CompositeOperator = CompositeSourceOver);
+    void paintFillLayer(const RenderObject::PaintInfo&, const Color&, const FillLayer*,
+                         int my, int mh, int tx, int ty, int w, int h, CompositeOperator = CompositeSourceOver);
+    void paintBoxShadow(GraphicsContext*, RenderStyle*, int tx, int ty, int w, int h);
+    virtual void paintTextDecorations(RenderObject::PaintInfo&, int tx, int ty, bool paintedChildren = false);
+    virtual void paint(RenderObject::PaintInfo&, int tx, int ty);
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty);
 
     int marginBorderPaddingLeft();
     int marginBorderPaddingRight();
     int marginLeft();
     int marginRight();
-    int borderLeft() { if (includeLeftEdge()) return object()->borderLeft(); return 0; }
-    int borderRight() { if (includeRightEdge()) return object()->borderRight(); return 0; }
-    int paddingLeft() { if (includeLeftEdge()) return object()->paddingLeft(); return 0; }
-    int paddingRight() { if (includeRightEdge()) return object()->paddingRight(); return 0; }
-    
+    int borderLeft() { if (includeLeftEdge()) return renderBox()->borderLeft(); return 0; }
+    int borderRight() { if (includeRightEdge()) return renderBox()->borderRight(); return 0; }
+    int paddingLeft() { if (includeLeftEdge()) return renderBox()->paddingLeft(); return 0; }
+    int paddingRight() { if (includeRightEdge()) return renderBox()->paddingRight(); return 0; }
+
     bool includeLeftEdge() { return m_includeLeftEdge; }
     bool includeRightEdge() { return m_includeRightEdge; }
-    void setEdges(bool includeLeft, bool includeRight) {
+    void setEdges(bool includeLeft, bool includeRight)
+    {
         m_includeLeftEdge = includeLeft;
         m_includeRightEdge = includeRight;
     }
-    virtual bool hasTextChildren() { return m_hasTextChildren; }
 
     // Helper functions used during line construction and placement.
     void determineSpacingForFlowBoxes(bool lastLine, RenderObject* endObject);
     int getFlowSpacingWidth();
     bool onEndChain(RenderObject* endObject);
-    int placeBoxesHorizontally(int x, int& leftPosition, int& rightPosition, bool& needsWordSpacing);
-    void verticallyAlignBoxes(int& heightOfBlock);
+    virtual int placeBoxesHorizontally(int x, int& leftPosition, int& rightPosition, bool& needsWordSpacing);
+    virtual int verticallyAlignBoxes(int heightOfBlock);
     void computeLogicalBoxHeights(int& maxPositionTop, int& maxPositionBottom,
                                   int& maxAscent, int& maxDescent, bool strictMode);
     void adjustMaxAscentAndDescent(int& maxAscent, int& maxDescent,
@@ -109,31 +124,48 @@ public:
                               int& topPosition, int& bottomPosition, int& selectionTop, int& selectionBottom);
     void shrinkBoxesWithNoTextChildren(int topPosition, int bottomPosition);
     
-    virtual void setVerticalOverflowPositions(int top, int bottom) {}
-    virtual void setVerticalSelectionPositions(int top, int bottom) {}
-    int maxHorizontalShadow() const { return m_maxHorizontalShadow; }
+    virtual void setVerticalOverflowPositions(int /*top*/, int /*bottom*/) { }
+    virtual void setVerticalSelectionPositions(int /*top*/, int /*bottom*/) { }
+    int maxHorizontalVisualOverflow() const { return m_maxHorizontalVisualOverflow; }
 
     void removeChild(InlineBox* child);
-    
+
     virtual RenderObject::SelectionState selectionState();
 
     virtual bool canAccommodateEllipsis(bool ltr, int blockEdge, int ellipsisWidth);
     virtual int placeEllipsisBox(bool ltr, int blockEdge, int ellipsisWidth, bool&);
 
-protected:
+    void checkConsistency() const;
+    void setHasBadChildList();
+
+private:
     InlineBox* m_firstChild;
     InlineBox* m_lastChild;
-    int m_maxHorizontalShadow;
-    bool m_includeLeftEdge : 1;
-    bool m_includeRightEdge : 1;
-    bool m_hasTextChildren : 1;
+    int m_maxHorizontalVisualOverflow;
+
+#ifndef NDEBUG
+    bool m_hasBadChildList;
+#endif
 };
 
-} //namespace
+#ifdef NDEBUG
+inline void InlineFlowBox::checkConsistency() const
+{
+}
+#endif
+
+inline void InlineFlowBox::setHasBadChildList()
+{
+#ifndef NDEBUG
+    m_hasBadChildList = true;
+#endif
+}
+
+} // namespace WebCore
 
 #ifndef NDEBUG
 // Outside the WebCore namespace for ease of invocation from gdb.
-void showTree(const WebCore::InlineBox*);
+void showTree(const WebCore::InlineFlowBox*);
 #endif
 
-#endif
+#endif // InlineFlowBox_h

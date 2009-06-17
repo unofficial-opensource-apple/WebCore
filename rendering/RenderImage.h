@@ -1,11 +1,9 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2006 Allan Sandfeld Jensen (kde@carewolf.com) 
  *           (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,25 +17,23 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef RENDER_IMAGE_H
-#define RENDER_IMAGE_H
+#ifndef RenderImage_h
+#define RenderImage_h
 
 #include "CachedImage.h"
-#include "HTMLElement.h"
+#include "CachedResourceHandle.h"
 #include "RenderReplaced.h"
 
 namespace WebCore {
 
-class DocLoader;
 class HTMLMapElement;
 
-class RenderImage : public RenderReplaced
-{
+class RenderImage : public RenderReplaced {
 public:
     RenderImage(Node*);
     virtual ~RenderImage();
@@ -45,65 +41,70 @@ public:
     virtual const char* renderName() const { return "RenderImage"; }
 
     virtual bool isImage() const { return true; }
-    virtual bool isImageButton() const { return false; }
+    virtual bool isRenderImage() const { return true; }
     
-    virtual void paint(PaintInfo&, int tx, int ty);
+    virtual void paintReplaced(PaintInfo& paintInfo, int tx, int ty);
 
-    virtual void layout();
+    virtual int minimumReplacedHeight() const;
 
-    virtual void imageChanged(CachedImage*);
+    virtual void imageChanged(WrappedImagePtr, const IntRect* = 0);
+    virtual void notifyFinished(CachedResource*);
     
-    // don't even think about making this method virtual!
-    HTMLElement* element() const
-        { return static_cast<HTMLElement*>(RenderReplaced::element()); }
+    bool setImageSizeForAltText(CachedImage* newImage = 0);
 
-    // hook to keep RendeObject::m_inline() up to date
-    virtual void setStyle(RenderStyle *style);
     void updateAltText();
-    
-    void setIsAnonymousImage(bool anon) { m_isAnonymousImage = anon; }
-    bool isAnonymousImage() { return m_isAnonymousImage; }
-    
-    void setCachedImage(CachedImage*);
-    CachedImage* cachedImage() const { return m_cachedImage; }
-    
-    Image* image() { return m_cachedImage ? m_cachedImage->image() : nullImage(); }
 
-    virtual bool nodeAtPoint(NodeInfo&, int x, int y, int tx, int ty, HitTestAction);
-    
-    virtual int calcReplacedWidth() const;
+    void setCachedImage(CachedImage*);
+    CachedImage* cachedImage() const { return m_cachedImage.get(); }
+
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
+
+    virtual int calcReplacedWidth(bool includeMaxWidth = true) const;
     virtual int calcReplacedHeight() const;
 
-    int calcAspectRatioWidth() const;
-    int calcAspectRatioHeight() const;
+    virtual void calcPrefWidths();
 
-    virtual void calcMinMaxWidth();
-
-    // Called to set generated content images (e.g., :before/:after generated images).
-    void setContentObject(CachedResource*);
-    
-    bool errorOccurred() const { return m_cachedImage && m_cachedImage->isErrorImage(); }
-    
     HTMLMapElement* imageMap();
 
     void resetAnimation();
 
+    virtual bool hasImage() const { return m_cachedImage; }
+
+    void highQualityRepaintTimerFired(Timer<RenderImage>*);
+    
+    virtual void collectSelectionRects(Vector<SelectionRect>&, unsigned, unsigned);
+
+protected:
+    virtual Image* image(int /*w*/ = 0, int /*h*/ = 0) { return m_cachedImage ? m_cachedImage->image() : nullImage(); }
+    virtual bool errorOccurred() const { return m_cachedImage && m_cachedImage->errorOccurred(); }
+    virtual bool usesImageContainerSize() const { return m_cachedImage ? m_cachedImage->usesImageContainerSize() : false; }
+    virtual void setImageContainerSize(const IntSize& size) const { if (m_cachedImage) m_cachedImage->setImageContainerSize(size); }
+    virtual bool imageHasRelativeWidth() const { return m_cachedImage ? m_cachedImage->imageHasRelativeWidth() : false; }
+    virtual bool imageHasRelativeHeight() const { return m_cachedImage ? m_cachedImage->imageHasRelativeHeight() : false; }
+    virtual IntSize imageSize(float multiplier) const { return m_cachedImage ? m_cachedImage->imageSize(multiplier) : IntSize(); }
+    virtual WrappedImagePtr imagePtr() const { return m_cachedImage.get(); }
+
+    virtual void intrinsicSizeChanged() { imageChanged(imagePtr()); }
+
 private:
+    int calcAspectRatioWidth() const;
+    int calcAspectRatioHeight() const;
+
     bool isWidthSpecified() const;
     bool isHeightSpecified() const;
 
+protected:
     // The image we are rendering.
-    CachedImage* m_cachedImage;
-
-    // True if the image is set through the content: property
-    bool m_isAnonymousImage;
+    CachedResourceHandle<CachedImage> m_cachedImage;
 
     // Text to display as long as the image isn't available.
     String m_altText;
 
     static Image* nullImage();
+    
+    friend class RenderImageScaleObserver;
 };
 
-} //namespace
+} // namespace WebCore
 
-#endif
+#endif // RenderImage_h

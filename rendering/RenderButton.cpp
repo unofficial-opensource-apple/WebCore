@@ -15,8 +15,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -26,10 +26,16 @@
 #include "Document.h"
 #include "GraphicsContext.h"
 #include "HTMLInputElement.h"
-#include "RenderText.h"
 #include "HTMLNames.h"
+#include "RenderTextFragment.h"
+#include "RenderTheme.h"
 
 #include "RenderTheme.h"
+
+#if ENABLE(WML)
+#include "WMLDoElement.h"
+#include "WMLNames.h"
+#endif
 
 namespace WebCore {
 
@@ -39,6 +45,7 @@ RenderButton::RenderButton(Node* node)
     : RenderFlexibleBox(node)
     , m_buttonText(0)
     , m_inner(0)
+    , m_default(false)
 {
 }
 
@@ -46,9 +53,9 @@ void RenderButton::addChild(RenderObject* newChild, RenderObject* beforeChild)
 {
     if (!m_inner) {
         // Create an anonymous block.
-        assert(!m_first);
+        ASSERT(!firstChild());
         m_inner = createAnonymousBlock();
-        m_inner->style()->setBoxFlex(1.0f);
+        setupInnerStyle(m_inner->style());
         RenderFlexibleBox::addChild(m_inner);
     }
     
@@ -60,19 +67,51 @@ void RenderButton::removeChild(RenderObject* oldChild)
     if (oldChild == m_inner || !m_inner) {
         RenderFlexibleBox::removeChild(oldChild);
         m_inner = 0;
-    }
-    else
+    } else
         m_inner->removeChild(oldChild);
 }
 
-void RenderButton::setStyle(RenderStyle* style)
+void RenderButton::styleWillChange(StyleDifference diff, const RenderStyle* newStyle)
 {
-    RenderBlock::setStyle(style);
+    if (m_inner) {
+        // RenderBlock::setStyle is going to apply a new style to the inner block, which
+        // will have the initial box flex value, 0. The current value is 1, because we set
+        // it right below. Here we change it back to 0 to avoid getting a spurious layout hint
+        // because of the difference.
+        m_inner->style()->setBoxFlex(0);
+    }
+    RenderBlock::styleWillChange(diff, newStyle);
+}
+
+void RenderButton::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
+{
+    RenderBlock::styleDidChange(diff, oldStyle);
+
     if (m_buttonText)
-        m_buttonText->setStyle(style);
-    if (m_inner)
-        m_inner->style()->setBoxFlex(1.0f);
+        m_buttonText->setStyle(style());
+    if (m_inner) // RenderBlock handled updating the anonymous block's style.
+        setupInnerStyle(m_inner->style());
     setReplaced(isInline());
+
+    if (!m_default && theme()->isDefault(this)) {
+        if (!m_timer)
+            m_timer.set(new Timer<RenderButton>(this, &RenderButton::timerFired));
+        m_timer->startRepeating(0.03);
+        m_default = true;
+    } else if (m_default && !theme()->isDefault(this)) {
+        m_default = false;
+        m_timer.clear();
+    }
+}
+
+void RenderButton::setupInnerStyle(RenderStyle* innerStyle) 
+{
+    ASSERT(innerStyle->refCount() == 1);
+    // RenderBlock::createAnonymousBlock creates a new RenderStyle, so this is
+    // safe to modify.
+    innerStyle->setBoxFlex(1.0f);
+    if (style()->hasAppearance())
+        theme()->adjustButtonInnerStyle(innerStyle);
 }
 
 void RenderButton::updateFromElement()
@@ -80,10 +119,30 @@ void RenderButton::updateFromElement()
     // If we're an input element, we may need to change our button text.
     if (element()->hasTagName(inputTag)) {
         HTMLInputElement* input = static_cast<HTMLInputElement*>(element());
-        
         String value = input->valueWithDefault();
         setText(value);
     }
+
+
+#if ENABLE(WML)
+    else if (element()->hasTagName(WMLNames::doTag)) {
+        WMLDoElement* doElement = static_cast<WMLDoElement*>(element());
+
+        String value = doElement->label();
+        if (value.isEmpty())
+            value = doElement->name();
+
+        setText(value);
+    }
+#endif
+}
+
+bool RenderButton::canHaveChildren() const
+{
+    // Input elements can't have children, but button elements can.  We'll
+    // write the code assuming any other button types that might emerge in the future
+    // can also have children.
+    return !element()->hasTagName(inputTag);
 }
 
 void RenderButton::setText(const String& str)
@@ -97,28 +156,39 @@ void RenderButton::setText(const String& str)
         if (m_buttonText)
             m_buttonText->setText(str.impl());
         else {
-            m_buttonText = new (renderArena()) RenderText(document(), str.impl());
+            m_buttonText = new (renderArena()) RenderTextFragment(document(), str.impl());
             m_buttonText->setStyle(style());
             addChild(m_buttonText);
         }
     }
 }
 
-void RenderButton::updatePseudoChild(RenderStyle::PseudoId type)
+void RenderButton::updateBeforeAfterContent(RenderStyle::PseudoId type)
 {
     if (m_inner)
-        m_inner->updatePseudoChildForObject(type, this);
+        m_inner->updateBeforeAfterContentForContainer(type, this);
     else
-        updatePseudoChildForObject(type, this);
+        updateBeforeAfterContentForContainer(type, this);
+}
+
+IntRect RenderButton::controlClipRect(int tx, int ty) const
+{
+    // Clip to the padding box to at least give content the extra padding space.
+    return IntRect(tx + borderLeft(), ty + borderTop(), width() - borderLeft() - borderRight(), height() - borderTop() - borderBottom());
+}
+
+void RenderButton::timerFired(Timer<RenderButton>*)
+{
+    repaint();
 }
 
 void RenderButton::layout()
 {
     RenderFlexibleBox::layout();
 
-    if (style()->appearance() == NoAppearance || style()->backgroundLayers()->hasImage()) return;
+    if (style()->appearance() == NoControlPart || style()->backgroundLayers()->hasImage()) return;
     
-    IntSize radius(MIN(width(), height()) / 2.0, height() / 2.0);
+    IntSize radius(MIN(width(), height()) / 2.0f, height() / 2.0f);
     
     style()->setBorderTopLeftRadius(radius);
     style()->setBorderTopRightRadius(radius);
@@ -126,24 +196,4 @@ void RenderButton::layout()
     style()->setBorderBottomRightRadius(radius);
 }
 
-void RenderButton::paintObject(PaintInfo& i, int _tx, int _ty)
-{
-    // Push a clip.
-    if (m_inner && i.phase == PaintPhaseForeground) {
-        IntRect clipRect(_tx + borderLeft(), _ty + borderTop(),
-            width() - borderLeft() - borderRight(), height() - borderBottom() - borderTop());
-        if (clipRect.width() == 0 || clipRect.height() == 0)
-            return;
-        i.p->save();
-        i.p->addClip(clipRect);
-    }
-    
-    // Paint the children.
-    RenderBlock::paintObject(i, _tx, _ty);
-    
-    // Pop the clip.
-    if (m_inner && i.phase == PaintPhaseForeground)
-        i.p->restore();
-}
-
-}
+} // namespace WebCore

@@ -1,10 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
@@ -39,28 +37,38 @@ namespace WebCore {
             REMOVAL         = 3
         };
 
-        MutationEvent();
-        MutationEvent(const AtomicString& type, bool canBubble, bool cancelable, Node* relatedNode,
-                      const String& prevValue, const String& newValue,
-                      const String& attrName, unsigned short attrChange);
+        static PassRefPtr<MutationEvent> create()
+        {
+            return adoptRef(new MutationEvent);
+        }
+        static PassRefPtr<MutationEvent> create(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<Node> relatedNode,
+            const String& prevValue, const String& newValue, const String& attrName, unsigned short attrChange)
+        {
+            return adoptRef(new MutationEvent(type, canBubble, cancelable, relatedNode, prevValue, newValue, attrName, attrChange));
+        }
 
-        void initMutationEvent(const AtomicString& type, bool canBubble, bool cancelable, Node* relatedNode,
+        void initMutationEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<Node> relatedNode,
                                const String& prevValue, const String& newValue,
                                const String& attrName, unsigned short attrChange);
 
         Node* relatedNode() const { return m_relatedNode.get(); }
-        String prevValue() const { return m_prevValue.get(); }
-        String newValue() const { return m_newValue.get(); }
-        String attrName() const { return m_attrName.get(); }
+        String prevValue() const { return m_prevValue; }
+        String newValue() const { return m_newValue; }
+        String attrName() const { return m_attrName; }
         unsigned short attrChange() const { return m_attrChange; }
 
         virtual bool isMutationEvent() const;
 
     private:
+        MutationEvent();
+        MutationEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<Node> relatedNode,
+                      const String& prevValue, const String& newValue,
+                      const String& attrName, unsigned short attrChange);
+
         RefPtr<Node> m_relatedNode;
-        RefPtr<StringImpl> m_prevValue;
-        RefPtr<StringImpl> m_newValue;
-        RefPtr<StringImpl> m_attrName;
+        String m_prevValue;
+        String m_newValue;
+        String m_attrName;
         unsigned short m_attrChange;
     };
 

@@ -1,10 +1,8 @@
-/**
- * This file is part of the KDE project.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,53 +16,70 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
+
 #include "config.h"
 #include "RenderPartObject.h"
 
-#include "Document.h"
 #include "Frame.h"
+#include "FrameLoader.h"
+#include "FrameLoaderClient.h"
 #include "FrameTree.h"
-#include "HTMLNames.h"
+#include "FrameView.h"
 #include "HTMLEmbedElement.h"
 #include "HTMLIFrameElement.h"
+#include "HTMLNames.h"
 #include "HTMLObjectElement.h"
 #include "HTMLParamElement.h"
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+#include "HTMLMediaElement.h"
+#include "HTMLVideoElement.h"
+#endif
+#include "MIMETypeRegistry.h"
 #include "Page.h"
+#include "PluginData.h"
+#include "RenderView.h"
+#include "Text.h"
+
 #include "RenderView.h"
 #include "Settings.h"
-#include "Text.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-RenderPartObject::RenderPartObject(HTMLElement* element)
+RenderPartObject::RenderPartObject(Element* element)
     : RenderPart(element)
+    , m_updatingWidget(false)
 {
     // init RenderObject attributes
     setInline(true);
     m_hasFallbackContent = false;
+    
+    if (element->hasTagName(embedTag) || element->hasTagName(objectTag))
+        view()->frameView()->setIsVisuallyNonEmpty();
 }
 
-static bool isURLAllowed(Document *doc, const String &url)
+RenderPartObject::~RenderPartObject()
 {
-    KURL newURL(doc->completeURL(url.deprecatedString()));
-    newURL.setRef(DeprecatedString::null);
-    
+    if (m_view)
+        m_view->removeWidgetToUpdate(this);
+}
+
+static bool isURLAllowed(Document* doc, const String& url)
+{
     if (doc->frame()->page()->frameCount() >= 200)
         return false;
 
     // We allow one level of self-reference because some sites depend on that.
     // But we don't allow more than one.
+    KURL completeURL = doc->completeURL(url);
     bool foundSelfReference = false;
-    for (Frame *frame = doc->frame(); frame; frame = frame->tree()->parent()) {
-        KURL frameURL = frame->url();
-        frameURL.setRef(DeprecatedString::null);
-        if (frameURL == newURL) {
+    for (Frame* frame = doc->frame(); frame; frame = frame->tree()->parent()) {
+        if (equalIgnoringRef(frame->loader()->url(), completeURL)) {
             if (foundSelfReference)
                 return false;
             foundSelfReference = true;
@@ -73,219 +88,346 @@ static bool isURLAllowed(Document *doc, const String &url)
     return true;
 }
 
-static inline void mapClassIdToServiceType(const String& classId, String& serviceType)
+typedef HashMap<String, String, CaseFoldingHash> ClassIdToTypeMap;
+
+static ClassIdToTypeMap* createClassIdToTypeMap()
 {
-    // It is ActiveX, but the nsplugin system handling
-    // should also work, that's why we don't override the
-    // serviceType with application/x-activex-handler
-    // but let the KTrader in khtmlpart::createPart() detect
-    // the user's preference: launch with activex viewer or
-    // with nspluginviewer (Niko)
-    if (classId.contains("D27CDB6E-AE6D-11cf-96B8-444553540000"))
-        serviceType = "application/x-shockwave-flash";
-    else if (classId.contains("CFCDAA03-8BE4-11cf-B84B-0020AFBBCCFA"))
-        serviceType = "audio/x-pn-realaudio-plugin";
-    else if (classId.contains("02BF25D5-8C17-4B23-BC80-D3488ABDDC6B"))
-        serviceType = "video/quicktime";
-    else if (classId.contains("166B1BCA-3F9C-11CF-8075-444553540000"))
-        serviceType = "application/x-director";
-    else if (classId.contains("6BF52A52-394A-11d3-B153-00C04F79FAA6"))
-        serviceType = "application/x-mplayer2";
-    else if (!classId.isEmpty())
-        // We have a clsid, means this is activex (Niko)
-        serviceType = "application/x-activex-handler";
-    // TODO: add more plugins here
+    ClassIdToTypeMap* map = new ClassIdToTypeMap;
+    map->add("clsid:D27CDB6E-AE6D-11CF-96B8-444553540000", "application/x-shockwave-flash");
+    map->add("clsid:CFCDAA03-8BE4-11CF-B84B-0020AFBBCCFA", "audio/x-pn-realaudio-plugin");
+    map->add("clsid:02BF25D5-8C17-4B23-BC80-D3488ABDDC6B", "video/quicktime");
+    map->add("clsid:166B1BCA-3F9C-11CF-8075-444553540000", "application/x-director");
+#if ENABLE(ACTIVEX_TYPE_CONVERSION_WMPLAYER)
+    map->add("clsid:6BF52A52-394A-11D3-B153-00C04F79FAA6", "application/x-mplayer2");
+    map->add("clsid:22D6F312-B0F6-11D0-94AB-0080C74C7E95", "application/x-mplayer2");
+#endif
+    return map;
 }
 
-void RenderPartObject::updateWidget()
+static const String& activeXType()
 {
-  String url;
-  String serviceType;
-  Vector<String> paramNames;
-  Vector<String> paramValues;
-  Frame* frame = m_view->frame();
+    DEFINE_STATIC_LOCAL(String, activeXType, ("application/x-oleobject"));
+    return activeXType;
+}
 
-  setNeedsLayoutAndMinMaxRecalc();
+static inline bool havePlugin(const PluginData* pluginData, const String& type)
+{
+    return pluginData && !type.isEmpty() && pluginData->supportsMimeType(type);
+}
 
-  if (element()->hasTagName(objectTag)) {
+static String serviceTypeForClassId(const String& classId, const PluginData* pluginData)
+{
+    // Return early if classId is empty (since we won't do anything below).
+    // Furthermore, if classId is null, calling get() below will crash.
+    if (classId.isEmpty())
+        return String();
 
-      HTMLObjectElement* o = static_cast<HTMLObjectElement*>(element());
+    static ClassIdToTypeMap* map = createClassIdToTypeMap();
+    String type = map->get(classId);
 
-      if (!o->isComplete())
+    // If we do have a plug-in that supports generic ActiveX content and don't have a plug-in
+    // for the MIME type we came up with, ignore the MIME type we came up with and just use
+    // the ActiveX type.
+    if (havePlugin(pluginData, activeXType()) && !havePlugin(pluginData, type))
+        return activeXType();
+
+    return type;
+}
+
+static inline bool shouldUseEmbedDescendant(HTMLObjectElement* objectElement, const PluginData* pluginData)
+{
+    // If we have both an <object> and <embed>, we always want to use the <embed> except when we have
+    // an ActiveX plug-in and plan to use it.
+    return !(havePlugin(pluginData, activeXType())
+        && serviceTypeForClassId(objectElement->classId(), pluginData) == activeXType());
+}
+
+class UpdateWidgetReentryHelper {
+public:
+    inline UpdateWidgetReentryHelper(RenderPartObject *renderer)
+        : m_renderer(renderer)
+        , m_isRenderPartObjectDestroyedBeforeExitingUpdateWidget(false)
+    {
+        m_renderer->setUpdatingWidget(true);
+    }
+
+    inline ~UpdateWidgetReentryHelper()
+    {
+        if (!m_isRenderPartObjectDestroyedBeforeExitingUpdateWidget)
+            m_renderer->setUpdatingWidget(false);
+    }
+
+    inline void setIsRenderPartObjectDestroyedBeforeExitingUpdateWidget(bool flag)
+    {
+        m_isRenderPartObjectDestroyedBeforeExitingUpdateWidget = flag;
+    }
+
+private:
+    RenderPartObject *m_renderer;
+    bool m_isRenderPartObjectDestroyedBeforeExitingUpdateWidget;
+};
+
+void RenderPartObject::updateWidget(bool onlyCreateNonNetscapePlugins)
+{
+    // Disallow reentry into this method.  Creating a plug-in makes WebKit delegate callbacks happen, which can call back into
+    // WebCore to update layout.  If that happens we can create orphan plug-in views that remain in the view hierarchy forever.
+    if (m_updatingWidget)
         return;
-      // Check for a child EMBED tag.
-      HTMLEmbedElement* embed = 0;
-      for (Node* child = o->firstChild(); child;) {
-          if (child->hasTagName(embedTag)) {
-              embed = static_cast<HTMLEmbedElement*>(child);
-              break;
-          } else if (child->hasTagName(objectTag))
-              child = child->nextSibling();         // Don't descend into nested OBJECT tags
-          else
-              child = child->traverseNextNode(o);   // Otherwise descend (EMBEDs may be inside COMMENT tags)
-      }
-      
-      // Use the attributes from the EMBED tag instead of the OBJECT tag including WIDTH and HEIGHT.
-      HTMLElement *embedOrObject;
-      if (embed) {
-          embedOrObject = (HTMLElement *)embed;
-          String attribute = embedOrObject->getAttribute(widthAttr);
-          if (!attribute.isEmpty())
-              o->setAttribute(widthAttr, attribute);
-          attribute = embedOrObject->getAttribute(heightAttr);
-          if (!attribute.isEmpty())
-              o->setAttribute(heightAttr, attribute);
-          url = embed->url;
-          serviceType = embed->serviceType;
-      } else
-          embedOrObject = (HTMLElement *)o;
-      
-      // If there was no URL or type defined in EMBED, try the OBJECT tag.
-      if (url.isEmpty())
-          url = o->url;
-      if (serviceType.isEmpty())
-          serviceType = o->serviceType;
-      
-      HashSet<StringImpl*, CaseInsensitiveHash> uniqueParamNames;
-      
-      // Scan the PARAM children.
-      // Get the URL and type from the params if we don't already have them.
-      // Get the attributes from the params if there is no EMBED tag.
-      Node *child = o->firstChild();
-      while (child && (url.isEmpty() || serviceType.isEmpty() || !embed)) {
-          if (child->hasTagName(paramTag)) {
-              HTMLParamElement* p = static_cast<HTMLParamElement*>(child);
-              String name = p->name().lower();
-              if (url.isEmpty() && (name == "src" || name == "movie" || name == "code" || name == "url"))
-                  url = p->value();
-              if (serviceType.isEmpty() && name == "type") {
-                  serviceType = p->value();
-                  int pos = serviceType.find(";");
-                  if (pos != -1)
-                      serviceType = serviceType.left(pos);
-              }
-              if (!embed && !name.isEmpty()) {
-                  uniqueParamNames.add(p->name().impl());
-                  paramNames.append(p->name());
-                  paramValues.append(p->value());
-              }
-          }
-          child = child->nextSibling();
-      }
-      
-      // When OBJECT is used for an applet via Sun's Java plugin, the CODEBASE attribute in the tag
-      // points to the Java plugin itself (an ActiveX component) while the actual applet CODEBASE is
-      // in a PARAM tag. See <http://java.sun.com/products/plugin/1.2/docs/tags.html>. This means
-      // we have to explicitly suppress the tag's CODEBASE attribute if there is none in a PARAM,
-      // else our Java plugin will misinterpret it. [4004531]
-      String codebase;
-      if (!embed && serviceType.lower() == "application/x-java-applet") {
-          codebase = "codebase";
-          uniqueParamNames.add(codebase.impl()); // pretend we found it in a PARAM already
-      }
-      
-      // Turn the attributes of either the EMBED tag or OBJECT tag into arrays, but don't override PARAM values.
-      NamedAttrMap* attributes = embedOrObject->attributes();
-      if (attributes) {
-          for (unsigned i = 0; i < attributes->length(); ++i) {
-              Attribute* it = attributes->attributeItem(i);
-              const AtomicString& name = it->name().localName();
-              if (embed || !uniqueParamNames.contains(name.impl())) {
-                  paramNames.append(name.domString());
-                  paramValues.append(it->value().domString());
-              }
-          }
-      }
-      
-      // If we still don't have a type, try to map from a specific CLASSID to a type.
-      if (serviceType.isEmpty() && !o->classId.isEmpty())
-          mapClassIdToServiceType(o->classId, serviceType);
-      
-      // If no URL and type, abort.
-      if (url.isEmpty() && serviceType.isEmpty())
-          return;
-      if (!isURLAllowed(document(), url))
+
+    UpdateWidgetReentryHelper reentryHelper(this);
+
+    String url;
+    String serviceType;
+    Vector<String> paramNames;
+    Vector<String> paramValues;
+    Frame* frame = m_view->frame();
+
+    if (element()->hasTagName(objectTag)) {
+        HTMLObjectElement* o = static_cast<HTMLObjectElement*>(element());
+
+        o->setNeedWidgetUpdate(false);
+        if (!o->isFinishedParsingChildren())
           return;
 
-      // Find out if we support fallback content.
-      m_hasFallbackContent = false;
-      for (Node *child = o->firstChild(); child && !m_hasFallbackContent; child = child->nextSibling()) {
-          if ((!child->isTextNode() && !child->hasTagName(embedTag) && !child->hasTagName(paramTag)) || // Discount <embed> and <param>
-              (child->isTextNode() && !static_cast<Text*>(child)->containsOnlyWhitespace()))
-              m_hasFallbackContent = true;
-      }
-      bool success = frame->requestObject(this, url, AtomicString(o->name()), serviceType, paramNames, paramValues);
-      if (!success && m_hasFallbackContent)
-          o->renderFallbackContent();
-  } else if (element()->hasTagName(embedTag)) {
-      HTMLEmbedElement *o = static_cast<HTMLEmbedElement*>(element());
-      url = o->url;
-      serviceType = o->serviceType;
+        // Check for a child EMBED tag.
+        HTMLEmbedElement* embed = 0;
+        const PluginData* pluginData = frame->page()->pluginData();
+        if (shouldUseEmbedDescendant(o, pluginData)) {
+            for (Node* child = o->firstChild(); child; ) {
+                if (child->hasTagName(embedTag)) {
+                    embed = static_cast<HTMLEmbedElement*>(child);
+                    break;
+                } else if (child->hasTagName(objectTag))
+                    child = child->nextSibling();         // Don't descend into nested OBJECT tags
+                else
+                    child = child->traverseNextNode(o);   // Otherwise descend (EMBEDs may be inside COMMENT tags)
+            }
+        }
 
-      if (url.isEmpty() && serviceType.isEmpty())
-          return;
-      if (!isURLAllowed(document(), url))
-          return;
-      
-      // add all attributes set on the embed object
-      NamedAttrMap* a = o->attributes();
-      if (a) {
-          for (unsigned i = 0; i < a->length(); ++i) {
-              Attribute* it = a->attributeItem(i);
-              paramNames.append(it->name().localName().domString());
-              paramValues.append(it->value().domString());
-          }
-      }
-      frame->requestObject(this, url, o->getAttribute(nameAttr), serviceType, paramNames, paramValues);
-  }
+        // Use the attributes from the EMBED tag instead of the OBJECT tag including WIDTH and HEIGHT.
+        HTMLElement *embedOrObject;
+        if (embed) {
+            embedOrObject = (HTMLElement *)embed;
+            url = embed->url();
+            serviceType = embed->serviceType();
+        } else
+            embedOrObject = (HTMLElement *)o;
+
+        // If there was no URL or type defined in EMBED, try the OBJECT tag.
+        if (url.isEmpty())
+            url = o->url();
+        if (serviceType.isEmpty())
+            serviceType = o->serviceType();
+
+        HashSet<StringImpl*, CaseFoldingHash> uniqueParamNames;
+
+        // Scan the PARAM children.
+        // Get the URL and type from the params if we don't already have them.
+        // Get the attributes from the params if there is no EMBED tag.
+        Node *child = o->firstChild();
+        while (child && (url.isEmpty() || serviceType.isEmpty() || !embed)) {
+            if (child->hasTagName(paramTag)) {
+                HTMLParamElement* p = static_cast<HTMLParamElement*>(child);
+                String name = p->name();
+                if (url.isEmpty() && (equalIgnoringCase(name, "src") || equalIgnoringCase(name, "movie") || equalIgnoringCase(name, "code") || equalIgnoringCase(name, "url")))
+                    url = p->value();
+                if (serviceType.isEmpty() && equalIgnoringCase(name, "type")) {
+                    serviceType = p->value();
+                    int pos = serviceType.find(";");
+                    if (pos != -1)
+                        serviceType = serviceType.left(pos);
+                }
+                if (!embed && !name.isEmpty()) {
+                    uniqueParamNames.add(name.impl());
+                    paramNames.append(p->name());
+                    paramValues.append(p->value());
+                }
+            }
+            child = child->nextSibling();
+        }
+
+        // When OBJECT is used for an applet via Sun's Java plugin, the CODEBASE attribute in the tag
+        // points to the Java plugin itself (an ActiveX component) while the actual applet CODEBASE is
+        // in a PARAM tag. See <http://java.sun.com/products/plugin/1.2/docs/tags.html>. This means
+        // we have to explicitly suppress the tag's CODEBASE attribute if there is none in a PARAM,
+        // else our Java plugin will misinterpret it. [4004531]
+        String codebase;
+        if (!embed && MIMETypeRegistry::isJavaAppletMIMEType(serviceType)) {
+            codebase = "codebase";
+            uniqueParamNames.add(codebase.impl()); // pretend we found it in a PARAM already
+        }
+        
+        // Turn the attributes of either the EMBED tag or OBJECT tag into arrays, but don't override PARAM values.
+        NamedAttrMap* attributes = embedOrObject->attributes();
+        if (attributes) {
+            for (unsigned i = 0; i < attributes->length(); ++i) {
+                Attribute* it = attributes->attributeItem(i);
+                const AtomicString& name = it->name().localName();
+                if (embed || !uniqueParamNames.contains(name.impl())) {
+                    paramNames.append(name.string());
+                    paramValues.append(it->value().string());
+                }
+            }
+        }
+
+        // If we still don't have a type, try to map from a specific CLASSID to a type.
+        if (serviceType.isEmpty())
+            serviceType = serviceTypeForClassId(o->classId(), pluginData);
+
+        if (!isURLAllowed(document(), url))
+            return;
+
+        // Find out if we support fallback content.
+        m_hasFallbackContent = false;
+        for (Node *child = o->firstChild(); child && !m_hasFallbackContent; child = child->nextSibling()) {
+            if ((!child->isTextNode() && !child->hasTagName(embedTag) && !child->hasTagName(paramTag)) || // Discount <embed> and <param>
+                (child->isTextNode() && !static_cast<Text*>(child)->containsOnlyWhitespace()))
+                m_hasFallbackContent = true;
+        }
+
+        if (onlyCreateNonNetscapePlugins) {
+            KURL completedURL;
+            if (!url.isEmpty())
+                completedURL = frame->loader()->completeURL(url);
+
+            if (frame->loader()->client()->objectContentType(completedURL, serviceType) == ObjectContentNetscapePlugin)
+                return;
+        }
+
+        bool success = frame->loader()->requestObject(this, url, AtomicString(o->name()), serviceType, paramNames, paramValues);
+        if (!success && m_hasFallbackContent) {
+            reentryHelper.setIsRenderPartObjectDestroyedBeforeExitingUpdateWidget(true);
+            o->renderFallbackContent();
+        }
+    } else if (element()->hasTagName(embedTag)) {
+        HTMLEmbedElement *o = static_cast<HTMLEmbedElement*>(element());
+        o->setNeedWidgetUpdate(false);
+        url = o->url();
+        serviceType = o->serviceType();
+
+        if (url.isEmpty() && serviceType.isEmpty())
+            return;
+        if (!isURLAllowed(document(), url))
+            return;
+
+        // add all attributes set on the embed object
+        NamedAttrMap* a = o->attributes();
+        if (a) {
+            for (unsigned i = 0; i < a->length(); ++i) {
+                Attribute* it = a->attributeItem(i);
+                paramNames.append(it->name().localName().string());
+                paramValues.append(it->value().string());
+            }
+        }
+
+        if (onlyCreateNonNetscapePlugins) {
+            KURL completedURL;
+            if (!url.isEmpty())
+                completedURL = frame->loader()->completeURL(url);
+
+            if (frame->loader()->client()->objectContentType(completedURL, serviceType) == ObjectContentNetscapePlugin)
+                return;
+
+        }
+
+        frame->loader()->requestObject(this, url, o->getAttribute(nameAttr), serviceType, paramNames, paramValues);
+    }
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)        
+    else if (node()->hasTagName(videoTag) || node()->hasTagName(audioTag)) {
+        HTMLMediaElement* o = static_cast<HTMLMediaElement*>(node());
+
+        o->setNeedWidgetUpdate(false);
+        if (node()->hasTagName(videoTag)) {
+            HTMLVideoElement* vid = static_cast<HTMLVideoElement*>(node());
+            String poster = vid->poster();
+            if (!poster.isEmpty()) {
+                paramNames.append("_media_element_poster_");
+                paramValues.append(poster);
+            }
+        }
+
+        url = o->initialURL();
+        if (!url.isEmpty()) {
+            paramNames.append("_media_element_src_");
+            paramValues.append(url);
+        }
+
+        serviceType = "application/x-media-element-proxy-plugin";
+        frame->loader()->requestObject(this, url, nullAtom, serviceType, paramNames, paramValues);
+    }
+#endif
+}
+    
+void RenderPartObject::calcWidth()
+{
+    RenderPart::calcWidth();
+    if (!shouldResizeFrameToContent())
+        return;
+    if (!style()->width().isFixed() || static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollbarAlwaysOff)
+        setWidth(max(width(), static_cast<FrameView*>(m_widget)->contentsWidth()));
+}
+    
+void RenderPartObject::calcHeight()
+{
+    RenderPart::calcHeight();
+    if (!shouldResizeFrameToContent())
+        return;
+    if (!style()->height().isFixed() || static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollbarAlwaysOff)
+        setHeight(max(height(), static_cast<FrameView*>(m_widget)->contentsHeight()));
+}
+  
+bool RenderPartObject::shouldResizeFrameToContent() const
+{
+    Document* document = element() ? element()->document() : 0;
+    return m_widget && m_widget->isFrameView() && document && element()->hasTagName(iframeTag) && document->frame() && 
+        document->frame()->settings() && document->frame()->settings()->flatFrameSetLayoutEnabled() && 
+        (static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollbarAlwaysOff || !style()->width().isFixed() || !style()->height().isFixed());
 }
 
 void RenderPartObject::layout()
 {
     ASSERT(needsLayout());
-    ASSERT(minMaxKnown());
 
-    FrameView* childFrameView = static_cast<FrameView*>(m_widget);
-    RenderView* childRoot = 0;
-    
-    bool flatten = m_widget && element()->hasTagName(iframeTag) && element() && element()->document()->frame() && 
-        element()->document()->frame()->settings()->flatFrameSetLayoutEnabled() && 
-        (static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollBarAlwaysOff || !style()->width().isFixed() || !style()->height().isFixed()) &&
-        (childRoot = childFrameView ? static_cast<RenderView*>(childFrameView->frame()->renderer()) : 0);
-
-    if (flatten) {
+    if (shouldResizeFrameToContent()) {
+        FrameView* childFrameView = static_cast<FrameView*>(m_widget);
+        RenderView* childRoot = childFrameView ? childFrameView->frame()->contentRenderer() : 0;
+        if (childRoot && childRoot->prefWidthsDirty())
+            childRoot->calcPrefWidths();
         
-        if (!childRoot->minMaxKnown())
-            childRoot->calcMinMaxWidth();
+        RenderPart::calcWidth();
+        RenderPart::calcHeight();
+        RenderPart::adjustOverflowForBoxShadowAndReflect();
         
-        calcWidth();
-        calcHeight();
-        
-        bool scrolling = static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollBarAlwaysOff;
-        if (scrolling || !style()->width().isFixed())
-            m_width = max(m_width, childRoot->minWidth());
+        bool scrolling = static_cast<HTMLIFrameElement*>(element())->scrollingMode() != ScrollbarAlwaysOff;
+        if (childRoot && (scrolling || !style()->width().isFixed()))
+            setWidth(max(width(), childRoot->minPrefWidth()));
 
         updateWidgetPosition();
         do
             childFrameView->layout();
-        while (childFrameView->layoutPending() || childRoot->needsLayout());     
+        while (childFrameView->layoutPending() || (childRoot && childRoot->needsLayout()));
         
         if (scrolling || !style()->height().isFixed())
-            m_height = max(m_height, childFrameView->contentsHeight());
+            setHeight(max(height(), childFrameView->contentsHeight()));
         if (scrolling || !style()->width().isFixed())
-            m_width = max(m_width, childFrameView->contentsWidth());
+            setWidth(max(width(), childFrameView->contentsWidth()));
         
         updateWidgetPosition();
         
         ASSERT(!childFrameView->layoutPending());
-        ASSERT(!childRoot->needsLayout());
-        ASSERT(!childRoot->firstChild() || !childRoot->firstChild()->firstChild() || !childRoot->firstChild()->firstChild()->needsLayout());
+        ASSERT(!childRoot || !childRoot->needsLayout());
+        ASSERT(!childRoot || !childRoot->firstChild() || !childRoot->firstChild()->firstChild() || !childRoot->firstChild()->firstChild()->needsLayout());
     } else {
     calcWidth();
     calcHeight();
+    adjustOverflowForBoxShadowAndReflect();
 
     RenderPart::layout();
     }
+
+    if (!m_widget && m_view)
+        m_view->addWidgetToUpdate(this);
+
     setNeedsLayout(false);
 }
 
@@ -293,18 +435,13 @@ void RenderPartObject::viewCleared()
 {
     if (element() && m_widget && m_widget->isFrameView()) {
         FrameView* view = static_cast<FrameView*>(m_widget);
-        bool hasBorder = false;
         int marginw = -1;
         int marginh = -1;
         if (element()->hasTagName(iframeTag)) {
             HTMLIFrameElement* frame = static_cast<HTMLIFrameElement*>(element());
-            hasBorder = frame->m_frameBorder;
-            marginw = frame->m_marginWidth;
-            marginh = frame->m_marginHeight;
+            marginw = frame->getMarginWidth();
+            marginh = frame->getMarginHeight();
         }
-
-        view->setHasBorder(hasBorder);
-        view->setIgnoreWheelEvents(element()->hasTagName(iframeTag));
         if (marginw != -1)
             view->setMarginWidth(marginw);
         if (marginh != -1)

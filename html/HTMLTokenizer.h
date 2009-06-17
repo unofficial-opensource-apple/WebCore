@@ -1,11 +1,9 @@
 /*
-    This file is part of the KDE libraries
-
     Copyright (C) 1997 Martin Jones (mjones@kde.org)
               (C) 1997 Torben Weis (weis@kde.org)
               (C) 1998 Waldo Bastian (bastian@kde.org)
               (C) 2001 Dirk Mueller (mueller@kde.org)
-    Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+    Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -19,19 +17,22 @@
 
     You should have received a copy of the GNU Library General Public License
     along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
-    Boston, MA 02111-1307, USA.
+    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+    Boston, MA 02110-1301, USA.
 */
 
-#ifndef HTMLTOKENIZER_H
-#define HTMLTOKENIZER_H
+#ifndef HTMLTokenizer_h
+#define HTMLTokenizer_h
 
-#include "DeprecatedPtrQueue.h"
+#include "CachedResourceClient.h"
+#include "CachedResourceHandle.h"
 #include "NamedMappedAttrMap.h"
 #include "SegmentedString.h"
 #include "Timer.h"
-#include "XMLTokenizer.h"
-#include "CachedResourceClient.h"
+#include "Tokenizer.h"
+#include <wtf/Deque.h>
+#include <wtf/OwnPtr.h>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
@@ -39,10 +40,15 @@ class CachedScript;
 class DocumentFragment;
 class Document;
 class HTMLDocument;
+class HTMLScriptElement;
 class HTMLViewSourceDocument;
 class FrameView;
 class HTMLParser;
 class Node;
+class PreloadScanner;
+class ScriptSourceCode;
+
+extern const double defaultTokenizerTimeDelay;
 
 /**
  * @internal
@@ -50,12 +56,16 @@ class Node;
  * of attributes. Can also represent text. In this case the id = 0 and
  * text contains the text.
  */
-class Token
-{
-public:
-    Token() : beginTag(true), flat(false) { }
+struct Token {
+    Token()
+        : beginTag(true)
+        , selfClosingTag(false)
+        , brokenXMLStyle(false)
+        , m_sourceInfo(0)
+    { }
+    ~Token() { }
 
-    void addAttribute(Document*, const AtomicString& attrName, const AtomicString& v);
+    void addAttribute(AtomicString& attrName, const AtomicString& v, bool viewSourceMode);
 
     bool isOpenTag(const QualifiedName& fullName) const { return beginTag && fullName.localName() == tagName; }
     bool isCloseTag(const QualifiedName& fullName) const { return !beginTag && fullName.localName() == tagName; }
@@ -63,23 +73,67 @@ public:
     void reset()
     {
         attrs = 0;
-        text = 0;        
+        text = 0;
         tagName = nullAtom;
         beginTag = true;
-        flat = false;
+        selfClosingTag = false;
+        brokenXMLStyle = false;
+        if (m_sourceInfo)
+            m_sourceInfo->clear();
     }
+
+    void addViewSourceChar(UChar c) { if (!m_sourceInfo.get()) m_sourceInfo.set(new Vector<UChar>); m_sourceInfo->append(c); }
 
     RefPtr<NamedMappedAttrMap> attrs;
     RefPtr<StringImpl> text;
     AtomicString tagName;
     bool beginTag;
-    bool flat;
+    bool selfClosingTag;
+    bool brokenXMLStyle;
+    OwnPtr<Vector<UChar> > m_sourceInfo;
+};
+
+enum DoctypeState {
+    DoctypeBegin,
+    DoctypeBeforeName,
+    DoctypeName,
+    DoctypeAfterName,
+    DoctypeBeforePublicID,
+    DoctypePublicID,
+    DoctypeAfterPublicID,
+    DoctypeBeforeSystemID,
+    DoctypeSystemID,
+    DoctypeAfterSystemID,
+    DoctypeBogus
+};
+
+class DoctypeToken {
+public:
+    DoctypeToken() {}
+    
+    void reset()
+    {
+        m_name.clear();
+        m_publicID.clear();
+        m_systemID.clear();
+        m_state = DoctypeBegin;
+        m_source.clear();
+    }
+
+    DoctypeState state() { return m_state; }
+    void setState(DoctypeState s) { m_state = s; }
+
+    Vector<UChar> m_name;
+    Vector<UChar> m_publicID;
+    Vector<UChar> m_systemID;
+    DoctypeState m_state;
+    
+    Vector<UChar> m_source;
 };
 
 //-----------------------------------------------------------------------------
 
-class HTMLTokenizer : public Tokenizer, public CachedResourceClient
-{
+class HTMLTokenizer : public Tokenizer, public CachedResourceClient {
 public:
     HTMLTokenizer(HTMLDocument*, bool reportErrors);
     HTMLTokenizer(HTMLViewSourceDocument*);
@@ -94,13 +148,16 @@ public:
     virtual bool processingData() const;
     virtual int executingScript() const { return m_executingScript; }
     virtual void parsePending();
-    
-    virtual int lineNumber() const { return lineno; }
+
+    virtual int lineNumber() const { return m_lineNumber; }
     virtual int columnNumber() const { return 1; }
+
+    bool processingContentWrittenByScript() const { return m_src.excludeLineNumbers(); }
     
-    int* lineNumberPtr() { return &lineno; }
+    virtual void executeScriptsWaitingForStylesheets();
     
-    bool processingContentWrittenByScript() const { return src.excludeLineNumbers(); }
+    virtual bool isHTMLTokenizer() const { return true; }
+    HTMLParser* htmlParser() const { return m_parser.get(); }
 
 private:
     class State;
@@ -110,30 +167,34 @@ private:
     void end();
 
     void reset();
+
     PassRefPtr<Node> processToken();
+    void processDoctypeToken();
 
     State processListing(SegmentedString, State);
     State parseComment(SegmentedString&, State);
+    State parseDoctype(SegmentedString&, State);
     State parseServer(SegmentedString&, State);
     State parseText(SegmentedString&, State);
     State parseSpecial(SegmentedString&, State);
     State parseTag(SegmentedString&, State);
-    State parseEntity(SegmentedString&, UChar*& dest, State, unsigned& _cBufferPos, bool start, bool parsingTag);
+    State parseEntity(SegmentedString&, UChar*& dest, State, unsigned& cBufferPos, bool start, bool parsingTag);
     State parseProcessingInstruction(SegmentedString&, State);
     State scriptHandler(State);
-    State scriptExecution(const DeprecatedString& script, State state, DeprecatedString scriptURL = DeprecatedString(), int baseLine = 0);
+    State scriptExecution(const ScriptSourceCode&, State);
     void setSrc(const SegmentedString&);
-
+ 
     // check if we have enough space in the buffer.
     // if not enlarge it
     inline void checkBuffer(int len = 10)
     {
-        if ( (dest - buffer) > size-len )
+        if ((m_dest - m_buffer) > m_bufferSize - len)
             enlargeBuffer(len);
     }
+
     inline void checkScriptBuffer(int len = 10)
     {
-        if ( scriptCodeSize + len >= scriptCodeMaxSize )
+        if (m_scriptCodeSize + len >= m_scriptCodeCapacity)
             enlargeScriptBuffer(len);
     }
 
@@ -145,17 +206,15 @@ private:
     void allDataProcessed();
 
     // from CachedResourceClient
-    void notifyFinished(CachedResource *finishedObj);
+    void notifyFinished(CachedResource*);
 
     // Internal buffers
     ///////////////////
-    UChar* buffer;
-    UChar* dest;
+    UChar* m_buffer;
+    int m_bufferSize;
+    UChar* m_dest;
 
-    Token currToken;
-
-    // the size of buffer
-    int size;
+    Token m_currentToken;
 
     // Tokenizer flags
     //////////////////
@@ -188,7 +247,7 @@ private:
 
     class State {
     public:
-        State() : m_bits(0) {}
+        State() : m_bits(0) { }
 
         TagState tagState() const { return static_cast<TagState>(m_bits & TagMask); }
         void setTagState(TagState t) { m_bits = (m_bits & ~TagMask) | t; }
@@ -199,18 +258,20 @@ private:
         void setInScript(bool v) { setBit(InScript, v); }
         bool inStyle() const { return testBit(InStyle); }
         void setInStyle(bool v) { setBit(InStyle, v); }
-        bool inSelect() const { return testBit(InSelect); }
-        void setInSelect(bool v) { setBit(InSelect, v); }
         bool inXmp() const { return testBit(InXmp); }
         void setInXmp(bool v) { setBit(InXmp, v); }
         bool inTitle() const { return testBit(InTitle); }
         void setInTitle(bool v) { setBit(InTitle, v); }
+        bool inIFrame() const { return testBit(InIFrame); }
+        void setInIFrame(bool v) { setBit(InIFrame, v); }
         bool inPlainText() const { return testBit(InPlainText); }
         void setInPlainText(bool v) { setBit(InPlainText, v); }
         bool inProcessingInstruction() const { return testBit(InProcessingInstruction); }
         void setInProcessingInstruction(bool v) { return setBit(InProcessingInstruction, v); }
         bool inComment() const { return testBit(InComment); }
         void setInComment(bool v) { setBit(InComment, v); }
+        bool inDoctype() const { return testBit(InDoctype); }
+        void setInDoctype(bool v) { setBit(InDoctype, v); }
         bool inTextArea() const { return testBit(InTextArea); }
         void setInTextArea(bool v) { setBit(InTextArea, v); }
         bool escaped() const { return testBit(Escaped); }
@@ -230,11 +291,11 @@ private:
         bool forceSynchronous() const { return testBit(ForceSynchronous); }
         void setForceSynchronous(bool v) { setBit(ForceSynchronous, v); }
 
-        bool inAnySpecial() const { return m_bits & (InScript | InStyle | InXmp | InTextArea | InTitle); }
+        bool inAnySpecial() const { return m_bits & (InScript | InStyle | InXmp | InTextArea | InTitle | InIFrame); }
         bool hasTagState() const { return m_bits & TagMask; }
         bool hasEntityState() const { return m_bits & EntityMask; }
 
-        bool needsSpecialWriteHandling() const { return m_bits & (InScript | InStyle | InXmp | InTextArea | InTitle | TagMask | EntityMask | InPlainText | InComment | InServer | InProcessingInstruction | StartTag); }
+        bool needsSpecialWriteHandling() const { return m_bits & (InScript | InStyle | InXmp | InTextArea | InTitle | InIFrame | TagMask | EntityMask | InPlainText | InComment | InDoctype | InServer | InProcessingInstruction | StartTag); }
 
     private:
         static const int EntityShift = 4;
@@ -243,7 +304,7 @@ private:
             EntityMask = (1 << 7) - (1 << 4),
             InScript = 1 << 7,
             InStyle = 1 << 8,
-            InSelect = 1 << 9,
+            // Bit 9 unused
             InXmp = 1 << 10,
             InTitle = 1 << 11,
             InPlainText = 1 << 12,
@@ -258,13 +319,15 @@ private:
             AllowYield = 1 << 21,
             LoadingExtScript = 1 << 22,
             ForceSynchronous = 1 << 23,
+            InIFrame = 1 << 24,
+            InDoctype = 1 << 25
         };
-    
-        void setBit(StateBits bit, bool value) 
-        { 
-            if (value) 
-                m_bits |= bit; 
-            else 
+
+        void setBit(StateBits bit, bool value)
+        {
+            if (value)
+                m_bits |= bit;
+            else
                 m_bits &= ~bit;
         }
         bool testBit(StateBits bit) const { return m_bits & bit; }
@@ -273,61 +336,66 @@ private:
     };
 
     State m_state;
+    
+    DoctypeToken m_doctypeToken;
+    int m_doctypeSearchCount;
+    int m_doctypeSecondarySearchCount;
 
-    bool brokenServer;
+    bool m_brokenServer;
 
     // Name of an attribute that we just scanned.
-    AtomicString attrName;
-    
-    // Used to store the code of a srcipting sequence
-    UChar* scriptCode;
+    AtomicString m_attrName;
+
+    // Used to store the code of a scripting sequence
+    UChar* m_scriptCode;
     // Size of the script sequenze stored in @ref #scriptCode
-    int scriptCodeSize;
+    int m_scriptCodeSize;
     // Maximal size that can be stored in @ref #scriptCode
-    int scriptCodeMaxSize;
+    int m_scriptCodeCapacity;
     // resync point of script code size
-    int scriptCodeResync;
+    int m_scriptCodeResync;
 
     // Stores characters if we are scanning for a string like "</script>"
     UChar searchBuffer[10];
+    
     // Counts where we are in the string we are scanning for
     int searchCount;
-    // The string we are searching for
-    const UChar* searchFor;
     // the stopper string
-    const char* searchStopper;
-    // the stopper len
-    int searchStopperLen;
+    const char* m_searchStopper;
+    int m_searchStopperLength;
+    
     // if no more data is coming, just parse what we have (including ext scripts that
     // may be still downloading) and finish
-    bool noMoreData;
+    bool m_noMoreData;
     // URL to get source code of script from
-    DeprecatedString scriptSrc;
-    DeprecatedString scriptSrcCharset;
-    bool javascript;
+    String m_scriptTagSrcAttrValue;
+    String m_scriptTagCharsetAttrValue;
     // the HTML code we will parse after the external script we are waiting for has loaded
-    SegmentedString pendingSrc;
+    SegmentedString m_pendingSrc;
 
     // the HTML code we will parse after this particular script has
     // loaded, but before all pending HTML
-    SegmentedString *currentPrependingSrc;
+    SegmentedString* m_currentPrependingSrc;
 
     // true if we are executing a script while parsing a document. This causes the parsing of
     // the output of the script to be postponed until after the script has finished executing
     int m_executingScript;
-    DeprecatedPtrQueue<CachedScript> pendingScripts;
-    RefPtr<Node> scriptNode;
+    Deque<CachedResourceHandle<CachedScript> > m_pendingScripts;
+    RefPtr<HTMLScriptElement> m_scriptNode;
 
     bool m_requestingScript;
+    bool m_hasScriptsWaitingForStylesheets;
 
     // if we found one broken comment, there are most likely others as well
     // store a flag to get rid of the O(n^2) behaviour in such a case.
-    bool brokenComments;
+    bool m_brokenComments;
     // current line number
-    int lineno;
-    // line number at which the current <script> started
-    int scriptStartLineno;
-    int tagStartLineno;
+    int m_lineNumber;
+    int m_currentScriptTagStartLineNumber;
+    int m_currentTagStartLineNumber;
+
+    double m_tokenizerTimeDelay;
+    int m_tokenizerChunkSize;
 
     // The timer for continued processing.
     Timer<HTMLTokenizer> m_timer;
@@ -336,20 +404,22 @@ private:
 // So any fixed number might be too small, but rather than rewriting all usage of this buffer
 // we'll just make it large enough to handle all imaginable cases.
 #define CBUFLEN 1024
-    char cBuffer[CBUFLEN+2];
+    UChar m_cBuffer[CBUFLEN + 2];
     unsigned int m_cBufferPos;
-    
-    SegmentedString src;
+
+    SegmentedString m_src;
     Document* m_doc;
-    HTMLParser* parser;
-    bool inWrite;
+    OwnPtr<HTMLParser> m_parser;
+    bool m_inWrite;
     bool m_fragment;
+
+    OwnPtr<PreloadScanner> m_preloadScanner;
 };
 
 void parseHTMLDocumentFragment(const String&, DocumentFragment*);
 
 UChar decodeNamedEntity(const char*);
 
-}
+} // namespace WebCore
 
-#endif
+#endif // HTMLTokenizer_h

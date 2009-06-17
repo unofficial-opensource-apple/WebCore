@@ -1,4 +1,3 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
  * Copyright (C) 2006 Apple Computer, Inc.
  *
@@ -14,12 +13,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FRAME_TREE_H
-#define FRAME_TREE_H
+#ifndef FrameTree_h
+#define FrameTree_h
 
 #include "AtomicString.h"
 
@@ -41,7 +40,8 @@ namespace WebCore {
 
         const AtomicString& name() const { return m_name; }
         void setName(const AtomicString&);
-        Frame* parent() const { return m_parent; }
+        void clearName();
+        Frame* parent(bool checkForDisconnectedFrame = false) const;
         void setParent(Frame* parent) { m_parent = parent; }
         
         Frame* nextSibling() const { return m_nextSibling.get(); }
@@ -50,8 +50,8 @@ namespace WebCore {
         Frame* lastChild() const { return m_lastChild; }
         unsigned childCount() const { return m_childCount; }
 
-        bool isDescendantOf(Frame* ancestor) const;
-        Frame* traverseNext(Frame* stayWithin = 0) const;
+        bool isDescendantOf(const Frame* ancestor) const;
+        Frame* traverseNext(const Frame* stayWithin = 0) const;
         Frame* traverseNextWithWrap(bool) const;
         Frame* traversePreviousWithWrap(bool) const;
         
@@ -63,6 +63,8 @@ namespace WebCore {
         Frame* find(const AtomicString& name) const;
 
         AtomicString uniqueChildName(const AtomicString& requestedName) const;
+
+        Frame* top(bool checkForDisconnectedFrame = false) const;
 
     private:
         Frame* deepLastChild() const;
@@ -82,4 +84,4 @@ namespace WebCore {
 
 } // namespace WebCore
 
-#endif // FRAME_TREE_H
+#endif // FrameTree_h

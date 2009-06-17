@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *
@@ -16,13 +14,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLDirectoryElement_H
-#define HTMLDirectoryElement_H
+#ifndef HTMLDirectoryElement_h
+#define HTMLDirectoryElement_h
 
 #include "HTMLElement.h"
 
@@ -31,7 +29,7 @@ namespace WebCore {
 class HTMLDirectoryElement : public HTMLElement
 {
 public:
-    HTMLDirectoryElement(Document*);
+    HTMLDirectoryElement(const QualifiedName&, Document*);
 
     virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
     virtual int tagPriority() const { return 5; }

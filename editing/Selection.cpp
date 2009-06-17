@@ -26,13 +26,17 @@
 #include "config.h"
 #include "Selection.h"
 
+#include "CharacterNames.h"
+#include "CString.h"
 #include "Document.h"
 #include "Element.h"
 #include "htmlediting.h"
+#include "TextIterator.h"
 #include "VisiblePosition.h"
 #include "visible_units.h"
 #include "Range.h"
 #include <wtf/Assertions.h>
+#include <stdio.h>
 
 namespace WebCore {
 
@@ -129,6 +133,10 @@ PassRefPtr<Range> Selection::toRange() const
     // incorrect results.
     m_start.node()->document()->updateLayout();
 
+    // Check again, because updating layout can clear the selection.
+    if (isNone())
+        return 0;
+
     Position s, e;
     if (isCaret()) {
         // If the selection is a caret, move the range start upstream. This helps us match
@@ -163,7 +171,7 @@ PassRefPtr<Range> Selection::toRange() const
     }
 
     ExceptionCode ec = 0;
-    RefPtr<Range> result(new Range(s.node()->document()));
+    RefPtr<Range> result(Range::create(s.node()->document()));
     result->setStart(s.node(), s.offset(), ec);
     if (ec) {
         LOG_ERROR("Exception setting Range start from Selection: %d", ec);
@@ -185,6 +193,49 @@ bool Selection::expandUsingGranularity(TextGranularity granularity)
     m_granularity = granularity;
     validate();
     return true;
+}
+
+static PassRefPtr<Range> makeSearchRange(const Position& pos)
+{
+    Node* n = pos.node();
+    if (!n)
+        return 0;
+    Document* d = n->document();
+    Node* de = d->documentElement();
+    if (!de)
+        return 0;
+    Node* boundary = n->enclosingBlockFlowElement();
+    if (!boundary)
+        return 0;
+
+    RefPtr<Range> searchRange(Range::create(d));
+    ExceptionCode ec = 0;
+
+    Position start(rangeCompliantEquivalent(pos));
+    searchRange->selectNodeContents(boundary, ec);
+    searchRange->setStart(start.node(), start.offset(), ec);
+
+    ASSERT(!ec);
+    if (ec)
+        return 0;
+
+    return searchRange.release();
+}
+
+void Selection::appendTrailingWhitespace()
+{
+    RefPtr<Range> searchRange = makeSearchRange(m_end);
+    if (!searchRange)
+        return;
+
+    CharacterIterator charIt(searchRange.get(), true);
+
+    for (; charIt.length(); charIt.advance(1)) {
+        UChar c = charIt.characters()[0];
+        if (!isSpaceOrNewline(c) && c != noBreakSpace)
+            break;
+        m_end = charIt.range()->endPosition();
+    }
 }
 
 void Selection::validate()
@@ -232,15 +283,38 @@ void Selection::validate()
             // Edge case: If the caret is after the last word in a paragraph, select from the the end of the
             // last word to the line break (also RightWordIfOnBoundary);
             VisiblePosition start = VisiblePosition(m_start, m_affinity);
-            VisiblePosition end   = VisiblePosition(m_end, m_affinity);
+            VisiblePosition originalEnd(m_end, m_affinity);
             EWordSide side = RightWordIfOnBoundary;
             if (isEndOfDocument(start) || (isEndOfLine(start) && !isStartOfLine(start) && !isEndOfParagraph(start)))
                 side = LeftWordIfOnBoundary;
             m_start = startOfWord(start, side).deepEquivalent();
             side = RightWordIfOnBoundary;
-            if (isEndOfDocument(end) || (isEndOfLine(end) && !isStartOfLine(end) && !isEndOfParagraph(end)))
+            if (isEndOfDocument(originalEnd) || (isEndOfLine(originalEnd) && !isStartOfLine(originalEnd) && !isEndOfParagraph(originalEnd)))
                 side = LeftWordIfOnBoundary;
-            m_end = endOfWord(end, side).deepEquivalent();
+                
+            VisiblePosition wordEnd(endOfWord(originalEnd, side));
+            VisiblePosition end(wordEnd);
+            
+            if (isEndOfParagraph(originalEnd)) {
+                // Select the paragraph break (the space from the end of a paragraph to the start of 
+                // the next one) to match TextEdit.
+                end = wordEnd.next();
+                
+                if (Node* table = isFirstPositionAfterTable(end)) {
+                    // The paragraph break after the last paragraph in the last cell of a block table ends
+                    // at the start of the paragraph after the table.
+                    if (isBlock(table))
+                        end = end.next(true);
+                    else
+                        end = wordEnd;
+                }
+                
+                if (end.isNull())
+                    end = wordEnd;
+                    
+            }
+                
+            m_end = end.deepEquivalent();
             // End must not be before start.
             if (m_start.node() == m_end.node() && m_start.offset() > m_end.offset()) {
                 Position swap(m_start);
@@ -277,16 +351,25 @@ void Selection::validate()
                 pos = pos.previous();
             m_start = startOfParagraph(pos).deepEquivalent();
             VisiblePosition visibleParagraphEnd = endOfParagraph(VisiblePosition(m_end, m_affinity));
-            // Include the space after the end of the paragraph in the selection.
-            VisiblePosition startOfNextParagraph = visibleParagraphEnd.next();
-            if (startOfNextParagraph.isNull())
-                m_end = visibleParagraphEnd.deepEquivalent();
-            else {
-                m_end = startOfNextParagraph.deepEquivalent();
-                // Stay within enclosing node, e.g. do not span end of table.
-                if (visibleParagraphEnd.deepEquivalent().node()->isAncestor(m_end.node()))
-                    m_end = visibleParagraphEnd.deepEquivalent();
+            
+            // Include the "paragraph break" (the space from the end of this paragraph to the start
+            // of the next one) in the selection.
+            VisiblePosition end(visibleParagraphEnd.next());
+             
+            if (Node* table = isFirstPositionAfterTable(end)) {
+                // The paragraph break after the last paragraph in the last cell of a block table ends
+                // at the start of the paragraph after the table, not at the position just after the table.
+                if (isBlock(table))
+                    end = end.next(true);
+                // There is no parargraph break after the last paragraph in the last cell of an inline table.
+                else
+                    end = visibleParagraphEnd;
             }
+             
+            if (end.isNull())
+                end = visibleParagraphEnd;
+                
+            m_end = end.deepEquivalent();
             break;
         }
         case DocumentBoundary:
@@ -334,19 +417,52 @@ void Selection::validate()
         // purposes of comparing selections). This is an ideal point of the code
         // to do this operation, since all selection changes that result in a RANGE 
         // come through here before anyone uses it.
+        // FIXME: Canonicalizing is good, but haven't we already done it (when we
+        // set these two positions to VisiblePosition deepEquivalent()s above)?
         m_start = m_start.downstream();
         m_end = m_end.upstream();
     }
+}
+
+// FIXME: This function breaks the invariant of this class.
+// But because we use Selection to store values in editing commands for use when
+// undoing the command, we need to be able to create a selection that while currently
+// invalid, will be valid once the changes are undone. This is a design problem.
+// To fix it we either need to change the invariants of Selection or create a new
+// class for editing to use that can manipulate selections that are not currently valid.
+void Selection::setWithoutValidation(const Position& base, const Position& extent)
+{
+    ASSERT(!base.isNull());
+    ASSERT(!extent.isNull());
+    ASSERT(base != extent);
+    ASSERT(m_affinity == DOWNSTREAM);
+    ASSERT(m_granularity == CharacterGranularity);
+    m_base = base;
+    m_extent = extent;
+    m_baseIsFirst = comparePositions(base, extent) <= 0;
+    if (m_baseIsFirst) {
+        m_start = base;
+        m_end = extent;
+    } else {
+        m_start = extent;
+        m_end = base;
+    }
+    m_state = RANGE;
 }
 
 void Selection::adjustForEditableContent()
 {
     if (m_base.isNull() || m_start.isNull() || m_end.isNull())
         return;
+    
+    // Early return in the caret case (the state hasn't actually been set yet, so we can't use isCaret()) to avoid the 
+    // expense of computing highestEditableRoot.
+    if (m_base == m_start && m_base == m_end)
+        return;
 
-    Node* baseRoot = m_base.node()->rootEditableElement();
-    Node* startRoot = m_start.node()->rootEditableElement();
-    Node* endRoot = m_end.node()->rootEditableElement();
+    Node* baseRoot = highestEditableRoot(m_base);
+    Node* startRoot = highestEditableRoot(m_start);
+    Node* endRoot = highestEditableRoot(m_end);
     
     Node* baseEditableAncestor = lowestEditableAncestor(m_base.node());
     
@@ -362,6 +478,10 @@ void Selection::adjustForEditableContent()
         if (startRoot != baseRoot) {
             VisiblePosition first = firstEditablePositionAfterPositionInRoot(m_start, baseRoot);
             m_start = first.deepEquivalent();
+            if (m_start.isNull()) {
+                ASSERT_NOT_REACHED();
+                m_start = m_end;
+            }
         }
         // If the end is outside the base's editable root, cap it at the end of that root.
         // If the end is in non-editable content that is inside the base's root, put it
@@ -369,6 +489,10 @@ void Selection::adjustForEditableContent()
         if (endRoot != baseRoot) {
             VisiblePosition last = lastEditablePositionBeforePositionInRoot(m_end, baseRoot);
             m_end = last.deepEquivalent();
+            if (m_end.isNull()) {
+                ASSERT_NOT_REACHED();
+                m_end = m_start;
+            }
         }
     // The selection is based in non-editable content.
     } else {
@@ -381,14 +505,15 @@ void Selection::adjustForEditableContent()
         if (endRoot || endEditableAncestor != baseEditableAncestor) {
             
             Position p = previousVisuallyDistinctCandidate(m_end);
-            if (p.isNull() && endRoot && endRoot->isShadowNode())
-                p = Position(endRoot->shadowParentNode(), maxDeepOffset(endRoot->shadowParentNode()));
+            Node* shadowAncestor = endRoot ? endRoot->shadowAncestorNode() : 0;
+            if (p.isNull() && endRoot && (shadowAncestor != endRoot))
+                p = Position(shadowAncestor, maxDeepOffset(shadowAncestor));
             while (p.isNotNull() && !(lowestEditableAncestor(p.node()) == baseEditableAncestor && !isEditablePosition(p))) {
                 Node* root = editableRootForPosition(p);
-                Node* shadowParent = root && root->isShadowNode() ? root->shadowParentNode() : 0;
+                shadowAncestor = root ? root->shadowAncestorNode() : 0;
                 p = isAtomicNode(p.node()) ? positionBeforeNode(p.node()) : previousVisuallyDistinctCandidate(p);
-                if (p.isNull() && shadowParent)
-                    p = Position(shadowParent, maxDeepOffset(shadowParent));
+                if (p.isNull() && (shadowAncestor != root))
+                    p = Position(shadowAncestor, maxDeepOffset(shadowAncestor));
             }
             VisiblePosition previous(p);
             
@@ -407,14 +532,15 @@ void Selection::adjustForEditableContent()
         Node* startEditableAncestor = lowestEditableAncestor(m_start.node());      
         if (startRoot || startEditableAncestor != baseEditableAncestor) {
             Position p = nextVisuallyDistinctCandidate(m_start);
-            if (p.isNull() && startRoot && startRoot->isShadowNode())
-                p = Position(startRoot->shadowParentNode(), 0);
+            Node* shadowAncestor = startRoot ? startRoot->shadowAncestorNode() : 0;
+            if (p.isNull() && startRoot && (shadowAncestor != startRoot))
+                p = Position(shadowAncestor, 0);
             while (p.isNotNull() && !(lowestEditableAncestor(p.node()) == baseEditableAncestor && !isEditablePosition(p))) {
                 Node* root = editableRootForPosition(p);
-                Node* shadowParent = root && root->isShadowNode() ? root->shadowParentNode() : 0;
+                shadowAncestor = root ? root->shadowAncestorNode() : 0;
                 p = isAtomicNode(p.node()) ? positionAfterNode(p.node()) : nextVisuallyDistinctCandidate(p);
-                if (p.isNull() && shadowParent)
-                    p = Position(shadowParent, 0);
+                if (p.isNull() && (shadowAncestor != root))
+                    p = Position(shadowAncestor, 0);
             }
             VisiblePosition next(p);
             
@@ -449,6 +575,11 @@ Element* Selection::rootEditableElement() const
     return editableRootForPosition(start());
 }
 
+Node* Selection::shadowTreeRootNode() const
+{
+    return start().node() ? start().node()->shadowTreeRootNode() : 0;
+}
+
 void Selection::debugPosition() const
 {
     if (!m_start.node())
@@ -458,13 +589,13 @@ void Selection::debugPosition() const
 
     if (m_start == m_end) {
         Position pos = m_start;
-        fprintf(stderr, "pos:        %s %p:%d\n", pos.node()->nodeName().deprecatedString().latin1(), pos.node(), pos.offset());
+        fprintf(stderr, "pos:        %s %p:%d\n", pos.node()->nodeName().utf8().data(), pos.node(), pos.offset());
     } else {
         Position pos = m_start;
-        fprintf(stderr, "start:      %s %p:%d\n", pos.node()->nodeName().deprecatedString().latin1(), pos.node(), pos.offset());
+        fprintf(stderr, "start:      %s %p:%d\n", pos.node()->nodeName().utf8().data(), pos.node(), pos.offset());
         fprintf(stderr, "-----------------------------------\n");
         pos = m_end;
-        fprintf(stderr, "end:        %s %p:%d\n", pos.node()->nodeName().deprecatedString().latin1(), pos.node(), pos.offset());
+        fprintf(stderr, "end:        %s %p:%d\n", pos.node()->nodeName().utf8().data(), pos.node(), pos.offset());
         fprintf(stderr, "-----------------------------------\n");
     }
 
@@ -491,13 +622,15 @@ void Selection::formatForDebugger(char* buffer, unsigned length) const
         result += s;
     }
 
-    strncpy(buffer, result.deprecatedString().latin1(), length - 1);
+    strncpy(buffer, result.utf8().data(), length - 1);
 }
 
 void Selection::showTreeForThis() const
 {
-    if (start().node())
+    if (start().node()) {
         start().node()->showTreeAndMark(start().node(), "S", end().node(), "E");
+        fprintf(stderr, "start offset: %d, end offset: %d\n", start().offset(), end().offset());
+    }
 }
 
 #endif

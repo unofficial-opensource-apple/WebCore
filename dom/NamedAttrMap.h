@@ -19,18 +19,20 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #ifndef NamedAttrMap_h
 #define NamedAttrMap_h
 
-#include "Element.h"
+#include "Attribute.h"
 #include "NamedNodeMap.h"
+#include <wtf/RefPtr.h>
+#include <wtf/Vector.h>
 
-#if __OBJC__
+#ifdef __OBJC__
 #define id id_AVOID_KEYWORD
 #endif
 
@@ -39,11 +41,14 @@ namespace WebCore {
 // the map of attributes of an element
 class NamedAttrMap : public NamedNodeMap {
     friend class Element;
+protected:
+    NamedAttrMap(Element* element) : m_element(element) { }
 public:
-    NamedAttrMap(Element *e);
+    static PassRefPtr<NamedAttrMap> create(Element* element) { return adoptRef(new NamedAttrMap(element)); }
+
     virtual ~NamedAttrMap();
-    NamedAttrMap(const NamedAttrMap&);
-    NamedAttrMap &operator =(const NamedAttrMap &other);
+
+    void setAttributes(const NamedAttrMap&);
 
     // DOM methods & attributes for NamedNodeMap
 
@@ -58,22 +63,23 @@ public:
     virtual PassRefPtr<Node> setNamedItem(Node* arg, ExceptionCode&);
 
     virtual PassRefPtr<Node> item(unsigned index) const;
-    unsigned length() const { return len; }
+    size_t length() const { return m_attributes.size(); }
 
     // Other methods (not part of DOM)
-    Attribute* attributeItem(unsigned index) const { return attrs ? attrs[index] : 0; }
+    Attribute* attributeItem(unsigned index) const { return m_attributes[index].get(); }
     Attribute* getAttributeItem(const QualifiedName& name) const;
-    Attribute* getAttributeItem(const String& name) const;
-    virtual bool isReadOnlyNode() { return element ? element->isReadOnlyNode() : false; }
+    Attribute* getAttributeItem(const String& name, bool shouldIgnoreAttributeCase) const;
+    
+    void shrinkToLength() { m_attributes.shrinkCapacity(length()); }
+    void reserveInitialCapacity(unsigned capacity) { m_attributes.reserveInitialCapacity(capacity); }
 
     // used during parsing: only inserts if not already there
     // no error checking!
-    void insertAttribute(Attribute* newAttribute) {
-        assert(!element);
-        if (!getAttributeItem(newAttribute->name()))
+    void insertAttribute(PassRefPtr<Attribute> newAttribute, bool allowDuplicates)
+    {
+        ASSERT(!m_element);
+        if (allowDuplicates || !getAttributeItem(newAttribute->name()))
             addAttribute(newAttribute);
-        else
-            newAttribute->deref();
     }
 
     virtual bool isMappedAttributeMap() const;
@@ -83,17 +89,17 @@ public:
     
     bool mapsEquivalent(const NamedAttrMap* otherMap) const;
 
-protected:
-    // this method is internal, does no error checking at all
-    void addAttribute(Attribute* newAttribute);
-    // this method is internal, does no error checking at all
+    // These functions are internal, and do no error checking.
+    void addAttribute(PassRefPtr<Attribute>);
     void removeAttribute(const QualifiedName& name);
+
+protected:
     virtual void clearAttributes();
+
     void detachFromElement();
 
-    Element *element;
-    Attribute **attrs;
-    unsigned len;
+    Element* m_element;
+    Vector<RefPtr<Attribute> > m_attributes;
     AtomicString m_id;
 };
 

@@ -20,13 +20,13 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLTableCellElement_H
-#define HTMLTableCellElement_H
+#ifndef HTMLTableCellElement_h
+#define HTMLTableCellElement_h
 
 #include "HTMLTablePartElement.h"
 
@@ -55,7 +55,8 @@ public:
     virtual void parseMappedAttribute(MappedAttribute*);
 
     // used by table cells to share style decls created by the enclosing table.
-    virtual CSSMutableStyleDeclaration* additionalAttributeStyleDecl();
+    virtual bool canHaveAdditionalAttributeStyleDecls() const { return true; }
+    virtual void additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>&);
     
     virtual bool isURLAttribute(Attribute*) const;
 
@@ -100,6 +101,8 @@ public:
 
     String width() const;
     void setWidth(const String&);
+
+    virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
 protected:
     int _row;

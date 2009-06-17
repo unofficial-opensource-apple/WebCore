@@ -16,12 +16,12 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 
-#ifndef FixedTableLayout_H
-#define FixedTableLayout_H
+#ifndef FixedTableLayout_h
+#define FixedTableLayout_h
 
 #include "Length.h"
 #include "TableLayout.h"
@@ -31,14 +31,12 @@ namespace WebCore {
 
 class RenderTable;
 
-class FixedTableLayout : public TableLayout
-{
+class FixedTableLayout : public TableLayout {
 public:
     FixedTableLayout(RenderTable*);
-    ~FixedTableLayout();
 
-    void calcMinMaxWidth();
-    void layout();
+    virtual void calcPrefWidths(int& minWidth, int& maxWidth);
+    virtual void layout();
 
 protected:
     int calcWidthArray(int tableWidth);
@@ -46,6 +44,6 @@ protected:
     Vector<Length> m_width;
 };
 
-}
+} // namespace WebCore
 
-#endif
+#endif // FixedTableLayout_h

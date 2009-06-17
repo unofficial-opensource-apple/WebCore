@@ -15,49 +15,65 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef RenderButton_H
-#define RenderButton_H
+#ifndef RenderButton_h
+#define RenderButton_h
 
 #include "RenderFlexibleBox.h"
+#include "Timer.h"
+#include <wtf/OwnPtr.h>
 
 namespace WebCore {
+
+class RenderTextFragment;
 
 // RenderButtons are just like normal flexboxes except that they will generate an anonymous block child.
 // For inputs, they will also generate an anonymous RenderText and keep its style and content up
 // to date as the button changes.
-class RenderButton : public RenderFlexibleBox
-{
+class RenderButton : public RenderFlexibleBox {
 public:
     RenderButton(Node*);
 
-    virtual void addChild(RenderObject* newChild, RenderObject *beforeChild = 0);
-    virtual void removeChild(RenderObject* oldChild);
-    virtual void removeLeftoverAnonymousBoxes() {}
-    virtual bool createsAnonymousWrapper() const { return true; }
-
-    virtual void setStyle(RenderStyle*);
-    virtual void updateFromElement();
-
-    virtual void updatePseudoChild(RenderStyle::PseudoId);
-
-    virtual void paintObject(PaintInfo&, int tx, int ty);
-
     virtual const char* renderName() const { return "RenderButton"; }
 
+    virtual void addChild(RenderObject* newChild, RenderObject *beforeChild = 0);
+    virtual void removeChild(RenderObject*);
+    virtual void removeLeftoverAnonymousBlock(RenderBlock*) { }
+    virtual bool createsAnonymousWrapper() const { return true; }
+
+    void setupInnerStyle(RenderStyle*);
+    virtual void updateFromElement();
+
+    virtual void updateBeforeAfterContent(RenderStyle::PseudoId);
+
+    virtual bool hasControlClip() const { return true; }
+    virtual IntRect controlClipRect(int /*tx*/, int /*ty*/) const;
+
     void setText(const String&);
+    
+    virtual bool canHaveChildren() const;
     
     virtual void layout();
 
 protected:
-    RenderText* m_buttonText;
+    virtual void styleWillChange(StyleDifference, const RenderStyle* newStyle);
+    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
+
+    virtual bool hasLineIfEmpty() const { return true; }
+
+    void timerFired(Timer<RenderButton>*);
+
+    RenderTextFragment* m_buttonText;
     RenderBlock* m_inner;
+
+    OwnPtr<Timer<RenderButton> > m_timer;
+    bool m_default;
 };
 
-}
+} // namespace WebCore
 
-#endif
+#endif // RenderButton_h

@@ -29,12 +29,27 @@
 namespace WebCore {
 
     class String;
-
+    class IntSize;
+    
     String inputElementAltText();
     String resetButtonDefaultLabel();
     String searchableIndexIntroduction();
     String submitButtonDefaultLabel();
+    String fileButtonChooseFileLabel();
+    String fileButtonNoFileSelectedLabel();
+    String copyImageUnknownFileLabel();
 
+    String multipleFileUploadText(unsigned numberOfFiles);
+    String unknownFileSizeText();
+
+#if PLATFORM(WIN)
+    String uploadFileText();
+    String allFilesText();
+#endif
+
+    String htmlSelectMultipleItems(int num);
+
+    String imageTitle(const String& filename, const IntSize& size);
 }
 
 #endif

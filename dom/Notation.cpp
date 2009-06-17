@@ -16,8 +16,8 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  */
 #include "config.h"
 #include "Notation.h"
@@ -30,15 +30,15 @@ Notation::Notation(Document* doc) : ContainerNode(doc)
 
 Notation::Notation(Document* doc, const String& name, const String& publicId, const String& systemId)
     : ContainerNode(doc)
-    , m_name(name.impl())
-    , m_publicId(publicId.impl())
-    , m_systemId(systemId.impl())
+    , m_name(name)
+    , m_publicId(publicId)
+    , m_systemId(systemId)
 {
 }
 
 String Notation::nodeName() const
 {
-    return m_name.get();
+    return m_name;
 }
 
 Node::NodeType Notation::nodeType() const

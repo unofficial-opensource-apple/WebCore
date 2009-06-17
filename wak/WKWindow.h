@@ -1,38 +1,52 @@
 //
 //  WKWindow.h
 //
-//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, 2008, Apple Inc.  All rights reserved.
 //
+#ifndef WKWindow_h
+#define WKWindow_h
+
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreGraphics/CGSTypes.h>
+#import <GraphicsServices/GSEvent.h>
 
-#import "GraphicsServices/GSEvent.h"
+#import "WebCoreThread.h"
 #import "WKTypes.h"
 #import "WKUtilities.h"
-#import "WebCoreThread.h"
+
+#ifdef __cplusplus
+namespace WebCore {
+    class TiledSurface;
+}
+typedef WebCore::TiledSurface TiledSurface;
+#else
+typedef struct TiledSurface TiledSurface;
+#endif
+
+#ifdef __OBJC__
+@class WAKWindow;
+#else
+typedef struct WAKWindow WAKWindow;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-    
-typedef void (*WKWindowNeedsDisplayCallback)(WKWindowRef window, void *userInfo);
 
 struct WKWindow {
     WKObject obj;
+    WAKWindow* wakWindow;
     CGRect frame;
     WKViewRef contentView;
     WKViewRef responderView;
-    GSEventRef currentEvent;
-    WKWindowNeedsDisplayCallback needsDisplayCallback;
-    void *needsDisplayUserInfo;
-    unsigned int needsDisplay:1;
-    unsigned int isSuspendedWindow:1;
+    TiledSurface* tiledSurface;
+    unsigned int useOrientationDependentFontAntialiasing:1;
     unsigned int isOffscreen:1;
 };
 
 extern WKClassInfo WKWindowClassInfo;
 
-WKWindowRef WKWindowCreate(CGRect contentRect);
+WKWindowRef WKWindowCreate(WAKWindow* wakWindow, CGRect contentRect);
 
 void WKWindowSetContentView (WKWindowRef window, WKViewRef aView);
 WKViewRef WKWindowGetContentView (WKWindowRef window);
@@ -56,16 +70,17 @@ GSEventRef WKEventGetCurrentEvent(void);
 void WKWindowPrepareForDrawing(WKWindowRef window);
 
 void WKWindowSetNeedsDisplay(WKWindowRef window, bool flag);
-bool WKWindowNeedsDisplay(WKWindowRef window);
-
-void WKWindowSetNeedsDisplayCallback(WKWindowRef window, WKWindowNeedsDisplayCallback, void *userInfo);
+void WKWindowSetNeedsDisplayInRect(WKWindowRef window, CGRect rect);
+    
 void WKWindowDrawRect(WKWindowRef window, CGRect dirtyRect);
 
-void WKWindowSetIsSuspendedWindow(WKWindowRef window, bool flag);
-bool WKWindowIsSuspendedWindow(WKWindowRef window);
-
 void WKWindowSetOffscreen(WKWindowRef window, bool flag);
+    
+void WKWindowSetTiledSurface(WKWindowRef window, TiledSurface*);
+TiledSurface* WKWindowGetTiledSurface(WKWindowRef window);
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

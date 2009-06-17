@@ -15,36 +15,46 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef DOM_DocumentMarker_h
-#define DOM_DocumentMarker_h
+#ifndef DocumentMarker_h
+#define DocumentMarker_h
+
+#include "PlatformString.h"
 
 namespace WebCore {
+    class String;
 
-// A range of a node within a document that is "marked", such as being misspelled
-struct DocumentMarker
-{
+// A range of a node within a document that is "marked", such as the range of a misspelled word.
+// It optionally includes a description that could be displayed in the user interface.
+struct DocumentMarker {
+
     enum MarkerType {
-        AllMarkers = -1,
-        Spelling = 0,
-        TextMatch,
+        AllMarkers  = -1,
+        Spelling,
+        Grammar,
+        TextMatch
     };
-    
-    enum MarkerType type;
-    unsigned startOffset, endOffset;
-    
-    bool operator == (const DocumentMarker &o) const {
+
+    MarkerType type;
+    unsigned startOffset;
+    unsigned endOffset;
+    String description;
+
+    bool operator==(const DocumentMarker& o) const
+    {
         return type == o.type && startOffset == o.startOffset && endOffset == o.endOffset;
     }
-    bool operator != (const DocumentMarker &o) const {
+
+    bool operator!=(const DocumentMarker& o) const
+    {
         return !(*this == o);
     }
 };
 
-}
+} // namespace WebCore
 
-#endif
+#endif // DocumentMarker_h

@@ -17,49 +17,29 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTMLImageLoader_H
-#define HTMLImageLoader_H
+#ifndef HTMLImageLoader_h
+#define HTMLImageLoader_h
 
-#include "CachedResourceClient.h"
+#include "ImageLoader.h"
 
 namespace WebCore {
 
-class Element;
-
-class HTMLImageLoader : public CachedResourceClient {
+class HTMLImageLoader : public ImageLoader {
 public:
     HTMLImageLoader(Element*);
     virtual ~HTMLImageLoader();
 
-    virtual void updateFromElement();
+    virtual void dispatchLoadEvent();
+    virtual String sourceURI(const AtomicString&) const;
 
-    void dispatchLoadEvent();
-
-    Element* element() const { return m_element; }
-    bool imageComplete() const { return m_imageComplete; }
-    CachedImage* image() const { return m_image; }
-
-    void setLoadManually(bool loadManually) { m_loadManually = loadManually; }
-
-    // CachedResourceClient API
     virtual void notifyFinished(CachedResource*);
-
-protected:
-    void setLoadingImage(CachedImage*);
-
-private:
-    Element* m_element;
-    CachedImage* m_image;
-    bool m_firedLoad : 1;
-    bool m_imageComplete : 1;
-    bool m_loadManually : 1;
 };
 
-} //namespace
+}
 
 #endif

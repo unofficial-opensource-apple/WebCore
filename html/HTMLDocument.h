@@ -1,9 +1,7 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,64 +15,97 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef HTML_DOCUMENTIMPL_H
-#define HTML_DOCUMENTIMPL_H
+#ifndef HTMLDocument_h
+#define HTMLDocument_h
 
 #include "CachedResourceClient.h"
 #include "Document.h"
-#include "HTMLCollection.h"
 
 namespace WebCore {
 
-class DeprecatedString;
 class FrameView;
 class HTMLElement;
 
-class HTMLDocument : public Document, public CachedResourceClient
-{
+class HTMLDocument : public Document, public CachedResourceClient {
 public:
-    HTMLDocument(DOMImplementation*, FrameView* = 0);
-    ~HTMLDocument();
+    static PassRefPtr<HTMLDocument> create(Frame* frame)
+    {
+        return new HTMLDocument(frame);
+    }
+    virtual ~HTMLDocument();
 
-    virtual bool isHTMLDocument() const { return true; }
+    int width();
+    int height();
 
-    String lastModified() const;
-    String cookie() const;
-    void setCookie(const String&);
+    String dir();
+    void setDir(const String&);
 
-    void setBody(HTMLElement*, ExceptionCode&);
+    String designMode() const;
+    void setDesignMode(const String&);
 
-    virtual Tokenizer* createTokenizer();
+    String compatMode() const;
+
+    Element* activeElement();
+    bool hasFocus();
+
+    String bgColor();
+    void setBgColor(const String&);
+    String fgColor();
+    void setFgColor(const String&);
+    String alinkColor();
+    void setAlinkColor(const String&);
+    String linkColor();
+    void setLinkColor(const String&);
+    String vlinkColor();
+    void setVlinkColor(const String&);
+
+    void clear();
+
+    void captureEvents();
+    void releaseEvents();
 
     virtual bool childAllowed(Node*);
 
-    virtual PassRefPtr<Element> createElement(const String& tagName, ExceptionCode&);
+    virtual PassRefPtr<Element> createElement(const AtomicString& tagName, ExceptionCode&);
 
-    virtual void determineParseMode(const DeprecatedString&);
+    void addNamedItem(const AtomicString& name);
+    void removeNamedItem(const AtomicString& name);
+    bool hasNamedItem(AtomicStringImpl* name);
 
-    void addNamedItem(const String& name);
-    void removeNamedItem(const String& name);
-    bool hasNamedItem(const String& name);
+    void addExtraNamedItem(const AtomicString& name);
+    void removeExtraNamedItem(const AtomicString& name);
+    bool hasExtraNamedItem(AtomicStringImpl* name);
 
-    void addDocExtraNamedItem(const String& name);
-    void removeDocExtraNamedItem(const String& name);
-    bool hasDocExtraNamedItem(const String& name);
-
-    typedef HashMap<StringImpl*, int> NameCountMap;
+    typedef HashMap<AtomicStringImpl*, int> NameCountMap;
 
 protected:
-    HTMLElement* bodyElement;
-    HTMLElement* htmlElement;
+    HTMLDocument(Frame*);
 
 private:
-    NameCountMap namedItemCounts;
-    NameCountMap docExtraNamedItemCounts;
+    virtual bool isHTMLDocument() const { return true; }
+    virtual Tokenizer* createTokenizer();
+    virtual void determineParseMode();
+
+    NameCountMap m_namedItemCounts;
+    NameCountMap m_extraNamedItemCounts;
 };
+
+inline bool HTMLDocument::hasNamedItem(AtomicStringImpl* name)
+{
+    ASSERT(name);
+    return m_namedItemCounts.contains(name);
+}
+
+inline bool HTMLDocument::hasExtraNamedItem(AtomicStringImpl* name)
+{
+    ASSERT(name);
+    return m_extraNamedItemCounts.contains(name);
+}
 
 } // namespace
 

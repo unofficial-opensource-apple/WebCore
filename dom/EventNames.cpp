@@ -15,37 +15,22 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #include "config.h"
-
-#if AVOID_STATIC_CONSTRUCTORS
-#define DOM_EVENT_NAMES_HIDE_GLOBALS 1
-#endif
-
 #include "EventNames.h"
-#include "StaticConstructors.h"
 
-namespace WebCore { namespace EventNames {
+namespace WebCore {
 
-#define DEFINE_EVENT_GLOBAL(name) \
-    DEFINE_GLOBAL(AtomicString, name##Event, #name)
-DOM_EVENT_NAMES_FOR_EACH(DEFINE_EVENT_GLOBAL)
-
-void init()
+#define INITIALIZE_EVENT_NAME(name) \
+    , name##Event(#name)
+EventNames::EventNames()
+    : dummy(0)
+DOM_EVENT_NAMES_FOR_EACH(INITIALIZE_EVENT_NAME)
 {
-    static bool initialized;
-    if (!initialized) {
-        // Use placement new to initialize the globals.
-        
-        AtomicString::init();
-        #define INITIALIZE_GLOBAL(name) new ((void*)&name##Event) AtomicString(#name);
-        DOM_EVENT_NAMES_FOR_EACH(INITIALIZE_GLOBAL)
-        initialized = true;
-    }
 }
 
-} }
+}

@@ -16,8 +16,8 @@
  * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL APPLE COMPUTER, INC. OR
  * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
  * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-                                        * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-                                        * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
@@ -26,47 +26,46 @@
 #ifndef HTMLParserErrorCodes_h
 #define HTMLParserErrorCodes_h
 
-#include "Chrome.h"
+#include "Console.h"
 
 namespace WebCore {
-    
-    enum HTMLParserErrorCode { 
-        MisplacedTablePartError,
-        MisplacedHeadError,
-        MisplacedHeadContentError,
-        RedundantHTMLBodyError,
-        MisplacedAreaError,
-        IgnoredContentError,
-        MisplacedFramesetContentError,
-        MisplacedContentRetryError,
-        MisplacedCaptionContentError,
-        MisplacedTableError,
-        StrayTableContentError,
-        TablePartRequiredError,
-        MalformedBRError,
-        IncorrectXMLSelfCloseError,
-        StrayParagraphCloseError,
-        StrayCloseTagError,
-        ResidualStyleError,
-        FormInsideTablePartError,
-        IncorrectXMLCloseScriptWarning
-    };
-    
-    const char* htmlParserErrorMessageTemplate(HTMLParserErrorCode);
-    const char* htmlParserDocumentWriteMessage();
-    
-    bool isWarning(HTMLParserErrorCode);
-    
-    enum ViewportErrorCode {
-        DeviceWidthShouldBeUsedWarning,
-        DeviceHeightShouldBeUsedWarning,
-        UnrecognizedViewportArgumentError,
-        MaximumScaleTooLargeError
-    };
-    
-    const char* viewportErrorMessageTemplate(ViewportErrorCode);
-    MessageLevel viewportErrorMessageLevel(ViewportErrorCode);
-    
+
+enum HTMLParserErrorCode { 
+    MisplacedTablePartError,
+    MisplacedHeadError,
+    MisplacedHeadContentError,
+    RedundantHTMLBodyError,
+    MisplacedAreaError,
+    IgnoredContentError,
+    MisplacedFramesetContentError,
+    MisplacedContentRetryError,
+    MisplacedCaptionContentError,
+    MisplacedTableError,
+    StrayTableContentError,
+    TablePartRequiredError,
+    MalformedBRError,
+    IncorrectXMLSelfCloseError,
+    StrayParagraphCloseError,
+    StrayCloseTagError,
+    ResidualStyleError,
+    FormInsideTablePartError,
+    IncorrectXMLCloseScriptWarning
+};
+
+const char* htmlParserErrorMessageTemplate(HTMLParserErrorCode);
+const char* htmlParserDocumentWriteMessage();
+
+bool isWarning(HTMLParserErrorCode);
+
+enum ViewportErrorCode {
+    DeviceWidthShouldBeUsedWarning,
+    DeviceHeightShouldBeUsedWarning,
+    UnrecognizedViewportArgumentError,
+    MaximumScaleTooLargeError
+};
+
+const char* viewportErrorMessageTemplate(ViewportErrorCode);
+MessageLevel viewportErrorMessageLevel(ViewportErrorCode);
 }
 
 #endif

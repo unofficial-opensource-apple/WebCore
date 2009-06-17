@@ -1,7 +1,7 @@
 //
 //  WAKView.h
 //
-//  Copyright (C) 2005, 2006, 2007, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, 2008, Apple Inc.  All rights reserved.
 //
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -9,8 +9,11 @@
 #import "WAKResponder.h"
 #import "WKView.h"
 
+#ifndef NSRect
 #define NSRect CGRect
+#endif
 #define NSPoint CGPoint
+#define NSSize CGSize
 
 extern NSString *WAKViewFrameSizeDidChangeNotification;
 extern NSString *WAKViewDidScrollNotification;
@@ -61,6 +64,7 @@ extern NSString *WAKViewDidScrollNotification;
 - (void)displayRect:(NSRect)rect;
 - (void)displayRectIgnoringOpacity:(NSRect)rect;
 - (void)drawRect:(CGRect)rect;
+- (void)viewWillDraw;
 
 - (WAKView *)hitTest:(NSPoint)point;
 - (NSPoint)convertPoint:(NSPoint)point fromView:(WAKView *)aView;
@@ -83,9 +87,11 @@ extern NSString *WAKViewDidScrollNotification;
 - (WAKView *)previousKeyView;
 - (WAKView *)previousValidKeyView;
 
+- (void)invalidateGState;
 - (void)releaseGState;
 
 - (void)setAutoresizingMask:(unsigned int)mask;
+- (unsigned int)autoresizingMask;
 - (BOOL)inLiveResize;
 
 - (BOOL)mouse:(NSPoint)aPoint inRect:(NSRect)aRect;
@@ -96,5 +102,7 @@ extern NSString *WAKViewDidScrollNotification;
 
 - (void)setScale:(float)scale;
 - (float)scale;
+
+- (void)_setDrawsOwnDescendants:(BOOL)draw;
 
 @end

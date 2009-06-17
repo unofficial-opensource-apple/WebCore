@@ -1,10 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2007 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -18,55 +16,31 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
-#ifndef DOM_NodeList_h
-#define DOM_NodeList_h
+#ifndef NodeList_h
+#define NodeList_h
 
-#include "Shared.h"
-#include <wtf/Forward.h>
-#include <wtf/RefPtr.h>
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
-class AtomicString;
-class Node;
+    class AtomicString;
+    class Node;
 
-class NodeList : public Shared<NodeList> {
-public:
-    NodeList(PassRefPtr<Node> rootNode);
-    virtual ~NodeList();
+    class NodeList : public RefCounted<NodeList> {
+    public:
+        virtual ~NodeList() { }
 
-    // DOM methods & attributes for NodeList
-    virtual unsigned length() const = 0;
-    virtual Node* item(unsigned index) const = 0;
-    Node* itemWithName(const AtomicString&) const;
+        // DOM methods & attributes for NodeList
+        virtual unsigned length() const = 0;
+        virtual Node* item(unsigned index) const = 0;
+        virtual Node* itemWithName(const AtomicString&) const = 0;
+    };
 
-    // Other methods (not part of DOM)
-    virtual void rootNodeChildrenChanged();
-    virtual void rootNodeAttributeChanged() {}
+} // namespace WebCore
 
-protected:
-    // helper functions for searching all ElementImpls in a tree
-    unsigned recursiveLength(Node* start = 0) const;
-    Node* recursiveItem (unsigned offset, Node* start = 0) const;
-    virtual bool nodeMatches(Node* testNode) const = 0;
-
-    RefPtr<Node> rootNode;
-    mutable int cachedLength;
-    mutable Node* lastItem;
-    mutable unsigned lastItemOffset;
-    mutable bool isLengthCacheValid : 1;
-    mutable bool isItemCacheValid : 1;
-
- private:
-    Node* itemForwardsFromCurrent(Node* start, unsigned offset, int remainingOffset) const;
-    Node* itemBackwardsFromCurrent(Node* start, unsigned offset, int remainingOffset) const;
-};
-
-} //namespace
-
-#endif
+#endif // NodeList_h

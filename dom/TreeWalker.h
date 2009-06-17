@@ -1,11 +1,9 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  * Copyright (C) 2000 Frederik Holljen (frederik.holljen@hig.no)
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2004 Apple Computer, Inc.
+ * Copyright (C) 2004, 2008 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,40 +17,55 @@
  *
  * You should have received a copy of the GNU Library General Public License
  * along with this library; see the file COPYING.LIB.  If not, write to
- * the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
- * Boston, MA 02111-1307, USA.
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
  *
  */
 
 #ifndef TreeWalker_h
 #define TreeWalker_h
 
+#include "JSDOMBinding.h"
+#include "NodeFilter.h"
 #include "Traversal.h"
-#include <wtf/RefPtr.h>
+#include <wtf/PassRefPtr.h>
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
     typedef int ExceptionCode;
 
-    class TreeWalker : public Traversal {
+    class TreeWalker : public RefCounted<TreeWalker>, public Traversal {
     public:
-        TreeWalker(Node*, unsigned whatToShow, PassRefPtr<NodeFilter>, bool expandEntityReferences);
+        static PassRefPtr<TreeWalker> create(PassRefPtr<Node> rootNode, unsigned whatToShow, PassRefPtr<NodeFilter> filter, bool expandEntityReferences)
+        {
+            return adoptRef(new TreeWalker(rootNode, whatToShow, filter, expandEntityReferences));
+        }                            
 
         Node* currentNode() const { return m_current.get(); }
-        void setCurrentNode(Node*, ExceptionCode&);
+        void setCurrentNode(PassRefPtr<Node>, ExceptionCode&);
 
-        Node* parentNode();
-        Node* firstChild();
-        Node* lastChild();
-        Node* previousSibling();
-        Node* nextSibling();
-        Node* previousNode();
-        Node* nextNode();
+        Node* parentNode(ScriptState*);
+        Node* firstChild(ScriptState*);
+        Node* lastChild(ScriptState*);
+        Node* previousSibling(ScriptState*);
+        Node* nextSibling(ScriptState*);
+        Node* previousNode(ScriptState*);
+        Node* nextNode(ScriptState*);
+
+        // For non-JS bindings. Silently ignores the JavaScript exception if any.
+        Node* parentNode() { return parentNode(scriptStateFromNode(m_current.get())); }
+        Node* firstChild() { return firstChild(scriptStateFromNode(m_current.get())); }
+        Node* lastChild() { return lastChild(scriptStateFromNode(m_current.get())); }
+        Node* previousSibling() { return previousSibling(scriptStateFromNode(m_current.get())); }
+        Node* nextSibling() { return nextSibling(scriptStateFromNode(m_current.get())); }
+        Node* previousNode() { return previousNode(scriptStateFromNode(m_current.get())); }
+        Node* nextNode() { return nextNode(scriptStateFromNode(m_current.get())); }
 
     private:
-        // convenience for when it is known there will be no exception
-        void setCurrentNode(Node*);
-        bool ancestorRejected(const Node*) const;
+        TreeWalker(PassRefPtr<Node>, unsigned whatToShow, PassRefPtr<NodeFilter>, bool expandEntityReferences);
+        
+        Node* setCurrent(PassRefPtr<Node>);
 
         RefPtr<Node> m_current;
     };
