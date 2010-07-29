@@ -1,6 +1,4 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
@@ -21,6 +19,7 @@
  * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "HTMLPlugInElement.h"
 
@@ -30,6 +29,7 @@
 #include "FrameLoader.h"
 #include "FrameTree.h"
 #include "HTMLNames.h"
+#include "MappedAttribute.h"
 #include "Page.h"
 #include "RenderWidget.h"
 #include "ScriptController.h"
@@ -45,8 +45,7 @@ namespace WebCore {
 using namespace HTMLNames;
 
 HTMLPlugInElement::HTMLPlugInElement(const QualifiedName& tagName, Document* doc)
-    // FIXME: Always passing false as createdByParser is odd (see bug22851).
-    : HTMLFrameOwnerElement(tagName, doc, false)
+    : HTMLFrameOwnerElement(tagName, doc)
 #if ENABLE(NETSCAPE_PLUGIN_API)
     , m_NPObject(0)
 #endif
@@ -89,16 +88,6 @@ PassScriptInstance HTMLPlugInElement::getInstance() const
     return m_instance;
 }
 
-String HTMLPlugInElement::align() const
-{
-    return getAttribute(alignAttr);
-}
-
-void HTMLPlugInElement::setAlign(const String& value)
-{
-    setAttribute(alignAttr, value);
-}
-
 String HTMLPlugInElement::height() const
 {
     return getAttribute(heightAttr);
@@ -107,16 +96,6 @@ String HTMLPlugInElement::height() const
 void HTMLPlugInElement::setHeight(const String& value)
 {
     setAttribute(heightAttr, value);
-}
-
-String HTMLPlugInElement::name() const
-{
-    return getAttribute(nameAttr);
-}
-
-void HTMLPlugInElement::setName(const String& value)
-{
-    setAttribute(nameAttr, value);
 }
 
 String HTMLPlugInElement::width() const
@@ -175,9 +154,10 @@ void HTMLPlugInElement::defaultEventHandler(Event* event)
     RenderObject* r = renderer();
     if (!r || !r->isWidget())
         return;
-
-    if (Widget* widget = static_cast<RenderWidget*>(r)->widget())
-        widget->handleEvent(event);
+    Widget* widget = toRenderWidget(r)->widget();
+    if (!widget)
+        return;
+    widget->handleEvent(event);
 }
 
 #if ENABLE(NETSCAPE_PLUGIN_API)

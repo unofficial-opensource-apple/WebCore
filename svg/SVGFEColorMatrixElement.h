@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2006 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -23,7 +21,7 @@
 #ifndef SVGFEColorMatrixElement_h
 #define SVGFEColorMatrixElement_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "FEColorMatrix.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 #include "SVGNumberList.h"
@@ -36,15 +34,13 @@ namespace WebCore {
         virtual ~SVGFEColorMatrixElement();
 
         virtual void parseMappedAttribute(MappedAttribute*);
-        virtual SVGFilterEffect* filterEffect(SVGResourceFilter*) const;
-        bool build(FilterBuilder*);
+        virtual void synchronizeProperty(const QualifiedName&);
+        virtual bool build(SVGResourceFilter*);
 
     private:
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEColorMatrixElement, SVGNames::feColorMatrixTagString, SVGNames::inAttrString, String, In1, in1)
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEColorMatrixElement, SVGNames::feColorMatrixTagString, SVGNames::typeAttrString, int, Type, type)
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEColorMatrixElement, SVGNames::feColorMatrixTagString, SVGNames::valuesAttrString, SVGNumberList, Values, values)
-
-        mutable RefPtr<FEColorMatrix> m_filterEffect;
+        DECLARE_ANIMATED_PROPERTY(SVGFEColorMatrixElement, SVGNames::inAttr, String, In1, in1)
+        DECLARE_ANIMATED_PROPERTY(SVGFEColorMatrixElement, SVGNames::typeAttr, int, Type, type)
+        DECLARE_ANIMATED_PROPERTY(SVGFEColorMatrixElement, SVGNames::valuesAttr, SVGNumberList*, Values, values)
     };
 
 } // namespace WebCore

@@ -1,6 +1,4 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
@@ -33,16 +31,12 @@
 #include "RenderTableCell.h"
 #include "RenderView.h"
 
-#if ENABLE(WML)
-#include "WMLNames.h"
-#endif
-
 namespace WebCore {
 
 using namespace HTMLNames;
 
 RenderTableRow::RenderTableRow(Node* node)
-    : RenderContainer(node)
+    : RenderBox(node)
 {
     // init RenderObject attributes
     setInline(false);   // our object is not Inline
@@ -52,7 +46,7 @@ void RenderTableRow::destroy()
 {
     RenderTableSection* recalcSection = section();
     
-    RenderContainer::destroy();
+    RenderBox::destroy();
     
     if (recalcSection)
         recalcSection->setNeedsCellRecalc();
@@ -65,7 +59,7 @@ void RenderTableRow::styleWillChange(StyleDifference diff, const RenderStyle* ne
 
     ASSERT(newStyle->display() == TABLE_ROW);
 
-    RenderContainer::styleWillChange(diff, newStyle);
+    RenderBox::styleWillChange(diff, newStyle);
 }
 
 void RenderTableRow::addChild(RenderObject* child, RenderObject* beforeChild)
@@ -74,19 +68,7 @@ void RenderTableRow::addChild(RenderObject* child, RenderObject* beforeChild)
     if (!beforeChild && isAfterContent(lastChild()))
         beforeChild = lastChild();
 
-    bool isTableRow = element() && element()->hasTagName(trTag);
-
-#if ENABLE(WML)
-    if (!isTableRow && element() && element()->isWMLElement())
-        isTableRow = element()->hasTagName(WMLNames::trTag);
-#endif
-
     if (!child->isTableCell()) {
-        if (isTableRow && child->element() && child->element()->hasTagName(formTag) && document()->isHTMLDocument()) {
-            RenderContainer::addChild(child, beforeChild);
-            return;
-        }
-
         RenderObject* last = beforeChild;
         if (!last)
             last = lastChild();
@@ -115,14 +97,14 @@ void RenderTableRow::addChild(RenderObject* child, RenderObject* beforeChild)
     while (beforeChild && beforeChild->parent() != this)
         beforeChild = beforeChild->parent();
 
-    RenderTableCell* cell = static_cast<RenderTableCell*>(child);
+    RenderTableCell* cell = toRenderTableCell(child);
 
     // Generated content can result in us having a null section so make sure to null check our parent.
     if (parent())
         section()->addCell(cell, this);
 
-    ASSERT(!beforeChild || beforeChild->isTableCell() || isTableRow && beforeChild->element() && beforeChild->element()->hasTagName(formTag) && document()->isHTMLDocument());
-    RenderContainer::addChild(cell, beforeChild);
+    ASSERT(!beforeChild || beforeChild->isTableCell());
+    RenderBox::addChild(cell, beforeChild);
 
     if (beforeChild || nextSibling())
         section()->setNeedsCellRecalc();
@@ -137,7 +119,7 @@ void RenderTableRow::layout()
 
     for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
         if (child->isTableCell()) {
-            RenderTableCell* cell = static_cast<RenderTableCell*>(child);
+            RenderTableCell* cell = toRenderTableCell(child);
             if (child->needsLayout()) {
                 cell->calcVerticalMargins();
                 cell->layout();
@@ -161,8 +143,13 @@ void RenderTableRow::layout()
     setNeedsLayout(false);
 }
 
-IntRect RenderTableRow::clippedOverflowRectForRepaint(RenderBox* repaintContainer)
+IntRect RenderTableRow::clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer)
 {
+    ASSERT(parent());
+
+    if (repaintContainer == this)
+        return RenderBox::clippedOverflowRectForRepaint(repaintContainer);
+
     // For now, just repaint the whole table.
     // FIXME: Find a better way to do this, e.g., need to repaint all the cells that we
     // might have propagated a background color into.
@@ -201,7 +188,7 @@ void RenderTableRow::paint(PaintInfo& paintInfo, int tx, int ty)
         if (child->isTableCell()) {
             // Paint the row background behind the cell.
             if (paintInfo.phase == PaintPhaseBlockBackground || paintInfo.phase == PaintPhaseChildBlockBackground) {
-                RenderTableCell* cell = static_cast<RenderTableCell*>(child);
+                RenderTableCell* cell = toRenderTableCell(child);
                 cell->paintBackgroundsBehindCell(paintInfo, tx, ty, this);
             }
             if (!toRenderBox(child)->hasSelfPaintingLayer())

@@ -24,7 +24,6 @@
 #include "config.h"
 #include "Font.h"
 
-#include "CharacterNames.h"
 #include "FloatRect.h"
 #include "FontCache.h"
 #include "FontFallbackList.h"
@@ -59,9 +58,7 @@ Font::CodePath Font::s_codePath = Auto;
 // ============================================================================================
 
 Font::Font()
-    : m_pageZero(0)
-    , m_cachedPrimaryFont(0)
-    , m_letterSpacing(0)
+    : m_letterSpacing(0)
     , m_wordSpacing(0)
     , m_isPlatformFont(false)
 {
@@ -69,8 +66,6 @@ Font::Font()
 
 Font::Font(const FontDescription& fd, float letterSpacing, float wordSpacing) 
     : m_fontDescription(fd)
-    , m_pageZero(0)
-    , m_cachedPrimaryFont(0)
     , m_letterSpacing(letterSpacing)
     , m_wordSpacing(wordSpacing)
     , m_isPlatformFont(false)
@@ -79,8 +74,6 @@ Font::Font(const FontDescription& fd, float letterSpacing, float wordSpacing)
 
 Font::Font(const FontPlatformData& fontData, bool isPrinterFont)
     : m_fontList(FontFallbackList::create())
-    , m_pageZero(0)
-    , m_cachedPrimaryFont(0)
     , m_letterSpacing(0)
     , m_wordSpacing(0)
     , m_isPlatformFont(true)
@@ -96,9 +89,6 @@ Font::Font(const FontPlatformData& fontData, bool isPrinterFont)
 Font::Font(const Font& other)
     : m_fontDescription(other.m_fontDescription)
     , m_fontList(other.m_fontList)
-    , m_pages(other.m_pages)
-    , m_pageZero(other.m_pageZero)
-    , m_cachedPrimaryFont(other.m_cachedPrimaryFont)
     , m_letterSpacing(other.m_letterSpacing)
     , m_wordSpacing(other.m_wordSpacing)
     , m_isPlatformFont(other.m_isPlatformFont)
@@ -109,9 +99,6 @@ Font& Font::operator=(const Font& other)
 {
     m_fontDescription = other.m_fontDescription;
     m_fontList = other.m_fontList;
-    m_pages = other.m_pages;
-    m_pageZero = other.m_pageZero;
-    m_cachedPrimaryFont = other.m_cachedPrimaryFont;
     m_letterSpacing = other.m_letterSpacing;
     m_wordSpacing = other.m_wordSpacing;
     m_isPlatformFont = other.m_isPlatformFont;
@@ -140,11 +127,10 @@ bool Font::operator==(const Font& other) const
            && (m_fontList ? m_fontList->generation() : 0) == (other.m_fontList ? other.m_fontList->generation() : 0);
 }
 
-void Font::cachePrimaryFont() const
+const SimpleFontData* Font::primaryFont() const
 {
     ASSERT(m_fontList);
-    ASSERT(!m_cachedPrimaryFont);
-    m_cachedPrimaryFont = m_fontList->primaryFont(this)->fontDataForCharacter(' ');
+    return m_fontList->primarySimpleFontData(this);
 }
 
 const FontData* Font::fontDataAt(unsigned index) const
@@ -169,9 +155,6 @@ void Font::update(PassRefPtr<FontSelector> fontSelector) const
     if (!m_fontList)
         m_fontList = FontFallbackList::create();
     m_fontList->invalidate(fontSelector);
-    m_cachedPrimaryFont = 0;
-    m_pageZero = 0;
-    m_pages.clear();
 }
 
 bool Font::isFixedPitch() const
@@ -196,14 +179,14 @@ float Font::drawText(GraphicsContext* context, const TextRun& run, const FloatPo
 #endif
 
 #if USE(FONT_FAST_PATH)
-    if (canUseGlyphCache(run))
+    if (codePath(run) != Complex)
         return drawSimpleText(context, run, point, from, to);
 #endif
 
     return drawComplexText(context, run, point, from, to);
 }
 
-float Font::floatWidth(const TextRun& run) const
+float Font::floatWidth(const TextRun& run, HashSet<const SimpleFontData*>* fallbackFonts, GlyphOverflow* glyphOverflow) const
 {
 #if ENABLE(SVG_FONTS)
     if (primaryFont()->isSVGFont())
@@ -211,11 +194,16 @@ float Font::floatWidth(const TextRun& run) const
 #endif
 
 #if USE(FONT_FAST_PATH)
-    if (canUseGlyphCache(run))
-        return floatWidthForSimpleText(run, 0);
+    CodePath codePathToUse = codePath(run);
+    if (codePathToUse != Complex) {
+        // If the complex text implementation cannot return fallback fonts, avoid
+        // returning them for simple text as well.
+        static bool returnFallbackFonts = canReturnFallbackFontsForComplexText();
+        return floatWidthForSimpleText(run, 0, returnFallbackFonts ? fallbackFonts : 0, codePathToUse == SimpleWithGlyphOverflow ? glyphOverflow : 0);
+    }
 #endif
 
-    return floatWidthForComplexText(run);
+    return floatWidthForComplexText(run, fallbackFonts, glyphOverflow);
 }
 
 float Font::floatWidth(const TextRun& run, int extraCharsAvailable, int& charsConsumed, String& glyphName) const
@@ -231,7 +219,7 @@ float Font::floatWidth(const TextRun& run, int extraCharsAvailable, int& charsCo
     glyphName = "";
 
 #if USE(FONT_FAST_PATH)
-    if (canUseGlyphCache(run))
+    if (codePath(run) != Complex)
         return floatWidthForSimpleText(run, 0);
 #endif
 
@@ -248,7 +236,7 @@ FloatRect Font::selectionRectForText(const TextRun& run, const IntPoint& point, 
     to = (to == -1 ? run.length() : to);
 
 #if USE(FONT_FAST_PATH)
-    if (canUseGlyphCache(run))
+    if (codePath(run) != Complex)
         return selectionRectForSimpleText(run, point, h, from, to);
 #endif
 
@@ -263,7 +251,7 @@ int Font::offsetForPosition(const TextRun& run, int x, bool includePartialGlyphs
 #endif
 
 #if USE(FONT_FAST_PATH)
-    if (canUseGlyphCache(run))
+    if (codePath(run) != Complex)
         return offsetForPositionForSimpleText(run, x, includePartialGlyphs);
 #endif
 
@@ -280,6 +268,59 @@ bool Font::isSVGFont() const
 FontSelector* Font::fontSelector() const
 {
     return m_fontList ? m_fontList->fontSelector() : 0;
+}
+
+String Font::normalizeSpaces(const String& string)
+{
+    unsigned length = string.length();
+    Vector<UChar, 256> buffer(length);
+    bool didReplacement = false;
+
+    for (unsigned i = 0; i < length; ++i) {
+        UChar originalCharacter = string[i];
+        buffer[i] = normalizeSpaces(originalCharacter);
+        if (buffer[i] != originalCharacter)
+            didReplacement = true;
+    }
+
+    return didReplacement ? String(buffer.data(), length) : string;
+}
+
+static bool shouldUseFontSmoothing = true;
+
+void Font::setShouldUseSmoothing(bool shouldUseSmoothing)
+{
+    ASSERT(isMainThread() || pthread_main_np());
+    shouldUseFontSmoothing = shouldUseSmoothing;
+}
+
+bool Font::shouldUseSmoothing()
+{
+    return shouldUseFontSmoothing;
+}
+
+static CGFontSmoothingStyle fontSmoothingStyle = kCGFontSmoothingStyleMedium;
+
+void Font::setSmoothingStyle(CGFontSmoothingStyle newStyle)
+{
+    fontSmoothingStyle = newStyle;
+}
+
+CGFontSmoothingStyle Font::smoothingStyle()
+{
+    return fontSmoothingStyle;
+}
+
+static CGFontAntialiasingStyle fontAntialiasingStyle = kCGFontAntialiasingStyleUnfiltered;
+
+void Font::setAntialiasingStyle(CGFontAntialiasingStyle newStyle)
+{
+    fontAntialiasingStyle = newStyle;
+}
+
+CGFontAntialiasingStyle Font::antialiasingStyle()
+{
+    return fontAntialiasingStyle;
 }
 
 }

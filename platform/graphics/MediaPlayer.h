@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,8 +37,25 @@
 #include <wtf/HashSet.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/PassOwnPtr.h>
+
+#ifdef __OBJC__
+@class QTMovie;
+#else
+class QTMovie;
+#endif
 
 namespace WebCore {
+
+// Structure that will hold every native
+// types supported by the current media player.
+// We have to do that has multiple media players
+// backend can live at runtime.
+typedef struct PlatformMedia {
+    QTMovie* qtMovie;
+} PlatformMedia;
+
+static const PlatformMedia NoPlatformMedia = { 0 };
 
 class ContentType;
 class FrameView;
@@ -48,6 +65,11 @@ class IntSize;
 class MediaPlayer;
 class MediaPlayerPrivateInterface;
 class String;
+class TimeRanges;
+
+#if USE(ACCELERATED_COMPOSITING)
+class GraphicsLayer;
+#endif
 
 class MediaPlayerClient {
 public:
@@ -65,22 +87,40 @@ public:
     // time has jumped, eg. not as a result of normal playback
     virtual void mediaPlayerTimeChanged(MediaPlayer*) { }
     
-    // a new frame of video is available
-    virtual void mediaPlayerRepaint(MediaPlayer*) { }
-
     // the media file duration has changed, or is now known
     virtual void mediaPlayerDurationChanged(MediaPlayer*) { }
     
     // the playback rate has changed
     virtual void mediaPlayerRateChanged(MediaPlayer*) { }
 
+    // The MediaPlayer has found potentially problematic media content.
+    // This is used internally to trigger swapping from a <video>
+    // element to an <embed> in standalone documents
+    virtual void mediaPlayerSawUnsupportedTracks(MediaPlayer*) { }
+
+// Presentation-related methods
+    // a new frame of video is available
+    virtual void mediaPlayerRepaint(MediaPlayer*) { }
+
     // the movie size has changed
     virtual void mediaPlayerSizeChanged(MediaPlayer*) { }
+
+#if USE(ACCELERATED_COMPOSITING)
+    // whether the rendering system can accelerate the display of this MediaPlayer.
+    virtual bool mediaPlayerRenderingCanBeAccelerated(MediaPlayer*) { return false; }
+
+    // return the GraphicsLayer that will host the presentation for this MediaPlayer.
+    virtual GraphicsLayer* mediaPlayerGraphicsLayer(MediaPlayer*) { return 0; }
+#endif
 };
 
-class MediaPlayer : Noncopyable {
+class MediaPlayer : public Noncopyable {
 public:
-    MediaPlayer(MediaPlayerClient*);
+
+    static PassOwnPtr<MediaPlayer> create(MediaPlayerClient* client)
+    {
+        return new MediaPlayer(client);
+    }
     virtual ~MediaPlayer();
 
     // media engine support
@@ -89,8 +129,13 @@ public:
     static void getSupportedTypes(HashSet<String>&);
     static bool isAvailable();
 
+    bool supportsFullscreen() const;
+    bool supportsSave() const;
+    PlatformMedia platformMedia() const;
+
     IntSize naturalSize();
-    bool hasVideo();
+    bool hasVideo() const;
+    bool hasAudio() const;
     
     void setFrameView(FrameView* frameView) { m_frameView = frameView; }
     FrameView* frameView() { return m_frameView; }
@@ -105,6 +150,7 @@ public:
     bool visible() const;
     void setVisible(bool);
     
+    void prepareToPlay();
     void play();
     void pause();    
     
@@ -114,28 +160,31 @@ public:
     float duration() const;
     float currentTime() const;
     void seek(float time);
-    
-    void setEndTime(float time);
+
+    float startTime() const;
     
     float rate() const;
     void setRate(float);
+
+    bool preservesPitch() const;    
+    void setPreservesPitch(bool);
     
-    float maxTimeBuffered();
+    PassRefPtr<TimeRanges> buffered();
     float maxTimeSeekable();
 
     unsigned bytesLoaded();
-    bool totalBytesKnown();
-    unsigned totalBytes();
     
     float volume() const;
     void setVolume(float);
-    
-    int dataRate() const;
+
+    bool hasClosedCaptions() const;
+    void setClosedCaptionsVisible(bool closedCaptionsVisible);
 
     bool autobuffer() const;    
     void setAutobuffer(bool);
 
     void paint(GraphicsContext*, const IntRect&);
+    void paintCurrentFrameInContext(GraphicsContext*, const IntRect&);
     
     enum NetworkState { Empty, Idle, Loading, Loaded, FormatError, NetworkError, DecodeError };
     NetworkState networkState();
@@ -143,6 +192,9 @@ public:
     enum ReadyState  { HaveNothing, HaveMetadata, HaveCurrentData, HaveFutureData, HaveEnoughData };
     ReadyState readyState();
     
+    enum MovieLoadType { Unknown, Download, StoredStream, LiveStream };
+    MovieLoadType movieLoadType() const;
+
     void networkStateChanged();
     void readyStateChanged();
     void volumeChanged();
@@ -155,13 +207,31 @@ public:
 
     MediaPlayerClient* mediaPlayerClient() const { return m_mediaPlayerClient; }
 
+    bool hasAvailableVideoFrame() const;
+
+    bool canLoadPoster() const;
+    void setPoster(const String&);
+
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
-    void setPoster(const String& url);
     void deliverNotification(MediaPlayerProxyNotificationType notification);
     void setMediaPlayerProxy(WebMediaPlayerProxy* proxy);
+    void setControls(bool);
+    void enterFullScreen();
+    void exitFullScreen();
 #endif
 
+#if USE(ACCELERATED_COMPOSITING)
+    // whether accelerated rendering is supported by the media engine for the current media.
+    bool supportsAcceleratedRendering() const;
+    // called when the rendering system flips the into or out of accelerated rendering mode.
+    void acceleratedRenderingStateChanged();
+#endif
+
+    bool hasSingleSecurityOrigin() const;
+
 private:
+    MediaPlayer(MediaPlayerClient*);
+
     static void initializeMediaEngines();
 
     MediaPlayerClient* m_mediaPlayerClient;
@@ -172,6 +242,7 @@ private:
     bool m_visible;
     float m_rate;
     float m_volume;
+    bool m_preservesPitch;
     bool m_autobuffer;
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
     WebMediaPlayerProxy* m_playerProxy;    // not owned or used, passed to m_private

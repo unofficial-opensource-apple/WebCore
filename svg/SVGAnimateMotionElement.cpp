@@ -22,9 +22,11 @@
 */
 
 #include "config.h"
+
 #if ENABLE(SVG) && ENABLE(SVG_ANIMATION)
 #include "SVGAnimateMotionElement.h"
 
+#include "MappedAttribute.h"
 #include "RenderObject.h"
 #include "SVGElementInstance.h"
 #include "SVGMPathElement.h"
@@ -213,9 +215,9 @@ void SVGAnimateMotionElement::applyResultsToTarget()
         targetElement->renderer()->setNeedsLayout(true);
     
     // ...except in case where we have additional instances in <use> trees.
-    HashSet<SVGElementInstance*> instances = targetElement->instancesForElement();
-    HashSet<SVGElementInstance*>::iterator end = instances.end();
-    for (HashSet<SVGElementInstance*>::iterator it = instances.begin(); it != end; ++it) {
+    const HashSet<SVGElementInstance*>& instances = targetElement->instancesForElement();
+    const HashSet<SVGElementInstance*>::const_iterator end = instances.end();
+    for (HashSet<SVGElementInstance*>::const_iterator it = instances.begin(); it != end; ++it) {
         SVGElement* shadowTreeElement = (*it)->shadowTreeElement();
         ASSERT(shadowTreeElement);
         TransformationMatrix* transform = shadowTreeElement->supplementalTransform();

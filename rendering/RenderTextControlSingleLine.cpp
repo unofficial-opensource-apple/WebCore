@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2010 Apple Inc. All rights reserved.
  *           (C) 2008 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/) 
  *
  * This library is free software; you can redistribute it and/or
@@ -39,6 +39,7 @@
 #include "SearchPopupMenu.h"
 #include "SelectionController.h"
 #include "Settings.h"
+#include "SimpleFontData.h"
 #include "TextControlInnerElements.h"
 
 using namespace std;
@@ -47,9 +48,8 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-RenderTextControlSingleLine::RenderTextControlSingleLine(Node* node)
-    : RenderTextControl(node)
-    , m_placeholderVisible(false)
+RenderTextControlSingleLine::RenderTextControlSingleLine(Node* node, bool placeholderVisible)
+    : RenderTextControl(node, placeholderVisible)
     , m_searchPopupIsVisible(false)
     , m_shouldDrawCapsLockIndicator(false)
     , m_searchEventTimer(this, &RenderTextControlSingleLine::searchEventTimerFired)
@@ -68,25 +68,9 @@ RenderTextControlSingleLine::~RenderTextControlSingleLine()
         m_innerBlock->detach();
 }
 
-bool RenderTextControlSingleLine::placeholderShouldBeVisible() const
+RenderStyle* RenderTextControlSingleLine::textBaseStyle() const
 {
-    return inputElement()->placeholderShouldBeVisible();
-}
-
-void RenderTextControlSingleLine::updatePlaceholderVisibility()
-{
-    RenderStyle* parentStyle = m_innerBlock ? m_innerBlock->renderer()->style() : style();
-
-    RefPtr<RenderStyle> textBlockStyle = createInnerTextStyle(parentStyle);
-    HTMLElement* innerText = innerTextElement();
-    innerText->renderer()->setStyle(textBlockStyle);
-
-    for (Node* n = innerText->firstChild(); n; n = n->traverseNextNode(innerText)) {
-        if (RenderObject* renderer = n->renderer())
-            renderer->setStyle(textBlockStyle);
-    }
-
-    updateFromElement();
+    return m_innerBlock ? m_innerBlock->renderer()->style() : style();
 }
 
 void RenderTextControlSingleLine::addSearchResult()
@@ -162,17 +146,19 @@ void RenderTextControlSingleLine::hidePopup()
     ASSERT(node()->isHTMLElement());
     if (m_searchPopup)
         m_searchPopup->hide();
-
-    m_searchPopupIsVisible = false;
 }
 
 void RenderTextControlSingleLine::subtreeHasChanged()
 {
-    bool wasEdited = isEdited();
+    bool wasChanged = wasChangedSinceLastChangeEvent();
     RenderTextControl::subtreeHasChanged();
 
     InputElement* input = inputElement();
-    input->setValueFromRenderer(input->constrainValue(text()));
+    // We don't need to call sanitizeUserInputValue() function here because
+    // InputElement::handleBeforeTextInsertedEvent() has already called
+    // sanitizeUserInputValue().
+    // sanitizeValue() is needed because IME input doesn't dispatch BeforeTextInsertedEvent.
+    input->setValueFromRenderer(input->sanitizeValue(text()));
 
     if (m_cancelButton)
         updateCancelButtonVisibility();
@@ -181,7 +167,7 @@ void RenderTextControlSingleLine::subtreeHasChanged()
     if (input->searchEventsShouldBeDispatched())
         startSearchEventTimer();
 
-    if (!wasEdited && node()->focused()) {
+    if (!wasChanged && node()->focused()) {
         if (Frame* frame = document()->frame())
             frame->textFieldDidBeginEditing(static_cast<Element*>(node()));
     }
@@ -198,6 +184,9 @@ void RenderTextControlSingleLine::paint(PaintInfo& paintInfo, int tx, int ty)
 
     if (paintInfo.phase == PaintPhaseBlockBackground && m_shouldDrawCapsLockIndicator) {
         IntRect contentsRect = contentBoxRect();
+
+        // Center vertically like the text.
+        contentsRect.setY((height() - contentsRect.height()) / 2);
 
         // Convert the rect into the coords used for painting the content
         contentsRect.move(tx + x(), ty + y());
@@ -222,17 +211,12 @@ void RenderTextControlSingleLine::layout()
     int desiredHeight = textBlockHeight();
     int currentHeight = innerTextRenderer->height();
 
-    if (m_innerBlock || currentHeight > height()) {
+    if (currentHeight > height()) {
         if (desiredHeight != currentHeight)
             relayoutChildren = true;
         innerTextRenderer->style()->setHeight(Length(desiredHeight, Fixed));
-    }
-
-    if (m_innerBlock) {
-        ASSERT(innerBlockRenderer);
-        if (desiredHeight != innerBlockRenderer->height())
-            relayoutChildren = true;
-        innerBlockRenderer->style()->setHeight(Length(desiredHeight, Fixed));
+        if (m_innerBlock)
+            innerBlockRenderer->style()->setHeight(Length(desiredHeight, Fixed));
     }
 
     // Set the text block width
@@ -250,13 +234,11 @@ void RenderTextControlSingleLine::layout()
 
     RenderBlock::layoutBlock(relayoutChildren);
 
-    // For text fields, center the inner text vertically
-    // Don't do this for search fields, since we don't honor height for them
-    if (!m_innerBlock) {
-        currentHeight = innerTextRenderer->height();
-        if (currentHeight < height())
-            innerTextRenderer->setLocation(innerTextRenderer->x(), (height() - currentHeight) / 2);
-    }
+    // Center the child block vertically
+    RenderBox* childBlock = innerBlockRenderer ? innerBlockRenderer : innerTextRenderer;
+    currentHeight = childBlock->height();
+    if (currentHeight < height())
+        childBlock->setLocation(childBlock->x(), (height() - currentHeight) / 2);
 }
 
 bool RenderTextControlSingleLine::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, int xPos, int yPos, int tx, int ty, HitTestAction hitTestAction)
@@ -273,7 +255,7 @@ bool RenderTextControlSingleLine::nodeAtPoint(const HitTestRequest& request, Hit
     // If we hit a node inside the inner text element, say that we hit that element,
     // and if we hit our node (e.g. we're over the border or padding), also say that we hit the
     // inner text element so that it gains focus.
-    if (result.innerNode()->isDescendantOf(innerTextElement()) || result.innerNode() == element())
+    if (result.innerNode()->isDescendantOf(innerTextElement()) || result.innerNode() == node())
         hitInnerTextElement(result, xPos, yPos, tx, ty);
 
     // If we're not a search field, or we already found the results or cancel buttons, we're done.
@@ -325,7 +307,7 @@ void RenderTextControlSingleLine::forwardEvent(Event* event)
         return;
     }
 
-    FloatPoint localPoint = innerTextRenderer->absoluteToLocal(FloatPoint(static_cast<MouseEvent*>(event)->pageX(), static_cast<MouseEvent*>(event)->pageY()), false, true);
+    FloatPoint localPoint = innerTextRenderer->absoluteToLocal(static_cast<MouseEvent*>(event)->absoluteLocation(), false, true);
     if (m_resultsButton && localPoint.x() < innerTextRenderer->borderBoxRect().x())
         m_resultsButton->defaultEventHandler(event);
     else if (m_cancelButton && localPoint.x() > innerTextRenderer->borderBoxRect().right())
@@ -351,6 +333,8 @@ void RenderTextControlSingleLine::styleDidChange(StyleDifference diff, const Ren
 
     if (RenderObject* cancelRenderer = m_cancelButton ? m_cancelButton->renderer() : 0)
         cancelRenderer->setStyle(createCancelButtonStyle(style()));
+
+    setHasOverflowClip(false);
 }
 
 void RenderTextControlSingleLine::capsLockStateMayHaveChanged()
@@ -377,6 +361,18 @@ void RenderTextControlSingleLine::capsLockStateMayHaveChanged()
     }
 }
 
+IntRect RenderTextControlSingleLine::controlClipRect(int tx, int ty) const
+{
+    // This should only get called for search inputs, which have an innerBlock.
+    ASSERT(hasControlClip());
+    ASSERT(m_innerBlock);
+
+    RenderBox* renderBox = m_innerBlock->renderBox();
+    IntRect clipRect = IntRect(renderBox->x(), renderBox->y(), contentWidth(), contentHeight());        
+    clipRect.move(tx, ty);
+    return clipRect;
+}
+
 int RenderTextControlSingleLine::textBlockWidth() const
 {
     int width = RenderTextControl::textBlockWidth();
@@ -393,6 +389,12 @@ int RenderTextControlSingleLine::textBlockWidth() const
 
     return width;
 }
+    
+float RenderTextControlSingleLine::getAvgCharWidth(AtomicString family)
+{
+
+    return RenderTextControl::getAvgCharWidth(family);
+}
 
 int RenderTextControlSingleLine::preferredContentWidth(float charWidth) const
 {
@@ -401,6 +403,13 @@ int RenderTextControlSingleLine::preferredContentWidth(float charWidth) const
         factor = 20;
 
     int result = static_cast<int>(ceilf(charWidth * factor));
+
+    float maxCharWidth = 0.f;
+
+
+    // For text inputs, IE adds some extra width.
+    if (maxCharWidth > 0.f)
+        result += maxCharWidth - charWidth;
 
     if (RenderBox* resultsRenderer = m_resultsButton ? m_resultsButton->renderBox() : 0)
         result += resultsRenderer->borderLeft() + resultsRenderer->borderRight() +
@@ -416,7 +425,7 @@ int RenderTextControlSingleLine::preferredContentWidth(float charWidth) const
 void RenderTextControlSingleLine::adjustControlHeightBasedOnLineHeight(int lineHeight)
 {
     if (RenderBox* resultsRenderer = m_resultsButton ? m_resultsButton->renderBox() : 0) {
-        static_cast<RenderBlock*>(resultsRenderer)->calcHeight();
+        toRenderBlock(resultsRenderer)->calcHeight();
         setHeight(max(height(),
                   resultsRenderer->borderTop() + resultsRenderer->borderBottom() +
                   resultsRenderer->paddingTop() + resultsRenderer->paddingBottom() +
@@ -425,7 +434,7 @@ void RenderTextControlSingleLine::adjustControlHeightBasedOnLineHeight(int lineH
     }
 
     if (RenderBox* cancelRenderer = m_cancelButton ? m_cancelButton->renderBox() : 0) {
-        static_cast<RenderBlock*>(cancelRenderer)->calcHeight();
+        toRenderBlock(cancelRenderer)->calcHeight();
         setHeight(max(height(),
                   cancelRenderer->borderTop() + cancelRenderer->borderBottom() +
                   cancelRenderer->paddingTop() + cancelRenderer->paddingBottom() +
@@ -470,18 +479,19 @@ void RenderTextControlSingleLine::updateFromElement()
     createSubtreeIfNeeded();
     RenderTextControl::updateFromElement();
 
-    bool placeholderVisibilityShouldChange = m_placeholderVisible != placeholderShouldBeVisible();
-    m_placeholderVisible = placeholderShouldBeVisible();
-
     if (m_cancelButton)
         updateCancelButtonVisibility();
 
     if (m_placeholderVisible) {
         ExceptionCode ec = 0;
-        innerTextElement()->setInnerText(inputElement()->placeholderValue(), ec);
+        innerTextElement()->setInnerText(static_cast<Element*>(node())->getAttribute(placeholderAttr), ec);
         ASSERT(!ec);
-    } else if (!formControlElement()->valueMatchesRenderer() || placeholderVisibilityShouldChange)
-        setInnerTextValue(inputElement()->value());
+    } else {
+        if (!inputElement()->suggestedValue().isNull())
+            setInnerTextValue(inputElement()->suggestedValue());
+        else
+            setInnerTextValue(inputElement()->value());
+    }
 
     if (m_searchPopupIsVisible)
         m_searchPopup->updateFromElement();
@@ -495,10 +505,11 @@ void RenderTextControlSingleLine::cacheSelection(int start, int end)
 PassRefPtr<RenderStyle> RenderTextControlSingleLine::createInnerTextStyle(const RenderStyle* startStyle) const
 {
     RefPtr<RenderStyle> textBlockStyle;
-    if (placeholderShouldBeVisible()) {
-        RenderStyle* pseudoStyle = getCachedPseudoStyle(RenderStyle::INPUT_PLACEHOLDER);
-        textBlockStyle = RenderStyle::clone(pseudoStyle);
-    } else {
+    if (m_placeholderVisible) {
+        if (RenderStyle* pseudoStyle = getCachedPseudoStyle(INPUT_PLACEHOLDER))
+            textBlockStyle = RenderStyle::clone(pseudoStyle);
+    } 
+    if (!textBlockStyle) {
         textBlockStyle = RenderStyle::create();   
         textBlockStyle->inheritFrom(startStyle);
     }
@@ -524,7 +535,7 @@ PassRefPtr<RenderStyle> RenderTextControlSingleLine::createInnerTextStyle(const 
     // After this, updateFromElement will immediately update the text displayed.
     // When the placeholder is no longer visible, updatePlaceholderVisiblity will reset the style, 
     // and the text security mode will be set back to the computed value correctly.
-    if (placeholderShouldBeVisible())
+    if (m_placeholderVisible)
         textBlockStyle->setTextSecurity(TSNONE);
 
     return textBlockStyle.release();
@@ -553,11 +564,11 @@ PassRefPtr<RenderStyle> RenderTextControlSingleLine::createResultsButtonStyle(co
 
     RefPtr<RenderStyle> resultsBlockStyle;
     if (input->maxResults() < 0)
-        resultsBlockStyle = getCachedPseudoStyle(RenderStyle::SEARCH_DECORATION);
+        resultsBlockStyle = getCachedPseudoStyle(SEARCH_DECORATION);
     else if (!input->maxResults())
-        resultsBlockStyle = getCachedPseudoStyle(RenderStyle::SEARCH_RESULTS_DECORATION);
+        resultsBlockStyle = getCachedPseudoStyle(SEARCH_RESULTS_DECORATION);
     else
-        resultsBlockStyle = getCachedPseudoStyle(RenderStyle::SEARCH_RESULTS_BUTTON);
+        resultsBlockStyle = getCachedPseudoStyle(SEARCH_RESULTS_BUTTON);
 
     if (!resultsBlockStyle)
         resultsBlockStyle = RenderStyle::create();
@@ -573,7 +584,7 @@ PassRefPtr<RenderStyle> RenderTextControlSingleLine::createCancelButtonStyle(con
     ASSERT(node()->isHTMLElement());
     RefPtr<RenderStyle> cancelBlockStyle;
     
-    if (RefPtr<RenderStyle> pseudoStyle = getCachedPseudoStyle(RenderStyle::SEARCH_CANCEL_BUTTON))
+    if (RefPtr<RenderStyle> pseudoStyle = getCachedPseudoStyle(SEARCH_CANCEL_BUTTON))
         // We may be sharing style with another search field, but we must not share the cancel button style.
         cancelBlockStyle = RenderStyle::clone(pseudoStyle.get());
     else
@@ -681,7 +692,7 @@ PopupMenuStyle RenderTextControlSingleLine::itemStyle(unsigned) const
 
 PopupMenuStyle RenderTextControlSingleLine::menuStyle() const
 {
-    return PopupMenuStyle(style()->color(), style()->backgroundColor(), style()->font(), style()->visibility() == VISIBLE);
+    return PopupMenuStyle(style()->color(), style()->backgroundColor(), style()->font(), style()->visibility() == VISIBLE, style()->textIndent(), style()->direction());
 }
 
 int RenderTextControlSingleLine::clientInsetLeft() const
@@ -733,10 +744,15 @@ int RenderTextControlSingleLine::selectedIndex() const
     return -1;
 }
 
+void RenderTextControlSingleLine::popupDidHide()
+{
+    m_searchPopupIsVisible = false;
+}
+
 bool RenderTextControlSingleLine::itemIsSeparator(unsigned listIndex) const
 {
-   // The separator will be the second to last item in our list.
-   return static_cast<int>(listIndex) == (listSize() - 2);
+    // The separator will be the second to last item in our list.
+    return static_cast<int>(listIndex) == (listSize() - 2);
 }
 
 bool RenderTextControlSingleLine::itemIsLabel(unsigned listIndex) const
@@ -765,10 +781,65 @@ HostWindow* RenderTextControlSingleLine::hostWindow() const
     return document()->view()->hostWindow();
 }
 
+void RenderTextControlSingleLine::autoscroll()
+{
+    RenderLayer* layer = innerTextElement()->renderBox()->layer();
+    if (layer)
+        layer->autoscroll();
+}
+
+int RenderTextControlSingleLine::scrollWidth() const
+{
+    if (innerTextElement())
+        return innerTextElement()->scrollWidth();
+    return RenderBlock::scrollWidth();
+}
+
+int RenderTextControlSingleLine::scrollHeight() const
+{
+    if (innerTextElement())
+        return innerTextElement()->scrollHeight();
+    return RenderBlock::scrollHeight();
+}
+
+int RenderTextControlSingleLine::scrollLeft() const
+{
+    if (innerTextElement())
+        return innerTextElement()->scrollLeft();
+    return RenderBlock::scrollLeft();
+}
+
+int RenderTextControlSingleLine::scrollTop() const
+{
+    if (innerTextElement())
+        return innerTextElement()->scrollTop();
+    return RenderBlock::scrollTop();
+}
+
+void RenderTextControlSingleLine::setScrollLeft(int newLeft)
+{
+    if (innerTextElement())
+        innerTextElement()->setScrollLeft(newLeft);
+}
+
+void RenderTextControlSingleLine::setScrollTop(int newTop)
+{
+    if (innerTextElement())
+        innerTextElement()->setScrollTop(newTop);
+}
+
+bool RenderTextControlSingleLine::scroll(ScrollDirection direction, ScrollGranularity granularity, float multiplier, Node** stopNode)
+{
+    RenderLayer* layer = innerTextElement()->renderBox()->layer();
+    if (layer && layer->scroll(direction, granularity, multiplier))
+        return true;
+    return RenderBlock::scroll(direction, granularity, multiplier, stopNode);
+}
+
 PassRefPtr<Scrollbar> RenderTextControlSingleLine::createScrollbar(ScrollbarClient* client, ScrollbarOrientation orientation, ScrollbarControlSize controlSize)
 {
     RefPtr<Scrollbar> widget;
-    bool hasCustomScrollbarStyle = style()->hasPseudoStyle(RenderStyle::SCROLLBAR);
+    bool hasCustomScrollbarStyle = style()->hasPseudoStyle(SCROLLBAR);
     if (hasCustomScrollbarStyle)
         widget = RenderScrollbar::createCustomScrollbar(client, orientation, this);
     else

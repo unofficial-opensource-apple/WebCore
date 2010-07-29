@@ -30,12 +30,18 @@
 #include "GlyphBuffer.h"
 #include "GraphicsContext.h"
 #include "IntRect.h"
-#include "NotImplemented.h"
 #include "SimpleFontData.h"
 #include "UniscribeController.h"
 #include <wtf/MathExtras.h>
 
+using namespace std;
+
 namespace WebCore {
+
+bool Font::canReturnFallbackFontsForComplexText()
+{
+    return true;
+}
 
 FloatRect Font::selectionRectForComplexText(const TextRun& run, const IntPoint& point, int h,
                                             int from, int to) const
@@ -85,10 +91,16 @@ void Font::drawComplexText(GraphicsContext* context, const TextRun& run, const F
     drawGlyphBuffer(context, glyphBuffer, run, startPoint);
 }
 
-float Font::floatWidthForComplexText(const TextRun& run) const
+float Font::floatWidthForComplexText(const TextRun& run, HashSet<const SimpleFontData*>* fallbackFonts, GlyphOverflow* glyphOverflow) const
 {
-    UniscribeController controller(this, run);
+    UniscribeController controller(this, run, fallbackFonts);
     controller.advance(run.length());
+    if (glyphOverflow) {
+        glyphOverflow->top = max<int>(glyphOverflow->top, ceilf(-controller.minGlyphBoundingBoxY()) - ascent());
+        glyphOverflow->bottom = max<int>(glyphOverflow->bottom, ceilf(controller.maxGlyphBoundingBoxY()) - descent());
+        glyphOverflow->left = max<int>(0, ceilf(-controller.minGlyphBoundingBoxX()));
+        glyphOverflow->right = max<int>(0, ceilf(controller.maxGlyphBoundingBoxX() - controller.runWidthSoFar()));
+    }
     return controller.runWidthSoFar();
 }
 

@@ -38,13 +38,10 @@
 
 namespace WebCore {
 
-    class ApplicationCache;
-    class ApplicationCacheGroup;
-    class ApplicationCacheResource;
+    class ApplicationCacheHost;
     class Archive;
     class ArchiveResource;
     class ArchiveResourceCollection;
-    class CachedPage;
     class Frame;
     class FrameLoader;
     class MainResourceLoader;
@@ -91,9 +88,9 @@ namespace WebCore {
         const KURL& responseURL() const;
         const String& responseMIMEType() const;
         
-        void replaceRequestURLForAnchorScroll(const KURL&);
+        void replaceRequestURLForSameDocumentNavigation(const KURL&);
         bool isStopping() const { return m_isStopping; }
-        void stopLoading();
+        void stopLoading(DatabasePolicy = DatabasePolicyStop);
         void setCommitted(bool committed) { m_committed = committed; }
         bool isCommitted() const { return m_committed; }
         bool isLoading() const { return m_loading; }
@@ -113,7 +110,7 @@ namespace WebCore {
         void setPrimaryLoadComplete(bool);
         void setTitle(const String&);
         const String& overrideEncoding() const { return m_overrideEncoding; }
-        
+
 #if PLATFORM(MAC)
         void schedule(SchedulePair*);
         void unschedule(SchedulePair*);
@@ -156,13 +153,21 @@ namespace WebCore {
 
         KURL urlForHistory() const;
         bool urlForHistoryReflectsFailure() const;
-        bool urlForHistoryReflectsServerRedirect() const { return urlForHistory() != url(); }
-        bool urlForHistoryReflectsClientRedirect() const { return m_urlForHistoryReflectsClientRedirect; }
-        void setURLForHistoryReflectsClientRedirect(bool b) { m_urlForHistoryReflectsClientRedirect = b; }
+
+        // These accessors accommodate WebCore's somewhat fickle custom of creating history
+        // items for redirects, but only sometimes. For "source" and "destination",
+        // these accessors return the URL that would have been used if a history
+        // item were created. This allows WebKit to link history items reflecting
+        // redirects into a chain from start to finish.
+        String clientRedirectSourceForHistory() const { return m_clientRedirectSourceForHistory; } // null if no client redirect occurred.
+        String clientRedirectDestinationForHistory() const { return urlForHistory(); }
+        void setClientRedirectSourceForHistory(const String& clientedirectSourceForHistory) { m_clientRedirectSourceForHistory = clientedirectSourceForHistory; }
         
-        void loadFromCachedPage(PassRefPtr<CachedPage>);
-        void setLoadingFromCachedPage(bool loading) { m_loadingFromCachedPage = loading; }
-        bool isLoadingFromCachedPage() const { return m_loadingFromCachedPage; }
+        String serverRedirectSourceForHistory() const { return urlForHistory() == url() ? String() : urlForHistory(); } // null if no server redirect occurred.
+        String serverRedirectDestinationForHistory() const { return url(); }
+
+        bool didCreateGlobalHistoryEntry() const { return m_didCreateGlobalHistoryEntry; }
+        void setDidCreateGlobalHistoryEntry(bool didCreateGlobalHistoryEntry) { m_didCreateGlobalHistoryEntry = didCreateGlobalHistoryEntry; }
         
         void setDefersLoading(bool);
 
@@ -195,18 +200,7 @@ namespace WebCore {
         void takeMemoryCacheLoadsForClientNotification(Vector<String>& loads);
 
 #if ENABLE(OFFLINE_WEB_APPLICATIONS)
-        bool scheduleApplicationCacheLoad(ResourceLoader*, const ResourceRequest&, const KURL& originalURL);
-        bool scheduleLoadFallbackResourceFromApplicationCache(ResourceLoader*, const ResourceRequest&, ApplicationCache* = 0);
-        bool shouldLoadResourceFromApplicationCache(const ResourceRequest&, ApplicationCacheResource*&);
-        bool getApplicationCacheFallbackResource(const ResourceRequest&, ApplicationCacheResource*&, ApplicationCache* = 0);
-        
-        void setCandidateApplicationCacheGroup(ApplicationCacheGroup* group);
-        ApplicationCacheGroup* candidateApplicationCacheGroup() const { return m_candidateApplicationCacheGroup; }
-        
-        void setApplicationCache(PassRefPtr<ApplicationCache> applicationCache);
-        ApplicationCache* applicationCache() const { return m_applicationCache.get(); }
-
-        ApplicationCache* mainResourceApplicationCache() const;
+        ApplicationCacheHost* applicationCacheHost() const { return m_applicationCacheHost.get(); }
 #endif
 
     protected:
@@ -221,7 +215,7 @@ namespace WebCore {
         void setMainDocumentError(const ResourceError&);
         void commitLoad(const char*, int);
         bool doesProgressiveLoad(const String& MIMEType) const;
-        
+
         void deliverSubstituteResourcesAfterDelay();
         void substituteResourceDeliveryTimerFired(Timer<DocumentLoader>*);
                 
@@ -261,7 +255,6 @@ namespace WebCore {
         bool m_gotFirstByte;
         bool m_primaryLoadComplete;
         bool m_isClientRedirect;
-        bool m_loadingFromCachedPage;
 
         String m_pageTitle;
 
@@ -291,18 +284,12 @@ namespace WebCore {
         HashSet<String> m_resourcesClientKnowsAbout;
         Vector<String> m_resourcesLoadedFromMemoryCacheForClientNotification;
         
-        bool m_urlForHistoryReflectsClientRedirect;
+        String m_clientRedirectSourceForHistory;
+        bool m_didCreateGlobalHistoryEntry;
 
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)  
-        // The application cache that the document loader is associated with (if any).
-        RefPtr<ApplicationCache> m_applicationCache;
-        
-        // Before an application cache has finished loading, this will be the candidate application
-        // group that the document loader is associated with.
-        ApplicationCacheGroup* m_candidateApplicationCacheGroup;
-        
-        // Once the main resource has finished loading, this is the application cache it was loaded from (if any).
-        RefPtr<ApplicationCache> m_mainResourceApplicationCache;
+#if ENABLE(OFFLINE_WEB_APPLICATIONS)
+        friend class ApplicationCacheHost;  // for substitute resource delivery
+        OwnPtr<ApplicationCacheHost> m_applicationCacheHost;
 #endif
     };
 

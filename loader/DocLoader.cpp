@@ -3,6 +3,7 @@
     Copyright (C) 2001 Dirk Mueller (mueller@kde.org)
     Copyright (C) 2002 Waldo Bastian (bastian@kde.org)
     Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+    Copyright (C) 2009 Torch Mobile Inc. http://www.torchmobile.com/
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -36,8 +37,10 @@
 #include "CString.h"
 #include "Document.h"
 #include "DOMWindow.h"
+#include "HTMLElement.h"
 #include "Frame.h"
 #include "FrameLoader.h"
+#include "FrameLoaderClient.h"
 #include "loader.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
@@ -59,11 +62,17 @@ DocLoader::DocLoader(Document* doc)
 
 DocLoader::~DocLoader()
 {
+    if (m_requestCount)
+        m_cache->loader()->cancelRequests(this);
+
     clearPreloads();
     DocumentResourceMap::iterator end = m_documentResources.end();
     for (DocumentResourceMap::iterator it = m_documentResources.begin(); it != end; ++it)
         it->second->setDocLoader(0);
     m_cache->removeDocLoader(this);
+
+    // Make sure no requests still point to this DocLoader
+    ASSERT(m_requestCount == 0);
 }
 
 Frame* DocLoader::frame() const
@@ -103,8 +112,8 @@ void DocLoader::checkForReload(const KURL& fullURL)
     case CachePolicyRevalidate:
         cache()->revalidateResource(existing, this);
         break;
-    default:
-        ASSERT_NOT_REACHED();
+    case CachePolicyAllowStale:
+        return;
     }
 
     m_reloadedURLs.add(fullURL.string());
@@ -112,6 +121,11 @@ void DocLoader::checkForReload(const KURL& fullURL)
 
 CachedImage* DocLoader::requestImage(const String& url)
 {
+    if (Frame* f = frame()) {
+        Settings* settings = f->settings();
+        if (!f->loader()->client()->allowImages(!settings || settings->areImagesEnabled()))
+            return 0;
+    }
     CachedImage* resource = static_cast<CachedImage*>(requestResource(CachedResource::ImageResource, url, String()));
     if (autoLoadImages() && resource && resource->stillNeedsLoad()) {
         resource->setLoading(true);
@@ -184,6 +198,41 @@ bool DocLoader::canRequest(CachedResource::Type type, const KURL& url)
         ASSERT_NOT_REACHED();
         break;
     }
+
+    // Given that the load is allowed by the same-origin policy, we should
+    // check whether the load passes the mixed-content policy.
+    //
+    // Note: Currently, we always allow mixed content, but we generate a
+    //       callback to the FrameLoaderClient in case the embedder wants to
+    //       update any security indicators.
+    // 
+    switch (type) {
+    case CachedResource::Script:
+#if ENABLE(XSLT)
+    case CachedResource::XSLStyleSheet:
+#endif
+#if ENABLE(XBL)
+    case CachedResource::XBL:
+#endif
+        // These resource can inject script into the current document.
+        if (Frame* f = frame())
+            f->loader()->checkIfRunInsecureContent(m_doc->securityOrigin(), url);
+        break;
+    case CachedResource::ImageResource:
+    case CachedResource::CSSStyleSheet:
+    case CachedResource::FontResource: {
+        // These resources can corrupt only the frame's pixels.
+        if (Frame* f = frame()) {
+            Frame* top = f->tree()->top();
+            top->loader()->checkIfDisplayInsecureContent(top->document()->securityOrigin(), url);
+        }
+        break;
+    }
+    default:
+        ASSERT_NOT_REACHED();
+        break;
+    }
+    // FIXME: Consider letting the embedder block mixed content loads.
     return true;
 }
 
@@ -209,7 +258,7 @@ CachedResource* DocLoader::requestResource(CachedResource::Type type, const Stri
     if (resource) {
         // Check final URL of resource to catch redirects.
         // See <https://bugs.webkit.org/show_bug.cgi?id=21963>.
-        if (!canRequest(type, KURL(resource->url())))
+        if (fullURL != resource->url() && !canRequest(type, KURL(ParsedURLString, resource->url())))
             return 0;
 
         m_documentResources.set(resource->url(), resource);
@@ -239,7 +288,7 @@ void DocLoader::printAccessDeniedMessage(const KURL& url) const
                        m_doc->url().string().utf8().data());
 
     // FIXME: provide a real line number and source URL.
-    frame()->domWindow()->console()->addMessage(OtherMessageSource, ErrorMessageLevel, message, 1, String());
+    frame()->domWindow()->console()->addMessage(OtherMessageSource, LogMessageType, ErrorMessageLevel, message, 1, String());
 }
 
 void DocLoader::setAutoLoadImages(bool enable)
@@ -266,11 +315,16 @@ void DocLoader::setAutoLoadImages(bool enable)
 
 CachePolicy DocLoader::cachePolicy() const
 {
-    return frame() ? frame()->loader()->cachePolicy() : CachePolicyVerify;
+    return frame() ? frame()->loader()->subresourceCachePolicy() : CachePolicyVerify;
 }
 
 void DocLoader::removeCachedResource(CachedResource* resource) const
 {
+#ifndef NDEBUG
+    DocumentResourceMap::iterator it = m_documentResources.find(resource->url());
+    if (it != m_documentResources.end())
+        ASSERT(it->second.get() == resource);
+#endif
     m_documentResources.remove(resource->url());
 }
 
@@ -339,7 +393,9 @@ void DocLoader::checkForPendingPreloads()
         return;
     for (unsigned i = 0; i < count; ++i) {
         PendingPreload& preload = m_pendingPreloads[i];
-        requestPreload(preload.m_type, preload.m_url, preload.m_charset);
+        // Don't request preload if the resource already loaded normally (this will result in double load if the page is being reloaded with cached results ignored).
+        if (!cachedResource(m_doc->completeURL(preload.m_url)))
+            requestPreload(preload.m_type, preload.m_url, preload.m_charset);
     }
     m_pendingPreloads.clear();
 }
@@ -375,6 +431,11 @@ void DocLoader::clearPreloads()
             cache()->remove(res);
     }
     m_preloads.clear();
+}
+
+void DocLoader::clearPendingPreloads()
+{
+    m_pendingPreloads.clear();
 }
 
 #if PRELOAD_DEBUG

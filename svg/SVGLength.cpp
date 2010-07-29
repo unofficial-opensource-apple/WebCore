@@ -3,8 +3,6 @@
                   2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
                   2007 Apple Inc.  All rights reserved.
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -285,7 +283,7 @@ float SVGLength::PercentageOfViewport(float value, const SVGElement* context, SV
     Document* doc = context->document();
     if (doc->documentElement() == context) {
         // We have to ask the canvas for the full "canvas size"...
-        RenderView* view = static_cast<RenderView*>(doc->renderer());
+        RenderView* view = toRenderView(doc->renderer());
         if (view && view->frameView()) {
             width = view->frameView()->visibleWidth(); // TODO: recheck!
             height = view->frameView()->visibleHeight(); // TODO: recheck!

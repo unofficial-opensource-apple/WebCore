@@ -27,7 +27,9 @@
 #define Timer_h
 
 #include <wtf/Noncopyable.h>
-#include <wtf/Vector.h>
+#include <wtf/Threading.h>
+
+#include "WebCoreThread.h"
 
 namespace WebCore {
 
@@ -35,7 +37,7 @@ namespace WebCore {
 
 class TimerHeapElement;
 
-class TimerBase : Noncopyable {
+class TimerBase : public Noncopyable {
 public:
     TimerBase();
     virtual ~TimerBase();
@@ -73,17 +75,17 @@ private:
     void heapPop();
     void heapPopMin();
 
-    static void collectFiringTimers(double fireTime, Vector<TimerBase*>&);
-    static void fireTimers(double fireTime, const Vector<TimerBase*>&);
-    static void sharedTimerFired();
-
     double m_nextFireTime; // 0 if inactive
     double m_repeatInterval; // 0 if not repeating
     int m_heapIndex; // -1 if not in heap
     unsigned m_heapInsertionOrder; // Used to keep order among equal-fire-time timers
 
-    friend void updateSharedTimer();
+#ifndef NDEBUG
+    ThreadIdentifier m_thread;
+#endif
+
     friend class TimerHeapElement;
+    friend class ThreadTimers;
     friend bool operator<(const TimerHeapElement&, const TimerHeapElement&);
 };
 
@@ -100,6 +102,13 @@ private:
     TimerFiredClass* m_object;
     TimerFiredFunction m_function;
 };
+
+inline bool TimerBase::isActive() const
+{
+    // For iPhone timers are always run on the main thread or the Web Thread.
+    ASSERT(WebThreadIsCurrent() || pthread_main_np());
+    return m_nextFireTime;
+}
 
 }
 

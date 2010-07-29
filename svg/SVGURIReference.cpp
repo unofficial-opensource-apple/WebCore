@@ -23,12 +23,11 @@
 #if ENABLE(SVG)
 #include "SVGURIReference.h"
 
+#include "MappedAttribute.h"
+
 namespace WebCore {
 
-char SVGURIReferenceIdentifier[] = "SVGURIReference";
-
 SVGURIReference::SVGURIReference()
-    : m_href(this, XLinkNames::hrefAttr)
 {
 }
 

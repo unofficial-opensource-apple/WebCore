@@ -26,6 +26,7 @@
 #import "config.h"
 #import "ThemeMac.h"
 
+#import "BlockExceptions.h"
 #import "GraphicsContext.h"
 #import "LocalCurrentGraphicsContext.h"
 #import "ScrollView.h"
@@ -172,9 +173,9 @@ static LengthSize checkboxSize(const Font& font, const LengthSize& zoomedSize, f
     return sizeFromFont(font, zoomedSize, zoomFactor, checkboxSizes());
 }
 
-static NSButtonCell* checkbox(ControlStates states, const IntRect& zoomedRect, float zoomFactor)
+static NSButtonCell *checkbox(ControlStates states, const IntRect& zoomedRect, float zoomFactor)
 {
-    static NSButtonCell* checkboxCell;
+    static NSButtonCell *checkboxCell;
     if (!checkboxCell) {
         checkboxCell = [[NSButtonCell alloc] init];
         [checkboxCell setButtonType:NSSwitchButton];
@@ -195,8 +196,10 @@ static NSButtonCell* checkbox(ControlStates states, const IntRect& zoomedRect, f
 // FIXME: Share more code with radio buttons.
 static void paintCheckbox(ControlStates states, GraphicsContext* context, const IntRect& zoomedRect, float zoomFactor, ScrollView* scrollView)
 {
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
+
     // Determine the width and height needed for the control and prepare the cell for painting.
-    NSButtonCell* checkboxCell = checkbox(states, zoomedRect, zoomFactor);
+    NSButtonCell *checkboxCell = checkbox(states, zoomedRect, zoomFactor);
 
     context->save();
 
@@ -218,6 +221,8 @@ static void paintCheckbox(ControlStates states, GraphicsContext* context, const 
     [checkboxCell setControlView:nil];
 
     context->restore();
+    
+    END_BLOCK_OBJC_EXCEPTIONS
 }
 
 // Radio Buttons
@@ -249,9 +254,9 @@ static LengthSize radioSize(const Font& font, const LengthSize& zoomedSize, floa
     return sizeFromFont(font, zoomedSize, zoomFactor, radioSizes());
 }
 
-static NSButtonCell* radio(ControlStates states, const IntRect& zoomedRect, float zoomFactor)
+static NSButtonCell *radio(ControlStates states, const IntRect& zoomedRect, float zoomFactor)
 {
-    static NSButtonCell* radioCell;
+    static NSButtonCell *radioCell;
     if (!radioCell) {
         radioCell = [[NSButtonCell alloc] init];
         [radioCell setButtonType:NSRadioButton];
@@ -271,7 +276,7 @@ static NSButtonCell* radio(ControlStates states, const IntRect& zoomedRect, floa
 static void paintRadio(ControlStates states, GraphicsContext* context, const IntRect& zoomedRect, float zoomFactor, ScrollView* scrollView)
 {
     // Determine the width and height needed for the control and prepare the cell for painting.
-    NSButtonCell* radioCell = radio(states, zoomedRect, zoomFactor);
+    NSButtonCell *radioCell = radio(states, zoomedRect, zoomFactor);
 
     context->save();
 
@@ -289,8 +294,10 @@ static void paintRadio(ControlStates states, GraphicsContext* context, const Int
         context->translate(-inflatedRect.x(), -inflatedRect.y());
     }
     
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
     [radioCell drawWithFrame:NSRect(inflatedRect) inView:scrollView->documentView()];
     [radioCell setControlView:nil];
+    END_BLOCK_OBJC_EXCEPTIONS
 
     context->restore();
 }
@@ -304,6 +311,14 @@ static const IntSize* buttonSizes()
     return sizes;
 }
 
+#if ENABLE(DATALIST)
+static const IntSize* listButtonSizes()
+{
+    static const IntSize sizes[3] = { IntSize(21, 21), IntSize(19, 18), IntSize(17, 16) };
+    return sizes;
+}
+#endif
+
 static const int* buttonMargins(NSControlSize controlSize)
 {
     static const int margins[3][4] =
@@ -315,17 +330,24 @@ static const int* buttonMargins(NSControlSize controlSize)
     return margins[controlSize];
 }
 
-static NSButtonCell* button(ControlPart part, ControlStates states, const IntRect& zoomedRect, float zoomFactor)
+static void setupButtonCell(NSButtonCell *&buttonCell, ControlPart part, ControlStates states, const IntRect& zoomedRect, float zoomFactor)
 {
-    static NSButtonCell *buttonCell;
-    static bool defaultButton;
     if (!buttonCell) {
         buttonCell = [[NSButtonCell alloc] init];
         [buttonCell setTitle:nil];
         [buttonCell setButtonType:NSMomentaryPushInButton];
+        if (states & DefaultState)
+            [buttonCell setKeyEquivalent:@"\r"];
     }
 
     // Set the control size based off the rectangle we're painting into.
+    const IntSize* sizes = buttonSizes();
+#if ENABLE(DATALIST)
+    if (part == ListButtonPart) {
+        [buttonCell setBezelStyle:NSRoundedDisclosureBezelStyle];
+        sizes = listButtonSizes();
+    } else
+#endif
     if (part == SquareButtonPart || zoomedRect.height() > buttonSizes()[NSRegularControlSize].height() * zoomFactor) {
         // Use the square button
         if ([buttonCell bezelStyle] != NSShadowlessSquareBezelStyle)
@@ -333,27 +355,34 @@ static NSButtonCell* button(ControlPart part, ControlStates states, const IntRec
     } else if ([buttonCell bezelStyle] != NSRoundedBezelStyle)
         [buttonCell setBezelStyle:NSRoundedBezelStyle];
 
-    setControlSize(buttonCell, buttonSizes(), zoomedRect.size(), zoomFactor);
-
-    if (defaultButton != (states & DefaultState)) {
-        defaultButton = !defaultButton;
-        [buttonCell setKeyEquivalent:(defaultButton ? @"\r" : @"")];
-    }
+    setControlSize(buttonCell, sizes, zoomedRect.size(), zoomFactor);
 
     // Update the various states we respond to.
     updateStates(buttonCell, states);
+}
     
-    return buttonCell;
+static NSButtonCell *button(ControlPart part, ControlStates states, const IntRect& zoomedRect, float zoomFactor)
+{
+    bool isDefault = states & DefaultState;
+    static NSButtonCell *cells[2];
+    setupButtonCell(cells[isDefault], part, states, zoomedRect, zoomFactor);    
+    return cells[isDefault];
 }
 
 static void paintButton(ControlPart part, ControlStates states, GraphicsContext* context, const IntRect& zoomedRect, float zoomFactor, ScrollView* scrollView)
 {
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
+    
     // Determine the width and height needed for the control and prepare the cell for painting.
     NSButtonCell *buttonCell = button(part, states, zoomedRect, zoomFactor);
     LocalCurrentGraphicsContext localContext(context);
 
     NSControlSize controlSize = [buttonCell controlSize];
+#if ENABLE(DATALIST)
+    IntSize zoomedSize = (part == ListButtonPart ? listButtonSizes() : buttonSizes())[controlSize];
+#else
     IntSize zoomedSize = buttonSizes()[controlSize];
+#endif
     zoomedSize.setWidth(zoomedRect.width()); // Buttons don't ever constrain width, so the zoomed width can just be honored.
     zoomedSize.setHeight(zoomedSize.height() * zoomFactor);
     IntRect inflatedRect = zoomedRect;
@@ -380,7 +409,7 @@ static void paintButton(ControlPart part, ControlStates states, GraphicsContext*
     NSWindow *window = [view window];
     NSButtonCell *previousDefaultButtonCell = [window defaultButtonCell];
 
-    if ((states & DefaultState) && [window isKeyWindow]) {
+    if (states & DefaultState) {
         [window setDefaultButtonCell:buttonCell];
         wkAdvanceDefaultButtonPulseAnimation(buttonCell);
     } else if ([previousDefaultButtonCell isEqual:buttonCell])
@@ -391,6 +420,8 @@ static void paintButton(ControlPart part, ControlStates states, GraphicsContext*
 
     if (![previousDefaultButtonCell isEqual:buttonCell])
         [window setDefaultButtonCell:previousDefaultButtonCell];
+
+    END_BLOCK_OBJC_EXCEPTIONS
 }
 
 // Theme overrides
@@ -431,6 +462,10 @@ LengthSize ThemeMac::controlSize(ControlPart part, const Font& font, const Lengt
         case PushButtonPart:
             // Height is reset to auto so that specified heights can be ignored.
             return sizeFromFont(font, LengthSize(zoomedSize.width(), Length()), zoomFactor, buttonSizes());
+#if ENABLE(DATALIST)
+        case ListButtonPart:
+            return sizeFromFont(font, LengthSize(zoomedSize.width(), Length()), zoomFactor, listButtonSizes());
+#endif
         default:
             return zoomedSize;
     }
@@ -442,6 +477,7 @@ LengthSize ThemeMac::minimumControlSize(ControlPart part, const Font& font, floa
         case SquareButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
+        case ListButtonPart:
             return LengthSize(Length(0, Fixed), Length(static_cast<int>(15 * zoomFactor), Fixed));
         default:
             return Theme::minimumControlSize(part, font, zoomFactor);
@@ -454,6 +490,7 @@ LengthBox ThemeMac::controlBorder(ControlPart part, const Font& font, const Leng
         case SquareButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
+        case ListButtonPart:
             return LengthBox(0, zoomedBox.right().value(), 0, zoomedBox.left().value());
         default:
             return Theme::controlBorder(part, font, zoomedBox, zoomFactor);
@@ -479,6 +516,7 @@ LengthBox ThemeMac::controlPadding(ControlPart part, const Font& font, const Len
 
 void ThemeMac::inflateControlPaintRect(ControlPart part, ControlStates states, IntRect& zoomedRect, float zoomFactor) const
 {
+    BEGIN_BLOCK_OBJC_EXCEPTIONS
     switch (part) {
         case CheckboxPart: {
             // We inflate the rect as needed to account for padding included in the cell to accommodate the checkbox
@@ -520,6 +558,7 @@ void ThemeMac::inflateControlPaintRect(ControlPart part, ControlStates states, I
         default:
             break;
     }
+    END_BLOCK_OBJC_EXCEPTIONS
 }
 
 void ThemeMac::paint(ControlPart part, ControlStates states, GraphicsContext* context, const IntRect& zoomedRect, float zoomFactor, ScrollView* scrollView) const
@@ -535,6 +574,7 @@ void ThemeMac::paint(ControlPart part, ControlStates states, GraphicsContext* co
         case DefaultButtonPart:
         case ButtonPart:
         case SquareButtonPart:
+        case ListButtonPart:
             paintButton(part, states, context, zoomedRect, zoomFactor, scrollView);
             break;
         default:

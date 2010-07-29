@@ -31,11 +31,16 @@
 #include "SVGPaintServer.h"
 
 #include "GraphicsContext.h"
+#include "NodeRenderStyle.h"
 #include "RenderObject.h"
 #include "RenderStyle.h"
 #include "SVGPaintServerSolid.h"
 #include "SVGStyledElement.h"
 #include "SVGURIReference.h"
+
+#if PLATFORM(SKIA)
+#include "PlatformContextSkia.h"
+#endif
 
 namespace WebCore {
 
@@ -52,9 +57,9 @@ TextStream& operator<<(TextStream& ts, const SVGPaintServer& paintServer)
     return paintServer.externalRepresentation(ts);
 }
 
-SVGPaintServer* getPaintServerById(Document* document, const AtomicString& id)
+SVGPaintServer* getPaintServerById(Document* document, const AtomicString& id, const RenderObject* object)
 {
-    SVGResource* resource = getResourceById(document, id);
+    SVGResource* resource = getResourceById(document, id, object);
     if (resource && resource->isPaintServer())
         return static_cast<SVGPaintServer*>(resource);
 
@@ -80,9 +85,9 @@ SVGPaintServer* SVGPaintServer::fillPaintServer(const RenderStyle* style, const 
     if (paintType == SVGPaint::SVG_PAINTTYPE_URI ||
         paintType == SVGPaint::SVG_PAINTTYPE_URI_RGBCOLOR) {
         AtomicString id(SVGURIReference::getTarget(fill->uri()));
-        fillPaintServer = getPaintServerById(item->document(), id);
+        fillPaintServer = getPaintServerById(item->document(), id, item);
 
-        SVGElement* svgElement = static_cast<SVGElement*>(item->element());
+        SVGElement* svgElement = static_cast<SVGElement*>(item->node());
         ASSERT(svgElement && svgElement->document() && svgElement->isStyled());
 
         if (item->isRenderPath() && fillPaintServer)
@@ -121,9 +126,9 @@ SVGPaintServer* SVGPaintServer::strokePaintServer(const RenderStyle* style, cons
     if (paintType == SVGPaint::SVG_PAINTTYPE_URI ||
         paintType == SVGPaint::SVG_PAINTTYPE_URI_RGBCOLOR) {
         AtomicString id(SVGURIReference::getTarget(stroke->uri()));
-        strokePaintServer = getPaintServerById(item->document(), id);
+        strokePaintServer = getPaintServerById(item->document(), id, item);
 
-        SVGElement* svgElement = static_cast<SVGElement*>(item->element());
+        SVGElement* svgElement = static_cast<SVGElement*>(item->node());
         ASSERT(svgElement && svgElement->document() && svgElement->isStyled());
  
         if (item->isRenderPath() && strokePaintServer)
@@ -154,7 +159,7 @@ void applyStrokeStyleToContext(GraphicsContext* context, RenderStyle* style, con
     if (style->svgStyle()->joinStyle() == MiterJoin)
         context->setMiterLimit(style->svgStyle()->strokeMiterLimit());
 
-    const DashArray& dashes = dashArrayFromRenderingStyle(object->style());
+    const DashArray& dashes = dashArrayFromRenderingStyle(object->style(), object->document()->documentElement()->renderStyle());
     float dashOffset = SVGRenderStyle::cssPrimitiveToLength(object, style->svgStyle()->strokeDashOffset(), 0.0f);
     context->setLineDash(dashes, dashOffset);
 }
@@ -179,21 +184,25 @@ void SVGPaintServer::renderPath(GraphicsContext*& context, const RenderObject* p
         context->strokePath();
 }
 
-void SVGPaintServer::teardown(GraphicsContext*&, const RenderObject*, SVGPaintTargetType, bool) const
-{
 #if PLATFORM(SKIA)
+void SVGPaintServer::teardown(GraphicsContext*& context, const RenderObject*, SVGPaintTargetType, bool) const
+{
     // FIXME: Move this into the GraphicsContext
     // WebKit implicitly expects us to reset the path.
     // For example in fillAndStrokePath() of RenderPath.cpp the path is 
     // added back to the context after filling. This is because internally it
     // calls CGContextFillPath() which closes the path.
     context->beginPath();
-    context->platformContext()->setGradient(0);
-    context->platformContext()->setPattern(0);
-#endif
+    context->platformContext()->setFillShader(0);
+    context->platformContext()->setStrokeShader(0);
 }
+#else
+void SVGPaintServer::teardown(GraphicsContext*&, const RenderObject*, SVGPaintTargetType, bool) const
+{
+}
+#endif
 
-DashArray dashArrayFromRenderingStyle(const RenderStyle* style)
+DashArray dashArrayFromRenderingStyle(const RenderStyle* style, RenderStyle* rootStyle)
 {
     DashArray array;
     
@@ -206,7 +215,7 @@ DashArray dashArrayFromRenderingStyle(const RenderStyle* style)
             if (!dash)
                 continue;
 
-            array.append((float) dash->computeLengthFloat(const_cast<RenderStyle*>(style)));
+            array.append((float) dash->computeLengthFloat(const_cast<RenderStyle*>(style), rootStyle));
         }
     }
 

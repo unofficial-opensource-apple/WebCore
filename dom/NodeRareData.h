@@ -28,36 +28,41 @@
 #include "StringHash.h"
 #include "QualifiedName.h"
 #include <wtf/HashSet.h>
+#include <wtf/PassOwnPtr.h>
 #include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
-struct NodeListsNodeData {
+struct NodeListsNodeData : Noncopyable {
     typedef HashSet<DynamicNodeList*> NodeListSet;
     NodeListSet m_listsWithCaches;
     
-    DynamicNodeList::Caches m_childNodeListCaches;
+    RefPtr<DynamicNodeList::Caches> m_childNodeListCaches;
     
-    typedef HashMap<String, DynamicNodeList::Caches*> CacheMap;
+    typedef HashMap<String, RefPtr<DynamicNodeList::Caches> > CacheMap;
     CacheMap m_classNodeListCaches;
     CacheMap m_nameNodeListCaches;
     
-    typedef HashMap<QualifiedName, DynamicNodeList::Caches*> TagCacheMap;
+    typedef HashMap<QualifiedName, RefPtr<DynamicNodeList::Caches> > TagCacheMap;
     TagCacheMap m_tagNodeListCaches;
-    
-    ~NodeListsNodeData()
+
+    static PassOwnPtr<NodeListsNodeData> create()
     {
-        deleteAllValues(m_classNodeListCaches);
-        deleteAllValues(m_nameNodeListCaches);
-        deleteAllValues(m_tagNodeListCaches);
+        return new NodeListsNodeData;
     }
     
     void invalidateCaches();
     void invalidateCachesThatDependOnAttributes();
     bool isEmpty() const;
+
+private:
+    NodeListsNodeData()
+        : m_childNodeListCaches(DynamicNodeList::Caches::create())
+    {
+    }
 };
     
-class NodeRareData {
+class NodeRareData : public Noncopyable {
 public:    
     NodeRareData()
         : m_tabIndex(0)
@@ -81,19 +86,19 @@ public:
     }
     
     void clearNodeLists() { m_nodeLists.clear(); }
-    void setNodeLists(std::auto_ptr<NodeListsNodeData> lists) { m_nodeLists.set(lists.release()); }
+    void setNodeLists(PassOwnPtr<NodeListsNodeData> lists) { m_nodeLists = lists; }
     NodeListsNodeData* nodeLists() const { return m_nodeLists.get(); }
     
     short tabIndex() const { return m_tabIndex; }
     void setTabIndexExplicitly(short index) { m_tabIndex = index; m_tabIndexWasSetExplicitly = true; }
     bool tabIndexSetExplicitly() const { return m_tabIndexWasSetExplicitly; }
 
-    RegisteredEventListenerVector* listeners() { return m_eventListeners.get(); }
-    RegisteredEventListenerVector& ensureListeners()
+    EventTargetData* eventTargetData() { return m_eventTargetData.get(); }
+    EventTargetData* ensureEventTargetData()
     {
-        if (!m_eventListeners)
-            m_eventListeners.set(new RegisteredEventListenerVector);
-        return *m_eventListeners;
+        if (!m_eventTargetData)
+            m_eventTargetData.set(new EventTargetData);
+        return m_eventTargetData.get();
     }
 
     bool isFocused() const { return m_isFocused; }
@@ -106,7 +111,7 @@ protected:
 
 private:
     OwnPtr<NodeListsNodeData> m_nodeLists;
-    OwnPtr<RegisteredEventListenerVector > m_eventListeners;
+    OwnPtr<EventTargetData> m_eventTargetData;
     short m_tabIndex;
     bool m_tabIndexWasSetExplicitly : 1;
     bool m_isFocused : 1;

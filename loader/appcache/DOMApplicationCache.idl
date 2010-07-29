@@ -27,7 +27,8 @@ module offline {
  
     interface [
         Conditional=OFFLINE_WEB_APPLICATIONS,
-        CustomMarkFunction
+        EventTarget,
+        OmitConstructor
     ] DOMApplicationCache {
         // update status
         const unsigned short UNCACHED = 0;
@@ -42,17 +43,6 @@ module offline {
             raises(DOMException);
         void swapCache()
             raises(DOMException);
-
-#if ENABLE_APPLICATION_CAHE_DYNAMIC_ENTRIES
-        // dynamic entries
-        readonly attribute DOMStringList items;
-        [Custom] boolean hasItem(in DOMString url)
-            raises(DOMException);
-        [Custom] void add(in DOMString uri)
-            raises(DOMException);
-        [Custom] void remove(in DOMString uri)
-            raises(DOMException);
-#endif
 
         // events
         attribute EventListener onchecking;

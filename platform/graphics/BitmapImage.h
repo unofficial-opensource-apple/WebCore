@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
  * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2008-2009 Torch Mobile, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,6 +38,10 @@
 
 #if PLATFORM(WIN)
 typedef struct HBITMAP__ *HBITMAP;
+#endif
+
+#if PLATFORM(HAIKU)
+class BBitmap;
 #endif
 
 namespace WebCore {
@@ -141,9 +146,16 @@ public:
     virtual CGImageRef getCGImageRef();
 #endif
 
+#if PLATFORM(WIN) || (PLATFORM(QT) && OS(WINDOWS))
+    static PassRefPtr<BitmapImage> create(HBITMAP);
+#endif
 #if PLATFORM(WIN)
     virtual bool getHBITMAP(HBITMAP);
     virtual bool getHBITMAPOfSize(HBITMAP, LPSIZE);
+#endif
+
+#if PLATFORM(GTK)
+    virtual GdkPixbuf* getGdkPixbuf();
 #endif
 
     virtual NativeImagePtr nativeImageForCurrentFrame() { return frameAtIndex(currentFrame()); }
@@ -171,13 +183,19 @@ protected:
     BitmapImage(ImageObserver* = 0);
 
 #if PLATFORM(WIN)
-    virtual void drawFrameMatchingSourceSize(GraphicsContext*, const FloatRect& dstRect, const IntSize& srcSize, CompositeOperator);
+    virtual void drawFrameMatchingSourceSize(GraphicsContext*, const FloatRect& dstRect, const IntSize& srcSize, ColorSpace styleColorSpace, CompositeOperator);
 #endif
-    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, CompositeOperator);
-#if PLATFORM(QT) || PLATFORM(WX)
+    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, ColorSpace styleColorSpace, CompositeOperator);
+
+#if PLATFORM(WX) || (OS(WINCE) && !PLATFORM(QT))
     virtual void drawPattern(GraphicsContext*, const FloatRect& srcRect, const TransformationMatrix& patternTransform,
-                             const FloatPoint& phase, CompositeOperator, const FloatRect& destRect);
-#endif    
+                             const FloatPoint& phase, ColorSpace styleColorSpace, CompositeOperator, const FloatRect& destRect);
+#endif
+
+#if PLATFORM(HAIKU)
+    virtual BBitmap* getBBitmap() const;
+#endif
+
     size_t currentFrame() const { return m_currentFrame; }
     size_t frameCount();
     NativeImagePtr frameAtIndex(size_t index, float scaleHint);
@@ -185,7 +203,9 @@ protected:
     bool frameIsCompleteAtIndex(size_t);
     float frameDurationAtIndex(size_t);
     bool frameHasAlphaAtIndex(size_t); 
+#if ENABLE(RESPECT_EXIF_ORIENTATION)    
     int frameOrientationAtIndex(size_t);
+#endif
 
     // Decodes and caches a frame. Never accessed except internally.
     virtual unsigned animatedImageSize();
@@ -237,9 +257,22 @@ protected:
     void invalidatePlatformData();
     
     // Checks to see if the image is a 1x1 solid color.  We optimize these images and just do a fill rect instead.
+    // This check should happen regardless whether m_checkedForSolidColor is already set, as the frame may have
+    // changed.
     void checkForSolidColor();
     
-    virtual bool mayFillWithSolidColor() const { return m_isSolidColor && m_currentFrame == 0; }
+    virtual bool mayFillWithSolidColor()
+    {
+        if (!m_checkedForSolidColor && frameCount() > 0) {
+            checkForSolidColor();
+            // WINCE PORT: checkForSolidColor() doesn't set m_checkedForSolidColor until
+            // it gets enough information to make final decision.
+#if !OS(WINCE)
+            ASSERT(m_checkedForSolidColor);
+#endif
+        }
+        return m_isSolidColor && m_currentFrame == 0;
+    }
     virtual Color solidColor() const { return m_solidColor; }
     
     ImageSource m_source;
@@ -260,6 +293,7 @@ protected:
 
     Color m_solidColor;  // If we're a 1x1 solid color, this is the color to use to fill.
     bool m_isSolidColor;  // Whether or not we are a 1x1 solid image.
+    bool m_checkedForSolidColor; // Whether we've checked the frame for solid color.
 
     bool m_animationFinished;  // Whether or not we've completed the entire animation.
 

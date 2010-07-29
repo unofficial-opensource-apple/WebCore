@@ -45,7 +45,12 @@ typedef unsigned WPARAM;
 typedef long LPARAM;
 #endif
 
-#include <GraphicsServices/GSEvent.h>
+#include <wtf/RetainPtr.h>
+#ifdef __OBJC__
+@class WebEvent;
+#else
+class WebEvent;
+#endif
 
 #if PLATFORM(GTK)
 typedef struct _GdkEventKey GdkEventKey;
@@ -61,9 +66,13 @@ QT_END_NAMESPACE
 class wxKeyEvent;
 #endif
 
+#if PLATFORM(HAIKU)
+class BMessage;
+#endif
+
 namespace WebCore {
 
-    class PlatformKeyboardEvent {
+    class PlatformKeyboardEvent : public FastAllocBase {
     public:
         enum Type {
             // KeyDown is sent by platforms such as Mac OS X, gtk and Qt, and has information about both physical pressed key, and its translation.
@@ -128,8 +137,9 @@ namespace WebCore {
         static bool currentCapsLockState();
 
 #if PLATFORM(MAC)
-        PlatformKeyboardEvent(GSEventRef);
-        GSEventRef gsEvent() const { return m_gsEvent.get(); }
+        PlatformKeyboardEvent();
+        PlatformKeyboardEvent(WebEvent *);
+        WebEvent *event() const { return m_Event.get(); }
 #endif
 
 #if PLATFORM(WIN)
@@ -148,6 +158,10 @@ namespace WebCore {
 
 #if PLATFORM(WX)
         PlatformKeyboardEvent(wxKeyEvent&);
+#endif
+
+#if PLATFORM(HAIKU)
+        PlatformKeyboardEvent(BMessage*);
 #endif
 
 #if PLATFORM(WIN) || PLATFORM(CHROMIUM)
@@ -169,7 +183,7 @@ namespace WebCore {
         bool m_metaKey;
 
 #if PLATFORM(MAC)
-        RetainPtr<__GSEvent> m_gsEvent;
+        RetainPtr<WebEvent> m_Event;
 #endif
 #if PLATFORM(WIN) || PLATFORM(CHROMIUM)
         bool m_isSystemKey;

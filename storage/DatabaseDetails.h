@@ -29,6 +29,8 @@
 #ifndef DatabaseDetails_h
 #define DatabaseDetails_h
 
+#if ENABLE(DATABASE)
+
 #include "PlatformString.h"
 
 namespace WebCore {
@@ -58,10 +60,12 @@ private:
     String m_name;
     String m_displayName;
     unsigned long long m_expectedUsage;
-    unsigned long long m_currentUsage; 
+    unsigned long long m_currentUsage;
 
 };
 
 } // namespace WebCore
+
+#endif
 
 #endif // DatabaseDetails_h

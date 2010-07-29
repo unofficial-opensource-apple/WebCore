@@ -29,6 +29,7 @@
 #include "FormDataList.h"
 #include "HTMLNames.h"
 #include "HTMLOptionElement.h"
+#include "MappedAttribute.h"
 #include "SSLKeyGenerator.h"
 #include "Text.h"
 #include <wtf/StdLibExtras.h>
@@ -50,11 +51,11 @@ HTMLKeygenElement::HTMLKeygenElement(const QualifiedName& tagName, Document* doc
     for (Vector<String>::const_iterator it = keys.begin(); it != end; ++it) {
         HTMLOptionElement* o = new HTMLOptionElement(optionTag, doc, form());
         addChild(o);
-        o->addChild(new Text(doc, *it));
+        o->addChild(Text::create(doc, *it));
     }
 }
 
-const AtomicString& HTMLKeygenElement::type() const
+const AtomicString& HTMLKeygenElement::formControlType() const
 {
     DEFINE_STATIC_LOCAL(const AtomicString, keygen, ("keygen"));
     return keygen;

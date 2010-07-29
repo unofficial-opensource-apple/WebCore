@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.  All rights reserved.
  * Copyright (C) 2007 Alp Toker <alp@atoker.com>
+ * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,12 +30,15 @@
 
 #if PLATFORM(CAIRO)
 
-#include "TransformationMatrix.h"
+#include "Color.h"
 #include "FloatRect.h"
 #include "GraphicsContext.h"
+#include "ImageBuffer.h"
 #include "ImageObserver.h"
+#include "TransformationMatrix.h"
 #include <cairo.h>
 #include <math.h>
+#include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
@@ -60,6 +64,7 @@ BitmapImage::BitmapImage(cairo_surface_t* surface, ImageObserver* observer)
     , m_repetitionCountStatus(Unknown)
     , m_repetitionsComplete(0)
     , m_isSolidColor(false)
+    , m_checkedForSolidColor(false)
     , m_animationFinished(true)
     , m_allDataReceived(true)
     , m_haveSize(true)
@@ -84,26 +89,30 @@ BitmapImage::BitmapImage(cairo_surface_t* surface, ImageObserver* observer)
     checkForSolidColor();
 }
 
-void BitmapImage::draw(GraphicsContext* context, const FloatRect& dst, const FloatRect& src, CompositeOperator op)
+void BitmapImage::draw(GraphicsContext* context, const FloatRect& dst, const FloatRect& src, ColorSpace styleColorSpace, CompositeOperator op)
 {
+    FloatRect srcRect(src);
+    FloatRect dstRect(dst);
+
+    if (dstRect.width() == 0.0f || dstRect.height() == 0.0f ||
+        srcRect.width() == 0.0f || srcRect.height() == 0.0f)
+        return;
+
     startAnimation();
 
     cairo_surface_t* image = frameAtIndex(m_currentFrame);
     if (!image) // If it's too early we won't have an image yet.
         return;
 
-    FloatRect srcRect(src);
-    FloatRect dstRect(dst);
-
     if (mayFillWithSolidColor()) {
-        fillWithSolidColor(context, dstRect, solidColor(), op);
+        fillWithSolidColor(context, dstRect, solidColor(), styleColorSpace, op);
         return;
     }
 
     IntSize selfSize = size();
 
     cairo_t* cr = context->platformContext();
-    cairo_save(cr);
+    context->save();
 
     // Set the compositing operation.
     if (op == CompositeSourceOver && !frameHasAlphaAtIndex(m_currentFrame))
@@ -116,16 +125,36 @@ void BitmapImage::draw(GraphicsContext* context, const FloatRect& dst, const Flo
     // Test using example site at http://www.meyerweb.com/eric/css/edge/complexspiral/demo.html
     cairo_pattern_t* pattern = cairo_pattern_create_for_surface(image);
 
-    // To avoid the unwanted gradient effect (#14017) we use
-    // CAIRO_FILTER_NEAREST now, but the real fix will be to have
-    // CAIRO_EXTEND_PAD implemented for surfaces in Cairo allowing us to still
-    // use bilinear filtering
-    cairo_pattern_set_filter(pattern, CAIRO_FILTER_NEAREST);
+    cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
 
     float scaleX = srcRect.width() / dstRect.width();
     float scaleY = srcRect.height() / dstRect.height();
     cairo_matrix_t matrix = { scaleX, 0, 0, scaleY, srcRect.x(), srcRect.y() };
     cairo_pattern_set_matrix(pattern, &matrix);
+
+    // Draw the shadow
+#if ENABLE(FILTERS)
+    IntSize shadowSize;
+    int shadowBlur;
+    Color shadowColor;
+    if (context->getShadow(shadowSize, shadowBlur, shadowColor)) {
+        IntSize shadowBufferSize;
+        FloatRect shadowRect;
+        float kernelSize (0.0);
+        GraphicsContext::calculateShadowBufferDimensions(shadowBufferSize, shadowRect, kernelSize, dstRect, shadowSize, shadowBlur);
+        shadowColor = colorWithOverrideAlpha(shadowColor.rgb(), (shadowColor.alpha() *  context->getAlpha()) / 255.f);
+
+        //draw shadow into a new ImageBuffer
+        OwnPtr<ImageBuffer> shadowBuffer = ImageBuffer::create(shadowBufferSize);
+        cairo_t* shadowContext = shadowBuffer->context()->platformContext();
+        cairo_set_source(shadowContext, pattern);
+        cairo_translate(shadowContext, -dstRect.x(), -dstRect.y());
+        cairo_rectangle(shadowContext, 0, 0, dstRect.width(), dstRect.height());
+        cairo_fill(shadowContext);
+
+        context->createPlatformShadow(shadowBuffer.release(), shadowColor, shadowRect, kernelSize);
+    }
+#endif
 
     // Draw the image.
     cairo_translate(cr, dstRect.x(), dstRect.y());
@@ -135,32 +164,44 @@ void BitmapImage::draw(GraphicsContext* context, const FloatRect& dst, const Flo
     cairo_clip(cr);
     cairo_paint_with_alpha(cr, context->getAlpha());
 
-    cairo_restore(cr);
+    context->restore();
 
     if (imageObserver())
         imageObserver()->didDraw(this);
 }
 
 void Image::drawPattern(GraphicsContext* context, const FloatRect& tileRect, const TransformationMatrix& patternTransform,
-                        const FloatPoint& phase, CompositeOperator op, const FloatRect& destRect)
+                        const FloatPoint& phase, ColorSpace, CompositeOperator op, const FloatRect& destRect)
 {
     cairo_surface_t* image = nativeImageForCurrentFrame();
     if (!image) // If it's too early we won't have an image yet.
         return;
 
+    // Avoid NaN
+    if (!isfinite(phase.x()) || !isfinite(phase.y()))
+       return;
+
     cairo_t* cr = context->platformContext();
     context->save();
 
-    // TODO: Make use of tileRect.
+    IntRect imageSize = enclosingIntRect(tileRect);
+    OwnPtr<ImageBuffer> imageSurface = ImageBuffer::create(imageSize.size());
+
+    if (!imageSurface)
+        return;
+
+    if (tileRect.size() != size()) {
+        cairo_t* clippedImageContext = imageSurface->context()->platformContext();
+        cairo_set_source_surface(clippedImageContext, image, -tileRect.x(), -tileRect.y());
+        cairo_paint(clippedImageContext);
+        image = imageSurface->image()->nativeImageForCurrentFrame();
+    }
 
     cairo_pattern_t* pattern = cairo_pattern_create_for_surface(image);
     cairo_pattern_set_extend(pattern, CAIRO_EXTEND_REPEAT);
 
-    // Workaround to avoid the unwanted gradient effect (#14017)
-    cairo_pattern_set_filter(pattern, CAIRO_FILTER_NEAREST);
-
     cairo_matrix_t pattern_matrix = cairo_matrix_t(patternTransform);
-    cairo_matrix_t phase_matrix = {1, 0, 0, 1, phase.x(), phase.y()};
+    cairo_matrix_t phase_matrix = {1, 0, 0, 1, phase.x() + tileRect.x() * patternTransform.a(), phase.y() + tileRect.y() * patternTransform.d()};
     cairo_matrix_t combined;
     cairo_matrix_multiply(&combined, &pattern_matrix, &phase_matrix);
     cairo_matrix_invert(&combined);
@@ -180,8 +221,28 @@ void Image::drawPattern(GraphicsContext* context, const FloatRect& tileRect, con
 
 void BitmapImage::checkForSolidColor()
 {
-    // FIXME: It's easy to implement this optimization. Just need to check the RGBA32 buffer to see if it is 1x1.
     m_isSolidColor = false;
+    m_checkedForSolidColor = true;
+
+    if (frameCount() > 1)
+        return;
+
+    cairo_surface_t* frameSurface = frameAtIndex(0);
+    if (!frameSurface)
+        return;
+
+    ASSERT(cairo_surface_get_type(frameSurface) == CAIRO_SURFACE_TYPE_IMAGE);
+
+    int width = cairo_image_surface_get_width(frameSurface);
+    int height = cairo_image_surface_get_height(frameSurface);
+
+    if (width != 1 || height != 1)
+        return;
+
+    unsigned* pixelColor = reinterpret_cast<unsigned*>(cairo_image_surface_get_data(frameSurface));
+    m_solidColor = colorFromPremultipliedARGB(*pixelColor);
+
+    m_isSolidColor = true;
 }
 
 }

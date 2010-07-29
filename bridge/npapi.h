@@ -43,8 +43,6 @@
 #ifndef _NPAPI_H_
 #define _NPAPI_H_
 
-#include <wtf/Platform.h>
-
 #ifdef INCLUDE_JAVA
 #include "jri.h"                /* Java Runtime Interface */
 #else
@@ -58,6 +56,12 @@
 #    endif /* XP_WIN */
 #endif /* _WIN32 */
 
+#ifdef __SYMBIAN32__
+#   ifndef XP_SYMBIAN
+#       define XP_SYMBIAN 1
+#   endif
+#endif  /* __SYMBIAN32__ */
+
 #ifdef __MWERKS__
 #    define _declspec __declspec
 #    ifdef macintosh
@@ -66,11 +70,13 @@
 #        endif /* XP_MAC */
 #    endif /* macintosh */
 #    ifdef __INTEL__
-#        undef NULL
-#        ifndef XP_WIN
-#            define XP_WIN 1
-#        endif /* __INTEL__ */
-#    endif /* XP_PC */
+#       ifndef XP_SYMBIAN
+#           undef NULL
+#           ifndef XP_WIN
+#               define XP_WIN 1
+#           endif /* XP_WIN */
+#       endif /* XP_SYMBIAN */
+#    endif /* __INTEL__ */
 #endif /* __MWERKS__ */
 
 #if defined(__APPLE_CC__) && !defined(__MACOS_CLASSIC__) && !defined(XP_UNIX)
@@ -101,6 +107,11 @@
     #include <stdio.h>
 #endif
 
+#if defined(XP_SYMBIAN)
+    #include <QEvent>
+    #include <QRegion>
+#endif
+
 #ifdef XP_WIN
     #include <windows.h>
 #endif
@@ -110,13 +121,19 @@
 /*----------------------------------------------------------------------*/
 
 #define NP_VERSION_MAJOR 0
-#define NP_VERSION_MINOR 20
-
-
+#define NP_VERSION_MINOR 24
 
 /*----------------------------------------------------------------------*/
 /*             Definition of Basic Types                                */
 /*----------------------------------------------------------------------*/
+
+/* QNX sets the _INT16 and friends defines, but does not typedef the types */
+#ifdef __QNXNTO__
+#undef _UINT16
+#undef _INT16
+#undef _UINT32
+#undef _INT32
+#endif
 
 #ifndef _UINT16
 #define _UINT16
@@ -345,13 +362,14 @@ typedef enum {
      */
     NPPVpluginWantsAllNetworkStreams = 18,
 
+    /* Checks to see if the plug-in would like the browser to load the "src" attribute. */
+    NPPVpluginCancelSrcStream = 20,
+
 #ifdef XP_MACOSX
     /* Used for negotiating drawing models */
     NPPVpluginDrawingModel = 1000,
     /* Used for negotiating event models */
     NPPVpluginEventModel = 1001,
-    /* The plug-in text input vtable */
-    NPPVpluginTextInputFuncs = 1002,
     /* In the NPDrawingModelCoreAnimation drawing model, the browser asks the plug-in for a Core Animation layer. */
     NPPVpluginCoreAnimationLayer = 1003
 #endif
@@ -381,7 +399,9 @@ typedef enum {
     /* Get the NPObject wrapper for the plugins DOM element. */
     NPNVPluginElementNPObject = 16,
 
-    NPNVSupportsWindowless = 17
+    NPNVSupportsWindowless = 17,
+    
+    NPNVprivateModeBool = 18
 
 #ifdef XP_MACOSX
     , NPNVpluginDrawingModel = 1000 /* The NPDrawingModel specified by the plugin */
@@ -398,9 +418,13 @@ typedef enum {
 #endif
     , NPNVsupportsCocoaBool = 3001 /* TRUE if the browser supports the Cocoa event model */
     
-    , NPNVbrowserTextInputFuncs = 1002 /* The browser text input vtable */
 #endif /* XP_MACOSX */
 } NPNVariable;
+
+typedef enum {
+   NPNURLVCookie = 501,
+   NPNURLVProxy
+} NPNURLVariable;
 
 /*
  * The type of a NPWindow - it specifies the type of the data structure
@@ -451,6 +475,7 @@ typedef enum {
     NPCocoaEventFocusChanged,
     NPCocoaEventWindowFocusChanged,
     NPCocoaEventScrollWheel,
+    NPCocoaEventTextInput
 } NPCocoaEventType;
 
 typedef struct _NPNSString NPNSString;
@@ -480,6 +505,8 @@ typedef struct _NPCocoaEvent {
             uint16 keyCode;
         } key;
         struct {
+            CGContextRef context;
+
             double x;
             double y;
             double width;
@@ -487,7 +514,10 @@ typedef struct _NPCocoaEvent {
         } draw;
         struct {
             NPBool hasFocus;
-        } focus;        
+        } focus;
+        struct {
+            NPNSString *text;
+        } text;
     } data;
 } NPCocoaEvent;
 
@@ -502,9 +532,9 @@ typedef struct _NPWindow
     uint32    height;
     NPRect    clipRect;    /* Clipping rectangle in port coordinates */
                         /* Used by MAC only.              */
-#ifdef XP_UNIX
+#if defined(XP_UNIX) || defined(XP_SYMBIAN)
     void *    ws_info;    /* Platform-dependent additonal data */
-#endif /* XP_UNIX */
+#endif /* XP_UNIX || XP_SYMBIAN */
     NPWindowType type;    /* Is this a window or a drawable? */
 } NPWindow;
 
@@ -540,12 +570,22 @@ typedef NPNSMenu NPMenu;
 typedef void * NPMenu;
 #endif
 
+typedef enum {
+    NPCoordinateSpacePlugin = 1,
+    NPCoordinateSpaceWindow,
+    NPCoordinateSpaceFlippedWindow,
+    NPCoordinateSpaceScreen,
+    NPCoordinateSpaceFlippedScreen
+} NPCoordinateSpace;
+
 #if defined(XP_MAC) || defined(XP_MACOSX)
 
 #ifndef NP_NO_CARBON
 typedef EventRecord    NPEvent;
 #endif
 
+#elif defined(XP_SYMBIAN)
+typedef QEvent NPEvent;
 #elif defined(XP_WIN)
 typedef struct _NPEvent
 {
@@ -576,6 +616,8 @@ typedef CGPathRef NPCGRegion;
 typedef HRGN NPRegion;
 #elif defined(XP_UNIX)
 typedef Region NPRegion;
+#elif defined(XP_SYMBIAN)
+typedef QRegion* NPRegion;
 #else
 typedef void *NPRegion;
 #endif /* XP_MAC */
@@ -728,7 +770,11 @@ typedef struct NP_Port
 #define NPVERS_HAS_RESPONSE_HEADERS       17
 #define NPVERS_HAS_NPOBJECT_ENUM          18
 #define NPVERS_HAS_PLUGIN_THREAD_ASYNC_CALL 19
-#define NPVERS_MACOSX_HAS_EVENT_MODELS    20
+#define NPVERS_HAS_ALL_NETWORK_STREAMS    20
+#define NPVERS_HAS_URL_AND_AUTH_INFO      21
+#define NPVERS_HAS_PRIVATE_MODE           22
+#define NPVERS_MACOSX_HAS_EVENT_MODELS    23
+#define NPVERS_HAS_CANCEL_SRC_STREAM      24
 
 /*----------------------------------------------------------------------*/
 /*             Function Prototypes                */
@@ -821,10 +867,14 @@ void        NPN_ForceRedraw(NPP instance);
 void        NPN_PushPopupsEnabledState(NPP instance, NPBool enabled);
 void        NPN_PopPopupsEnabledState(NPP instance);
 void        NPN_PluginThreadAsyncCall(NPP instance, void (*func) (void *), void *userData);
+NPError     NPN_GetValueForURL(NPP instance, NPNURLVariable variable, const char* url, char** value, uint32* len);
+NPError     NPN_SetValueForURL(NPP instance, NPNURLVariable variable, const char* url, const char* value, uint32 len);
+NPError     NPN_GetAuthenticationInfo(NPP instance, const char* protocol, const char* host, int32 port, const char* scheme, const char *realm, char** username, uint32* ulen, char** password, uint32* plen);
 uint32      NPN_ScheduleTimer(NPP instance, uint32 interval, NPBool repeat, void (*timerFunc)(NPP npp, uint32 timerID));
 void        NPN_UnscheduleTimer(NPP instance, uint32 timerID);
 NPError     NPN_PopUpContextMenu(NPP instance, NPMenu* menu);
-
+NPBool      NPN_ConvertPoint(NPP instance, double sourceX, double sourceY, NPCoordinateSpace sourceSpace, double *destX, double *destY, NPCoordinateSpace destSpace);
+    
 #ifdef __cplusplus
 }  /* end extern "C" */
 #endif

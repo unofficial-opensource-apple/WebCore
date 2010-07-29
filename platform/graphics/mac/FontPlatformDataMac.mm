@@ -1,7 +1,7 @@
 /*
  * This file is part of the internal font implementation.
  *
- * Copyright (C) 2006-7 Apple Computer, Inc.
+ * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,20 +23,21 @@
 #import "config.h"
 #import "FontPlatformData.h"
 
+#import "PlatformString.h"
 #import "WebCoreSystemInterface.h"
 
-#if USE(CORE_TEXT)
 #import <CoreText/CoreText.h>
-#endif
 
 namespace WebCore {
 
-FontPlatformData::FontPlatformData(GSFontRef f, bool b, bool o)
-: m_syntheticBold(b), m_syntheticOblique(o), m_font(f)
+FontPlatformData::FontPlatformData(GSFontRef gsFont, bool syntheticBold, bool syntheticOblique)
+    : m_syntheticBold(syntheticBold)
+    , m_syntheticOblique(syntheticOblique)
+    , m_font(gsFont)
 {
-    if (f)
-        CFRetain(f);
-    m_size = f ? GSFontGetSize(f) : 0.0f;
+    if (gsFont)
+        CFRetain(gsFont);
+    m_size = gsFont ? GSFontGetSize(gsFont) : 0.0f;
     m_gsFont = 0; // fixme <rdar://problem/5607116>
     m_isImageFont = false;
 }
@@ -62,25 +63,13 @@ const FontPlatformData& FontPlatformData::operator=(const FontPlatformData& f)
     m_syntheticBold = f.m_syntheticBold;
     m_syntheticOblique = f.m_syntheticOblique;
     m_size = f.m_size;
-#if !PLATFORM(MAC)
-    m_cgFont = f.m_cgFont;
-    m_atsuFontID = f.m_atsuFontID;
-#else
     m_isImageFont = f.m_isImageFont;
-#endif
     if (m_font == f.m_font)
         return *this;
-#if !PLATFORM(MAC)
-    if (f.m_font && f.m_font != reinterpret_cast<NSFont *>(-1))
-        CFRetain(f.m_font);
-    if (m_font && m_font != reinterpret_cast<NSFont *>(-1))
-        CFRelease(m_font);
-#else
     if (f.m_font && f.m_font != reinterpret_cast<GSFontRef>(-1))
         CFRetain(f.m_font);
     if (m_font && m_font != reinterpret_cast<GSFontRef>(-1))
         CFRelease(m_font);
-#endif
     m_font = f.m_font;
     return *this;
 }
@@ -98,6 +87,7 @@ void FontPlatformData::setFont(GSFontRef font)
     m_gsFont = 0; // fixme <rdar://problem/5607116>
 }
 
+
 bool FontPlatformData::allowsLigatures() const
 {
     if (!m_font)
@@ -107,5 +97,13 @@ bool FontPlatformData::allowsLigatures() const
     RetainPtr<CFCharacterSetRef> characterSet(AdoptCF, CTFontCopyCharacterSet(ctFont.get()));
     return !(characterSet.get() && CFCharacterSetIsCharacterMember(characterSet.get(), 'a'));
 }
+
+#ifndef NDEBUG
+String FontPlatformData::description() const
+{
+    RetainPtr<CFStringRef> cgFontDescription(AdoptCF, CFCopyDescription(GSFontGetCGFont(m_font)));
+    return String(cgFontDescription.get()) + " " + String::number(m_size) + (m_syntheticBold ? " synthetic bold" : "") + (m_syntheticOblique ? " syntheitic oblique" : "");
+}
+#endif
 
 } // namespace WebCore

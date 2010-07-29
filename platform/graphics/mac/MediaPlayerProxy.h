@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,10 @@
 #define MediaPlayerProxy_h
 
 #ifdef __OBJC__
+#import <Foundation/NSGeometry.h>
+#endif
+
+#ifdef __OBJC__
 @class WebMediaPlayerProxy;
 #else
 class WebMediaPlayerProxy;
@@ -36,31 +40,29 @@ enum MediaPlayerProxyNotificationType {
 
     MediaPlayerNotificationMediaValidated = 1,
     MediaPlayerNotificationMediaFailedToValidate,
-    
     MediaPlayerNotificationStartUsingNetwork,
     MediaPlayerNotificationStopUsingNetwork,
-
     MediaPlayerNotificationEnteredFullScreen,
     MediaPlayerNotificationExitedFullScreen,
-    
     MediaPlayerNotificationReadyForInspection,
     MediaPlayerNotificationReadyForPlayback,
     MediaPlayerNotificationDidPlayToTheEnd,
-
     MediaPlayerNotificationPlaybackFailed,
-
     MediaPlayerNotificationStreamLikelyToKeepUp,
     MediaPlayerNotificationStreamUnlikelyToKeepUp,
     MediaPlayerNotificationStreamBufferFull,
     MediaPlayerNotificationStreamRanDry,
     MediaPlayerNotificationFileLoaded,
-
     MediaPlayerNotificationSizeDidChange,
     MediaPlayerNotificationVolumeDidChange,
     MediaPlayerNotificationMutedDidChange,
     MediaPlayerNotificationTimeJumped,
-    
     MediaPlayerNotificationPlayPauseButtonPressed,
+    MediaPlayerNotificationRateDidChange,
+    MediaPlayerNotificationGainFocus,
+    MediaPlayerNotificationLoseFocus,
+    MediaPlayerRequestBeginPlayback,
+    MediaPlayerRequestPausePlayback,
 };
 
 #ifdef __OBJC__
@@ -75,6 +77,13 @@ enum MediaPlayerProxyNotificationType {
 
 - (void)_setPoster:(NSURL *)url;
 
+- (void)_setControls:(BOOL)controls;
+- (void)_setAutobuffer:(BOOL)autobuffer;
+
+- (void)_enterFullScreen;
+- (void)_exitFullScreen;
+
+- (void)_prepareForPlayback;
 - (void)_play;
 - (void)_pause;
 

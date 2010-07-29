@@ -29,6 +29,7 @@
 #include "config.h"
 #include "GlyphPageTreeNode.h"
 
+#include "CString.h"
 #include "CharacterNames.h"
 #include "SegmentedFontData.h"
 #include "SimpleFontData.h"
@@ -121,6 +122,18 @@ GlyphPageTreeNode::~GlyphPageTreeNode()
     delete m_systemFallbackChild;
 }
 
+static bool fill(GlyphPage* pageToFill, unsigned offset, unsigned length, UChar* buffer, unsigned bufferLength, const SimpleFontData* fontData)
+{
+    if (!fontData->isSVGFont())
+        return pageToFill->fill(offset, length, buffer, bufferLength, fontData);
+
+    // SVG Fonts do not use the glyph page cache. Zero fill the glyph
+    // positions and return false to indicate the glyphs were not found.
+    for (unsigned i = 0; i < length; ++i)
+        pageToFill->setGlyphDataForIndex(offset + i, 0, 0);
+    return false;
+}
+
 void GlyphPageTreeNode::initializePage(const FontData* fontData, unsigned pageNumber)
 {
     ASSERT(!m_page);
@@ -162,13 +175,15 @@ void GlyphPageTreeNode::initializePage(const FontData* fontData, unsigned pageNu
                     buffer[(int)'\t'] = ' ';
                     buffer[noBreakSpace] = ' ';
                 } else if (start == (leftToRightMark & ~(GlyphPage::size - 1))) {
-                    // LRM, RLM, LRE, RLE and PDF must not render at all.
+                    // LRM, RLM, LRE, RLE, ZWNJ, ZWJ, and PDF must not render at all.
                     buffer[leftToRightMark - start] = zeroWidthSpace;
                     buffer[rightToLeftMark - start] = zeroWidthSpace;
                     buffer[leftToRightEmbed - start] = zeroWidthSpace;
                     buffer[rightToLeftEmbed - start] = zeroWidthSpace;
                     buffer[leftToRightOverride - start] = zeroWidthSpace;
                     buffer[rightToLeftOverride - start] = zeroWidthSpace;
+                    buffer[zeroWidthNonJoiner - start] = zeroWidthSpace;
+                    buffer[zeroWidthJoiner - start] = zeroWidthSpace;
                     buffer[popDirectionalFormatting - start] = zeroWidthSpace;
                 } else if (start == (objectReplacementCharacter & ~(GlyphPage::size - 1))) {
                     // Object replacement character must not render at all.
@@ -201,8 +216,10 @@ void GlyphPageTreeNode::initializePage(const FontData* fontData, unsigned pageNu
                 GlyphPage* pageToFill = m_page.get();
                 for (unsigned i = 0; i < numRanges; i++) {
                     const FontDataRange& range = segmentedFontData->rangeAt(i);
-                    int from = max(0, range.from() - static_cast<int>(start));
-                    int to = 1 + min(range.to() - static_cast<int>(start), static_cast<int>(GlyphPage::size) - 1);
+                    // all this casting is to ensure all the parameters to min and max have the same type,
+                    // to avoid ambiguous template parameter errors on Windows
+                    int from = max(0, static_cast<int>(range.from()) - static_cast<int>(start));
+                    int to = 1 + min(static_cast<int>(range.to()) - static_cast<int>(start), static_cast<int>(GlyphPage::size) - 1);
                     if (from < static_cast<int>(GlyphPage::size) && to > 0) {
                         if (haveGlyphs && !scratchPage) {
                             scratchPage = GlyphPage::create(this);
@@ -216,17 +233,18 @@ void GlyphPageTreeNode::initializePage(const FontData* fontData, unsigned pageNu
                             }
                             zeroFilled = true;
                         }
-                        haveGlyphs |= pageToFill->fill(from, to - from, buffer + from * (start < 0x10000 ? 1 : 2), (to - from) * (start < 0x10000 ? 1 : 2), range.fontData());
+                        haveGlyphs |= fill(pageToFill, from, to - from, buffer + from * (start < 0x10000 ? 1 : 2), (to - from) * (start < 0x10000 ? 1 : 2), range.fontData());
                         if (scratchPage) {
+                            ASSERT(to <=  static_cast<int>(GlyphPage::size));
                             for (int j = from; j < to; j++) {
-                                if (!m_page->m_glyphs[j].glyph && pageToFill->m_glyphs[j].glyph)
-                                    m_page->m_glyphs[j] = pageToFill->m_glyphs[j];
+                                if (!m_page->glyphAt(j) && pageToFill->glyphAt(j))
+                                    m_page->setGlyphDataForIndex(j, pageToFill->glyphDataForIndex(j));
                             }
                         }
                     }
                 }
             } else
-                haveGlyphs = m_page->fill(0, GlyphPage::size, buffer, bufferLength, static_cast<const SimpleFontData*>(fontData));
+                haveGlyphs = fill(m_page.get(), 0, GlyphPage::size, buffer, bufferLength, static_cast<const SimpleFontData*>(fontData));
 
             if (!haveGlyphs)
                 m_page = 0;
@@ -264,15 +282,13 @@ void GlyphPageTreeNode::initializePage(const FontData* fontData, unsigned pageNu
                 // has added anything.
                 bool newGlyphs = false;
                 for (unsigned i = 0; i < GlyphPage::size; i++) {
-                    if (parentPage->m_glyphs[i].glyph)
-                        m_page->m_glyphs[i] = parentPage->m_glyphs[i];
-                    else  if (fallbackPage->m_glyphs[i].glyph) {
-                        m_page->m_glyphs[i] = fallbackPage->m_glyphs[i];
+                    if (parentPage->glyphAt(i))
+                        m_page->setGlyphDataForIndex(i, parentPage->glyphDataForIndex(i));
+                    else  if (fallbackPage->glyphAt(i)) {
+                        m_page->setGlyphDataForIndex(i, fallbackPage->glyphDataForIndex(i));
                         newGlyphs = true;
-                    } else {
-                        const GlyphData data = { 0, 0 };
-                        m_page->m_glyphs[i] = data;
-                    }
+                    } else
+                        m_page->setGlyphDataForIndex(i, 0, 0);
                 }
 
                 if (!newGlyphs)
@@ -287,12 +303,9 @@ void GlyphPageTreeNode::initializePage(const FontData* fontData, unsigned pageNu
         // ever finds it needs a glyph out of the system fallback page, it will
         // ask the system for the best font to use and fill that glyph in for us.
         if (parentPage && pageNumber != 6) // don't copy the fallback page for arabic - rdar://6814152 see glyphDataForCharacter in FontFastPath.cpp
-            memcpy(m_page->m_glyphs, parentPage->m_glyphs, GlyphPage::size * sizeof(m_page->m_glyphs[0]));
-        else {
-            const GlyphData data = { 0, 0 };
-            for (unsigned i = 0; i < GlyphPage::size; i++)
-                m_page->m_glyphs[i] = data;
-        }
+            m_page->copyFrom(*parentPage);
+        else
+            m_page->clear();
     }
 }
 
@@ -381,4 +394,41 @@ void GlyphPageTreeNode::pruneFontData(const SimpleFontData* fontData, unsigned l
         it->second->pruneFontData(fontData, level);
 }
 
+#ifndef NDEBUG
+    void GlyphPageTreeNode::showSubtree()
+    {
+        Vector<char> indent(level());
+        indent.fill('\t', level());
+        indent.append(0);
+
+        HashMap<const FontData*, GlyphPageTreeNode*>::iterator end = m_children.end();
+        for (HashMap<const FontData*, GlyphPageTreeNode*>::iterator it = m_children.begin(); it != end; ++it) {
+            printf("%s\t%p %s\n", indent.data(), it->first, it->first->description().utf8().data());
+            it->second->showSubtree();
+        }
+        if (m_systemFallbackChild) {
+            printf("%s\t* fallback\n", indent.data());
+            m_systemFallbackChild->showSubtree();
+        }
+    }
+#endif
+
 }
+
+#ifndef NDEBUG
+void showGlyphPageTrees()
+{
+    printf("Page 0:\n");
+    showGlyphPageTree(0);
+    HashMap<int, WebCore::GlyphPageTreeNode*>::iterator end = WebCore::GlyphPageTreeNode::roots->end();
+    for (HashMap<int, WebCore::GlyphPageTreeNode*>::iterator it = WebCore::GlyphPageTreeNode::roots->begin(); it != end; ++it) {
+        printf("\nPage %d:\n", it->first);
+        showGlyphPageTree(it->first);
+    }
+}
+
+void showGlyphPageTree(unsigned pageNumber)
+{
+    WebCore::GlyphPageTreeNode::getRoot(pageNumber)->showSubtree();
+}
+#endif

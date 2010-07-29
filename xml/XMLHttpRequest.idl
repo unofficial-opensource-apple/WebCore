@@ -29,7 +29,10 @@
 module xml {
 
     interface [
-        CustomMarkFunction
+        CustomConstructor,
+        CustomMarkFunction,
+        EventTarget,
+        NoStaticTables
     ] XMLHttpRequest {
         // From XMLHttpRequestEventTarget
         // event handler attributes
@@ -52,6 +55,8 @@ module xml {
         readonly attribute unsigned short readyState;
 
         // request
+        attribute boolean withCredentials
+            setter raises(DOMException);
         // void open(in DOMString method, in DOMString url);
         // void open(in DOMString method, in DOMString url, in boolean async);
         // void open(in DOMString method, in DOMString url, in boolean async, in DOMString user);

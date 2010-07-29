@@ -30,17 +30,20 @@
 #include <wtf/Noncopyable.h>
 #include "LinkHash.h"
 #include "StringHash.h"
+#include "UserScript.h"
+#include "UserStyleSheet.h"
 
 namespace WebCore {
 
     class KURL;
-    class LocalStorage;
     class Page;
+    class StorageNamespace;
 
-    class PageGroup : Noncopyable {
+    class PageGroup : public Noncopyable {
     public:
         PageGroup(const String& name);
         PageGroup(Page*);
+        ~PageGroup();
 
         static PageGroup* pageGroup(const String& groupName);
         static void closeLocalStorage();
@@ -63,8 +66,26 @@ namespace WebCore {
         unsigned identifier() { return m_identifier; }
 
 #if ENABLE(DOM_STORAGE)
-        LocalStorage* localStorage();
+        StorageNamespace* localStorage();
+        bool hasLocalStorage() { return m_localStorage; }
 #endif
+
+        void addUserScriptToWorld(DOMWrapperWorld*, const String& source, const KURL&, 
+                                  PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
+                                  UserScriptInjectionTime);
+        void addUserStyleSheetToWorld(DOMWrapperWorld*, const String& source, const KURL&,
+                               PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist);
+        
+        void removeUserScriptFromWorld(DOMWrapperWorld*, const KURL&);
+        void removeUserStyleSheetFromWorld(DOMWrapperWorld*, const KURL&);
+        
+        void removeUserScriptsFromWorld(DOMWrapperWorld*);
+        void removeUserStyleSheetsFromWorld(DOMWrapperWorld*);
+    
+        void removeAllUserContent();
+        
+        const UserScriptMap* userScripts() const { return m_userScripts.get(); }
+        const UserStyleSheetMap* userStyleSheets() const { return m_userStyleSheets.get(); }
 
     private:
         void addVisitedLink(LinkHash stringHash);
@@ -78,8 +99,11 @@ namespace WebCore {
 
         unsigned m_identifier;
 #if ENABLE(DOM_STORAGE)
-        RefPtr<LocalStorage> m_localStorage;
+        RefPtr<StorageNamespace> m_localStorage;
 #endif
+
+        OwnPtr<UserScriptMap> m_userScripts;
+        OwnPtr<UserStyleSheetMap> m_userStyleSheets;
     };
 
 } // namespace WebCore

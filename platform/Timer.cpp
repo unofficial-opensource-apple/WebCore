@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2009 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,13 +28,16 @@
 #include "Timer.h"
 
 #include "SharedTimer.h"
+#include "ThreadGlobalData.h"
+#include "ThreadTimers.h"
 #include <limits.h>
 #include <limits>
 #include <math.h>
 #include <wtf/CurrentTime.h>
 #include <wtf/HashSet.h>
 #include <wtf/Vector.h>
-#import "WebCoreThread.h"
+
+#include "WebCoreThread.h"
 
 using namespace std;
 
@@ -45,20 +49,24 @@ namespace WebCore {
 //
 // When a timer's "next fire time" changes, we need to move it around in the priority queue.
 
-// ----------------
-
-static Vector<TimerBase*>* timerHeap;
-static HashSet<const TimerBase*>* timersReadyToFire;
-
-// ----------------
+// Simple accessors to thread-specific data.
+static Vector<TimerBase*>& timerHeap()
+{
+    return threadGlobalData().threadTimers().timerHeap();
+}
 
 // Class to represent elements in the heap when calling the standard library heap algorithms.
 // Maintains the m_heapIndex value in the timers themselves, which allows us to do efficient
 // modification of the heap.
 class TimerHeapElement {
 public:
-    explicit TimerHeapElement(int i) : m_index(i), m_timer((*timerHeap)[m_index]) { checkConsistency(); }
-    
+    explicit TimerHeapElement(int i)
+        : m_index(i)
+        , m_timer(timerHeap()[m_index])
+    { 
+        checkConsistency(); 
+    }
+
     TimerHeapElement(const TimerHeapElement&);
     TimerHeapElement& operator=(const TimerHeapElement&);
 
@@ -67,7 +75,7 @@ public:
     void checkConsistency() const
     {
         ASSERT(m_index >= 0);
-        ASSERT(m_index < (timerHeap ? static_cast<int>(timerHeap->size()) : 0));
+        ASSERT(m_index < static_cast<int>(timerHeap().size()));
     }
 
 private:
@@ -88,7 +96,7 @@ inline TimerHeapElement& TimerHeapElement::operator=(const TimerHeapElement& o)
     m_timer = t;
     if (m_index != -1) {
         checkConsistency();
-        (*timerHeap)[m_index] = t;
+        timerHeap()[m_index] = t;
         t->m_heapIndex = m_index;
     }
     return *this;
@@ -135,7 +143,7 @@ public:
     void checkConsistency(int offset = 0) const
     {
         ASSERT_UNUSED(offset, m_index + offset >= 0);
-        ASSERT_UNUSED(offset, m_index + offset <= (timerHeap ? static_cast<int>(timerHeap->size()) : 0));
+        ASSERT_UNUSED(offset, m_index + offset <= static_cast<int>(timerHeap().size()));
     }
 
 private:
@@ -154,49 +162,40 @@ inline int operator-(TimerHeapIterator a, TimerHeapIterator b) { return a.index(
 
 // ----------------
 
-void updateSharedTimer()
-{
-    if (timersReadyToFire || !timerHeap || timerHeap->isEmpty())
-        stopSharedTimer();
-    else
-        setSharedTimerFireTime(timerHeap->first()->m_nextFireTime);
-}
-
-// ----------------
-
 TimerBase::TimerBase()
-    : m_nextFireTime(0), m_repeatInterval(0), m_heapIndex(-1)
+    : m_nextFireTime(0)
+    , m_repeatInterval(0)
+    , m_heapIndex(-1)
+#ifndef NDEBUG
+    , m_thread(currentThread())
+#endif
 {
-    // We only need to do this once, but probably not worth trying to optimize it.
-    setSharedTimerFiredFunction(sharedTimerFired);
 }
 
 TimerBase::~TimerBase()
 {
     stop();
-
     ASSERT(!inHeap());
 }
 
 void TimerBase::start(double nextFireInterval, double repeatInterval)
 {
+    ASSERT(m_thread == currentThread() || (isMainThread() || pthread_main_np()) && WebCoreWebThreadIsLockedOrDisabled());
+
     m_repeatInterval = repeatInterval;
     setNextFireTime(currentTime() + nextFireInterval);
 }
 
 void TimerBase::stop()
 {
+    ASSERT(m_thread == currentThread() || (isMainThread() || pthread_main_np()) && WebCoreWebThreadIsLockedOrDisabled());
+
     m_repeatInterval = 0;
     setNextFireTime(0);
 
     ASSERT(m_nextFireTime == 0);
     ASSERT(m_repeatInterval == 0);
     ASSERT(!inHeap());
-}
-
-bool TimerBase::isActive() const
-{
-    return m_nextFireTime || (timersReadyToFire && timersReadyToFire->contains(this));
 }
 
 double TimerBase::nextFireInterval() const
@@ -210,11 +209,10 @@ double TimerBase::nextFireInterval() const
 
 inline void TimerBase::checkHeapIndex() const
 {
-    ASSERT(timerHeap);
-    ASSERT(!timerHeap->isEmpty());
+    ASSERT(!timerHeap().isEmpty());
     ASSERT(m_heapIndex >= 0);
-    ASSERT(m_heapIndex < static_cast<int>(timerHeap->size()));
-    ASSERT((*timerHeap)[m_heapIndex] == this);
+    ASSERT(m_heapIndex < static_cast<int>(timerHeap().size()));
+    ASSERT(timerHeap()[m_heapIndex] == this);
 }
 
 inline void TimerBase::checkConsistency() const
@@ -237,15 +235,15 @@ inline void TimerBase::heapDelete()
 {
     ASSERT(m_nextFireTime == 0);
     heapPop();
-    timerHeap->removeLast();
+    timerHeap().removeLast();
     m_heapIndex = -1;
 }
 
-inline void TimerBase::heapDeleteMin()
+void TimerBase::heapDeleteMin()
 {
     ASSERT(m_nextFireTime == 0);
     heapPopMin();
-    timerHeap->removeLast();
+    timerHeap().removeLast();
     m_heapIndex = -1;
 }
 
@@ -259,10 +257,8 @@ inline void TimerBase::heapIncreaseKey()
 inline void TimerBase::heapInsert()
 {
     ASSERT(!inHeap());
-    if (!timerHeap)
-        timerHeap = new Vector<TimerBase*>;
-    timerHeap->append(this);
-    m_heapIndex = timerHeap->size() - 1;
+    timerHeap().append(this);
+    m_heapIndex = timerHeap().size() - 1;
     heapDecreaseKey();
 }
 
@@ -278,20 +274,18 @@ inline void TimerBase::heapPop()
 
 void TimerBase::heapPopMin()
 {
-    ASSERT(this == timerHeap->first());
+    ASSERT(this == timerHeap().first());
     checkHeapIndex();
-    pop_heap(TimerHeapIterator(0), TimerHeapIterator(timerHeap->size()));
+    pop_heap(TimerHeapIterator(0), TimerHeapIterator(timerHeap().size()));
     checkHeapIndex();
-    ASSERT(this == timerHeap->last());
+    ASSERT(this == timerHeap().last());
 }
 
 void TimerBase::setNextFireTime(double newTime)
 {
+    ASSERT(m_thread == currentThread() || (isMainThread() || pthread_main_np()) && WebCoreWebThreadIsLockedOrDisabled());
+
     // Keep heap valid while changing the next-fire time.
-
-    if (timersReadyToFire)
-        timersReadyToFire->remove(this);
-
     double oldTime = m_nextFireTime;
     if (oldTime != newTime) {
         m_nextFireTime = newTime;
@@ -312,73 +306,17 @@ void TimerBase::setNextFireTime(double newTime)
         bool isFirstTimerInHeap = m_heapIndex == 0;
 
         if (wasFirstTimerInHeap || isFirstTimerInHeap)
-            updateSharedTimer();
+            threadGlobalData().threadTimers().updateSharedTimer();
     }
 
     checkConsistency();
 }
 
-void TimerBase::collectFiringTimers(double fireTime, Vector<TimerBase*>& firingTimers)
-{
-    while (!timerHeap->isEmpty() && timerHeap->first()->m_nextFireTime <= fireTime) {
-        TimerBase* timer = timerHeap->first();
-        firingTimers.append(timer);
-        timersReadyToFire->add(timer);
-        timer->m_nextFireTime = 0;
-        timer->heapDeleteMin();
-    }
-}
-
-void TimerBase::fireTimers(double fireTime, const Vector<TimerBase*>& firingTimers)
-{
-    ASSERT(WebThreadIsLocked() || !WebThreadIsEnabled());
-    int size = firingTimers.size();
-    for (int i = 0; i != size; ++i) {
-        TimerBase* timer = firingTimers[i];
-
-        // If not in the set, this timer has been deleted or re-scheduled in another timer's fired function.
-        // So either we don't want to fire it at all or we will fire it next time the shared timer goes off.
-        // It might even have been deleted; that's OK because we won't do anything else with the pointer.
-        if (!timersReadyToFire->contains(timer))
-            continue;
-
-        // Setting the next fire time has a side effect of removing the timer from the firing timers set.
-        double interval = timer->repeatInterval();
-        timer->setNextFireTime(interval ? fireTime + interval : 0);
-
-        // Once the timer has been fired, it may be deleted, so do nothing else with it after this point.
-        timer->fired();
-
-        // Catch the case where the timer asked timers to fire in a nested event loop.
-        if (!timersReadyToFire)
-            break;
-    }
-}
-
-void TimerBase::sharedTimerFired()
-{
-    // Do a re-entrancy check.
-    if (timersReadyToFire)
-        return;
-
-    double fireTime = currentTime();
-    Vector<TimerBase*> firingTimers;
-    HashSet<const TimerBase*> firingTimersSet;
-
-    timersReadyToFire = &firingTimersSet;
-    
-    collectFiringTimers(fireTime, firingTimers);
-    fireTimers(fireTime, firingTimers);
-
-    timersReadyToFire = 0;
-    
-    updateSharedTimer();
-}
-
 void TimerBase::fireTimersInNestedEventLoop()
 {
-    timersReadyToFire = 0;
-    updateSharedTimer();
+    // Redirect to ThreadTimers.
+    threadGlobalData().threadTimers().fireTimersInNestedEventLoop();
 }
 
-}
+} // namespace WebCore
+

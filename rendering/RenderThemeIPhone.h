@@ -15,9 +15,12 @@ class GraphicsContext;
     
 class RenderThemeIPhone : public RenderTheme {
 public:
-    
+    static PassRefPtr<RenderTheme> create();
+
     virtual int popupInternalPaddingRight(RenderStyle*) const;
-                
+    
+    static void adjustButtonBorderRadius(RenderStyle*, RenderButton*);
+
 protected:
 
     virtual int baselinePosition(const RenderObject* o) const;
@@ -31,6 +34,7 @@ protected:
     virtual void adjustRadioStyle(CSSStyleSelector*, RenderStyle*, Element*) const;    
     virtual bool paintRadioDecorations(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
     
+    virtual void adjustButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
     virtual bool paintButtonDecorations(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r);
     virtual bool paintPushButtonDecorations(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r);
     virtual void setButtonSize(RenderStyle*) const;
@@ -42,7 +46,12 @@ protected:
     virtual void adjustMenuListButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
     virtual bool paintMenuListButtonDecorations(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
     
+    virtual Color platformActiveSelectionBackgroundColor() const;
+    virtual Color platformInactiveSelectionBackgroundColor() const;
+        
 private:
+    RenderThemeIPhone() { }
+    virtual ~RenderThemeIPhone() { }
 
     typedef enum
     {
@@ -52,8 +61,8 @@ private:
         ConvexGradient,
         ConcaveGradient
     } IPhoneGradientName;
-    
-    Color * shadowColor() const;
+
+    const Color& shadowColor() const;
     IPhoneGradientRef gradientWithName(IPhoneGradientName aGradientName) const;
     FloatRect addRoundedBorderClip(const FloatRect& aRect, const BorderData&, GraphicsContext* aContext);
 };

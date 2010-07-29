@@ -41,37 +41,37 @@
 
 namespace WebCore {
 
-static const struct CompositOpToPorterDuffMode {
+static const struct CompositOpToXfermodeMode {
     uint8_t mCompositOp;
-    uint8_t mPorterDuffMode;
-} gMapCompositOpsToPorterDuffModes[] = {
-    { CompositeClear,           SkPorterDuff::kClear_Mode },
-    { CompositeCopy,            SkPorterDuff::kSrcOver_Mode },  // TODO
-    { CompositeSourceOver,      SkPorterDuff::kSrcOver_Mode },
-    { CompositeSourceIn,        SkPorterDuff::kSrcIn_Mode },
-    { CompositeSourceOut,       SkPorterDuff::kSrcOut_Mode },
-    { CompositeSourceAtop,      SkPorterDuff::kSrcATop_Mode },
-    { CompositeDestinationOver, SkPorterDuff::kDstOver_Mode },
-    { CompositeDestinationIn,   SkPorterDuff::kDstIn_Mode },
-    { CompositeDestinationOut,  SkPorterDuff::kDstOut_Mode },
-    { CompositeDestinationAtop, SkPorterDuff::kDstATop_Mode },
-    { CompositeXOR,             SkPorterDuff::kXor_Mode },
-    { CompositePlusDarker,      SkPorterDuff::kDarken_Mode },
-    { CompositeHighlight,       SkPorterDuff::kSrcOver_Mode },  // TODO
-    { CompositePlusLighter,     SkPorterDuff::kLighten_Mode }
+    uint8_t m_xfermodeMode;
+} gMapCompositOpsToXfermodeModes[] = {
+    { CompositeClear,           SkXfermode::kClear_Mode },
+    { CompositeCopy,            SkXfermode::kSrc_Mode },
+    { CompositeSourceOver,      SkXfermode::kSrcOver_Mode },
+    { CompositeSourceIn,        SkXfermode::kSrcIn_Mode },
+    { CompositeSourceOut,       SkXfermode::kSrcOut_Mode },
+    { CompositeSourceAtop,      SkXfermode::kSrcATop_Mode },
+    { CompositeDestinationOver, SkXfermode::kDstOver_Mode },
+    { CompositeDestinationIn,   SkXfermode::kDstIn_Mode },
+    { CompositeDestinationOut,  SkXfermode::kDstOut_Mode },
+    { CompositeDestinationAtop, SkXfermode::kDstATop_Mode },
+    { CompositeXOR,             SkXfermode::kXor_Mode },
+    { CompositePlusDarker,      SkXfermode::kDarken_Mode },
+    { CompositeHighlight,       SkXfermode::kSrcOver_Mode },  // TODO
+    { CompositePlusLighter,     SkXfermode::kPlus_Mode }
 };
 
-SkPorterDuff::Mode WebCoreCompositeToSkiaComposite(CompositeOperator op)
+SkXfermode::Mode WebCoreCompositeToSkiaComposite(CompositeOperator op)
 {
-    const CompositOpToPorterDuffMode* table = gMapCompositOpsToPorterDuffModes;
+    const CompositOpToXfermodeMode* table = gMapCompositOpsToXfermodeModes;
     
-    for (unsigned i = 0; i < SK_ARRAY_COUNT(gMapCompositOpsToPorterDuffModes); i++) {
+    for (unsigned i = 0; i < SK_ARRAY_COUNT(gMapCompositOpsToXfermodeModes); i++) {
         if (table[i].mCompositOp == op)
-            return (SkPorterDuff::Mode)table[i].mPorterDuffMode;
+            return (SkXfermode::Mode)table[i].m_xfermodeMode;
     }
 
     SkDEBUGF(("GraphicsContext::setCompositeOperation uknown CompositeOperator %d\n", op));
-    return SkPorterDuff::kSrcOver_Mode; // fall-back
+    return SkXfermode::kSrcOver_Mode; // fall-back
 }
 
 static U8CPU InvScaleByte(U8CPU component, uint32_t scale)
@@ -150,11 +150,15 @@ bool SkPathContainsPoint(SkPath* originalPath, const FloatPoint& point, SkPath::
     SkPath scaledPath;
     int scale = 1;
 
-    SkRect bounds;
-    originalPath->computeBounds(&bounds, SkPath::kFast_BoundsType);
+    SkRect bounds = originalPath->getBounds();
 
-    // We can immediately return false if the point is outside the bounding rect
-    if (!bounds.contains(SkFloatToScalar(point.x()), SkFloatToScalar(point.y())))
+    // We can immediately return false if the point is outside the bounding
+    // rect.  We don't use bounds.contains() here, since it would exclude
+    // points on the right and bottom edges of the bounding rect, and we want
+    // to include them.
+    SkScalar fX = SkFloatToScalar(point.x());
+    SkScalar fY = SkFloatToScalar(point.y());
+    if (fX < bounds.fLeft || fX > bounds.fRight || fY < bounds.fTop || fY > bounds.fBottom)
         return false;
 
     originalPath->setFillType(ft);
@@ -178,7 +182,7 @@ bool SkPathContainsPoint(SkPath* originalPath, const FloatPoint& point, SkPath::
 
     int x = static_cast<int>(floorf(point.x() / scale));
     int y = static_cast<int>(floorf(point.y() / scale));
-    clip.setRect(x, y, x + 1, y + 1);
+    clip.setRect(x - 1, y - 1, x + 1, y + 1);
 
     bool contains = rgn.setPath(*path, clip);
 
@@ -190,7 +194,7 @@ GraphicsContext* scratchContext()
 {
     static ImageBuffer* scratch = 0;
     if (!scratch)
-        scratch = ImageBuffer::create(IntSize(1, 1), false).release();
+        scratch = ImageBuffer::create(IntSize(1, 1)).release();
     // We don't bother checking for failure creating the ImageBuffer, since our
     // ImageBuffer initializer won't fail.
     return scratch->context();

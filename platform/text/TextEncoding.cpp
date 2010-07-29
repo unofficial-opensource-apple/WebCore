@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2004, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Alexey Proskuryakov <ap@nypop.com>
+ * Copyright (C) 2007-2009 Torch Mobile, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,12 +31,14 @@
 #include "CString.h"
 #include "PlatformString.h"
 #include "TextCodec.h"
-#include "TextDecoder.h"
 #include "TextEncodingRegistry.h"
 #if USE(ICU_UNICODE)
 #include <unicode/unorm.h>
 #elif USE(QT4_UNICODE)
 #include <QString>
+#elif USE(GLIB_UNICODE)
+#include <glib.h>
+#include <wtf/gtk/GOwnPtr.h>
 #endif
 #include <wtf/HashSet.h>
 #include <wtf/OwnPtr.h>
@@ -73,7 +76,7 @@ String TextEncoding::decode(const char* data, size_t length, bool stopOnError, b
     if (!m_name)
         return String();
 
-    return TextDecoder(*this).decode(data, length, true, stopOnError, sawError);
+    return newTextCodec(*this)->decode(data, length, true, stopOnError, sawError);
 }
 
 CString TextEncoding::encode(const UChar* characters, size_t length, UnencodableHandling handling) const
@@ -114,7 +117,41 @@ CString TextEncoding::encode(const UChar* characters, size_t length, Unencodable
     QString str(reinterpret_cast<const QChar*>(characters), length);
     str = str.normalized(QString::NormalizationForm_C);
     return newTextCodec(*this)->encode(reinterpret_cast<const UChar *>(str.utf16()), str.length(), handling);
+#elif USE(GLIB_UNICODE)
+    GOwnPtr<char> UTF8Source;
+    UTF8Source.set(g_utf16_to_utf8(characters, length, 0, 0, 0));
+
+    GOwnPtr<char> UTF8Normalized;
+    UTF8Normalized.set(g_utf8_normalize(UTF8Source.get(), -1, G_NORMALIZE_NFC));
+
+    long UTF16Length;
+    GOwnPtr<UChar> UTF16Normalized;
+    UTF16Normalized.set(g_utf8_to_utf16(UTF8Normalized.get(), -1, 0, &UTF16Length, 0));
+
+    return newTextCodec(*this)->encode(UTF16Normalized.get(), UTF16Length, handling);
+#elif OS(WINCE)
+    // normalization will be done by Windows CE API
+    OwnPtr<TextCodec> textCodec = newTextCodec(*this);
+    return textCodec.get() ? textCodec->encode(characters, length, handling) : CString();
 #endif
+}
+
+const char* TextEncoding::domName() const
+{
+    if (noExtendedTextEncodingNameUsed())
+        return m_name;
+
+    // We treat EUC-KR as windows-949 (its superset), but need to expose 
+    // the name 'EUC-KR' because the name 'windows-949' is not recognized by
+    // most Korean web servers even though they do use the encoding
+    // 'windows-949' with the name 'EUC-KR'. 
+    // FIXME: This is not thread-safe. At the moment, this function is
+    // only accessed in a single thread, but eventually has to be made
+    // thread-safe along with usesVisualOrdering().
+    static const char* const a = atomicCanonicalTextEncodingName("windows-949");
+    if (m_name == a)
+        return "EUC-KR";
+    return m_name;
 }
 
 bool TextEncoding::usesVisualOrdering() const
@@ -242,6 +279,7 @@ const TextEncoding& UTF32LittleEndianEncoding()
 const TextEncoding& UTF8Encoding()
 {
     static TextEncoding globalUTF8Encoding("UTF-8");
+    ASSERT(globalUTF8Encoding.isValid());
     return globalUTF8Encoding;
 }
 

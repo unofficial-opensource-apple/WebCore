@@ -23,7 +23,7 @@
 #ifndef RenderFrameSet_h
 #define RenderFrameSet_h
 
-#include "RenderContainer.h"
+#include "RenderBox.h"
 
 namespace WebCore {
 
@@ -32,8 +32,7 @@ class MouseEvent;
 
 enum FrameEdge { LeftFrameEdge, RightFrameEdge, TopFrameEdge, BottomFrameEdge };
 
-struct FrameEdgeInfo
-{
+struct FrameEdgeInfo {
     FrameEdgeInfo(bool preventResize = false, bool allowBorder = true)
         : m_preventResize(4)
         , m_allowBorder(4)
@@ -53,20 +52,14 @@ private:
     Vector<bool> m_allowBorder;
 };
 
-class RenderFrameSet : public RenderContainer {
+class RenderFrameSet : public RenderBox {
 public:
     RenderFrameSet(HTMLFrameSetElement*);
     virtual ~RenderFrameSet();
 
-    virtual const char* renderName() const { return "RenderFrameSet"; }
-    virtual bool isFrameSet() const { return true; }
+    const RenderObjectChildList* children() const { return &m_children; }
+    RenderObjectChildList* children() { return &m_children; }
 
-    virtual void layout();
-    virtual void calcPrefWidths();
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
-    virtual void paint(PaintInfo& paintInfo, int tx, int ty);
-    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
-    
     FrameEdgeInfo edgeInfo() const;
 
     bool userResize(MouseEvent*);
@@ -77,12 +70,10 @@ public:
     bool canResizeRow(const IntPoint&) const;
     bool canResizeColumn(const IntPoint&) const;
 
-    bool flattenFrameset() const;
-
 private:
     static const int noSplit = -1;
 
-    class GridAxis : Noncopyable {
+    class GridAxis : public Noncopyable {
     public:
         GridAxis();
         void resize(int);
@@ -94,9 +85,21 @@ private:
         int m_splitResizeOffset;
     };
 
+    virtual RenderObjectChildList* virtualChildren() { return children(); }
+    virtual const RenderObjectChildList* virtualChildren() const { return children(); }
+
+    virtual const char* renderName() const { return "RenderFrameSet"; }
+    virtual bool isFrameSet() const { return true; }
+
+    virtual void layout();
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
+    virtual void paint(PaintInfo&, int tx, int ty);
+    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
+
     inline HTMLFrameSetElement* frameSet() const;
 
-    bool canResize(const IntPoint&) const;
+    bool flattenFrameSet() const;
+
     void setIsResizing(bool);
 
     void layOutAxis(GridAxis&, const Length*, int availableSpace);
@@ -111,8 +114,10 @@ private:
     void startResizing(GridAxis&, int position);
     void continueResizing(GridAxis&, int position);
 
-    void paintRowBorder(const PaintInfo& paintInfo, const IntRect& rect);
-    void paintColumnBorder(const PaintInfo& paintInfo, const IntRect& rect);
+    void paintRowBorder(const PaintInfo&, const IntRect&);
+    void paintColumnBorder(const PaintInfo&, const IntRect&);
+
+    RenderObjectChildList m_children;
 
     GridAxis m_rows;
     GridAxis m_cols;
@@ -120,6 +125,16 @@ private:
     bool m_isResizing;
     bool m_isChildResizing;
 };
+
+
+inline RenderFrameSet* toRenderFrameSet(RenderObject* object)
+{
+    ASSERT(!object || object->isFrameSet());
+    return static_cast<RenderFrameSet*>(object);
+}
+
+// This will catch anyone doing an unnecessary cast.
+void toRenderFrameSet(const RenderFrameSet*);
 
 } // namespace WebCore
 

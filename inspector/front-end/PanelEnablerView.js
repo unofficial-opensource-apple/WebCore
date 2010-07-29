@@ -44,6 +44,23 @@ WebInspector.PanelEnablerView = function(identifier, headingText, disclaimerText
     this.headerElement.textContent = headingText;
     this.choicesForm.appendChild(this.headerElement);
 
+    var self = this;
+    function enableOption(text, checked) {
+        var label = document.createElement("label");
+        var option = document.createElement("input");
+        option.type = "radio";
+        option.name = "enable-option";
+        if (checked)
+            option.checked = true;
+        label.appendChild(option);
+        label.appendChild(document.createTextNode(text));
+        self.choicesForm.appendChild(label);
+        return option;
+    };
+
+    this.enabledForSession = enableOption(WebInspector.UIString("Only enable for this session"), true);
+    this.enabledAlways = enableOption(WebInspector.UIString("Always enable"));
+
     this.disclaimerElement = document.createElement("div");
     this.disclaimerElement.className = "panel-enabler-disclaimer";
     this.disclaimerElement.textContent = disclaimerText;
@@ -54,8 +71,6 @@ WebInspector.PanelEnablerView = function(identifier, headingText, disclaimerText
     this.enableButton.textContent = buttonTitle;
     this.enableButton.addEventListener("click", this._enableButtonCicked.bind(this), false);
     this.choicesForm.appendChild(this.enableButton);
-
-    window.addEventListener("resize", this._windowResized.bind(this), true);
 }
 
 WebInspector.PanelEnablerView.prototype = {
@@ -64,12 +79,23 @@ WebInspector.PanelEnablerView.prototype = {
         this.dispatchEventToListeners("enable clicked");
     },
 
-    _windowResized: function()
+    show: function(parentElement)
+    {
+        WebInspector.View.prototype.show.call(this, parentElement);
+
+        setTimeout(this.resize.bind(this), 0);
+    },
+
+    resize: function()
     {
         this.imageElement.removeStyleClass("hidden");
 
         if (this.element.offsetWidth < (this.choicesForm.offsetWidth + this.imageElement.offsetWidth))
             this.imageElement.addStyleClass("hidden");
+    },
+
+    get alwaysEnabled() {
+        return this.enabledAlways.checked;
     }
 }
 

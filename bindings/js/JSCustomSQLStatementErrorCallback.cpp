@@ -29,78 +29,57 @@
 #include "config.h"
 #include "JSCustomSQLStatementErrorCallback.h"
 
-#include "CString.h"
-#include "DOMWindow.h"
+#if ENABLE(DATABASE)
+
 #include "Frame.h"
-#include "ScriptController.h"
+#include "JSCallbackData.h"
 #include "JSSQLError.h"
 #include "JSSQLTransaction.h"
+#include "ScriptController.h"
 #include <runtime/JSLock.h>
+#include <wtf/MainThread.h>
 
 namespace WebCore {
     
 using namespace JSC;
     
-JSCustomSQLStatementErrorCallback::JSCustomSQLStatementErrorCallback(JSObject* callback, Frame* frame)
-    : m_callback(callback)
-    , m_frame(frame)
+JSCustomSQLStatementErrorCallback::JSCustomSQLStatementErrorCallback(JSObject* callback, JSDOMGlobalObject* globalObject)
+    : m_data(new JSCallbackData(callback, globalObject))
 {
 }
-    
+
+JSCustomSQLStatementErrorCallback::~JSCustomSQLStatementErrorCallback()
+{
+    callOnMainThread(JSCallbackData::deleteData, m_data);
+#ifndef NDEBUG
+    m_data = 0;
+#endif
+}
+
 bool JSCustomSQLStatementErrorCallback::handleEvent(SQLTransaction* transaction, SQLError* error)
 {
-    ASSERT(m_callback);
-    ASSERT(m_frame);
-        
-    if (!m_frame->script()->isEnabled())
-        return true;
-        
-    JSGlobalObject* globalObject = m_frame->script()->globalObject();
-    ExecState* exec = globalObject->globalExec();
-        
-    JSC::JSLock lock(false);
-        
-    JSValuePtr handleEventFunction = m_callback->get(exec, Identifier(exec, "handleEvent"));
-    CallData handleEventCallData;
-    CallType handleEventCallType = handleEventFunction.getCallData(handleEventCallData);
-    CallData callbackCallData;
-    CallType callbackCallType = CallTypeNone;
-
-    if (handleEventCallType == CallTypeNone) {
-        callbackCallType = m_callback->getCallData(callbackCallData);
-        if (callbackCallType == CallTypeNone) {
-            // FIXME: Should an exception be thrown here?
-            return true;
-        }
-    }
+    ASSERT(m_data);
         
     RefPtr<JSCustomSQLStatementErrorCallback> protect(this);
         
-    ArgList args;
-    args.append(toJS(exec, transaction));
-    args.append(toJS(exec, error));
-        
-    JSValuePtr result;
-    globalObject->startTimeoutCheck();
-    if (handleEventCallType != CallTypeNone)
-        result = call(exec, handleEventFunction, handleEventCallType, handleEventCallData, m_callback, args);
-    else
-        result = call(exec, m_callback, callbackCallType, callbackCallData, m_callback, args);
-    globalObject->stopTimeoutCheck();
-        
-    if (exec->hadException()) {
-        reportCurrentException(exec);
-            
+    JSC::JSLock lock(SilenceAssertionsOnly);
+    ExecState* exec = m_data->globalObject()->globalExec();
+    MarkedArgumentBuffer args;
+    args.append(toJS(exec, deprecatedGlobalObjectForPrototype(exec), transaction));
+    args.append(toJS(exec, deprecatedGlobalObjectForPrototype(exec), error));
+    
+    bool raisedException = false;
+    JSValue result = m_data->invokeCallback(args, &raisedException);
+    if (raisedException) {
         // The spec says:
         // "If the error callback returns false, then move on to the next statement..."
         // "Otherwise, the error callback did not return false, or there was no error callback"
         // Therefore an exception and returning true are the same thing - so, return true on an exception
         return true;
     }
-        
-    Document::updateDocumentsRendering();
-
     return result.toBoolean(exec);
 }
 
 }
+
+#endif // ENABLE(DATABASE)

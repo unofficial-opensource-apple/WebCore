@@ -31,6 +31,7 @@
 #include "HTMLCanvasElement.h"
 #include "HTMLNames.h"
 #include "RenderView.h"
+#include "FrameView.h"
 
 namespace WebCore {
 
@@ -39,6 +40,20 @@ using namespace HTMLNames;
 RenderHTMLCanvas::RenderHTMLCanvas(HTMLCanvasElement* element)
     : RenderReplaced(element, element->size())
 {
+    view()->frameView()->setIsVisuallyNonEmpty();
+}
+
+bool RenderHTMLCanvas::requiresLayer() const
+{
+    if (RenderReplaced::requiresLayer())
+        return true;
+    
+#if ENABLE(3D_CANVAS)
+    HTMLCanvasElement* canvas = static_cast<HTMLCanvasElement*>(node());
+    return canvas && canvas->is3D();
+#else
+    return false;
+#endif
 }
 
 void RenderHTMLCanvas::paintReplaced(PaintInfo& paintInfo, int tx, int ty)
@@ -53,10 +68,13 @@ void RenderHTMLCanvas::canvasSizeChanged()
     IntSize canvasSize = static_cast<HTMLCanvasElement*>(node())->size();
     IntSize zoomedSize(canvasSize.width() * style()->effectiveZoom(), canvasSize.height() * style()->effectiveZoom());
 
-    if (canvasSize == intrinsicSize())
+    if (zoomedSize == intrinsicSize())
         return;
 
-    setIntrinsicSize(canvasSize);
+    setIntrinsicSize(zoomedSize);
+
+    if (!parent())
+        return;
 
     if (!prefWidthsDirty())
         setPrefWidthsDirty(true);

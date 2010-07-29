@@ -29,9 +29,46 @@
 #if PLATFORM(CG)
 
 #include <wtf/Assertions.h>
+#include <wtf/RetainPtr.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <CoreGraphics/CGColorTransform.h>
+#include <wtf/StdLibExtras.h>
 
 namespace WebCore {
+
+
+CGColorRef createCGColorWithDeviceWhite(CGFloat w, CGFloat a)
+{
+    DEFINE_STATIC_LOCAL(RetainPtr<CGColorSpaceRef>, graySpace, (AdoptCF, CGColorSpaceCreateDeviceGray()));
+    const CGFloat components[] = { w, a };
+    return CGColorCreate(graySpace.get(), components);
+}
+
+CGColorSpaceRef deviceRGBColorSpace()
+{
+    DEFINE_STATIC_LOCAL(RetainPtr<CGColorSpaceRef>, colorSpace, (AdoptCF, CGColorSpaceCreateDeviceRGB()));
+    return colorSpace.get();
+}
+
+static CGColorRef createCGColorWithDeviceRGBA(CGColorRef sourceColor)
+{
+    if (!sourceColor || CFEqual(CGColorGetColorSpace(sourceColor), deviceRGBColorSpace()))
+        return CGColorRetain(sourceColor);
+    
+    RetainPtr<CGColorTransformRef> colorTransform(AdoptCF, CGColorTransformCreate(deviceRGBColorSpace(), NULL));
+    if (!colorTransform)
+        return CGColorRetain(sourceColor);
+    
+    // CGColorTransformConvertColor() returns a +1 retained object.
+    return CGColorTransformConvertColor(colorTransform.get(), sourceColor, kCGRenderingIntentDefault);
+}
+
+static CGColorRef createCGColorWithDeviceRGBA(CGFloat r, CGFloat g, CGFloat b, CGFloat a)
+{
+    const CGFloat components[] = { r, g, b, a };
+    return CGColorCreate(deviceRGBColorSpace(), components);
+}
+
 
 Color::Color(CGColorRef color)
 {
@@ -41,8 +78,12 @@ Color::Color(CGColorRef color)
         return;
     }
 
-    size_t numComponents = CGColorGetNumberOfComponents(color);
-    const CGFloat* components = CGColorGetComponents(color);
+    RetainPtr<CGColorRef> correctedColor(AdoptCF, createCGColorWithDeviceRGBA(color));
+    if (!correctedColor)
+        correctedColor = color;
+
+    size_t numComponents = CGColorGetNumberOfComponents(correctedColor.get());
+    const CGFloat* components = CGColorGetComponents(correctedColor.get());
 
     float r = 0;
     float g = 0;
@@ -67,21 +108,20 @@ Color::Color(CGColorRef color)
     m_color = makeRGBA(r * 255, g * 255, b * 255, a * 255);
 }
 
-#if !PLATFORM(MAC)
+#if OS(WINDOWS)
 
-CGColorRef cgColor(const Color& c)
+CGColorRef createCGColor(const Color& c)
 {
     CGColorRef color = NULL;
     CMProfileRef prof = NULL;
     CMGetSystemProfile(&prof);
 
-    CGColorSpaceRef rgbSpace = CGColorSpaceCreateWithPlatformColorSpace(prof);
+    RetainPtr<CGColorSpaceRef> rgbSpace(AdoptCF, CGColorSpaceCreateWithPlatformColorSpace(prof));
 
-    if (rgbSpace != NULL)
-    {
-        float components[4] = {c.red() / 255.0f, c.green() / 255.0f, c.blue() / 255.0f, c.alpha() / 255.0f};
-        color = CGColorCreate(rgbSpace, components);
-        CGColorSpaceRelease(rgbSpace);
+    if (rgbSpace) {
+        CGFloat components[4] = { static_cast<CGFloat>(c.red()) / 255, static_cast<CGFloat>(c.green()) / 255,
+                                  static_cast<CGFloat>(c.blue()) / 255, static_cast<CGFloat>(c.alpha()) / 255 };
+        color = CGColorCreate(rgbSpace.get(), components);
     }
 
     CMCloseProfile(prof);
@@ -89,7 +129,50 @@ CGColorRef cgColor(const Color& c)
     return color;
 }
 
-#endif // !PLATFORM(MAC)
+#endif // OS(WINDOWS)
+
+
+CGColorRef createCGColor(const Color &color)
+{
+    RGBA32 c = color.rgb();
+    switch (c) {
+        case 0: {
+            DEFINE_STATIC_LOCAL(RetainPtr<CGColorRef>, clearColor, (AdoptCF, createCGColorWithDeviceRGBA(0.f, 0.f, 0.f, 0.f)));
+            return CGColorRetain(clearColor.get());
+        }
+        case Color::black: {
+            DEFINE_STATIC_LOCAL(RetainPtr<CGColorRef>, blackColor, (AdoptCF, createCGColorWithDeviceRGBA(0.f, 0.f, 0.f, 1.f)));
+            return CGColorRetain(blackColor.get());
+        }
+        case Color::white: {
+            DEFINE_STATIC_LOCAL(RetainPtr<CGColorRef>, whiteColor, (AdoptCF, createCGColorWithDeviceRGBA(1.f, 1.f, 1.f, 1.f)));
+            return CGColorRetain(whiteColor.get());
+        }
+        default: {
+            const int cacheSize = 32;
+            static RGBA32 cachedRGBAValues[cacheSize];
+            static RetainPtr<CGColorRef>* cachedColors = new RetainPtr<CGColorRef>[cacheSize];
+
+            for (int i = 0; i != cacheSize; ++i) {
+                if (cachedRGBAValues[i] == c)
+                    return CGColorRetain(cachedColors[i].get());
+            }
+
+            CGColorRef result =  createCGColorWithDeviceRGBA(color.red() / 255.f, color.green() / 255.f, color.blue() / 255.f, color.alpha() / 255.f);
+
+            static int cursor;
+            cachedRGBAValues[cursor] = c;
+            cachedColors[cursor] = result;
+            if (++cursor == cacheSize)
+                cursor = 0;
+            
+            return result;
+        }
+    }
+
+    return NULL;
+}
+
 
 }
 

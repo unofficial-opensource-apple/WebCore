@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2007 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -26,15 +24,13 @@
 #include "SVGExternalResourcesRequired.h"
 
 #include "Attr.h"
-#include "SVGNames.h"
+#include "MappedAttribute.h"
 #include "SVGElement.h"
+#include "SVGNames.h"
 
 namespace WebCore {
 
-char SVGExternalResourcesRequiredIdentifier[] = "SVGExternalResourcesRequired";
-
 SVGExternalResourcesRequired::SVGExternalResourcesRequired()
-    : m_externalResourcesRequired(this, SVGNames::externalResourcesRequiredAttr, false)
 {
 }
 

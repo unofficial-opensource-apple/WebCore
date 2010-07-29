@@ -21,8 +21,6 @@
 
 #include <QObject>
 
-#if QT_VERSION >= 0x040400
-
 #include <QNetworkRequest>
 #include <QNetworkAccessManager>
 
@@ -43,7 +41,8 @@ class QNetworkReplyHandler : public QObject
 public:
     enum LoadMode {
         LoadNormal,
-        LoadDeferred
+        LoadDeferred,
+        LoadResuming
     };
 
     QNetworkReplyHandler(ResourceHandle *handle, LoadMode);
@@ -55,24 +54,28 @@ public:
 
     QNetworkReply* release();
 
+signals:
+    void processQueuedItems();
+
 private slots:
     void finish();
     void sendResponseIfNeeded();
     void forwardData();
+    void sendQueuedItems();
+    void uploadProgress(qint64 bytesSent, qint64 bytesTotal);
 
 private:
     void start();
     void resetState();
-    void sendQueuedItems();
 
     QNetworkReply* m_reply;
     ResourceHandle* m_resourceHandle;
     bool m_redirected;
     bool m_responseSent;
+    bool m_responseDataSent;
     LoadMode m_loadMode;
     QNetworkAccessManager::Operation m_method;
     QNetworkRequest m_request;
-    uint   m_startTime;
 
     // defer state holding
     bool m_shouldStart;
@@ -92,15 +95,11 @@ public:
     FormDataIODevice(FormData*);
     ~FormDataIODevice();
 
-    void setParent(QNetworkReply*);
     bool isSequential() const;
 
 protected:
     qint64 readData(char*, qint64);
     qint64 writeData(const char*, qint64);
-
-private Q_SLOTS:
-    void slotFinished();
 
 private:
     void moveToNextElement();
@@ -112,7 +111,5 @@ private:
 };
 
 }
-
-#endif
 
 #endif // QNETWORKREPLYHANDLER_H

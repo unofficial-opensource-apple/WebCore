@@ -23,41 +23,37 @@
 #include "JSXMLHttpRequest.h"
 #include "ScriptExecutionContext.h"
 #include "XMLHttpRequest.h"
+#include <runtime/Error.h>
 
 using namespace JSC;
 
 namespace WebCore {
 
-ASSERT_CLASS_FITS_IN_CELL(JSXMLHttpRequestConstructor)
+ASSERT_CLASS_FITS_IN_CELL(JSXMLHttpRequestConstructor);
 
 const ClassInfo JSXMLHttpRequestConstructor::s_info = { "XMLHttpRequestConstructor", 0, 0, 0 };
 
-JSXMLHttpRequestConstructor::JSXMLHttpRequestConstructor(ExecState* exec, ScriptExecutionContext* context)
-    : DOMObject(JSXMLHttpRequestConstructor::createStructure(exec->lexicalGlobalObject()->objectPrototype()))
+JSXMLHttpRequestConstructor::JSXMLHttpRequestConstructor(ExecState* exec, JSDOMGlobalObject* globalObject)
+    : DOMConstructorObject(JSXMLHttpRequestConstructor::createStructure(globalObject->objectPrototype()), globalObject)
 {
-    ASSERT(context->isDocument());
-    m_document = static_cast<JSDocument*>(asObject(toJS(exec, static_cast<Document*>(context))));
-
-    putDirect(exec->propertyNames().prototype, JSXMLHttpRequestPrototype::self(exec, exec->lexicalGlobalObject()), None);
+    putDirect(exec->propertyNames().prototype, JSXMLHttpRequestPrototype::self(exec, globalObject), None);
 }
 
 static JSObject* constructXMLHttpRequest(ExecState* exec, JSObject* constructor, const ArgList&)
 {
-    RefPtr<XMLHttpRequest> xmlHttpRequest = XMLHttpRequest::create(static_cast<JSXMLHttpRequestConstructor*>(constructor)->document());
-    return CREATE_DOM_OBJECT_WRAPPER(exec, XMLHttpRequest, xmlHttpRequest.get());
+    JSXMLHttpRequestConstructor* jsConstructor = static_cast<JSXMLHttpRequestConstructor*>(constructor);
+    ScriptExecutionContext* context = jsConstructor->scriptExecutionContext();
+    if (!context)
+        return throwError(exec, ReferenceError, "XMLHttpRequest constructor associated document is unavailable");
+
+    RefPtr<XMLHttpRequest> xmlHttpRequest = XMLHttpRequest::create(context);
+    return CREATE_DOM_OBJECT_WRAPPER(exec, jsConstructor->globalObject(), XMLHttpRequest, xmlHttpRequest.get());
 }
 
 ConstructType JSXMLHttpRequestConstructor::getConstructData(ConstructData& constructData)
 {
     constructData.native.function = constructXMLHttpRequest;
     return ConstructTypeHost;
-}
-
-void JSXMLHttpRequestConstructor::mark()
-{
-    DOMObject::mark();
-    if (!m_document->marked())
-        m_document->mark();
 }
 
 } // namespace WebCore

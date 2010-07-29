@@ -9,9 +9,7 @@
 module events {
 
     interface [
-        AppleCopyright,
-        Conditional=TOUCH_EVENTS,
-        GenerateConstructor
+        AppleCopyright
     ] TouchEvent : UIEvent {
         
         void initTouchEvent(in DOMString type, 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -47,41 +47,56 @@ namespace WebCore {
     class AuthenticationChallenge;
     class CachedFrame;
     class Color;
+    class DOMWrapperWorld;
     class DocumentLoader;
     class Element;
     class FormState;
     class Frame;
     class FrameLoader;
     class HistoryItem;
+    class HTMLAppletElement;
     class HTMLFrameOwnerElement;
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    class HTMLMediaElement;
+#endif
+    class HTMLPlugInElement;
     class IntSize;
     class KURL;
     class NavigationAction;
+    class PluginView;
+    class PolicyChecker;
     class ProtectionSpace;
     class ResourceError;
     class ResourceHandle;
     class ResourceLoader;
+    class ResourceRequest;
     class ResourceResponse;
+    class ScriptString;
+    class SecurityOrigin;
     class SharedBuffer;
     class SubstituteData;
     class String;
     class Widget;
 
-    class ResourceRequest;
-
-    typedef void (FrameLoader::*FramePolicyFunction)(PolicyAction);
+    typedef void (PolicyChecker::*FramePolicyFunction)(PolicyAction);
 
     class FrameLoaderClient {
     public:
-        virtual ~FrameLoaderClient();
-        virtual void frameLoaderDestroyed() = 0;
-        
-        virtual bool hasWebView() const = 0; // mainly for assertions
+        // An inline function cannot be the first non-abstract virtual function declared
+        // in the class as it results in the vtable being generated as a weak symbol.
+        // This hurts performance (in Mac OS X at least, when loadig frameworks), so we
+        // don't want to do it in WebKit.
+        virtual bool hasHTMLView() const;
 
-        virtual bool hasHTMLView() const { return true; }
+        virtual ~FrameLoaderClient() { }
+
+        virtual void frameLoaderDestroyed() = 0;
+
+        virtual bool hasWebView() const = 0; // mainly for assertions
 
         virtual void makeRepresentation(DocumentLoader*) = 0;
         virtual void forceLayout() = 0;
+        virtual void forceLayoutWithoutRecalculatingStyles() = 0;
         virtual void forceLayoutForNonHTML() = 0;
 
         virtual void setCopiesOnScroll() = 0;
@@ -97,18 +112,23 @@ namespace WebCore {
         virtual void dispatchDidCancelAuthenticationChallenge(DocumentLoader*, unsigned long identifier, const AuthenticationChallenge&) = 0;        
 
         virtual bool canAuthenticateAgainstProtectionSpace(DocumentLoader*, unsigned long identifier, const ProtectionSpace&) = 0;
+        virtual CFDictionaryRef connectionProperties(DocumentLoader*, unsigned long identifier) = 0;
 
         virtual void dispatchDidReceiveResponse(DocumentLoader*, unsigned long identifier, const ResourceResponse&) = 0;
         virtual void dispatchDidReceiveContentLength(DocumentLoader*, unsigned long identifier, int lengthReceived) = 0;
         virtual void dispatchDidFinishLoading(DocumentLoader*, unsigned long identifier) = 0;
         virtual void dispatchDidFailLoading(DocumentLoader*, unsigned long identifier, const ResourceError&) = 0;
         virtual bool dispatchDidLoadResourceFromMemoryCache(DocumentLoader*, const ResourceRequest&, const ResourceResponse&, int length) = 0;
+        virtual void dispatchDidLoadResourceByXMLHttpRequest(unsigned long identifier, const ScriptString&) = 0;
 
         virtual void dispatchDidHandleOnloadEvents() = 0;
         virtual void dispatchDidReceiveServerRedirectForProvisionalLoad() = 0;
         virtual void dispatchDidCancelClientRedirect() = 0;
         virtual void dispatchWillPerformClientRedirect(const KURL&, double interval, double fireDate) = 0;
         virtual void dispatchDidChangeLocationWithinPage() = 0;
+        virtual void dispatchDidPushStateWithinPage() = 0;
+        virtual void dispatchDidReplaceStateWithinPage() = 0;
+        virtual void dispatchDidPopStateWithinPage() = 0;
         virtual void dispatchWillClose() = 0;
         virtual void dispatchDidReceiveIcon() = 0;
         virtual void dispatchDidStartProvisionalLoad() = 0;
@@ -155,9 +175,21 @@ namespace WebCore {
         virtual void finishedLoading(DocumentLoader*) = 0;
         
         virtual void updateGlobalHistory() = 0;
-        virtual void updateGlobalHistoryForRedirectWithoutHistoryItem() = 0;
+        virtual void updateGlobalHistoryRedirectLinks() = 0;
 
         virtual bool shouldGoToHistoryItem(HistoryItem*) const = 0;
+        virtual void dispatchDidAddBackForwardItem(HistoryItem*) const = 0;
+        virtual void dispatchDidRemoveBackForwardItem(HistoryItem*) const = 0;
+        virtual void dispatchDidChangeBackForwardIndex() const = 0;
+
+        // This frame has displayed inactive content (such as an image) from an
+        // insecure source.  Inactive content cannot spread to other frames.
+        virtual void didDisplayInsecureContent() = 0;
+
+        // The indicated security origin has run active content (such as a
+        // script) from an insecure source.  Note that the insecure content can
+        // spread to other frames in the same origin.
+        virtual void didRunInsecureContent(SecurityOrigin*) = 0;
 
         virtual ResourceError cancelledError(const ResourceRequest&) = 0;
         virtual ResourceError blockedError(const ResourceRequest&) = 0;
@@ -196,29 +228,49 @@ namespace WebCore {
 
         virtual PassRefPtr<Frame> createFrame(const KURL& url, const String& name, HTMLFrameOwnerElement* ownerElement,
                                    const String& referrer, bool allowsScrolling, int marginWidth, int marginHeight) = 0;
-        virtual Widget* createPlugin(const IntSize&, Element*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool loadManually) = 0;
+        virtual PassRefPtr<Widget> createPlugin(const IntSize&, HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool loadManually) = 0;
         virtual void redirectDataToPlugin(Widget* pluginWidget) = 0;
-        
-        virtual Widget* createJavaAppletWidget(const IntSize&, Element*, const KURL& baseURL, const Vector<String>& paramNames, const Vector<String>& paramValues) = 0;
+
+        virtual PassRefPtr<Widget> createJavaAppletWidget(const IntSize&, HTMLAppletElement*, const KURL& baseURL, const Vector<String>& paramNames, const Vector<String>& paramValues) = 0;
+
+        virtual void dispatchDidFailToStartPlugin(const PluginView*) const { }
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+        virtual PassRefPtr<Widget> createMediaPlayerProxyPlugin(const IntSize&, HTMLMediaElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&) = 0;
+        virtual void hideMediaPlayerProxyPlugin(Widget*) = 0;
+        virtual void showMediaPlayerProxyPlugin(Widget*) = 0;
+#endif
 
         virtual ObjectContentType objectContentType(const KURL& url, const String& mimeType) = 0;
         virtual String overrideMediaType() const = 0;
 
-        virtual void windowObjectCleared() = 0;
+        virtual void dispatchDidClearWindowObjectInWorld(DOMWrapperWorld*) = 0;
+        virtual void documentElementAvailable() = 0;
         virtual void didPerformFirstNavigation() const = 0; // "Navigation" here means a transition from one page to another that ends up in the back/forward list.
-        
+
+#if USE(V8)
+        virtual void didCreateScriptContextForFrame() = 0;
+        virtual void didDestroyScriptContextForFrame() = 0;
+        virtual void didCreateIsolatedScriptContext() = 0;
+#endif
+
         virtual void registerForIconNotification(bool listen = true) = 0;
         
 #if ENABLE(MAC_JAVA_BRIDGE)
         virtual jobject javaApplet(NSView*) { return 0; }
 #endif
         virtual NSCachedURLResponse* willCacheResponse(DocumentLoader*, unsigned long identifier, NSCachedURLResponse*) const = 0;
+#if USE(CFNETWORK)
+        virtual bool shouldCacheResponse(DocumentLoader*, unsigned long identifier, const ResourceResponse&, const unsigned char* data, unsigned long long length) = 0;
+#endif
 
         virtual bool shouldUsePluginDocument(const String& /*mimeType*/) const { return false; }
+        virtual bool shouldLoadMediaElementURL(const KURL&) const { return true; }
 
-    protected:
-        static void transitionToCommittedForNewPage(Frame*, const IntSize&, const Color&, bool, const IntSize &, bool,
-                                                    ScrollbarMode = ScrollbarAuto, ScrollbarMode = ScrollbarAuto);
+        virtual void didChangeScrollOffset() { }
+
+        virtual bool allowJavaScript(bool enabledPerSettings) { return enabledPerSettings; }
+        virtual bool allowPlugins(bool enabledPerSettings) { return enabledPerSettings; }
+        virtual bool allowImages(bool enabledPerSettings) { return enabledPerSettings; }
     };
 
 } // namespace WebCore

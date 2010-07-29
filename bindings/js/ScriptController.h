@@ -58,46 +58,70 @@ class ScriptSourceCode;
 class ScriptValue;
 class String;
 class Widget;
+class XSSAuditor;
 
 typedef HashMap<void*, RefPtr<JSC::Bindings::RootObject> > RootObjectMap;
 
 class ScriptController {
+    friend class ScriptCachedFrameData;
+    typedef WTF::HashMap< RefPtr<DOMWrapperWorld>, JSC::ProtectedPtr<JSDOMWindowShell> > ShellMap;
+
 public:
     ScriptController(Frame*);
     ~ScriptController();
 
-    bool haveWindowShell() const { return m_windowShell; }
-    JSDOMWindowShell* windowShell()
+    static PassRefPtr<DOMWrapperWorld> createWorld();
+
+    JSDOMWindowShell* windowShell(DOMWrapperWorld* world)
     {
-        initScriptIfNeeded();
-        return m_windowShell;
+        ShellMap::iterator iter = m_windowShells.find(world);
+        return (iter != m_windowShells.end()) ? iter->second.get() : initScript(world);
+    }
+    JSDOMWindowShell* existingWindowShell(DOMWrapperWorld* world) const
+    {
+        ShellMap::const_iterator iter = m_windowShells.find(world);
+        return (iter != m_windowShells.end()) ? iter->second.get() : 0;
+    }
+    JSDOMWindow* globalObject(DOMWrapperWorld* world)
+    {
+        return windowShell(world)->window();
     }
 
-    JSDOMWindow* globalObject()
-    {
-        initScriptIfNeeded();
-        return m_windowShell->window();
-    }
+    static void getAllWorlds(Vector<DOMWrapperWorld*>&);
+
+    ScriptValue executeScript(const ScriptSourceCode&);
+    ScriptValue executeScript(const String& script, bool forceUserGesture = false);
+    ScriptValue executeScriptInWorld(DOMWrapperWorld* world, const String& script, bool forceUserGesture = false);
+
+    // Returns true if argument is a JavaScript URL.
+    bool executeIfJavaScriptURL(const KURL&, bool userGesture = false, bool replaceDocument = true);
+
+    // This function must be called from the main thread. It is safe to call it repeatedly.
+    // Darwin is an exception to this rule: it is OK to call this function from any thread, even reentrantly.
+    static void initializeThreading();
 
     ScriptValue evaluate(const ScriptSourceCode&);
+    ScriptValue evaluateInWorld(const ScriptSourceCode&, DOMWrapperWorld*);
 
-    PassRefPtr<EventListener> createInlineEventListener(const String& functionName, const String& code, Node*);
-#if ENABLE(SVG)
-    PassRefPtr<EventListener> createSVGEventHandler(const String& functionName, const String& code, Node*);
-#endif
-    void setEventHandlerLineno(int lineno) { m_handlerLineno = lineno; }
+    void setEventHandlerLineNumber(int lineno) { m_handlerLineNumber = lineno; }
+    int eventHandlerLineNumber() { return m_handlerLineNumber; }
 
     void setProcessingTimerCallback(bool b) { m_processingTimerCallback = b; }
-    bool processingUserGesture() const;
+    bool processingUserGesture(DOMWrapperWorld*) const;
     bool anyPageIsProcessingUserGesture() const;
 
-    bool isEnabled();
+    bool canExecuteScripts();
 
-    void attachDebugger(JSC::Debugger*);
+    // Debugger can be 0 to detach any existing Debugger.
+    void attachDebugger(JSC::Debugger*); // Attaches/detaches in all worlds/window shells.
+    void attachDebugger(JSDOMWindowShell*, JSC::Debugger*);
 
     void setPaused(bool b) { m_paused = b; }
     bool isPaused() const { return m_paused; }
 
+    void setAllowPopupsFromPlugin(bool allowPopupsFromPlugin) { m_allowPopupsFromPlugin = allowPopupsFromPlugin; }
+    bool allowPopupsFromPlugin() const { return m_allowPopupsFromPlugin; }
+    
     const String* sourceURL() const { return m_sourceURL; } // 0 if we are not evaluating any script
 
     void clearWindowShell();
@@ -126,31 +150,32 @@ public:
     WebScriptObject* windowScriptObject();
 #endif
 
+    JSC::JSObject* jsObjectForPluginElement(HTMLPlugInElement*);
+    
 #if ENABLE(NETSCAPE_PLUGIN_API)
     NPObject* createScriptObjectForPluginElement(HTMLPlugInElement*);
     NPObject* windowScriptNPObject();
 #endif
+    
+    XSSAuditor* xssAuditor() { return m_XSSAuditor.get(); }
 
 private:
-    void initScriptIfNeeded()
-    {
-        if (!m_windowShell)
-            initScript();
-    }
-    void initScript();
+    JSDOMWindowShell* initScript(DOMWrapperWorld* world);
 
     void disconnectPlatformScriptObjects();
 
-    bool processingUserGestureEvent() const;
     bool isJavaScriptAnchorNavigation() const;
 
-    JSC::ProtectedPtr<JSDOMWindowShell> m_windowShell;
+    ShellMap m_windowShells;
     Frame* m_frame;
-    int m_handlerLineno;
+    int m_handlerLineNumber;
     const String* m_sourceURL;
+
+    bool m_inExecuteScript;
 
     bool m_processingTimerCallback;
     bool m_paused;
+    bool m_allowPopupsFromPlugin;
 
     // The root object used for objects bound outside the context of a plugin.
     RefPtr<JSC::Bindings::RootObject> m_bindingRootObject;
@@ -161,6 +186,9 @@ private:
 #if PLATFORM(MAC)
     RetainPtr<WebScriptObject> m_windowScriptObject;
 #endif
+    
+    // The XSSAuditor associated with this ScriptController.
+    OwnPtr<XSSAuditor> m_XSSAuditor;
 };
 
 } // namespace WebCore

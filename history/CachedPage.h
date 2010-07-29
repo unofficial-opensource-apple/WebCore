@@ -30,15 +30,9 @@
 
 namespace WebCore {
     
-    class CachedFrame;
-    class CachedFramePlatformData;
-    class DOMWindow;
-    class Document;
-    class DocumentLoader;
-    class FrameView;
-    class KURL;
-    class Node;
-    class Page;
+class Document;
+class DocumentLoader;
+class Page;
 
 class CachedPage : public RefCounted<CachedPage> {
 public:
@@ -47,23 +41,20 @@ public:
 
     void restore(Page*);
     void clear();
+    void destroy();
 
-    Document* document() const { return m_cachedMainFrame.document(); }
-    DocumentLoader* documentLoader() const { return m_cachedMainFrame.documentLoader(); }
-    FrameView* view() const { return m_cachedMainFrame.view(); }
-    Node* mousePressNode() const { return m_cachedMainFrame.mousePressNode(); }
-    const KURL& url() const { return m_cachedMainFrame.url(); }
-    DOMWindow* domWindow() const { return m_cachedMainFrame.domWindow(); }
+    Document* document() const { return m_cachedMainFrame->document(); }
+    DocumentLoader* documentLoader() const { return m_cachedMainFrame->documentLoader(); }
 
     double timeStamp() const { return m_timeStamp; }
     
-    CachedFrame* cachedMainFrame() { return &m_cachedMainFrame; }
+    CachedFrame* cachedMainFrame() { return m_cachedMainFrame.get(); }
 
 private:
     CachedPage(Page*);
 
     double m_timeStamp;
-    CachedFrame m_cachedMainFrame;
+    RefPtr<CachedFrame> m_cachedMainFrame;
 };
 
 } // namespace WebCore

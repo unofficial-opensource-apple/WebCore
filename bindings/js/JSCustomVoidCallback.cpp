@@ -29,74 +29,39 @@
 #include "config.h"
 #include "JSCustomVoidCallback.h"
 
-#include "CString.h"
-#include "DOMWindow.h"
 #include "Frame.h"
+#include "JSCallbackData.h"
 #include "JSDOMWindowCustom.h"
-#include "JSDOMBinding.h"
 #include "ScriptController.h"
 #include <runtime/JSLock.h>
+#include <wtf/MainThread.h>
 
 namespace WebCore {
     
 using namespace JSC;
     
-JSCustomVoidCallback::JSCustomVoidCallback(JSObject* callback, Frame* frame)
-    : m_callback(callback)
-    , m_frame(frame)
+JSCustomVoidCallback::JSCustomVoidCallback(JSObject* callback, JSDOMGlobalObject* globalObject)
+    : m_data(new JSCallbackData(callback, globalObject))
 {
+}
+
+JSCustomVoidCallback::~JSCustomVoidCallback()
+{
+    callOnMainThread(JSCallbackData::deleteData, m_data);
+#ifndef NDEBUG
+    m_data = 0;
+#endif
 }
     
 void JSCustomVoidCallback::handleEvent()
 {
-    ASSERT(m_callback);
-    ASSERT(m_frame);
-       
-    if (!m_frame->script()->isEnabled())
-        return;
-        
-    JSGlobalObject* globalObject = m_frame->script()->globalObject();
-    ExecState* exec = globalObject->globalExec();
-        
-    JSC::JSLock lock(false);
-        
-    JSValuePtr function = m_callback->get(exec, Identifier(exec, "handleEvent"));
-    CallData callData;
-    CallType callType = function.getCallData(callData);
-    if (callType == CallTypeNone) {
-        callType = m_callback->getCallData(callData);
-        if (callType == CallTypeNone) {
-            // FIXME: Should an exception be thrown here?
-            return;
-        }
-        function = m_callback;
-    }
-        
+    ASSERT(m_data);
+
     RefPtr<JSCustomVoidCallback> protect(this);
         
-    ArgList args;
-    
-    globalObject->startTimeoutCheck();
-    call(exec, function, callType, callData, m_callback, args);
-    globalObject->stopTimeoutCheck();
-        
-    if (exec->hadException())
-        reportCurrentException(exec);
-        
-    Document::updateDocumentsRendering();
-}
- 
-PassRefPtr<VoidCallback> toVoidCallback(ExecState* exec, JSValuePtr value)
-{
-    JSObject* object = value.getObject();
-    if (!object)
-        return 0;
-    
-    Frame* frame = asJSDOMWindow(exec->dynamicGlobalObject())->impl()->frame();
-    if (!frame)
-        return 0;
-    
-    return JSCustomVoidCallback::create(object, frame);
+    JSC::JSLock lock(SilenceAssertionsOnly);
+    MarkedArgumentBuffer args;
+    m_data->invokeCallback(args);
 }
 
-}
+} // namespace WebCore

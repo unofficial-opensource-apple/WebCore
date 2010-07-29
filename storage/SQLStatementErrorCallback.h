@@ -29,13 +29,15 @@
 #ifndef SQLStatementErrorCallback_h
 #define SQLStatementErrorCallback_h
 
+#if ENABLE(DATABASE)
+
 #include <wtf/Threading.h>
 
 namespace WebCore {
 
 class SQLTransaction;
 class SQLError;
-    
+
 class SQLStatementErrorCallback : public ThreadSafeShared<SQLStatementErrorCallback> {
 public:
     virtual ~SQLStatementErrorCallback() { }
@@ -44,6 +46,6 @@ public:
 
 }
 
+#endif
+
 #endif // SQLStatementErrorCallback_h
-
-

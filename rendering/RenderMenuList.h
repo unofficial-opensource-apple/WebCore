@@ -1,7 +1,7 @@
 /*
  * This file is part of the select element renderer in WebCore.
  *
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -34,16 +34,24 @@
 
 namespace WebCore {
 
-class HTMLSelectElement;
 class PopupMenu;
 class RenderText;
 
 class RenderMenuList : public RenderFlexibleBox, private PopupMenuClient {
 public:
-    RenderMenuList(HTMLSelectElement*);
-    ~RenderMenuList();
-    
-    HTMLSelectElement* selectElement();
+    RenderMenuList(Element*);
+    virtual ~RenderMenuList();
+
+public:
+    void hidePopup();
+
+    void setOptionsChanged(bool changed) { m_optionsChanged = changed; }
+
+    void didSetSelectedIndex();
+
+    String text() const;
+
+    bool multiple() const;
 
 private:
     virtual bool isMenuList() const { return true; }
@@ -62,20 +70,11 @@ private:
 
     virtual void calcPrefWidths();
 
-public:
-    void hidePopup();
-
-    void setOptionsChanged(bool changed) { m_optionsChanged = changed; }
-
-    String text() const;
-    
-    bool multiple() const;
-
-private:
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
     // PopupMenuClient methods
     virtual String itemText(unsigned listIndex) const;
+    virtual String itemToolTip(unsigned listIndex) const;
     virtual bool itemIsEnabled(unsigned listIndex) const;
     virtual PopupMenuStyle itemStyle(unsigned listIndex) const;
     virtual PopupMenuStyle menuStyle() const;
@@ -85,6 +84,7 @@ private:
     virtual int clientPaddingRight() const;
     virtual int listSize() const;
     virtual int selectedIndex() const;
+    virtual void popupDidHide();
     virtual bool itemIsSeparator(unsigned listIndex) const;
     virtual bool itemIsLabel(unsigned listIndex) const;
     virtual bool itemIsSelected(unsigned listIndex) const;
@@ -112,7 +112,18 @@ private:
     bool m_optionsChanged;
     int m_optionsWidth;
 
+    int m_lastSelectedIndex;
+
 };
+
+inline RenderMenuList* toRenderMenuList(RenderObject* object)
+{ 
+    ASSERT(!object || object->isMenuList());
+    return static_cast<RenderMenuList*>(object);
+}
+
+// This will catch anyone doing an unnecessary cast.
+void toRenderMenuList(const RenderMenuList*);
 
 }
 

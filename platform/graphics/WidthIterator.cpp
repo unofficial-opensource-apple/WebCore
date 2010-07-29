@@ -33,19 +33,26 @@
 
 using namespace WTF;
 using namespace Unicode;
+using namespace std;
 
 namespace WebCore {
 
 // According to http://www.unicode.org/Public/UNIDATA/UCD.html#Canonical_Combining_Class_Values
 static const uint8_t hiraganaKatakanaVoicingMarksCombiningClass = 8;
 
-WidthIterator::WidthIterator(const Font* font, const TextRun& run)
+WidthIterator::WidthIterator(const Font* font, const TextRun& run, HashSet<const SimpleFontData*>* fallbackFonts, bool accountForGlyphBounds)
     : m_font(font)
     , m_run(run)
     , m_end(run.length())
     , m_currentCharacter(0)
     , m_runWidthSoFar(0)
     , m_finalRoundingWidth(0)
+    , m_fallbackFonts(fallbackFonts)
+    , m_accountForGlyphBounds(accountForGlyphBounds)
+    , m_maxGlyphBoundingBoxY(numeric_limits<float>::min())
+    , m_minGlyphBoundingBoxY(numeric_limits<float>::max())
+    , m_firstGlyphOverflow(0)
+    , m_lastGlyphOverflow(0)
 {
     // If the padding is non-zero, count the number of spaces in the run
     // and divide that by the padding for per space addition.
@@ -78,7 +85,11 @@ void WidthIterator::advance(int offset, GlyphBuffer* glyphBuffer)
 
     float runWidthSoFar = m_runWidthSoFar;
     float lastRoundingWidth = m_finalRoundingWidth;
-    
+    FloatRect bounds;
+
+    const SimpleFontData* primaryFont = m_font->primaryFont();
+    const SimpleFontData* lastFontData = primaryFont;
+
     while (currentCharacter < offset) {
         UChar32 c = *cp;
         unsigned clusterLength = 1;
@@ -126,8 +137,23 @@ void WidthIterator::advance(int offset, GlyphBuffer* glyphBuffer)
             // First, we round spaces to an adjusted width in all fonts.
             // Second, in fixed-pitch fonts we ensure that all characters that
             // match the width of the space character have the same width as the space character.
-            if (width == fontData->m_spaceWidth && (fontData->m_treatAsFixedPitch || glyph == fontData->m_spaceGlyph) && m_run.applyWordRounding())
-                width = fontData->m_adjustedSpaceWidth;
+            if (width == fontData->spaceWidth() && (fontData->pitch() == FixedPitch || glyph == fontData->spaceGlyph()) && m_run.applyWordRounding())
+                width = fontData->adjustedSpaceWidth();
+        }
+
+        if (fontData != lastFontData && width) {
+            lastFontData = fontData;
+            if (m_fallbackFonts && fontData != primaryFont) {
+                // FIXME: This does a little extra work that could be avoided if
+                // glyphDataForCharacter() returned whether it chose to use a small caps font.
+                if (!m_font->isSmallCaps() || c == toUpper(c))
+                    m_fallbackFonts->add(fontData);
+                else {
+                    const GlyphData& uppercaseGlyphData = m_font->glyphDataForCharacter(toUpper(c), rtl);
+                    if (uppercaseGlyphData.fontData != primaryFont)
+                        m_fallbackFonts->add(uppercaseGlyphData.fontData);
+                }
+            }
         }
 
         if (hasExtraSpacing) {
@@ -154,6 +180,12 @@ void WidthIterator::advance(int offset, GlyphBuffer* glyphBuffer)
                 if (currentCharacter != 0 && !Font::treatAsSpace(cp[-1]) && m_font->wordSpacing())
                     width += m_font->wordSpacing();
             }
+        }
+
+        if (m_accountForGlyphBounds) {
+            bounds = fontData->boundsForGlyph(glyph);
+            if (!currentCharacter)
+                m_firstGlyphOverflow = max<float>(0, -bounds.x());
         }
 
         // Advance past the character we just dealt with.
@@ -186,6 +218,12 @@ void WidthIterator::advance(int offset, GlyphBuffer* glyphBuffer)
             glyphBuffer->add(glyph, fontData, (rtl ? oldWidth + lastRoundingWidth : width));
 
         lastRoundingWidth = width - oldWidth;
+
+        if (m_accountForGlyphBounds) {
+            m_maxGlyphBoundingBoxY = max(m_maxGlyphBoundingBoxY, bounds.bottom());
+            m_minGlyphBoundingBoxY = min(m_minGlyphBoundingBoxY, bounds.y());
+            m_lastGlyphOverflow = max<float>(0, bounds.right() - width);
+        }
     }
 
     m_currentCharacter = currentCharacter;

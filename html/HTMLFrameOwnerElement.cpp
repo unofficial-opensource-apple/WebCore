@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -32,16 +32,18 @@
 
 namespace WebCore {
 
-HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tagName, Document* document, bool createdByParser)
-    : HTMLElement(tagName, document)
+HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document, CreateElement)
     , m_contentFrame(0)
-    , m_createdByParser(createdByParser)
+    , m_sandboxFlags(SandboxNone)
 {
 }
 
 void HTMLFrameOwnerElement::willRemove()
 {
     if (Frame* frame = contentFrame()) {
+        if (Document* document = contentDocument())
+            document->updateTotalImageDataSizeBeforeDetaching();
         frame->disconnectOwnerElement();
         frame->loader()->frameDetached();
     }
@@ -63,6 +65,17 @@ Document* HTMLFrameOwnerElement::contentDocument() const
 DOMWindow* HTMLFrameOwnerElement::contentWindow() const
 {
     return m_contentFrame ? m_contentFrame->domWindow() : 0;
+}
+
+void HTMLFrameOwnerElement::setSandboxFlags(SandboxFlags flags)
+{
+    if (m_sandboxFlags == flags)
+        return;
+
+    m_sandboxFlags = flags;
+
+    if (Frame* frame = contentFrame())
+        frame->loader()->ownerElementSandboxFlagsChanged();
 }
 
 #if ENABLE(SVG)

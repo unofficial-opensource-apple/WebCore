@@ -128,6 +128,7 @@ ScriptElementData::ScriptElementData(ScriptElement* scriptElement, Element* elem
     , m_element(element)
     , m_cachedScript(0)
     , m_createdByParser(false)
+    , m_requested(false)
     , m_evaluated(false)
     , m_firedLoad(false)
 {
@@ -150,8 +151,12 @@ void ScriptElementData::requestScript(const String& sourceUrl)
     if (!document->frame())
         return;
 
+    if (!m_element->dispatchBeforeLoadEvent(sourceUrl))
+        return;
+
     ASSERT(!m_cachedScript);
     m_cachedScript = document->docLoader()->requestScript(sourceUrl, scriptCharset());
+    m_requested = true;
 
     // m_createdByParser is never reset - always resied at the initial value set while parsing.
     // m_evaluated is left untouched as well to avoid script reexecution, if a <script> element
@@ -172,13 +177,13 @@ void ScriptElementData::evaluateScript(const ScriptSourceCode& sourceCode)
         return;
 
     if (Frame* frame = m_element->document()->frame()) {
-        if (!frame->script()->isEnabled())
+        if (!frame->script()->canExecuteScripts())
             return;
 
         m_evaluated = true;
 
         frame->script()->evaluate(sourceCode);
-        Document::updateDocumentsRendering();
+        Document::updateStyleForAllDocuments();
     }
 }
 
@@ -190,28 +195,28 @@ void ScriptElementData::stopLoadRequest()
     }
 }
 
-void ScriptElementData::notifyFinished(CachedResource* o)
+void ScriptElementData::execute(CachedScript* cachedScript)
 {
-    CachedScript* cs = static_cast<CachedScript*>(o);
-    ASSERT(cs == m_cachedScript);
-
-    // Evaluating the script could lead to a garbage collection which can
-    // delete the script element so we need to protect it and us with it!
-    RefPtr<Element> protector(m_element);
-
-    if (cs->errorOccurred())
+    ASSERT(cachedScript);
+    if (cachedScript->errorOccurred())
         m_scriptElement->dispatchErrorEvent();
     else {
-        evaluateScript(ScriptSourceCode(cs));
+        evaluateScript(ScriptSourceCode(cachedScript));
         m_scriptElement->dispatchLoadEvent();
     }
+    cachedScript->removeClient(this);
+}
 
-    stopLoadRequest();
+void ScriptElementData::notifyFinished(CachedResource* o)
+{
+    ASSERT_UNUSED(o, o == m_cachedScript);
+    m_element->document()->executeScriptSoon(this, m_cachedScript);
+    m_cachedScript = 0;
 }
 
 bool ScriptElementData::ignoresLoadRequest() const
 {
-    return m_evaluated || m_cachedScript || m_createdByParser || !m_element->inDocument();
+    return m_evaluated || m_requested || m_createdByParser || !m_element->inDocument();
 }
 
 bool ScriptElementData::shouldExecuteAsJavaScript() const
@@ -224,15 +229,24 @@ bool ScriptElementData::shouldExecuteAsJavaScript() const
          We want to accept all the values that either of these browsers accept, but not other values.
      */
     String type = m_scriptElement->typeAttributeValue();
-    if (!type.isEmpty())
-        return MIMETypeRegistry::isSupportedJavaScriptMIMEType(type.stripWhiteSpace().lower());
+    if (!type.isEmpty()) {
+        if (!MIMETypeRegistry::isSupportedJavaScriptMIMEType(type.stripWhiteSpace().lower()))
+            return false;
+    } else {
+        String language = m_scriptElement->languageAttributeValue();
+        if (!language.isEmpty() && !isSupportedJavaScriptLanguage(language))
+            return false;
+    }    
 
-    String language = m_scriptElement->languageAttributeValue();
-    if (!language.isEmpty())
-        return isSupportedJavaScriptLanguage(language);
-
-    // No type or language is specified, so we assume the script to be JavaScript
-    return true;
+    // No type or language is specified, so we assume the script to be JavaScript.
+    // We don't yet support setting event listeners via the 'for' attribute for scripts.
+    // If there is such an attribute it's likely better to not execute the script than to do so
+    // immediately and unconditionally.
+    // FIXME: After <rdar://problem/4471751> / https://bugs.webkit.org/show_bug.cgi?id=16915 are resolved 
+    // and we support the for syntax in script tags, this check can be removed and we should just
+    // return 'true' here.
+    String forAttribute = m_scriptElement->forAttributeValue();
+    return forAttribute.isEmpty();
 }
 
 String ScriptElementData::scriptCharset() const

@@ -26,10 +26,12 @@
 #ifndef Color_h
 #define Color_h
 
+#include <wtf/FastAllocBase.h>
 #include <wtf/Platform.h>
 
 #if PLATFORM(CG)
 typedef struct CGColor* CGColorRef;
+typedef struct CGColorSpace* CGColorSpaceRef;
 #endif
 
 #if PLATFORM(QT)
@@ -47,6 +49,10 @@ typedef struct _GdkColor GdkColor;
 class wxColour;
 #endif
 
+#if PLATFORM(HAIKU)
+struct rgb_color;
+#endif
+
 namespace WebCore {
 
 class String;
@@ -60,10 +66,11 @@ RGBA32 makeRGBA(int r, int g, int b, int a);
 RGBA32 colorWithOverrideAlpha(RGBA32 color, float overrideAlpha);
 RGBA32 makeRGBA32FromFloats(float r, float g, float b, float a);
 RGBA32 makeRGBAFromHSLA(double h, double s, double l, double a);
+RGBA32 makeRGBAFromCMYKA(float c, float m, float y, float k, float a);
 
 int differenceSquared(const Color&, const Color&);
 
-class Color {
+class Color : public FastAllocBase {
 public:
     Color() : m_color(0), m_valid(false) { }
     Color(RGBA32 col) : m_color(col), m_valid(true) { }
@@ -71,6 +78,8 @@ public:
     Color(int r, int g, int b, int a) : m_color(makeRGBA(r, g, b, a)), m_valid(true) { }
     // Color is currently limited to 32bit RGBA, perhaps some day we'll support better colors
     Color(float r, float g, float b, float a) : m_color(makeRGBA32FromFloats(r, g, b, a)), m_valid(true) { }
+    // Creates a new color from the specific CMYK and alpha values.
+    Color(float c, float m, float y, float k, float a) : m_color(makeRGBAFromCMYKA(c, m, y, k, a)), m_valid(true) { }
     explicit Color(const String&);
     explicit Color(const char*);
     
@@ -91,6 +100,7 @@ public:
     void setRGB(RGBA32 rgb) { m_color = rgb; m_valid = true; }
     void getRGBA(float& r, float& g, float& b, float& a) const;
     void getRGBA(double& r, double& g, double& b, double& a) const;
+    void getHSL(double& h, double& s, double& l) const;
 
     Color light() const;
     Color dark() const;
@@ -119,6 +129,11 @@ public:
     Color(CGColorRef);
 #endif
 
+#if PLATFORM(HAIKU)
+    Color(const rgb_color&);
+    operator rgb_color() const;
+#endif
+
     static bool parseHexColor(const String& name, RGBA32& rgb);
 
     static const RGBA32 black = 0xFF000000;
@@ -130,6 +145,7 @@ public:
     static const RGBA32 tap = 0x4D1A1A1A;
     static const RGBA32 compositionFill = 0x3CAFC0E3;
     static const RGBA32 compositionFrame = 0x3C4D80B4;
+    static const RGBA32 cyan = 0xFF00FFFF;
 
 private:
     RGBA32 m_color;
@@ -146,10 +162,13 @@ inline bool operator!=(const Color& a, const Color& b)
     return !(a == b);
 }
 
-Color focusRingColor();
+Color colorFromPremultipliedARGB(unsigned);
+unsigned premultipliedARGBFromColor(const Color&);
 
 #if PLATFORM(CG)
-CGColorRef cgColor(const Color&);
+CGColorRef createCGColor(const Color&);
+CGColorRef createCGColorWithDeviceWhite(CGFloat w, CGFloat a);
+CGColorSpaceRef deviceRGBColorSpace();
 #endif
 
 } // namespace WebCore

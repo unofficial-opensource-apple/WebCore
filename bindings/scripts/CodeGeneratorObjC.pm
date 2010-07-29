@@ -4,6 +4,7 @@
 # Copyright (C) 2006, 2007 Samuel Weinig <sam@webkit.org>
 # Copyright (C) 2006 Alexey Proskuryakov <ap@webkit.org>
 # Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+# Copyright (C) 2009 Cameron McCormack <cam@mcc.id.au>
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Library General Public
@@ -26,17 +27,15 @@ package CodeGeneratorObjC;
 use Class::Struct;
 use File::stat;
 
-sub IPhoneApplyOnWebThread(\@);
-
 # Global Variables
 my $module = "";
 my $outputDir = "";
+my $writeDependencies = 0;
 my %publicInterfaces = ();
 my $newPublicClass = 0;
 my $interfaceAvailabilityVersion = "";
 my $isProtocol = 0;
 my $noImpl = 0;
-my @ivars = ();
 
 my @headerContentHeader = ();
 my @headerContent = ();
@@ -50,12 +49,32 @@ my %privateHeaderForwardDeclarationsForProtocols = ();
 
 my @internalHeaderContent = ();
 
+my @implConditionalIncludes = ();
 my @implContentHeader = ();
 my @implContent = ();
 my %implIncludes = ();
+my @depsContent = ();
 
 my $needIPhoneWebCoreThreadMessageHeader = 0;
-my $beginAppleCopyright = <<END;
+my $beginAppleCopyrightForHeaderFiles = <<END;
+// ------- Begin Apple Copyright -------
+/*
+ * Copyright (C) 2008, Apple Inc. All rights reserved.
+ *
+ * Permission is granted by Apple to use this file to the extent
+ * necessary to relink with LGPL WebKit files.
+ *
+ * No license or rights are granted by Apple expressly or by
+ * implication, estoppel, or otherwise, to Apple patents and
+ * trademarks. For the sake of clarity, no license or rights are
+ * granted by Apple expressly or by implication, estoppel, or otherwise,
+ * under any Apple patents, copyrights and trademarks to underlying
+ * implementations of any application programming interfaces (APIs)
+ * or to any functionality that is invoked by calling any API.
+ */
+
+END
+my $beginAppleCopyrightForSourceFiles = <<END;
 // ------- Begin Apple Copyright -------
 /*
  * Copyright (C) 2008, Apple Inc. All rights reserved.
@@ -84,7 +103,7 @@ my %nativeObjCTypeHash = ("URL" => 1, "Color" => 1);
 my %baseTypeHash = ("Object" => 1, "Node" => 1, "NodeList" => 1, "NamedNodeMap" => 1, "DOMImplementation" => 1,
                     "Event" => 1, "CSSRule" => 1, "CSSValue" => 1, "StyleSheet" => 1, "MediaList" => 1,
                     "Counter" => 1, "Rect" => 1, "RGBColor" => 1, "XPathExpression" => 1, "XPathResult" => 1,
-                    "NodeIterator" => 1, "TreeWalker" => 1, "AbstractView" => 1,
+                    "NodeIterator" => 1, "TreeWalker" => 1, "AbstractView" => 1, "Blob" => 1,
                     "SVGAngle" => 1, "SVGAnimatedAngle" => 1, "SVGAnimatedBoolean" => 1, "SVGAnimatedEnumeration" => 1,
                     "SVGAnimatedInteger" => 1, "SVGAnimatedLength" => 1, "SVGAnimatedLengthList" => 1,
                     "SVGAnimatedNumber" => 1, "SVGAnimatedNumberList" => 1, "SVGAnimatedPoints" => 1,
@@ -97,9 +116,10 @@ my %baseTypeHash = ("Object" => 1, "Node" => 1, "NodeList" => 1, "NamedNodeMap" 
 # Constants
 my $buildingForTigerOrEarlier = 1 if $ENV{"MACOSX_DEPLOYMENT_TARGET"} and $ENV{"MACOSX_DEPLOYMENT_TARGET"} <= 10.4;
 my $buildingForLeopardOrLater = 1 if $ENV{"MACOSX_DEPLOYMENT_TARGET"} and $ENV{"MACOSX_DEPLOYMENT_TARGET"} >= 10.5;
+my $buildingForIPhone = ($ENV{PLATFORM_NAME} eq "iphoneos" or $ENV{PLATFORM_NAME} eq "iphonesimulator");
 my $exceptionInit = "WebCore::ExceptionCode ec = 0;";
 my $exceptionRaiseOnError = "WebCore::raiseOnDOMError(ec);";
-my $assertMainThread = "{ DOM_ASSERT_MAIN_THREAD(); WebCoreThreadViolationCheck(); }";
+my $assertMainThread = "{ DOM_ASSERT_MAIN_THREAD(); WebCoreThreadViolationCheckRoundOne(); }";
 
 my %conflictMethod = (
     # FIXME: Add C language keywords?
@@ -215,6 +235,9 @@ sub new
 
     $codeGenerator = shift;
     $outputDir = shift;
+    shift; # $useLayerOnTop
+    shift; # $preprocessor
+    $writeDependencies = shift;
 
     bless($reference, $object);
     return $reference;
@@ -342,11 +365,13 @@ sub GetClassName
     my $name = $codeGenerator->StripModule(shift);
 
     # special cases
-    return "NSString" if $codeGenerator->IsStringType($name);
+    return "NSString" if $codeGenerator->IsStringType($name) or $name eq "SerializedScriptValue";
+    return "CGColorRef" if $name eq "Color" and $buildingForIPhone;
     return "NS$name" if IsNativeObjCType($name);
     return "BOOL" if $name eq "boolean";
     return "unsigned" if $name eq "unsigned long";
     return "int" if $name eq "long";
+    return "NSTimeInterval" if $name eq "Date";
     return "DOMAbstractView" if $name eq "DOMWindow";
     return $name if $codeGenerator->IsPrimitiveType($name) or $name eq "DOMImplementation" or $name eq "DOMTimeStamp";
 
@@ -381,7 +406,6 @@ sub GetParentImplClassName
     my $parent = $codeGenerator->StripModule($dataNode->parents(0));
 
     # special cases
-    return "Node" if $parent eq "EventTargetNode";
     return "Object" if $parent eq "HTMLCollection";
 
     return $parent;
@@ -409,8 +433,6 @@ sub GetParentAndProtocols
         } else {
             if (IsProtocolType($parentName)) {
                 push(@protocols, "DOM" . $parentName);
-            } elsif ($parentName eq "EventTargetNode") {
-                $parent = "DOMNode";
             } elsif ($parentName eq "HTMLCollection") {
                 $parent = "DOMObject";
             } else {
@@ -474,6 +496,14 @@ sub IsNativeObjCType
     return 0;
 }
 
+sub IsCoreFoundationType
+{
+    my $type = shift;
+
+    return 1 if $type =~ /^(CF|CG)[A-Za-z]+Ref$/;
+    return 0;
+}
+
 sub GetObjCType
 {
     my $type = shift;
@@ -482,6 +512,7 @@ sub GetObjCType
     return "id <$name>" if IsProtocolType($type);
     return $name if $codeGenerator->IsPrimitiveType($type) or $type eq "DOMTimeStamp";
     return "unsigned short" if $type eq "CompareHow" or $type eq "SVGPaintType";
+    return $name if IsCoreFoundationType($name);
     return "$name *";
 }
 
@@ -520,12 +551,17 @@ sub GetObjCTypeGetter
     my $type = $codeGenerator->StripModule(shift);
 
     return $argName if $codeGenerator->IsPrimitiveType($type) or $codeGenerator->IsStringType($type) or IsNativeObjCType($type);
-    return $argName . "EventTarget" if $type eq "EventTarget";
+    return $argName . "Node" if $type eq "EventTarget";
     return "static_cast<WebCore::Range::CompareHow>($argName)" if $type eq "CompareHow";
     return "static_cast<WebCore::SVGPaint::SVGPaintType>($argName)" if $type eq "SVGPaintType";
     return "WTF::getPtr(nativeEventListener)" if $type eq "EventListener";
     return "WTF::getPtr(nativeNodeFilter)" if $type eq "NodeFilter";
     return "WTF::getPtr(nativeResolver)" if $type eq "XPathNSResolver";
+    
+    if ($type eq "SerializedScriptValue") {
+        $implIncludes{"SerializedScriptValue.h"} = 1;
+        return "WebCore::SerializedScriptValue::create(WebCore::String($argName))";
+    }
     return "core($argName)";
 }
 
@@ -555,15 +591,21 @@ sub AddIncludesForType
 {
     my $type = $codeGenerator->StripModule(shift);
 
-    return if $codeGenerator->IsNonPointerType($type) or IsNativeObjCType($type);
+    return if $codeGenerator->IsNonPointerType($type);
 
-    if ($codeGenerator->IsStringType($type)) {
-        $implIncludes{"KURL.h"} = 1;
+    if (IsNativeObjCType($type)) {
+        if ($type eq "Color") {
+            if ($buildingForIPhone) {
+                $implIncludes{"FoundationExtras.h"} = 1;
+            } else {
+                $implIncludes{"ColorMac.h"} = 1;
+            }
+        }
         return;
     }
 
-    if ($type eq "RGBColor") {
-        $implIncludes{"DOMRGBColorInternal.h"} = 1;
+    if ($codeGenerator->IsStringType($type)) {
+        $implIncludes{"KURL.h"} = 1;
         return;
     }
 
@@ -580,7 +622,7 @@ sub AddIncludesForType
     }
 
     if ($type eq "EventTarget") {
-        $implIncludes{"EventTargetNode.h"} = 1;
+        $implIncludes{"Node.h"} = 1;
         $implIncludes{"DOMEventTarget.h"} = 1;
         return;
     }
@@ -639,9 +681,13 @@ sub AddIncludesForType
         return;
     }
 
+    if ($type eq "SerializedScriptValue") {
+        $implIncludes{"SerializedScriptValue.h"} = 1;
+        return;
+    }
+
     # FIXME: won't compile without these
     $implIncludes{"CSSMutableStyleDeclaration.h"} = 1 if $type eq "CSSStyleDeclaration";
-    $implIncludes{"NamedAttrMap.h"} = 1 if $type eq "NamedNodeMap";
     $implIncludes{"NameNodeList.h"} = 1 if $type eq "NodeList";
 
     # Default, include the same named file (the implementation) and the same name prefixed with "DOM". 
@@ -667,7 +713,7 @@ sub GenerateHeader
 
     # - Add default header template
     if ($dataNode->extendedAttributes->{"AppleCopyright"}) {
-        @headerContentHeader = split("\r", $beginAppleCopyright);
+        @headerContentHeader = split("\r", $beginAppleCopyrightForHeaderFiles);
     } else {
         @headerContentHeader = split("\r", $headerLicenseTemplate);
     }
@@ -737,23 +783,6 @@ sub GenerateHeader
 
     # - Add attribute getters/setters.
     if ($numAttributes > 0) {
-        # Add ivars, if any, first
-        @ivars = ();
-        foreach my $attribute (@{$dataNode->attributes}) {
-            push(@ivars, $attribute) if $attribute->signature->extendedAttributes->{"ObjCIvar"};
-        }
-
-        if (@ivars > 0) {
-            push(@headerContent, "{\n");
-            foreach my $attribute (@ivars) {
-                my $type = GetObjCType($attribute->signature->type);
-                my $name = "m_" . $attribute->signature->name;
-                my $ivarDeclaration = "$type $name";
-                push(@headerContent, "    $ivarDeclaration;\n");
-            }
-            push(@headerContent, "}\n");
-        }
-
         foreach my $attribute (@{$dataNode->attributes}) {
             my $attributeName = $attribute->signature->name;
 
@@ -769,9 +798,16 @@ sub GenerateHeader
             my $attributeIsReadonly = ($attribute->type =~ /^readonly/);
 
             my $property = "\@property" . GetPropertyAttributes($attribute->signature->type, $attributeIsReadonly);
+            # Some SVGFE*Element.idl use 'operator' as attribute name, rewrite as '_operator' to avoid clashes with C/C++
+            $attributeName =~ s/operator/_operator/ if ($attributeName =~ /operator/);
             $property .= " " . $attributeType . ($attributeType =~ /\*$/ ? "" : " ") . $attributeName;
 
             my $publicInterfaceKey = $property . ";";
+
+            # FIXME: This only works for the getter, but not the setter.  Need to refactor this code.
+            if ($buildingForTigerOrEarlier && !$buildingForIPhone || IsCoreFoundationType($attributeType)) {
+                $publicInterfaceKey = "- (" . $attributeType . ")" . $attributeName . ";";
+            }
 
             my $availabilityMacro = "";
             if (defined $publicInterfaces{$publicInterfaceKey} and length $publicInterfaces{$publicInterfaceKey}) {
@@ -802,7 +838,7 @@ sub GenerateHeader
                 $fatalError = 1;
             }
 
-            if ($buildingForLeopardOrLater) {
+            if (($buildingForLeopardOrLater || $buildingForIPhone) && !IsCoreFoundationType($attributeType)) {
                 $property .= $declarationSuffix;
                 push(@headerAttributes, $property) if $public;
                 push(@privateHeaderAttributes, $property) unless $public;
@@ -897,8 +933,8 @@ sub GenerateHeader
 
             if ($needsAppleCopyright) {
                 if (!$inAppleCopyright{$public ? "public" : "private"}) {
-                    push(@headerFunctions, $beginAppleCopyright) if $public;
-                    push(@privateHeaderFunctions, $beginAppleCopyright) unless $public;
+                    push(@headerFunctions, $beginAppleCopyrightForHeaderFiles) if $public;
+                    push(@privateHeaderFunctions, $beginAppleCopyrightForHeaderFiles) unless $public;
                     $inAppleCopyright{$public ? "public" : "private"} = 1;
                 }
             } elsif ($inAppleCopyright{$public ? "public" : "private"}) {
@@ -971,7 +1007,7 @@ sub GenerateHeader
     if (@privateHeaderAttributes > 0 or @privateHeaderFunctions > 0 or exists $alwaysGenerateForNoSVGBuild{$className}) {
         # - Private category @interface
         if ($dataNode->extendedAttributes->{"AppleCopyright"}) {
-            @privateHeaderContentHeader = split("\r", $beginAppleCopyright);
+            @privateHeaderContentHeader = split("\r", $beginAppleCopyrightForHeaderFiles);
         } else {
             @privateHeaderContentHeader = split("\r", $headerLicenseTemplate);
         }
@@ -1001,7 +1037,7 @@ sub GenerateHeader
 
         # Generate interface definitions. 
         if ($dataNode->extendedAttributes->{"AppleCopyright"}) {
-            @internalHeaderContent = split("\r", $beginAppleCopyright);
+            @internalHeaderContent = split("\r", $beginAppleCopyrightForHeaderFiles);
         } else {
             @internalHeaderContent = split("\r", $implementationLicenseTemplate);
         }
@@ -1019,8 +1055,6 @@ sub GenerateHeader
 
         if ($codeGenerator->IsSVGAnimatedType($interfaceName)) {
             push(@internalHeaderContent, "#import <WebCore/SVGAnimatedTemplate.h>\n\n");
-        } elsif ($interfaceName eq "RGBColor") {
-            push(@internalHeaderContent, "#import <WebCore/Color.h>\n\n");
         } else {
             push(@internalHeaderContent, "namespace WebCore {\n");
             $startedNamespace = 1;
@@ -1028,7 +1062,6 @@ sub GenerateHeader
                 push(@internalHeaderContent, "    class $podType;\n");
             } elsif ($interfaceName eq "Node") {
                 push(@internalHeaderContent, "    class EventTarget;\n    class Node;\n");
-                push(@internalHeaderContent, "    class EventTargetNode;\n");
             } else {
                 push(@internalHeaderContent, "    class $implClassName;\n");
             }
@@ -1061,7 +1094,6 @@ sub GenerateHeader
 
         if ($interfaceName eq "Node") {
             push(@internalHeaderContent, "id <DOMEventTarget> kit(WebCore::EventTarget*);\n");
-            push(@internalHeaderContent, "id <DOMEventTarget> kit(WebCore::EventTargetNode*);\n");
         }
 
         push(@internalHeaderContent, "\n#endif\n") if length $interfaceAvailabilityVersion;
@@ -1073,8 +1105,10 @@ sub GenerateImplementation
     my $object = shift;
     my $dataNode = shift;
 
+    my @ancestorInterfaceNames = ();
+
     if (@{$dataNode->parents} > 1) {
-        $codeGenerator->AddMethodsConstantsAndAttributesFromParentClasses($dataNode);
+        $codeGenerator->AddMethodsConstantsAndAttributesFromParentClasses($dataNode, \@ancestorInterfaceNames);
     }
 
     my $interfaceName = $dataNode->name;
@@ -1098,7 +1132,7 @@ sub GenerateImplementation
 
     # - Add default header template.
     if ($dataNode->extendedAttributes->{"AppleCopyright"}) {
-        @implContentHeader = split("\r", $beginAppleCopyright);
+        @implContentHeader = split("\r", $beginAppleCopyrightForSourceFiles);
     } else {
         @implContentHeader = split("\r", $implementationLicenseTemplate);
     }
@@ -1121,6 +1155,7 @@ sub GenerateImplementation
     $implIncludes{$classHeaderName . "Internal.h"} = 1;
 
     # FIXME: These includes are only needed when the class is a subclass of one of these polymorphic classes.
+    $implIncludes{"DOMBlobInternal.h"} = 1;
     $implIncludes{"DOMCSSRuleInternal.h"} = 1;
     $implIncludes{"DOMCSSValueInternal.h"} = 1;
     $implIncludes{"DOMEventInternal.h"} = 1;
@@ -1128,10 +1163,6 @@ sub GenerateImplementation
     $implIncludes{"DOMStyleSheetInternal.h"} = 1;
 
     $implIncludes{"DOMSVGPathSegInternal.h"} = 1 if $interfaceName =~ /^SVGPathSeg.+/;
-
-    if ($needIPhoneWebCoreThreadMessageHeader) {
-        push(@implContentHeader, "#import <WebCore/WebCoreThreadMessage.h>\n");
-    }
 
     if ($codeGenerator->IsSVGAnimatedType($interfaceName)) {
         $implIncludes{"SVGAnimatedTemplate.h"} = 1;
@@ -1164,18 +1195,12 @@ sub GenerateImplementation
 
     # Only generate 'dealloc' and 'finalize' methods for direct subclasses of DOMObject.
     if ($parentImplClassName eq "Object") {
-        my @ivarsToRelease = ();
-        if (@ivars > 0) {
-            foreach $attribute (@ivars) {
-                my $name = "m_" . $attribute->signature->name;
-                push(@ivarsToRelease, "    [$name release];\n");
-            }
-        }
-
+        $implIncludes{"WebCoreObjCExtras.h"} = 1;
         push(@implContent, "- (void)dealloc\n");
         push(@implContent, "{\n");
-        push(@implContent, "    $assertMainThread\n");
-        push(@implContent, @ivarsToRelease);
+        push(@implContent, "    if (WebCoreObjCScheduleDeallocateOnMainThread([$className class], self))\n");
+        push(@implContent, "        return;\n");
+        push(@implContent, "\n");
         if ($interfaceName eq "NodeIterator") {
             push(@implContent, "    if (_internal) {\n");
             push(@implContent, "        [self detach];\n");
@@ -1242,8 +1267,24 @@ sub GenerateImplementation
 
             # - GETTER
             my $getterSig = "- ($attributeType)$attributeInterfaceName\n";
+
+            # Some SVGFE*Element.idl use 'operator' as attribute name, rewrite as '_operator' to avoid clashes with C/C++
+            $attributeName =~ s/operatorAnimated/_operatorAnimated/ if ($attributeName =~ /operatorAnimated/);
+            $getterSig =~ s/operator/_operator/ if ($getterSig =~ /operator/);
+
             my $hasGetterException = @{$attribute->getterExceptions};
-            my $getterContentHead = "IMPL->" . $codeGenerator->WK_lcfirst($attributeName) . "(";
+            my $getterContentHead;
+            my $reflect = $attribute->signature->extendedAttributes->{"Reflect"};
+            my $reflectURL = $attribute->signature->extendedAttributes->{"ReflectURL"};
+            if ($reflect || $reflectURL) {
+                my $contentAttributeName = (($reflect || $reflectURL) eq "1") ? $attributeName : ($reflect || $reflectURL);
+                my $namespace = $codeGenerator->NamespaceForAttributeName($interfaceName, $contentAttributeName);
+                $implIncludes{"${namespace}.h"} = 1;
+                my $getAttributeFunctionName = $reflectURL ? "getURLAttribute" : "getAttribute";
+                $getterContentHead = "IMPL->${getAttributeFunctionName}(WebCore::${namespace}::${contentAttributeName}Attr";
+            } else {
+                $getterContentHead = "IMPL->" . $codeGenerator->WK_lcfirst($attributeName) . "(";
+            }
             my $getterContentTail = ")";
 
             # Special case for DOMSVGNumber
@@ -1296,12 +1337,23 @@ sub GenerateImplementation
                 $getterContentTail .= ")";
             } elsif ($attribute->signature->extendedAttributes->{"ConvertFromString"}) {
                 $getterContentTail .= ".toInt()";
-            } elsif ($codeGenerator->IsPodType($idlType)) {
+            } elsif ($codeGenerator->IsPodType($idlType) or $idlType eq "Date") {
                 $getterContentHead = "kit($getterContentHead";
                 $getterContentTail .= ")";
             } elsif (IsProtocolType($idlType) and $idlType ne "EventTarget") {
                 $getterContentHead = "kit($getterContentHead";
                 $getterContentTail .= ")";
+            } elsif ($idlType eq "Color") {
+                if ($buildingForIPhone) {
+                    $getterContentHead = "(CGColorRef)HardAutorelease(WebCore::createCGColor($getterContentHead";
+                    $getterContentTail .= "))";
+                } else {
+                    $getterContentHead = "WebCore::nsColor($getterContentHead";
+                    $getterContentTail .= ")";
+                }
+            } elsif ($attribute->signature->type eq "SerializedScriptValue") {
+                $getterContentHead = "$getterContentHead";
+                $getterContentTail .= "->toString()";                
             } elsif (ConversionNeeded($attribute->signature->type)) {
                 $getterContentHead = "kit(WTF::getPtr($getterContentHead";
                 $getterContentTail .= "))";
@@ -1316,11 +1368,6 @@ sub GenerateImplementation
 
             push(@implContent, $getterSig);
             push(@implContent, "{\n");
-
-            if ($attribute->signature->extendedAttributes->{"IPhoneApplyOnWebThread"} || $attribute->signature->extendedAttributes->{"IPhoneGetterApplyOnWebThread"}) {
-                my @params = ();
-                push(@implContent, IPhoneApplyOnWebThread(@params));
-            }
 
             push(@implContent, @customGetterContent);
             if ($hasGetterException) {
@@ -1346,7 +1393,7 @@ sub GenerateImplementation
                 # Exception handling
                 my $hasSetterException = @{$attribute->setterExceptions};
 
-                $attributeName = "set" . $codeGenerator->WK_ucfirst($attributeName);
+                my $coreSetterName = "set" . $codeGenerator->WK_ucfirst($attributeName);
                 my $setterName = "set" . ucfirst($attributeInterfaceName);
                 my $argName = "new" . ucfirst($attributeInterfaceName);
                 my $arg = GetObjCTypeGetter($argName, $idlType);
@@ -1367,12 +1414,8 @@ sub GenerateImplementation
                     push(@implContent, "    ASSERT($argName);\n\n");
                 }
 
-                if ($attribute->signature->extendedAttributes->{"IPhoneApplyOnWebThread"} || $attribute->signature->extendedAttributes->{"IPhoneSetterApplyOnWebThread"}) {
-                    struct( SetterParam => { name => '$', type => '$' });
-                    my @params = (new SetterParam);
-                    $params[0]->name($argName);
-                    $params[0]->type($attributeType);
-                    push(@implContent, IPhoneApplyOnWebThread(@params));
+                if ($idlType eq "Date") {
+                    $arg = "core(" . $arg . ")";
                 }
 
                 if ($podType) {
@@ -1380,14 +1423,22 @@ sub GenerateImplementation
                     if ($podType eq "float") {
                         push(@implContent, "    *IMPL = $arg;\n");
                     } else {
-                        push(@implContent, "    IMPL->$attributeName($arg);\n");
+                        push(@implContent, "    IMPL->$coreSetterName($arg);\n");
                     }
-                } elsif ($hasSetterException) {
-                    push(@implContent, "    $exceptionInit\n");
-                    push(@implContent, "    IMPL->$attributeName($arg, ec);\n");
-                    push(@implContent, "    $exceptionRaiseOnError\n");
                 } else {
-                    push(@implContent, "    IMPL->$attributeName($arg);\n");
+                    my $reflect = $attribute->signature->extendedAttributes->{"Reflect"};
+                    my $reflectURL = $attribute->signature->extendedAttributes->{"ReflectURL"};
+                    push(@implContent, "    $exceptionInit\n") if $hasSetterException;
+                    my $ec = $hasSetterException ? ", ec" : "";
+                    if ($reflect || $reflectURL) {
+                        my $contentAttributeName = (($reflect || $reflectURL) eq "1") ? $attributeName : ($reflect || $reflectURL);
+                        my $namespace = $codeGenerator->NamespaceForAttributeName($interfaceName, $contentAttributeName);
+                        $implIncludes{"${namespace}.h"} = 1;
+                        push(@implContent, "    IMPL->setAttribute(WebCore::${namespace}::${contentAttributeName}Attr, $arg$ec);\n");
+                    } else {
+                        push(@implContent, "    IMPL->$coreSetterName($arg$ec);\n");
+                    }
+                    push(@implContent, "    $exceptionRaiseOnError\n") if $hasSetterException;
                 }
 
                 push(@implContent, "}\n\n");
@@ -1450,10 +1501,6 @@ sub GenerateImplementation
             my @functionContent = ();
             my $caller = "IMPL";
 
-            if ($function->signature->extendedAttributes->{"IPhoneApplyOnWebThread"}) {
-                push(@functionContent, IPhoneApplyOnWebThread(@{$function->parameters}));
-            }
-
             # special case the XPathNSResolver
             if (defined $needsCustom{"XPathNSResolver"}) {
                 my $paramName = $needsCustom{"XPathNSResolver"};
@@ -1474,7 +1521,6 @@ sub GenerateImplementation
                 my $paramName = $needsCustom{"EventTarget"};
                 push(@functionContent, "    DOMNode* ${paramName}ObjC = $paramName;\n");
                 push(@functionContent, "    WebCore::Node* ${paramName}Node = core(${paramName}ObjC);\n");
-                push(@functionContent, "    WebCore::EventTargetNode* ${paramName}EventTarget = (${paramName}Node && ${paramName}Node->isEventTargetNode()) ? static_cast<WebCore::EventTargetNode*>(${paramName}Node) : 0;\n\n");
                 $implIncludes{"DOMNode.h"} = 1;
                 $implIncludes{"Node.h"} = 1;
             }
@@ -1485,16 +1531,6 @@ sub GenerateImplementation
                 push(@functionContent, "        return nil;\n");
                 $implIncludes{"DOMWindow.h"} = 1;
                 $caller = "dv";
-            }
-
-            if ($function->signature->extendedAttributes->{"EventTargetNodeCast"}) {
-                if ($dataNode->name =~ /^SVG/) {
-                    $caller = "static_cast<WebCore::SVGElementInstance*>($caller)";
-                } else {
-                    push(@functionContent, "    if (!$caller->isEventTargetNode())\n");
-                    $caller = "WebCore::EventTargetNodeCast($caller)";
-                    push(@functionContent, "        WebCore::raiseDOMException(DOM_NOT_SUPPORTED_ERR);\n");
-                }
             }
 
             # special case the EventListener
@@ -1559,6 +1595,8 @@ sub GenerateImplementation
                     push(@functionContent, "        return $toReturn;\n");
                     push(@functionContent, "    return nil;\n");
                 }
+            } elsif ($returnType eq "SerializedScriptValue") {
+                $content = "foo";
             } else {
                 if (ConversionNeeded($function->signature->type)) {
                     if ($codeGenerator->IsPodType($function->signature->type)) {
@@ -1588,7 +1626,7 @@ sub GenerateImplementation
 
             if ($needsAppleCopyright) {
                 if (!$inAppleCopyright) {
-                    push(@implContent, $beginAppleCopyright);
+                    push(@implContent, $beginAppleCopyrightForSourceFiles);
                     $inAppleCopyright = 1;
                 }
             } elsif ($inAppleCopyright) {
@@ -1683,6 +1721,18 @@ sub GenerateImplementation
     if ($dataNode->extendedAttributes->{"AppleCopyright"}) {
         push(@implContent, split("\r", $endAppleCopyright));
     }
+
+    # We don't know if we need to #import "WebCoreThreadMessage.h" until after generating the implementation.
+    if ($needIPhoneWebCoreThreadMessageHeader) {
+        push(@implConditionalIncludes, "#import \"WebCoreThreadMessage.h\"\n");
+        push(@implConditionalIncludes, "\n");
+    }
+
+    # - Generate dependencies.
+    if ($writeDependencies && @ancestorInterfaceNames) {
+        push(@depsContent, "$className.h : ", join(" ", map { "$_.idl" } @ancestorInterfaceNames), "\n");
+        push(@depsContent, map { "$_.idl :\n" } @ancestorInterfaceNames); 
+    }
 }
 
 # Internal helper
@@ -1696,18 +1746,20 @@ sub WriteData
     my $privateHeaderFileName = "$outputDir/" . $name . "Private.h";
     my $implFileName = "$outputDir/" . $name . ".mm";
     my $internalHeaderFileName = "$outputDir/" . $name . "Internal.h";
+    my $depsFileName = "$outputDir/" . $name . ".dep";
 
     # Remove old files.
     unlink($headerFileName);
     unlink($privateHeaderFileName);
     unlink($implFileName);
     unlink($internalHeaderFileName);
+    unlink($depsFileName);
 
     # Write public header.
     open(HEADER, ">$headerFileName") or die "Couldn't open file $headerFileName";
     
     print HEADER @headerContentHeader;
-    print HEADER map { "\@class $_;\n" } sort keys(%headerForwardDeclarations);
+    print HEADER map { IsCoreFoundationType($_) ? "typedef struct " . substr($_, 0, -3) . "* $_;\n" : "\@class $_;\n" } sort keys(%headerForwardDeclarations);
     print HEADER map { "\@protocol $_;\n" } sort keys(%headerForwardDeclarationsForProtocols);
 
     my $hasForwardDeclarations = keys(%headerForwardDeclarations) + keys(%headerForwardDeclarationsForProtocols);
@@ -1725,7 +1777,7 @@ sub WriteData
         open(PRIVATE_HEADER, ">$privateHeaderFileName") or die "Couldn't open file $privateHeaderFileName";
 
         print PRIVATE_HEADER @privateHeaderContentHeader;
-        print PRIVATE_HEADER map { "\@class $_;\n" } sort keys(%privateHeaderForwardDeclarations);
+        print PRIVATE_HEADER map { IsCoreFoundationType($_) ? "typedef struct " . substr($_, 0, -3) . "* $_;\n" : "\@class $_;\n" } sort keys(%privateHeaderForwardDeclarations);
         print PRIVATE_HEADER map { "\@protocol $_;\n" } sort keys(%privateHeaderForwardDeclarationsForProtocols);
 
         $hasForwardDeclarations = keys(%privateHeaderForwardDeclarations) + keys(%privateHeaderForwardDeclarationsForProtocols);
@@ -1746,6 +1798,7 @@ sub WriteData
 
         print IMPL @implContentHeader;
         print IMPL map { "#import \"$_\"\n" } sort keys(%implIncludes);
+        print IMPL "\n", @implConditionalIncludes if @implConditionalIncludes > 0;
         print IMPL @implContent;
 
         close(IMPL);
@@ -1764,23 +1817,14 @@ sub WriteData
 
        @internalHeaderContent = ();
     }
-}
 
-sub IPhoneApplyOnWebThread(\@)
-{
-    my $params = shift;
-    my @content;
-    $needIPhoneWebCoreThreadMessageHeader ||= 1;
-    push(@content, "    if (WebThreadNotCurrent()) {\n");
-    push(@content, "        NSInvocation *invocation = WebThreadCreateNSInvocation(self, _cmd);\n");
-    my $i = 0;
-    foreach my $param (@{$params}) {
-        push(@content, "        [invocation setArgument:\&" . $param->name . " atIndex:" . (2 + $i++) . "];\n");
+    # Write dependency file.
+    if (@depsContent) {
+        open(DEPS, ">$depsFileName") or die "Couldn't open file $depsFileName";
+        print DEPS @depsContent;
+        close(DEPS);
+        @depsContent = ();
     }
-    push(@content, "        WebThreadCallAPI(invocation);\n");
-    push(@content, "        return;\n");
-    push(@content, "    }\n");
-    return @content;
 }
 
 1;

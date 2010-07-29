@@ -29,6 +29,7 @@
 
 #include "EventNames.h"
 #include "StringImpl.h"
+#include "ThreadTimers.h"
 #include <wtf/UnusedParam.h>
 
 #if USE(ICU_UNICODE)
@@ -47,23 +48,21 @@ using namespace WTF;
 
 namespace WebCore {
 
-ThreadGlobalData& threadGlobalData()
-{
-    // FIXME: Workers are not necessarily the only feature that make per-thread global data necessary.
-    // We need to check for e.g. database objects manipulating strings on secondary threads.
-    static ThreadGlobalData* staticData;
-    if (!staticData) {
-        staticData = static_cast<ThreadGlobalData*>(fastMalloc(sizeof(ThreadGlobalData)));
-        // ThreadGlobalData constructor indirectly uses staticData, so we need to set up the memory before invoking it.
-        new (staticData) ThreadGlobalData;
-    }
-    return *staticData;
-}
+#if ENABLE(WORKERS)
+ThreadSpecific<ThreadGlobalData>* ThreadGlobalData::staticData;
+#error Need a separate ThreadGlobalData::staticData that is shared by the main thread and the Web Thread.
+#else
+ThreadGlobalData* ThreadGlobalData::staticData;
+#endif
 
 ThreadGlobalData::ThreadGlobalData()
     : m_emptyString(new StringImpl)
     , m_atomicStringTable(new HashSet<StringImpl*>)
     , m_eventNames(new EventNames)
+    , m_threadTimers(new ThreadTimers)
+#ifndef NDEBUG
+    , m_isMainThread(isMainThread())
+#endif
 #if USE(ICU_UNICODE)
     , m_cachedConverterICU(new ICUConverterWrapper)
 #endif
@@ -75,11 +74,16 @@ ThreadGlobalData::~ThreadGlobalData()
 #if USE(ICU_UNICODE)
     delete m_cachedConverterICU;
 #endif
-
     delete m_eventNames;
     delete m_atomicStringTable;
+    delete m_threadTimers;
 
-    ASSERT(isMainThread() || m_emptyString->hasOneRef()); // We intentionally don't clean up static data on application quit, so there will be many strings remaining on the main thread.
+    // Using member variable m_isMainThread instead of calling WTF::isMainThread() directly
+    // to avoid issues described in https://bugs.webkit.org/show_bug.cgi?id=25973.
+    // In short, some pthread-based platforms and ports can not use WTF::CurrentThread() and WTF::isMainThread()
+    // in destructors of thread-specific data.
+    ASSERT(m_isMainThread || m_emptyString->hasOneRef()); // We intentionally don't clean up static data on application quit, so there will be many strings remaining on the main thread.
+
     delete m_emptyString;
 }
 

@@ -28,6 +28,8 @@
 #ifndef OriginUsageRecord_h
 #define OriginUsageRecord_h
 
+#if ENABLE(DATABASE)
+
 #include "PlatformString.h"
 #include "StringHash.h"
 
@@ -38,7 +40,7 @@ namespace WebCore {
 
 // Objects of this class can be used from multiple threads with external synchronization.
 // String arguments are also supposed to be deeply copied by the caller when necessary.
-class OriginUsageRecord {
+class OriginUsageRecord : public Noncopyable {
 public:
     OriginUsageRecord();
 
@@ -64,4 +66,6 @@ private:
 
 } // namespace WebCore
 
-#endif 
+#endif
+
+#endif

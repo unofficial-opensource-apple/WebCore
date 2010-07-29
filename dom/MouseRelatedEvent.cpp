@@ -57,7 +57,7 @@ static int contentsX(AbstractView* abstractView)
     FrameView* frameView = frame->view();
     if (!frameView)
         return 0;
-    return frameView->scrollX();
+    return frameView->scrollX() / frame->pageZoomFactor();
 }
 
 static int contentsY(AbstractView* abstractView)
@@ -70,7 +70,7 @@ static int contentsY(AbstractView* abstractView)
     FrameView* frameView = frame->view();
     if (!frameView)
         return 0;
-    return frameView->scrollY();
+    return frameView->scrollY() / frame->pageZoomFactor();
 }
 
 MouseRelatedEvent::MouseRelatedEvent(const AtomicString& eventType, bool canBubble, bool cancelable, PassRefPtr<AbstractView> viewArg,
@@ -97,6 +97,8 @@ void MouseRelatedEvent::initCoordinates()
     m_layerY = m_pageY;
     m_offsetX = m_pageX;
     m_offsetY = m_pageY;
+
+    computePageLocation();
 }
 
 void MouseRelatedEvent::initCoordinates(int clientX, int clientY)
@@ -112,6 +114,14 @@ void MouseRelatedEvent::initCoordinates(int clientX, int clientY)
     m_layerY = m_pageY;
     m_offsetX = m_pageX;
     m_offsetY = m_pageY;
+
+    computePageLocation();
+}
+
+void MouseRelatedEvent::computePageLocation()
+{
+    float zoomFactor = (view() && view()->frame()) ? view()->frame()->pageZoomFactor() : 1.0f;
+    setAbsoluteLocation(roundedIntPoint(FloatPoint(pageX() * zoomFactor, pageY() * zoomFactor)));
 }
 
 void MouseRelatedEvent::receivedTarget()
@@ -128,19 +138,20 @@ void MouseRelatedEvent::receivedTarget()
     m_offsetY = m_pageY;
 
     // Must have an updated render tree for this math to work correctly.
-    targ->document()->updateRendering();
+    targ->document()->updateStyleIfNeeded();
 
     // Adjust offsetX/Y to be relative to the target's position.
     if (!isSimulated()) {
         if (RenderObject* r = targ->renderer()) {
-            IntPoint localPos = roundedIntPoint(r->absoluteToLocal(FloatPoint(m_pageX, m_pageY), false, true));
-            m_offsetX = localPos.x();
-            m_offsetY = localPos.y();
+            FloatPoint localPos = r->absoluteToLocal(absoluteLocation(), false, true);
+            float zoomFactor = (view() && view()->frame()) ? view()->frame()->pageZoomFactor() : 1.0f;
+            m_offsetX = lroundf(localPos.x() / zoomFactor);
+            m_offsetY = lroundf(localPos.y() / zoomFactor);
         }
     }
 
     // Adjust layerX/Y to be relative to the layer.
-    // FIXME: We're pretty sure this is the wrong defintion of "layer."
+    // FIXME: We're pretty sure this is the wrong definition of "layer."
     // Our RenderLayer is a more modern concept, and layerX/Y is some
     // other notion about groups of elements (left over from the Netscape 4 days?);
     // we should test and fix this.
@@ -151,8 +162,8 @@ void MouseRelatedEvent::receivedTarget()
         RenderLayer* layer = n->renderer()->enclosingLayer();
         layer->updateLayerPosition();
         for (; layer; layer = layer->parent()) {
-            m_layerX -= layer->xPos();
-            m_layerY -= layer->yPos();
+            m_layerX -= layer->x();
+            m_layerY -= layer->y();
         }
     }
 }

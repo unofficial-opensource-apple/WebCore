@@ -2,6 +2,7 @@
     Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005 Rob Buis <buis@kde.org>
                   2005 Eric Seidel <eric@webkit.org>
+                  2009 Dirk Schulze <krit@webkit.org>
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -22,29 +23,38 @@
 #ifndef SVGResourceFilter_h
 #define SVGResourceFilter_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGResource.h"
-#include "SVGFilterEffect.h"
 
+#include "Image.h"
+#include "ImageBuffer.h"
 #include "FloatRect.h"
+#include "RenderObject.h"
+#include "SVGFilterPrimitiveStandardAttributes.h"
 
 #include <wtf/OwnPtr.h>
+#include <wtf/PassOwnPtr.h>
+#include <wtf/PassRefPtr.h>
+#include <wtf/RefPtr.h>
 
 namespace WebCore {
 
+class Filter;
+class FilterEffect;
 class GraphicsContext;
-class SVGFilterEffect;
-    
-class SVGResourceFilterPlatformData {
-public:
-    virtual ~SVGResourceFilterPlatformData() {}
-};
+class SVGFilterBuilder;
+class SVGFilterElement;
+class SVGFilterPrimitiveStandardAttributes;
 
 class SVGResourceFilter : public SVGResource {
 public:
-    SVGResourceFilter();
+    static PassRefPtr<SVGResourceFilter> create(const SVGFilterElement* ownerElement) { return adoptRef(new SVGResourceFilter(ownerElement)); }
+    virtual ~SVGResourceFilter();
     
     virtual SVGResourceType resourceType() const { return FilterResourceType; }
+
+    void setFilterResolution(const FloatSize& filterResSize) { m_filterResSize = filterResSize; }
+    void setHasFilterResolution(bool filterRes) { m_filterRes = filterRes; }
 
     bool filterBoundingBoxMode() const { return m_filterBBoxMode; }
     void setFilterBoundingBoxMode(bool bboxMode) { m_filterBBoxMode = bboxMode; }
@@ -52,45 +62,48 @@ public:
     bool effectBoundingBoxMode() const { return m_effectBBoxMode; }
     void setEffectBoundingBoxMode(bool bboxMode) { m_effectBBoxMode = bboxMode; }
 
-    bool xBoundingBoxMode() const { return m_xBBoxMode; }
-    void setXBoundingBoxMode(bool bboxMode) { m_xBBoxMode = bboxMode; }
-
-    bool yBoundingBoxMode() const { return m_yBBoxMode; }
-    void setYBoundingBoxMode(bool bboxMode) { m_yBBoxMode = bboxMode; }
-
     FloatRect filterRect() const { return m_filterRect; }
     void setFilterRect(const FloatRect& rect) { m_filterRect = rect; }
 
-    FloatRect filterBBoxForItemBBox(const FloatRect& itemBBox) const;
+    float scaleX() const { return m_scaleX; }
+    float scaleY() const { return m_scaleY; }
 
-    void clearEffects();
-    void addFilterEffect(SVGFilterEffect*);
+    FloatRect filterBoundingBox(const FloatRect& obb) const;
+    void setFilterBoundingBox(const FloatRect& rect) { m_filterBBox = rect; }
+
+    bool prepareFilter(GraphicsContext*&, const RenderObject*);
+    void applyFilter(GraphicsContext*&, const RenderObject*);
+
+    bool fitsInMaximumImageSize(const FloatSize&);
+
+    void addFilterEffect(SVGFilterPrimitiveStandardAttributes*, PassRefPtr<FilterEffect>);
+
+    SVGFilterBuilder* builder() { return m_filterBuilder.get(); }
 
     virtual TextStream& externalRepresentation(TextStream&) const;
-
-    // To be implemented in platform specific code.
-    void prepareFilter(GraphicsContext*&, const FloatRect& bbox);
-    void applyFilter(GraphicsContext*&, const FloatRect& bbox);
-    
-    SVGResourceFilterPlatformData* platformData() { return m_platformData.get(); }
-    const Vector<SVGFilterEffect*>& effects() { return m_effects; }
     
 private:
-    SVGResourceFilterPlatformData* createPlatformData();
-    
-    OwnPtr<SVGResourceFilterPlatformData> m_platformData;
+    SVGResourceFilter(const SVGFilterElement*);
+
+    const SVGFilterElement* m_ownerElement;
 
     bool m_filterBBoxMode : 1;
     bool m_effectBBoxMode : 1;
-
-    bool m_xBBoxMode : 1;
-    bool m_yBBoxMode : 1;
+    bool m_filterRes : 1;
+    float m_scaleX;
+    float m_scaleY;
 
     FloatRect m_filterRect;
-    Vector<SVGFilterEffect*> m_effects;
+    FloatRect m_filterBBox;
+    FloatSize m_filterResSize;
+
+    OwnPtr<SVGFilterBuilder> m_filterBuilder;
+    GraphicsContext* m_savedContext;
+    OwnPtr<ImageBuffer> m_sourceGraphicBuffer;
+    RefPtr<Filter> m_filter;
 };
 
-SVGResourceFilter* getFilterById(Document*, const AtomicString&);
+SVGResourceFilter* getFilterById(Document*, const AtomicString&, const RenderObject*);
 
 } // namespace WebCore
 

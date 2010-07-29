@@ -32,7 +32,7 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLNameCollection::HTMLNameCollection(PassRefPtr<Document> document, Type type, const String& name)
+HTMLNameCollection::HTMLNameCollection(PassRefPtr<Document> document, CollectionType type, const String& name)
     : HTMLCollection(document.get(), type, document->nameCollectionInfo(type, name))
     , m_name(name)
 {
@@ -63,7 +63,7 @@ Element* HTMLNameCollection::itemAfter(Element* previous) const
                     e->hasTagName(objectTag))
                     if (e->getAttribute(nameAttr) == m_name)
                         return e;
-                if (e->getAttribute(idAttr) == m_name)
+                if (e->getAttribute(e->idAttributeName()) == m_name)
                     return e;
                 break;
             case DocumentNamedItems:
@@ -74,14 +74,14 @@ Element* HTMLNameCollection::itemAfter(Element* previous) const
                     if (e->getAttribute(nameAttr) == m_name)
                         return e;
                 } else if (e->hasTagName(appletTag)) {
-                    if (e->getAttribute(nameAttr) == m_name || e->getAttribute(idAttr) == m_name)
+                    if (e->getAttribute(nameAttr) == m_name || e->getAttribute(e->idAttributeName()) == m_name)
                         return e;
                 } else if (e->hasTagName(objectTag)) {
-                    if ((e->getAttribute(nameAttr) == m_name || e->getAttribute(idAttr) == m_name)
+                    if ((e->getAttribute(nameAttr) == m_name || e->getAttribute(e->idAttributeName()) == m_name)
                             && static_cast<HTMLObjectElement*>(e)->isDocNamedItem())
                         return e;
                 } else if (e->hasTagName(imgTag)) {
-                    if (e->getAttribute(nameAttr) == m_name || (e->getAttribute(idAttr) == m_name && e->hasAttribute(nameAttr)))
+                    if (e->getAttribute(nameAttr) == m_name || (e->getAttribute(e->idAttributeName()) == m_name && e->hasAttribute(nameAttr)))
                         return e;
                 }
                 break;

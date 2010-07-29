@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009 Apple, Inc.  All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010 Apple, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 #define QTMovieWin_h
 
 #include <Unicode.h>
+#include <windows.h>
 
 #ifdef QTMOVIEWIN_EXPORTS
 #define QTMOVIEWIN_API __declspec(dllexport)
@@ -45,6 +46,11 @@ public:
     virtual void movieNewImageAvailable(QTMovieWin*) = 0;
 };
 
+class QTMovieWinFullscreenClient {
+public:
+    virtual LRESULT fullscreenClientWndProc(HWND, UINT message, WPARAM, LPARAM) = 0;
+};
+
 enum {
     QTMovieLoadStateError = -1L,
     QTMovieLoadStateLoaded  = 2000L,
@@ -53,14 +59,21 @@ enum {
     QTMovieLoadStateComplete = 100000L
 };
 
+typedef const struct __CFURL * CFURLRef;
+
 class QTMOVIEWIN_API QTMovieWin {
 public:
     static bool initializeQuickTime();
 
+    typedef void (*SetTaskTimerDelayFunc)(double);
+    typedef void (*StopTaskTimerFunc)();
+    static void setTaskTimerFuncs(SetTaskTimerDelayFunc, StopTaskTimerFunc);
+    static void taskTimerFired();
+
     QTMovieWin(QTMovieWinClient*);
     ~QTMovieWin();
 
-    void load(const UChar* url, int len);
+    void load(const UChar* url, int len, bool preservesPitch);
     long loadState() const;
     float maxTimeLoaded() const;
 
@@ -75,6 +88,7 @@ public:
     void setCurrentTime(float) const;
 
     void setVolume(float);
+    void setPreservesPitch(bool);
 
     unsigned dataSize() const;
 
@@ -83,16 +97,30 @@ public:
 
     void setVisible(bool);
     void paint(HDC, int x, int y);
+    void getCurrentFrameInfo(void*& buffer, unsigned& bitsPerPixel, unsigned& rowBytes, unsigned& width, unsigned& height);
 
-    void disableUnsupportedTracks(unsigned& enabledTrackCount);
+    void disableUnsupportedTracks(unsigned& enabledTrackCount, unsigned& totalTrackCount);
+    void setDisabled(bool);
 
     bool hasVideo() const;
+    bool hasAudio() const;
+
+    bool hasClosedCaptions() const;
+    void setClosedCaptionsVisible(bool);
 
     static unsigned countSupportedTypes();
     static void getSupportedType(unsigned index, const UChar*& str, unsigned& len);
 
+    // Returns the full-screen window created
+    HWND enterFullscreen(QTMovieWinFullscreenClient*);
+    void exitFullscreen();
+
 private:
+    void load(CFURLRef, bool preservesPitch);
+    static LRESULT fullscreenWndProc(HWND, UINT message, WPARAM, LPARAM);
+
     QTMovieWinPrivate* m_private;
+    bool m_disabled;
     friend class QTMovieWinPrivate;
 };
 

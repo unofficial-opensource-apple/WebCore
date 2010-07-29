@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2006, 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -25,26 +23,26 @@
 #if ENABLE(SVG)
 #include "SVGPatternElement.h"
 
-#include "TransformationMatrix.h"
 #include "Document.h"
 #include "FloatConversion.h"
 #include "GraphicsContext.h"
 #include "ImageBuffer.h"
+#include "MappedAttribute.h"
 #include "PatternAttributes.h"
 #include "RenderSVGContainer.h"
 #include "SVGLength.h"
 #include "SVGNames.h"
 #include "SVGPaintServerPattern.h"
 #include "SVGRenderSupport.h"
-#include "SVGStyledTransformableElement.h"
 #include "SVGSVGElement.h"
+#include "SVGStyledTransformableElement.h"
 #include "SVGTransformList.h"
 #include "SVGTransformable.h"
 #include "SVGUnitTypes.h"
-
+#include "TransformationMatrix.h"
 #include <math.h>
-#include <wtf/OwnPtr.h>
 #include <wtf/MathExtras.h>
+#include <wtf/OwnPtr.h>
 
 using namespace std;
 
@@ -57,13 +55,13 @@ SVGPatternElement::SVGPatternElement(const QualifiedName& tagName, Document* doc
     , SVGLangSpace()
     , SVGExternalResourcesRequired()
     , SVGFitToViewBox()
-    , m_x(this, SVGNames::xAttr, LengthModeWidth)
-    , m_y(this, SVGNames::yAttr, LengthModeHeight)
-    , m_width(this, SVGNames::widthAttr, LengthModeWidth)
-    , m_height(this, SVGNames::heightAttr, LengthModeHeight)
-    , m_patternUnits(this, SVGNames::patternUnitsAttr, SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
-    , m_patternContentUnits(this, SVGNames::patternContentUnitsAttr, SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE)
-    , m_patternTransform(this, SVGNames::patternTransformAttr, SVGTransformList::create(SVGNames::patternTransformAttr))
+    , m_x(LengthModeWidth)
+    , m_y(LengthModeHeight)
+    , m_width(LengthModeWidth)
+    , m_height(LengthModeHeight)
+    , m_patternUnits(SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
+    , m_patternContentUnits(SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE)
+    , m_patternTransform(SVGTransformList::create(SVGNames::patternTransformAttr))
 {
 }
 
@@ -110,7 +108,7 @@ void SVGPatternElement::parseMappedAttribute(MappedAttribute* attr)
             return;
         if (SVGExternalResourcesRequired::parseMappedAttribute(attr))
             return;
-        if (SVGFitToViewBox::parseMappedAttribute(attr))
+        if (SVGFitToViewBox::parseMappedAttribute(document(), attr))
             return;
 
         SVGStyledElement::parseMappedAttribute(attr);
@@ -134,6 +132,48 @@ void SVGPatternElement::svgAttributeChanged(const QualifiedName& attrName)
         SVGFitToViewBox::isKnownAttribute(attrName) ||
         SVGStyledElement::isKnownAttribute(attrName))
         m_resource->invalidate();
+}
+
+void SVGPatternElement::synchronizeProperty(const QualifiedName& attrName)
+{
+    SVGStyledElement::synchronizeProperty(attrName);
+
+    if (attrName == anyQName()) {
+        synchronizePatternUnits();
+        synchronizePatternContentUnits();
+        synchronizePatternTransform();
+        synchronizeX();
+        synchronizeY();
+        synchronizeWidth();
+        synchronizeHeight();
+        synchronizeExternalResourcesRequired();
+        synchronizeViewBox();
+        synchronizePreserveAspectRatio();
+        synchronizeHref();
+        return;
+    }
+
+    if (attrName == SVGNames::patternUnitsAttr)
+        synchronizePatternUnits();
+    else if (attrName == SVGNames::patternContentUnitsAttr)
+        synchronizePatternContentUnits();
+    else if (attrName == SVGNames::patternTransformAttr)
+        synchronizePatternTransform();
+    else if (attrName == SVGNames::xAttr)
+        synchronizeX();
+    else if (attrName == SVGNames::yAttr)
+        synchronizeY();
+    else if (attrName == SVGNames::widthAttr)
+        synchronizeWidth();
+    else if (attrName == SVGNames::heightAttr)
+        synchronizeHeight();
+    else if (SVGExternalResourcesRequired::isKnownAttribute(attrName))
+        synchronizeExternalResourcesRequired();
+    else if (SVGFitToViewBox::isKnownAttribute(attrName)) {
+        synchronizeViewBox();
+        synchronizePreserveAspectRatio();
+    } else if (SVGURIReference::isKnownAttribute(attrName))
+        synchronizeHref();
 }
 
 void SVGPatternElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
@@ -177,7 +217,7 @@ void SVGPatternElement::buildPattern(const FloatRect& targetRect) const
         patternBoundaries.setHeight(targetRect.height());
 
     IntSize patternSize(patternBoundaries.width(), patternBoundaries.height());
-    clampImageBufferSizeToViewport(document()->renderer(), patternSize);
+    clampImageBufferSizeToViewport(document()->view(), patternSize);
 
     if (patternSize.width() < static_cast<int>(patternBoundaries.width()))
         patternBoundaries.setWidth(patternSize.width());
@@ -191,11 +231,11 @@ void SVGPatternElement::buildPattern(const FloatRect& targetRect) const
         for (Node* n = attributes.patternContentElement()->firstChild(); n; n = n->nextSibling()) {
             if (!n->isSVGElement() || !static_cast<SVGElement*>(n)->isStyledTransformable() || !n->renderer())
                 continue;
-            patternContentBoundaries.unite(n->renderer()->relativeBBox(true));
+            patternContentBoundaries.unite(n->renderer()->repaintRectInLocalCoordinates());
         }
     }
 
-    TransformationMatrix viewBoxCTM = viewBoxToViewTransform(patternBoundaries.width(), patternBoundaries.height()); 
+    TransformationMatrix viewBoxCTM = viewBoxToViewTransform(viewBox(), preserveAspectRatio(), patternBoundaries.width(), patternBoundaries.height()); 
     FloatRect patternBoundariesIncludingOverflow = patternBoundaries;
 
     // Apply objectBoundingBoxMode fixup for patternContentUnits, if viewBox is not set.
@@ -212,11 +252,11 @@ void SVGPatternElement::buildPattern(const FloatRect& targetRect) const
     }
 
     IntSize imageSize(lroundf(patternBoundariesIncludingOverflow.width()), lroundf(patternBoundariesIncludingOverflow.height()));
-    clampImageBufferSizeToViewport(document()->renderer(), imageSize);
+    clampImageBufferSizeToViewport(document()->view(), imageSize);
 
-    auto_ptr<ImageBuffer> patternImage = ImageBuffer::create(imageSize, false);
+    OwnPtr<ImageBuffer> patternImage = ImageBuffer::create(imageSize);
 
-    if (!patternImage.get())
+    if (!patternImage)
         return;
 
     GraphicsContext* context = patternImage->context();
@@ -251,7 +291,7 @@ void SVGPatternElement::buildPattern(const FloatRect& targetRect) const
 
     m_resource->setPatternTransform(attributes.patternTransform());
     m_resource->setPatternBoundaries(patternBoundaries); 
-    m_resource->setTile(patternImage);
+    m_resource->setTile(patternImage.release());
 }
 
 RenderObject* SVGPatternElement::createRenderer(RenderArena* arena, RenderStyle*)
@@ -261,7 +301,7 @@ RenderObject* SVGPatternElement::createRenderer(RenderArena* arena, RenderStyle*
     return patternContainer;
 }
 
-SVGResource* SVGPatternElement::canvasResource()
+SVGResource* SVGPatternElement::canvasResource(const RenderObject*)
 {
     if (!m_resource)
         m_resource = SVGPaintServerPattern::create(this);

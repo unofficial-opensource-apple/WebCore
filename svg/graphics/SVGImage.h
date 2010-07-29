@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 Eric Seidel (eric@webkit.org)
+ * Copyright (C) 2009 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,15 +30,10 @@
 #if ENABLE(SVG)
 
 #include "Image.h"
-#include "ImageBuffer.h"
-#include "IntSize.h"
-#include <wtf/OwnPtr.h>
 
 namespace WebCore {
-    
-    class SVGDocument;
-    class Frame;
-    class FrameView;
+
+    class ImageBuffer;
     class Page;
     class SVGImageChromeClient;
     
@@ -50,6 +46,8 @@ namespace WebCore {
 
     private:
         virtual ~SVGImage();
+
+        virtual String filenameExtension() const;
 
         virtual void setContainerSize(const IntSize&);
         virtual bool usesContainerSize() const;
@@ -68,16 +66,12 @@ namespace WebCore {
         virtual NativeImagePtr frameAtIndex(size_t) { return 0; }
         
         SVGImage(ImageObserver*);
-        virtual void draw(GraphicsContext*, const FloatRect& fromRect, const FloatRect& toRect, CompositeOperator);
+        virtual void draw(GraphicsContext*, const FloatRect& fromRect, const FloatRect& toRect, ColorSpace styleColorSpace, CompositeOperator);
         
         virtual NativeImagePtr nativeImageForCurrentFrame();
         
-        SVGDocument* m_document;
         OwnPtr<SVGImageChromeClient> m_chromeClient;
         OwnPtr<Page> m_page;
-        RefPtr<Frame> m_frame;
-        RefPtr<FrameView> m_frameView;
-        IntSize m_minSize;
         OwnPtr<ImageBuffer> m_frameCache;
     };
 }

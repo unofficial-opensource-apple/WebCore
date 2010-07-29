@@ -26,8 +26,7 @@
 
 namespace WebCore {
 
-class FormControlElement;
-class Selection;
+class VisibleSelection;
 class TextControlInnerElement;
 class TextControlInnerTextElement;
 
@@ -35,21 +34,11 @@ class RenderTextControl : public RenderBlock {
 public:
     virtual ~RenderTextControl();
 
-    virtual const char* renderName() const { return "RenderTextControl"; }
-    virtual bool hasControlClip() const { return false; }
-    virtual IntRect controlClipRect(int tx, int ty) const;
-    virtual void calcHeight();
-    virtual void calcPrefWidths();
-    virtual void removeLeftoverAnonymousBlock(RenderBlock*) { }
-    virtual void updateFromElement();
-    virtual bool canHaveChildren() const { return false; }
-    virtual bool avoidsFloats() const { return true; }
-    
-    virtual bool isEdited() const { return m_edited; }
-    virtual void setEdited(bool isEdited) { m_edited = isEdited; }
+    bool wasChangedSinceLastChangeEvent() const { return m_wasChangedSinceLastChangeEvent; }
+    void setChangedSinceLastChangeEvent(bool wasChangedSinceLastChangeEvent) { m_wasChangedSinceLastChangeEvent = wasChangedSinceLastChangeEvent; }
 
-    bool isUserEdited() const { return m_userEdited; }
-    void setUserEdited(bool isUserEdited);
+    bool lastChangeWasUserEdit() const { return m_lastChangeWasUserEdit; }
+    void setLastChangeWasUserEdit(bool lastChangeWasUserEdit);
 
     int selectionStart();
     int selectionEnd();
@@ -57,26 +46,12 @@ public:
     void setSelectionEnd(int);
     void select();
     void setSelectionRange(int start, int end);
-    Selection selection(int start, int end) const;
+    VisibleSelection selection(int start, int end) const;
 
     virtual void subtreeHasChanged();
     String text();
     String textWithHardLineBreaks();
     void selectionChanged(bool userTriggered);
-
-    virtual void addFocusRingRects(GraphicsContext*, int tx, int ty);
-
-    virtual bool canBeProgramaticallyScrolled(bool) const { return true; }
-    virtual void autoscroll();
-
-    // Subclassed to forward to our inner div.
-    virtual int scrollLeft() const;
-    virtual int scrollTop() const;
-    virtual int scrollWidth() const;
-    virtual int scrollHeight() const;
-    virtual void setScrollLeft(int);
-    virtual void setScrollTop(int);
-    virtual bool scroll(ScrollDirection, ScrollGranularity, float multiplier = 1.0f);
 
     bool canScroll() const;
 
@@ -86,8 +61,10 @@ public:
     VisiblePosition visiblePositionForIndex(int index);
     int indexForVisiblePosition(const VisiblePosition&);
 
+    void updatePlaceholderVisibility(bool, bool);
+
 protected:
-    RenderTextControl(Node*);
+    RenderTextControl(Node*, bool);
 
     int scrollbarThickness() const;
     void adjustInnerTextStyle(const RenderStyle* startStyle, RenderStyle* textBlockStyle) const;
@@ -102,23 +79,58 @@ protected:
     int textBlockWidth() const;
     int textBlockHeight() const;
 
+    float scaleEmToUnits(int x) const;
+
+    static bool hasValidAvgCharWidth(AtomicString family);
+    virtual float getAvgCharWidth(AtomicString family);
     virtual int preferredContentWidth(float charWidth) const = 0;
     virtual void adjustControlHeightBasedOnLineHeight(int lineHeight) = 0;
     virtual void cacheSelection(int start, int end) = 0;
     virtual PassRefPtr<RenderStyle> createInnerTextStyle(const RenderStyle* startStyle) const = 0;
+    virtual RenderStyle* textBaseStyle() const = 0;
+
+    virtual void updateFromElement();
+    virtual void calcHeight();
 
     friend class TextIterator;
     HTMLElement* innerTextElement() const;
 
-    FormControlElement* formControlElement() const;
+    bool m_placeholderVisible;
 
 private:
+    virtual const char* renderName() const { return "RenderTextControl"; }
+    virtual bool isTextControl() const { return true; }
+    virtual void calcPrefWidths();
+    virtual void removeLeftoverAnonymousBlock(RenderBlock*) { }
+    virtual bool canHaveChildren() const { return false; }
+    virtual bool avoidsFloats() const { return true; }
+    void setInnerTextStyle(PassRefPtr<RenderStyle>);
+    
+    virtual void addFocusRingRects(Vector<IntRect>&, int tx, int ty);
+
+    virtual bool canBeProgramaticallyScrolled(bool) const { return true; }
+
     String finishText(Vector<UChar>&) const;
 
-    bool m_edited;
-    bool m_userEdited;
+    bool m_wasChangedSinceLastChangeEvent;
+    bool m_lastChangeWasUserEdit;
     RefPtr<TextControlInnerTextElement> m_innerText;
 };
+
+inline RenderTextControl* toRenderTextControl(RenderObject* object)
+{ 
+    ASSERT(!object || object->isTextControl());
+    return static_cast<RenderTextControl*>(object);
+}
+
+inline const RenderTextControl* toRenderTextControl(const RenderObject* object)
+{ 
+    ASSERT(!object || object->isTextControl());
+    return static_cast<const RenderTextControl*>(object);
+}
+
+// This will catch anyone doing an unnecessary cast.
+void toRenderTextControl(const RenderTextControl*);
 
 } // namespace WebCore
 

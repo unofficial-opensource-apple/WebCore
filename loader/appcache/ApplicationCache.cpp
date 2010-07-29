@@ -39,6 +39,7 @@ namespace WebCore {
 ApplicationCache::ApplicationCache()
     : m_group(0)
     , m_manifest(0)
+    , m_estimatedSizeInStorage(0)
     , m_storageID(0)
 {
 }
@@ -81,12 +82,14 @@ void ApplicationCache::addResource(PassRefPtr<ApplicationCacheResource> resource
     
     if (m_storageID) {
         ASSERT(!resource->storageID());
-        ASSERT(resource->type() & (ApplicationCacheResource::Dynamic | ApplicationCacheResource::Implicit));
+        ASSERT(resource->type() & ApplicationCacheResource::Master);
         
         // Add the resource to the storage.
         cacheStorage().store(resource.get(), this);
     }
-    
+
+    m_estimatedSizeInStorage += resource->estimatedSizeInStorage();
+
     m_resources.set(url, resource);
 }
 
@@ -100,18 +103,21 @@ unsigned ApplicationCache::removeResource(const String& url)
     unsigned type = it->second->type();
 
     m_resources.remove(it);
-    
+
+    m_estimatedSizeInStorage -= it->second->estimatedSizeInStorage();
+
     return type;
 }    
     
 ApplicationCacheResource* ApplicationCache::resourceForURL(const String& url)
 {
+    ASSERT(!KURL(ParsedURLString, url).hasFragmentIdentifier());
     return m_resources.get(url).get();
 }    
 
 bool ApplicationCache::requestIsHTTPOrHTTPSGet(const ResourceRequest& request)
 {
-    if (!request.url().protocolIs("http") && !request.url().protocolIs("https"))
+    if (!request.url().protocolInHTTPFamily())
         return false;
     
     if (!equalIgnoringCase(request.httpMethod(), "GET"))
@@ -125,34 +131,12 @@ ApplicationCacheResource* ApplicationCache::resourceForRequest(const ResourceReq
     // We only care about HTTP/HTTPS GET requests.
     if (!requestIsHTTPOrHTTPSGet(request))
         return false;
-    
-    return resourceForURL(request.url());
-}
 
-unsigned ApplicationCache::numDynamicEntries() const
-{
-    // FIXME: Implement
-    return 0;
-}
-    
-String ApplicationCache::dynamicEntry(unsigned) const
-{
-    // FIXME: Implement
-    return String();
-}
-    
-bool ApplicationCache::addDynamicEntry(const String& url)
-{
-    if (!equalIgnoringCase(m_group->manifestURL().protocol(), KURL(url).protocol()))
-        return false;
+    KURL url(request.url());
+    if (url.hasFragmentIdentifier())
+        url.removeFragmentIdentifier();
 
-    // FIXME: Implement
-    return true;
-}
-    
-void ApplicationCache::removeDynamicEntry(const String&)
-{
-    // FIXME: Implement
+    return resourceForURL(url);
 }
 
 void ApplicationCache::setOnlineWhitelist(const Vector<KURL>& onlineWhitelist)
@@ -163,6 +147,9 @@ void ApplicationCache::setOnlineWhitelist(const Vector<KURL>& onlineWhitelist)
 
 bool ApplicationCache::isURLInOnlineWhitelist(const KURL& url)
 {
+    if (m_allowAllNetworkRequests)
+        return true;
+
     size_t whitelistSize = m_onlineWhitelist.size();
     for (size_t i = 0; i < whitelistSize; ++i) {
         if (protocolHostAndPortAreEqual(url, m_onlineWhitelist[i]) && url.string().startsWith(m_onlineWhitelist[i].string()))

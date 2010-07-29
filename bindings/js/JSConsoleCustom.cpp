@@ -26,6 +26,7 @@
 #include "config.h"
 #include "JSConsole.h"
 #include "JavaScriptProfile.h"
+#include "ScriptCallStack.h"
 #include <runtime/JSArray.h>
 
 #include "Console.h"
@@ -34,12 +35,14 @@ using namespace JSC;
 
 namespace WebCore {
 
+#if ENABLE(JAVASCRIPT_DEBUGGER)
+
 typedef Vector<RefPtr<JSC::Profile> > ProfilesArray;
 
-JSValuePtr JSConsole::profiles(ExecState* exec) const
+JSValue JSConsole::profiles(ExecState* exec) const
 {
     const ProfilesArray& profiles = impl()->profiles();
-    ArgList list;
+    MarkedArgumentBuffer list;
 
     ProfilesArray::const_iterator end = profiles.end();
     for (ProfilesArray::const_iterator iter = profiles.begin(); iter != end; ++iter)
@@ -47,5 +50,23 @@ JSValuePtr JSConsole::profiles(ExecState* exec) const
 
     return constructArray(exec, list);
 }
+
+JSValue JSConsole::profile(ExecState* exec, const ArgList& args)
+{
+    ScriptCallStack callStack(exec, args, 1);
+    const UString title = valueToStringWithUndefinedOrNullCheck(exec, args.at(0));
+    impl()->profile(title, &callStack);
+    return jsUndefined();
+}
+
+JSValue JSConsole::profileEnd(ExecState* exec, const ArgList& args)
+{
+    ScriptCallStack callStack(exec, args, 1);
+    const UString title = valueToStringWithUndefinedOrNullCheck(exec, args.at(0));
+    impl()->profileEnd(title, &callStack);
+    return jsUndefined();
+}
+
+#endif
 
 } // namespace WebCore

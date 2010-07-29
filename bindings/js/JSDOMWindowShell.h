@@ -40,7 +40,7 @@ namespace WebCore {
     class JSDOMWindowShell : public DOMObject {
         typedef DOMObject Base;
     public:
-        JSDOMWindowShell(PassRefPtr<DOMWindow>);
+        JSDOMWindowShell(PassRefPtr<DOMWindow>, DOMWrapperWorld* world);
         virtual ~JSDOMWindowShell();
 
         JSDOMWindow* window() const { return m_window; }
@@ -55,37 +55,42 @@ namespace WebCore {
         static const JSC::ClassInfo s_info;
 
         DOMWindow* impl() const;
-        void disconnectFrame();
-        void clear();
 
         void* operator new(size_t);
 
-        static PassRefPtr<JSC::Structure> createStructure(JSC::JSValuePtr prototype) 
+        static PassRefPtr<JSC::Structure> createStructure(JSC::JSValue prototype) 
         {
-            return JSC::Structure::create(prototype, JSC::TypeInfo(JSC::ObjectType)); 
+            return JSC::Structure::create(prototype, JSC::TypeInfo(JSC::ObjectType, StructureFlags), AnonymousSlotCount); 
         }
 
+        DOMWrapperWorld* world() { return m_world.get(); }
+
     private:
-        virtual void mark();
+        static const unsigned StructureFlags = JSC::OverridesGetOwnPropertySlot | JSC::OverridesMarkChildren | JSC::OverridesGetPropertyNames | DOMObject::StructureFlags;
+
+        virtual void markChildren(JSC::MarkStack&);
         virtual JSC::UString className() const;
         virtual bool getOwnPropertySlot(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::PropertySlot&);
-        virtual void put(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSValuePtr, JSC::PutPropertySlot&);
-        virtual void putWithAttributes(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSValuePtr, unsigned attributes);
+        virtual bool getOwnPropertyDescriptor(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::PropertyDescriptor&);
+        virtual void put(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSValue, JSC::PutPropertySlot&);
+        virtual void putWithAttributes(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSValue, unsigned attributes);
         virtual bool deleteProperty(JSC::ExecState*, const JSC::Identifier& propertyName);
-        virtual void getPropertyNames(JSC::ExecState*, JSC::PropertyNameArray&);
-        virtual bool getPropertyAttributes(JSC::ExecState*, const JSC::Identifier& propertyName, unsigned& attributes) const;
-        virtual void defineGetter(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSObject* getterFunction);
-        virtual void defineSetter(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSObject* setterFunction);
-        virtual JSC::JSValuePtr lookupGetter(JSC::ExecState*, const JSC::Identifier& propertyName);
-        virtual JSC::JSValuePtr lookupSetter(JSC::ExecState*, const JSC::Identifier& propertyName);
+        virtual void getPropertyNames(JSC::ExecState*, JSC::PropertyNameArray&, JSC::EnumerationMode mode = JSC::ExcludeDontEnumProperties);
+        virtual void getOwnPropertyNames(JSC::ExecState*, JSC::PropertyNameArray&, JSC::EnumerationMode mode = JSC::ExcludeDontEnumProperties);
+        virtual void defineGetter(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSObject* getterFunction, unsigned attributes);
+        virtual void defineSetter(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSObject* setterFunction, unsigned attributes);
+        virtual bool defineOwnProperty(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::PropertyDescriptor&, bool shouldThrow);
+        virtual JSC::JSValue lookupGetter(JSC::ExecState*, const JSC::Identifier& propertyName);
+        virtual JSC::JSValue lookupSetter(JSC::ExecState*, const JSC::Identifier& propertyName);
         virtual JSC::JSObject* unwrappedObject();
         virtual const JSC::ClassInfo* classInfo() const { return &s_info; }
 
         JSDOMWindow* m_window;
+        RefPtr<DOMWrapperWorld> m_world;
     };
 
-    JSC::JSValuePtr toJS(JSC::ExecState*, Frame*);
-    JSDOMWindowShell* toJSDOMWindowShell(Frame*);
+    JSC::JSValue toJS(JSC::ExecState*, Frame*);
+    JSDOMWindowShell* toJSDOMWindowShell(Frame*, DOMWrapperWorld*);
 
 } // namespace WebCore
 

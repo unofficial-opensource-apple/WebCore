@@ -43,6 +43,8 @@
 
 #include "DocumentLoader.h"
 
+#include "QuickLook.h"
+
 #define REQUEST_MANAGEMENT_ENABLED 1
 #define REQUEST_DEBUG 0
 
@@ -59,11 +61,13 @@ static const unsigned maxRequestsInFlightForNonHTTPProtocols = 10000;
 #endif
 
 Loader::Loader()
-    : m_nonHTTPProtocolHost(AtomicString(), maxRequestsInFlightForNonHTTPProtocols)
-    , m_requestTimer(this, &Loader::requestTimerFired)
+    : m_requestTimer(this, &Loader::requestTimerFired)
     , m_isSuspendingPendingRequests(false)
 {
-    maxRequestsInFlightPerHost = initializeMaximumHTTPConnectionCountPerHost();
+    m_nonHTTPProtocolHost = Host::create(AtomicString(), maxRequestsInFlightForNonHTTPProtocols);
+#if REQUEST_MANAGEMENT_ENABLED
+    maxRequestsInFlightPerHost = isHttpPipeliningEnabled() ? 10000 : initializeMaximumHTTPConnectionCountPerHost();
+#endif
 }
 
 Loader::~Loader()
@@ -71,7 +75,28 @@ Loader::~Loader()
     ASSERT_NOT_REACHED();
 }
     
-Loader::Priority Loader::determinePriority(const CachedResource* resource) const
+static ResourceRequest::TargetType cachedResourceTypeToTargetType(CachedResource::Type type)
+{
+    switch (type) {
+    case CachedResource::CSSStyleSheet:
+#if ENABLE(XSLT)
+    case CachedResource::XSLStyleSheet:
+#endif
+#if ENABLE(XBL)
+    case CachedResource::XBL:
+#endif
+        return ResourceRequest::TargetIsStyleSheet;
+    case CachedResource::Script: 
+        return ResourceRequest::TargetIsScript;
+    case CachedResource::FontResource:
+        return ResourceRequest::TargetIsFontResource;
+    case CachedResource::ImageResource:
+        return ResourceRequest::TargetIsImage;
+    }
+    return ResourceRequest::TargetIsSubresource;
+}
+
+Loader::Priority Loader::determinePriority(const CachedResource* resource)
 {
 #if REQUEST_MANAGEMENT_ENABLED
     switch (resource->type()) {
@@ -96,30 +121,36 @@ Loader::Priority Loader::determinePriority(const CachedResource* resource) const
 #endif
 }
 
-void Loader::load(DocLoader* docLoader, CachedResource* resource, bool incremental, bool skipCanLoadCheck, bool sendResourceLoadCallbacks)
+void Loader::load(DocLoader* docLoader, CachedResource* resource, bool incremental, SecurityCheckPolicy securityCheck, bool sendResourceLoadCallbacks)
 {
     ASSERT(docLoader);
-    Request* request = new Request(docLoader, resource, incremental, skipCanLoadCheck, sendResourceLoadCallbacks);
+    Request* request = new Request(docLoader, resource, incremental, securityCheck, sendResourceLoadCallbacks);
 
-    Host* host;
-    KURL url(resource->url());
-    bool isHTTP = url.protocolIs("http") || url.protocolIs("https");
-    if (isHTTP) {
+    RefPtr<Host> host;
+    KURL url(ParsedURLString, resource->url());
+    if (url.protocolInHTTPFamily()) {
+        m_hosts.checkConsistency();
         AtomicString hostName = url.host();
         host = m_hosts.get(hostName.impl());
         if (!host) {
-            host = new Host(hostName, maxRequestsInFlightPerHost);
+            host = Host::create(hostName, maxRequestsInFlightPerHost);
             m_hosts.add(hostName.impl(), host);
         }
     } else 
-        host = &m_nonHTTPProtocolHost;
+        host = m_nonHTTPProtocolHost;
     
     bool hadRequests = host->hasRequests();
     Priority priority = determinePriority(resource);
     host->addRequest(request, priority);
     docLoader->incrementRequestCount();
 
-    if (priority > Low || !isHTTP || !hadRequests) {
+    if (isHttpPipeliningEnabled()) {
+        // Serve all requests at once to keep the pipeline full at the network layer.
+        host->servePendingRequests(Low);
+        return;
+    }
+
+    if (priority > Low || !url.protocolInHTTPFamily() || !hadRequests) {
         // Try to request important resources immediately
         host->servePendingRequests(priority);
     } else {
@@ -140,23 +171,27 @@ void Loader::requestTimerFired(Timer<Loader>*)
 }
 
 void Loader::servePendingRequests(Priority minimumPriority)
-{    
+{
     if (m_isSuspendingPendingRequests)
         return;
 
     m_requestTimer.stop();
     
-    m_nonHTTPProtocolHost.servePendingRequests(minimumPriority);
+    m_nonHTTPProtocolHost->servePendingRequests(minimumPriority);
 
     Vector<Host*> hostsToServe;
-    copyValuesToVector(m_hosts, hostsToServe);
+    m_hosts.checkConsistency();
+    HostMap::iterator i = m_hosts.begin();
+    HostMap::iterator end = m_hosts.end();
+    for (;i != end; ++i)
+        hostsToServe.append(i->second.get());
+        
     for (unsigned n = 0; n < hostsToServe.size(); ++n) {
         Host* host = hostsToServe[n];
         if (host->hasRequests())
             host->servePendingRequests(minimumPriority);
         else if (!host->processingResource()){
             AtomicString name = host->name();
-            delete host;
             m_hosts.remove(name.impl());
         }
     }
@@ -172,17 +207,55 @@ void Loader::resumePendingRequests()
 {
     ASSERT(m_isSuspendingPendingRequests);
     m_isSuspendingPendingRequests = false;
-    if (!m_hosts.isEmpty() || m_nonHTTPProtocolHost.hasRequests())
+    if (!m_hosts.isEmpty() || m_nonHTTPProtocolHost->hasRequests())
         scheduleServePendingRequests();
+}
+
+void Loader::nonCacheRequestInFlight(const KURL& url)
+{
+    if (!url.protocolInHTTPFamily())
+        return;
+    
+    AtomicString hostName = url.host();
+    m_hosts.checkConsistency();
+    RefPtr<Host> host = m_hosts.get(hostName.impl());
+    if (!host) {
+        host = Host::create(hostName, maxRequestsInFlightPerHost);
+        m_hosts.add(hostName.impl(), host);
+    }
+
+    host->nonCacheRequestInFlight();
+}
+
+void Loader::nonCacheRequestComplete(const KURL& url)
+{
+    if (!url.protocolInHTTPFamily())
+        return;
+    
+    AtomicString hostName = url.host();
+    m_hosts.checkConsistency();
+    RefPtr<Host> host = m_hosts.get(hostName.impl());
+    ASSERT(host);
+    if (!host)
+        return;
+
+    host->nonCacheRequestComplete();
 }
 
 void Loader::cancelRequests(DocLoader* docLoader)
 {
-    if (m_nonHTTPProtocolHost.hasRequests())
-        m_nonHTTPProtocolHost.cancelRequests(docLoader);
+    docLoader->clearPendingPreloads();
+
+    if (m_nonHTTPProtocolHost->hasRequests())
+        m_nonHTTPProtocolHost->cancelRequests(docLoader);
     
     Vector<Host*> hostsToCancel;
-    copyValuesToVector(m_hosts, hostsToCancel);
+    m_hosts.checkConsistency();
+    HostMap::iterator i = m_hosts.begin();
+    HostMap::iterator end = m_hosts.end();
+    for (;i != end; ++i)
+        hostsToCancel.append(i->second.get());
+
     for (unsigned n = 0; n < hostsToCancel.size(); ++n) {
         Host* host = hostsToCancel[n];
         if (host->hasRequests())
@@ -191,16 +264,14 @@ void Loader::cancelRequests(DocLoader* docLoader)
 
     scheduleServePendingRequests();
     
-    if (docLoader->loadInProgress())
-        ASSERT(docLoader->requestCount() == 1);
-    else
-        ASSERT(docLoader->requestCount() == 0);
+    ASSERT(docLoader->requestCount() == (docLoader->loadInProgress() ? 1 : 0));
 }
 
 Loader::Host::Host(const AtomicString& name, unsigned maxRequestsInFlight)
     : m_name(name)
     , m_maxRequestsInFlight(maxRequestsInFlight)
     , m_numResourcesProcessing(0)
+    , m_nonCachedRequestsInFlight(0)
 {
 }
 
@@ -216,6 +287,17 @@ void Loader::Host::addRequest(Request* request, Priority priority)
     m_requestsPending[priority].append(request);
 }
     
+void Loader::Host::nonCacheRequestInFlight()
+{
+    ++m_nonCachedRequestsInFlight;
+}
+
+void Loader::Host::nonCacheRequestComplete()
+{
+    --m_nonCachedRequestsInFlight;
+    ASSERT(m_nonCachedRequestsInFlight >= 0);
+}
+
 bool Loader::Host::hasRequests() const
 {
     if (!m_requestsLoading.isEmpty())
@@ -243,30 +325,30 @@ void Loader::Host::servePendingRequests(RequestQueue& requestsPending, bool& ser
         Request* request = requestsPending.first();
         DocLoader* docLoader = request->docLoader();
         bool resourceIsCacheValidator = request->cachedResource()->isCacheValidator();
-        // If the document is fully parsed and there are no pending stylesheets there won't be any more 
-        // resources that we would want to push to the front of the queue. Just hand off the remaining resources
-        // to the networking layer.
-        bool parsedAndStylesheetsKnown = !docLoader->doc()->parsing() && docLoader->doc()->haveStylesheetsLoaded();
-        if (!parsedAndStylesheetsKnown && !resourceIsCacheValidator && m_requestsLoading.size() >= m_maxRequestsInFlight) {
+
+        // For named hosts - which are only http(s) hosts - we should always enforce the connection limit.
+        // For non-named hosts - everything but http(s) - we should only enforce the limit if the document isn't done parsing 
+        // and we don't know all stylesheets yet.
+        bool shouldLimitRequests = !m_name.isNull() || docLoader->doc()->parsing() || !docLoader->doc()->haveStylesheetsLoaded();
+        if (shouldLimitRequests && m_requestsLoading.size() + m_nonCachedRequestsInFlight >= m_maxRequestsInFlight) {
             serveLowerPriority = false;
             return;
         }
         requestsPending.removeFirst();
         
-        // When MobileQuickLook is invoked to convert a document, it returns a unique URL in the
+        // When QuickLook is invoked to convert a document, it returns a unique URL in the
         // NSURLReponse for the main document.  To make safeQLURLForDocumentURLAndResourceURL()
         // work, we need to use the QL URL not the original URL.
         const KURL& documentURL = docLoader->frame() ? docLoader->frame()->loader()->documentLoader()->response().url() : docLoader->doc()->url();
         ResourceRequest resourceRequest(safeQLURLForDocumentURLAndResourceURL(documentURL, request->cachedResource()->url()));
+        resourceRequest.setTargetType(cachedResourceTypeToTargetType(request->cachedResource()->type()));
         
         if (!request->cachedResource()->accept().isEmpty())
             resourceRequest.setHTTPAccept(request->cachedResource()->accept());
         
-        KURL referrer = docLoader->doc()->url();
-        if ((referrer.protocolIs("http") || referrer.protocolIs("https")) && referrer.path().isEmpty())
-            referrer.setPath("/");
-        resourceRequest.setHTTPReferrer(referrer.string());
-        FrameLoader::addHTTPOriginIfNeeded(resourceRequest, docLoader->doc()->securityOrigin()->toString());
+        resourceRequest.setPriority(Loader::determinePriority(request->cachedResource()));
+        
+         // Do not set the referrer or HTTP origin here. That's handled by SubresourceLoader::create.
         
         if (resourceIsCacheValidator) {
             CachedResource* resourceToRevalidate = request->cachedResource()->resourceToRevalidate();
@@ -286,7 +368,7 @@ void Loader::Host::servePendingRequests(RequestQueue& requestsPending, bool& ser
         }
 
         RefPtr<SubresourceLoader> loader = SubresourceLoader::create(docLoader->doc()->frame(),
-                                                                     this, resourceRequest, request->shouldSkipCanLoadCheck(), request->sendResourceLoadCallbacks());
+            this, resourceRequest, request->shouldDoSecurityCheck(), request->sendResourceLoadCallbacks());
         if (loader) {
             m_requestsLoading.add(loader.release(), request);
             request->cachedResource()->setRequestedFromNetworkingLayer();
@@ -306,15 +388,18 @@ void Loader::Host::servePendingRequests(RequestQueue& requestsPending, bool& ser
 
 void Loader::Host::didFinishLoading(SubresourceLoader* loader)
 {
+    RefPtr<Host> myProtector(this);
+
     RequestMap::iterator i = m_requestsLoading.find(loader);
     if (i == m_requestsLoading.end())
         return;
     
-    ProcessingResource processingResource(this);
-
     Request* request = i->second;
     m_requestsLoading.remove(i);
     DocLoader* docLoader = request->docLoader();
+    // Prevent the document from being destroyed before we are done with
+    // the docLoader that it will delete when the document gets deleted.
+    RefPtr<Document> protector(docLoader->doc());
     if (!request->isMultipart())
         docLoader->decrementRequestCount();
 
@@ -336,7 +421,7 @@ void Loader::Host::didFinishLoading(SubresourceLoader* loader)
     docLoader->checkForPendingPreloads();
 
 #if REQUEST_DEBUG
-    KURL u(resource->url());
+    KURL u(ParsedURLString, resource->url());
     printf("HOST %s COUNT %d RECEIVED %s\n", u.host().latin1().data(), m_requestsLoading.size(), resource->url().latin1().data());
 #endif
     servePendingRequests();
@@ -349,17 +434,20 @@ void Loader::Host::didFail(SubresourceLoader* loader, const ResourceError&)
 
 void Loader::Host::didFail(SubresourceLoader* loader, bool cancelled)
 {
+    RefPtr<Host> myProtector(this);
+
     loader->clearClient();
 
     RequestMap::iterator i = m_requestsLoading.find(loader);
     if (i == m_requestsLoading.end())
         return;
-
-    ProcessingResource processingResource(this);
     
     Request* request = i->second;
     m_requestsLoading.remove(i);
     DocLoader* docLoader = request->docLoader();
+    // Prevent the document from being destroyed before we are done with
+    // the docLoader that it will delete when the document gets deleted.
+    RefPtr<Document> protector(docLoader->doc());
     if (!request->isMultipart())
         docLoader->decrementRequestCount();
 
@@ -386,6 +474,8 @@ void Loader::Host::didFail(SubresourceLoader* loader, bool cancelled)
 
 void Loader::Host::didReceiveResponse(SubresourceLoader* loader, const ResourceResponse& response)
 {
+    RefPtr<Host> protector(this);
+
     Request* request = m_requestsLoading.get(loader);
     
     // FIXME: This is a workaround for <rdar://problem/5236843>
@@ -447,6 +537,8 @@ void Loader::Host::didReceiveResponse(SubresourceLoader* loader, const ResourceR
 
 void Loader::Host::didReceiveData(SubresourceLoader* loader, const char* data, int size)
 {
+    RefPtr<Host> protector(this);
+
     Request* request = m_requestsLoading.get(loader);
     if (!request)
         return;
@@ -456,12 +548,11 @@ void Loader::Host::didReceiveData(SubresourceLoader* loader, const char* data, i
     
     if (resource->errorOccurred())
         return;
-    
-    ProcessingResource processingResource(this);
-    
+        
     if (resource->response().httpStatusCode() / 100 == 4) {
-        // Treat a 4xx response like a network error.
-        resource->error();
+        // Treat a 4xx response like a network error for all resources but images (which will ignore the error and continue to load for 
+        // legacy compatibility).
+        resource->httpStatusCodeError();
         return;
     }
 

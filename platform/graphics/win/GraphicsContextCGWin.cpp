@@ -27,7 +27,6 @@
 #include "GraphicsContext.h"
 
 #include "TransformationMatrix.h"
-#include "NotImplemented.h"
 #include "Path.h"
 
 #include <CoreGraphics/CGBitmapContext.h>
@@ -66,78 +65,18 @@ GraphicsContext::GraphicsContext(HDC hdc, bool hasAlpha)
     : m_common(createGraphicsContextPrivate())
     , m_data(new GraphicsContextPlatformPrivate(CGContextWithHDC(hdc, hasAlpha)))
 {
-    CGContextRelease(m_data->m_cgContext);
+    CGContextRelease(m_data->m_cgContext.get());
     m_data->m_hdc = hdc;
     setPaintingDisabled(!m_data->m_cgContext);
     if (m_data->m_cgContext) {
         // Make sure the context starts in sync with our state.
-        setPlatformFillColor(fillColor());
-        setPlatformStrokeColor(strokeColor());
+        setPlatformFillColor(fillColor(), DeviceColorSpace);
+        setPlatformStrokeColor(strokeColor(), DeviceColorSpace);
     }
 }
-
-bool GraphicsContext::inTransparencyLayer() const { return m_data->m_transparencyCount; }
 
 // FIXME: Is it possible to merge getWindowsContext and createWindowsBitmap into a single API
 // suitable for all clients?
-HDC GraphicsContext::getWindowsContext(const IntRect& dstRect, bool supportAlphaBlend, bool mayCreateBitmap)
-{
-    // FIXME: Should a bitmap be created also when a shadow is set?
-    if (mayCreateBitmap && inTransparencyLayer()) {
-        if (dstRect.isEmpty())
-            return 0;
-
-        // Create a bitmap DC in which to draw.
-        BITMAPINFO bitmapInfo;
-        bitmapInfo.bmiHeader.biSize          = sizeof(BITMAPINFOHEADER);
-        bitmapInfo.bmiHeader.biWidth         = dstRect.width(); 
-        bitmapInfo.bmiHeader.biHeight        = dstRect.height();
-        bitmapInfo.bmiHeader.biPlanes        = 1;
-        bitmapInfo.bmiHeader.biBitCount      = 32;
-        bitmapInfo.bmiHeader.biCompression   = BI_RGB;
-        bitmapInfo.bmiHeader.biSizeImage     = 0;
-        bitmapInfo.bmiHeader.biXPelsPerMeter = 0;
-        bitmapInfo.bmiHeader.biYPelsPerMeter = 0;
-        bitmapInfo.bmiHeader.biClrUsed       = 0;
-        bitmapInfo.bmiHeader.biClrImportant  = 0;
-
-        void* pixels = 0;
-        HBITMAP bitmap = ::CreateDIBSection(NULL, &bitmapInfo, DIB_RGB_COLORS, &pixels, 0, 0);
-        if (!bitmap)
-            return 0;
-
-        HDC bitmapDC = ::CreateCompatibleDC(m_data->m_hdc);
-        ::SelectObject(bitmapDC, bitmap);
-
-        // Fill our buffer with clear if we're going to alpha blend.
-        if (supportAlphaBlend) {
-            BITMAP bmpInfo;
-            GetObject(bitmap, sizeof(bmpInfo), &bmpInfo);
-            int bufferSize = bmpInfo.bmWidthBytes * bmpInfo.bmHeight;
-            memset(bmpInfo.bmBits, 0, bufferSize);
-        }
-
-        // Make sure we can do world transforms.
-        SetGraphicsMode(bitmapDC, GM_ADVANCED);
-
-        // Apply a translation to our context so that the drawing done will be at (0,0) of the bitmap.
-        XFORM xform;
-        xform.eM11 = 1.0f;
-        xform.eM12 = 0.0f;
-        xform.eM21 = 0.0f;
-        xform.eM22 = 1.0f;
-        xform.eDx = -dstRect.x();
-        xform.eDy = -dstRect.y();
-        ::SetWorldTransform(bitmapDC, &xform);
-
-        return bitmapDC;
-    }
-
-    CGContextFlush(platformContext());
-    m_data->save();
-    return m_data->m_hdc;
-}
-
 void GraphicsContext::releaseWindowsContext(HDC hdc, const IntRect& dstRect, bool supportAlphaBlend, bool mayCreateBitmap)
 {
     if (mayCreateBitmap && hdc && inTransparencyLayer()) {
@@ -159,7 +98,7 @@ void GraphicsContext::releaseWindowsContext(HDC hdc, const IntRect& dstRect, boo
         CGColorSpaceRelease(deviceRGB);
 
         CGImageRef image = CGBitmapContextCreateImage(bitmapContext);
-        CGContextDrawImage(m_data->m_cgContext, dstRect, image);
+        CGContextDrawImage(m_data->m_cgContext.get(), dstRect, image);
         
         // Delete all our junk.
         CGImageRelease(image);
@@ -173,62 +112,6 @@ void GraphicsContext::releaseWindowsContext(HDC hdc, const IntRect& dstRect, boo
     m_data->restore();
 }
 
-void GraphicsContext::setShouldIncludeChildWindows(bool include)
-{
-    m_data->m_shouldIncludeChildWindows = include;
-}
-
-bool GraphicsContext::shouldIncludeChildWindows() const
-{
-    return m_data->m_shouldIncludeChildWindows;
-}
-
-GraphicsContext::WindowsBitmap::WindowsBitmap(HDC hdc, IntSize size)
-    : m_hdc(0)
-    , m_size(size)
-{
-    BITMAPINFO bitmapInfo;
-    bitmapInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bitmapInfo.bmiHeader.biWidth = m_size.width(); 
-    bitmapInfo.bmiHeader.biHeight = m_size.height();
-    bitmapInfo.bmiHeader.biPlanes = 1;
-    bitmapInfo.bmiHeader.biBitCount = 32;
-    bitmapInfo.bmiHeader.biCompression = BI_RGB;
-    bitmapInfo.bmiHeader.biSizeImage = 0;
-    bitmapInfo.bmiHeader.biXPelsPerMeter = 0;
-    bitmapInfo.bmiHeader.biYPelsPerMeter = 0;
-    bitmapInfo.bmiHeader.biClrUsed = 0;
-    bitmapInfo.bmiHeader.biClrImportant = 0;
-
-    m_bitmap = CreateDIBSection(0, &bitmapInfo, DIB_RGB_COLORS, reinterpret_cast<void**>(&m_bitmapBuffer), 0, 0);
-    if (!m_bitmap)
-        return;
-
-    m_hdc = CreateCompatibleDC(hdc);
-    SelectObject(m_hdc, m_bitmap);
-
-    BITMAP bmpInfo;
-    GetObject(m_bitmap, sizeof(bmpInfo), &bmpInfo);
-    m_bytesPerRow = bmpInfo.bmWidthBytes;
-    m_bitmapBufferLength = bmpInfo.bmWidthBytes * bmpInfo.bmHeight;
-
-    SetGraphicsMode(m_hdc, GM_ADVANCED);
-}
-
-GraphicsContext::WindowsBitmap::~WindowsBitmap()
-{
-    if (!m_bitmap)
-        return;
-
-    DeleteDC(m_hdc);
-    DeleteObject(m_bitmap);
-}
-
-GraphicsContext::WindowsBitmap* GraphicsContext::createWindowsBitmap(IntSize size)
-{
-    return new WindowsBitmap(m_data->m_hdc, size);
-}
-
 void GraphicsContext::drawWindowsBitmap(WindowsBitmap* image, const IntPoint& point)
 {
     RetainPtr<CGColorSpaceRef> deviceRGB(AdoptCF, CGColorSpaceCreateDeviceRGB());
@@ -238,37 +121,24 @@ void GraphicsContext::drawWindowsBitmap(WindowsBitmap* image, const IntPoint& po
     RetainPtr<CGDataProviderRef> dataProvider(AdoptCF, CGDataProviderCreateWithCFData(imageData.get()));
     RetainPtr<CGImageRef> cgImage(AdoptCF, CGImageCreate(image->size().width(), image->size().height(), 8, 32, image->bytesPerRow(), deviceRGB.get(),
                                                          kCGBitmapByteOrder32Little | kCGImageAlphaFirst, dataProvider.get(), 0, true, kCGRenderingIntentDefault));
-    CGContextDrawImage(m_data->m_cgContext, CGRectMake(point.x(), point.y(), image->size().width(), image->size().height()), cgImage.get());   
+    CGContextDrawImage(m_data->m_cgContext.get(), CGRectMake(point.x(), point.y(), image->size().width(), image->size().height()), cgImage.get());   
 }
 
-void GraphicsContextPlatformPrivate::concatCTM(const TransformationMatrix& transform)
+void GraphicsContext::drawFocusRing(const Vector<Path>& paths, int width, int offset, const Color& color)
 {
-    if (!m_hdc)
-        return;
-
-    CGAffineTransform mat = transform;
-    XFORM xform;
-    xform.eM11 = mat.a;
-    xform.eM12 = mat.b;
-    xform.eM21 = mat.c;
-    xform.eM22 = mat.d;
-    xform.eDx = mat.tx;
-    xform.eDy = mat.ty;
-
-    ModifyWorldTransform(m_hdc, &xform, MWT_LEFTMULTIPLY);
+    // FIXME: implement
 }
 
-void GraphicsContext::drawFocusRing(const Color& color)
+void GraphicsContext::drawFocusRing(const Vector<IntRect>& rects, int width, int offset, const Color& color)
 {
     if (paintingDisabled())
         return;
 
-    float radius = (focusRingWidth() - 1) / 2.0f;
-    int offset = radius + focusRingOffset();
-    CGColorRef colorRef = color.isValid() ? cgColor(color) : 0;
+    float radius = (width - 1) / 2.0f;
+    offset += radius;
+    CGColorRef colorRef = color.isValid() ? createCGColor(color) : 0;
 
     CGMutablePathRef focusRingPath = CGPathCreateMutable();
-    const Vector<IntRect>& rects = focusRingRects();
     unsigned rectCount = rects.size();
     for (unsigned i = 0; i < rectCount; i++)
         CGPathAddRect(focusRingPath, 0, CGRectInset(rects[i], -offset, -offset));
@@ -373,6 +243,11 @@ void GraphicsContext::drawLineForMisspellingOrBadGrammar(const IntPoint& point, 
     CGContextStrokeLineSegments(context, lowerPoints, 2);
 
     CGContextRestoreGState(context);
+}
+
+void GraphicsContextPlatformPrivate::flush()
+{
+    CGContextFlush(m_cgContext.get());
 }
 
 }

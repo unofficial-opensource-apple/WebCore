@@ -32,22 +32,26 @@
 #include "CSSHelper.h"
 #include "Document.h"
 #include "HTMLFrameElement.h"
+#include "HTMLNames.h"
 #include "JSDOMBinding.h"
 
 using namespace JSC;
 
 namespace WebCore {
 
+using namespace HTMLNames;
+
 static inline bool allowSettingJavascriptURL(ExecState* exec, HTMLFrameElement* imp, const String& value)
 {
-    if (protocolIs(parseURL(value), "javascript")) {
-        if (!checkNodeSecurity(exec, imp->contentDocument()))
+    if (protocolIsJavaScript(deprecatedParseURL(value))) {
+        Document* contentDocument = imp->contentDocument();
+        if (contentDocument && !checkNodeSecurity(exec, contentDocument))
             return false;
     }
     return true;
 }
 
-void JSHTMLFrameElement::setSrc(ExecState* exec, JSValuePtr value)
+void JSHTMLFrameElement::setSrc(ExecState* exec, JSValue value)
 {
     HTMLFrameElement* imp = static_cast<HTMLFrameElement*>(impl());
     String srcValue = valueToStringWithNullCheck(exec, value);
@@ -55,11 +59,10 @@ void JSHTMLFrameElement::setSrc(ExecState* exec, JSValuePtr value)
     if (!allowSettingJavascriptURL(exec, imp, srcValue))
         return;
 
-    imp->setSrc(srcValue);
-    return;
+    imp->setAttribute(srcAttr, srcValue);
 }
 
-void JSHTMLFrameElement::setLocation(ExecState* exec, JSValuePtr value)
+void JSHTMLFrameElement::setLocation(ExecState* exec, JSValue value)
 {
     HTMLFrameElement* imp = static_cast<HTMLFrameElement*>(impl());
     String locationValue = valueToStringWithNullCheck(exec, value);
@@ -68,7 +71,6 @@ void JSHTMLFrameElement::setLocation(ExecState* exec, JSValuePtr value)
         return;
 
     imp->setLocation(locationValue);
-    return;
 }
 
 } // namespace WebCore

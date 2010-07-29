@@ -22,12 +22,13 @@
 #define InlineFlowBox_h
 
 #include "InlineRunBox.h"
+#include "RenderOverflow.h"
 
 namespace WebCore {
 
+class HitTestRequest;
 class HitTestResult;
-
-struct HitTestRequest;
+class RenderLineBoxList;
 
 class InlineFlowBox : public InlineRunBox {
 public:
@@ -35,7 +36,8 @@ public:
         : InlineRunBox(obj)
         , m_firstChild(0)
         , m_lastChild(0)
-        , m_maxHorizontalVisualOverflow(0)
+        , m_includeLeftEdge(false)
+        , m_includeRightEdge(false)
 #ifndef NDEBUG
         , m_hasBadChildList(false)
 #endif
@@ -52,20 +54,16 @@ public:
     virtual ~InlineFlowBox();
 #endif
 
-    RenderFlow* flowObject();
-
-    virtual bool isInlineFlowBox() { return true; }
-
     InlineFlowBox* prevFlowBox() const { return static_cast<InlineFlowBox*>(m_prevLine); }
     InlineFlowBox* nextFlowBox() const { return static_cast<InlineFlowBox*>(m_nextLine); }
 
-    InlineBox* firstChild() { checkConsistency(); return m_firstChild; }
-    InlineBox* lastChild() { checkConsistency(); return m_lastChild; }
+    InlineBox* firstChild() const { checkConsistency(); return m_firstChild; }
+    InlineBox* lastChild() const { checkConsistency(); return m_lastChild; }
 
-    virtual InlineBox* firstLeafChild();
-    virtual InlineBox* lastLeafChild();
-    InlineBox* firstLeafChildAfterBox(InlineBox* start = 0);
-    InlineBox* lastLeafChildBeforeBox(InlineBox* start = 0);
+    virtual bool isLeaf() const { return false; }
+    
+    InlineBox* firstLeafChild() const;
+    InlineBox* lastLeafChild() const;
 
     virtual void setConstructed()
     {
@@ -80,30 +78,38 @@ public:
     virtual void attachLine();
     virtual void adjustPosition(int dx, int dy);
 
+    virtual void extractLineBoxFromRenderObject();
+    virtual void attachLineBoxToRenderObject();
+    virtual void removeLineBoxFromRenderObject();
+
     virtual void clearTruncation();
 
     virtual void paintBoxDecorations(RenderObject::PaintInfo&, int tx, int ty);
     virtual void paintMask(RenderObject::PaintInfo&, int tx, int ty);
-    void paintFillLayers(const RenderObject::PaintInfo&, const Color&, const FillLayer*,
-                         int my, int mh, int tx, int ty, int w, int h, CompositeOperator = CompositeSourceOver);
-    void paintFillLayer(const RenderObject::PaintInfo&, const Color&, const FillLayer*,
-                         int my, int mh, int tx, int ty, int w, int h, CompositeOperator = CompositeSourceOver);
-    void paintBoxShadow(GraphicsContext*, RenderStyle*, int tx, int ty, int w, int h);
+    void paintFillLayers(const RenderObject::PaintInfo&, const Color&, const FillLayer*, int tx, int ty, int w, int h, CompositeOperator = CompositeSourceOver);
+    void paintFillLayer(const RenderObject::PaintInfo&, const Color&, const FillLayer*, int tx, int ty, int w, int h, CompositeOperator = CompositeSourceOver);
+    void paintBoxShadow(GraphicsContext*, RenderStyle*, ShadowStyle, int tx, int ty, int w, int h);
     virtual void paintTextDecorations(RenderObject::PaintInfo&, int tx, int ty, bool paintedChildren = false);
     virtual void paint(RenderObject::PaintInfo&, int tx, int ty);
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty);
 
-    int marginBorderPaddingLeft();
-    int marginBorderPaddingRight();
-    int marginLeft();
-    int marginRight();
-    int borderLeft() { if (includeLeftEdge()) return renderBox()->borderLeft(); return 0; }
-    int borderRight() { if (includeRightEdge()) return renderBox()->borderRight(); return 0; }
-    int paddingLeft() { if (includeLeftEdge()) return renderBox()->paddingLeft(); return 0; }
-    int paddingRight() { if (includeRightEdge()) return renderBox()->paddingRight(); return 0; }
+    virtual RenderLineBoxList* rendererLineBoxes() const;
 
-    bool includeLeftEdge() { return m_includeLeftEdge; }
-    bool includeRightEdge() { return m_includeRightEdge; }
+    int marginBorderPaddingLeft() const { return marginLeft() + borderLeft() + paddingLeft(); }
+    int marginBorderPaddingRight() const { return marginRight() + borderRight() + paddingRight(); }
+    int marginLeft() const { if (includeLeftEdge()) return boxModelObject()->marginLeft(); return 0; }
+    int marginRight() const { if (includeRightEdge()) return boxModelObject()->marginRight(); return 0; }
+    int borderLeft() const { if (includeLeftEdge()) return renderer()->style()->borderLeftWidth(); return 0; }
+    int borderRight() const { if (includeRightEdge()) return renderer()->style()->borderRightWidth(); return 0; }
+    int borderTop() const { return renderer()->style()->borderTopWidth(); }
+    int borderBottom() const { return renderer()->style()->borderBottomWidth(); }
+    int paddingLeft() const { if (includeLeftEdge()) return boxModelObject()->paddingLeft(); return 0; }
+    int paddingRight() const { if (includeRightEdge()) return boxModelObject()->paddingRight(); return 0; }
+    int paddingTop() const { return boxModelObject()->paddingTop(); }
+    int paddingBottom() const { return boxModelObject()->paddingBottom(); }
+
+    bool includeLeftEdge() const { return m_includeLeftEdge; }
+    bool includeRightEdge() const { return m_includeRightEdge; }
     void setEdges(bool includeLeft, bool includeRight)
     {
         m_includeLeftEdge = includeLeft;
@@ -114,39 +120,92 @@ public:
     void determineSpacingForFlowBoxes(bool lastLine, RenderObject* endObject);
     int getFlowSpacingWidth();
     bool onEndChain(RenderObject* endObject);
-    virtual int placeBoxesHorizontally(int x, int& leftPosition, int& rightPosition, bool& needsWordSpacing);
-    virtual int verticallyAlignBoxes(int heightOfBlock);
+    virtual int placeBoxesHorizontally(int x, bool& needsWordSpacing);
     void computeLogicalBoxHeights(int& maxPositionTop, int& maxPositionBottom,
                                   int& maxAscent, int& maxDescent, bool strictMode);
     void adjustMaxAscentAndDescent(int& maxAscent, int& maxDescent,
                                    int maxPositionTop, int maxPositionBottom);
-    void placeBoxesVertically(int y, int maxHeight, int maxAscent, bool strictMode,
-                              int& topPosition, int& bottomPosition, int& selectionTop, int& selectionBottom);
-    void shrinkBoxesWithNoTextChildren(int topPosition, int bottomPosition);
-    
-    virtual void setVerticalOverflowPositions(int /*top*/, int /*bottom*/) { }
-    virtual void setVerticalSelectionPositions(int /*top*/, int /*bottom*/) { }
-    int maxHorizontalVisualOverflow() const { return m_maxHorizontalVisualOverflow; }
+    void placeBoxesVertically(int y, int maxHeight, int maxAscent, bool strictMode, int& lineTop, int& lineBottom);
+    void computeVerticalOverflow(int lineTop, int lineBottom, bool strictMode);
 
     void removeChild(InlineBox* child);
 
     virtual RenderObject::SelectionState selectionState();
 
     virtual bool canAccommodateEllipsis(bool ltr, int blockEdge, int ellipsisWidth);
-    virtual int placeEllipsisBox(bool ltr, int blockEdge, int ellipsisWidth, bool&);
+    virtual int placeEllipsisBox(bool ltr, int blockLeftEdge, int blockRightEdge, int ellipsisWidth, bool&);
+
+    bool hasTextChildren() const { return m_hasTextChildren; }
 
     void checkConsistency() const;
     void setHasBadChildList();
 
+    int topVisibleOverflow() const { return std::min(topLayoutOverflow(), topVisualOverflow()); }
+    int bottomVisibleOverflow() const { return std::max(bottomLayoutOverflow(), bottomVisualOverflow()); }
+    int leftVisibleOverflow() const { return std::min(leftLayoutOverflow(), leftVisualOverflow()); }
+    int rightVisibleOverflow() const { return std::max(rightLayoutOverflow(), rightVisualOverflow()); }
+    IntRect visibleOverflowRect() const { return m_overflow ? m_overflow->visibleOverflowRect() : IntRect(m_x, m_y, m_width, height());  }
+
+    int topLayoutOverflow() const { return m_overflow ? m_overflow->topLayoutOverflow() : m_y; }
+    int bottomLayoutOverflow() const { return m_overflow ? m_overflow->bottomLayoutOverflow() : m_y + height(); }
+    int leftLayoutOverflow() const { return m_overflow ? m_overflow->leftLayoutOverflow() : m_x; }
+    int rightLayoutOverflow() const { return m_overflow ? m_overflow->rightLayoutOverflow() : m_x + m_width; }
+    IntRect layoutOverflowRect() const { return m_overflow ? m_overflow->layoutOverflowRect() : IntRect(m_x, m_y, m_width, height()); }
+
+    int topVisualOverflow() const { return m_overflow ? m_overflow->topVisualOverflow() : m_y; }
+    int bottomVisualOverflow() const { return m_overflow ? m_overflow->bottomVisualOverflow() : m_y + height(); }
+    int leftVisualOverflow() const { return m_overflow ? m_overflow->leftVisualOverflow() : m_x; }
+    int rightVisualOverflow() const { return m_overflow ? m_overflow->rightVisualOverflow() : m_x + m_width; }
+    IntRect visualOverflowRect() const { return m_overflow ? m_overflow->visualOverflowRect() : IntRect(m_x, m_y, m_width, height()); }
+
+    void setHorizontalOverflowPositions(int leftLayoutOverflow, int rightLayoutOverflow, int leftVisualOverflow, int rightVisualOverflow);
+    void setVerticalOverflowPositions(int topLayoutOverflow, int bottomLayoutOverflow, int topVisualOverflow, int bottomVisualOverflow, int boxHeight);
+
+protected:
+    OwnPtr<RenderOverflow> m_overflow;
+
 private:
+    virtual bool isInlineFlowBox() const { return true; }
+
     InlineBox* m_firstChild;
     InlineBox* m_lastChild;
-    int m_maxHorizontalVisualOverflow;
+    
+    bool m_includeLeftEdge : 1;
+    bool m_includeRightEdge : 1;
+    bool m_hasTextChildren : 1;
 
 #ifndef NDEBUG
     bool m_hasBadChildList;
 #endif
 };
+
+inline void InlineFlowBox::setHorizontalOverflowPositions(int leftLayoutOverflow, int rightLayoutOverflow, int leftVisualOverflow, int rightVisualOverflow) 
+{ 
+    if (!m_overflow) {
+        if (leftLayoutOverflow == m_x && rightLayoutOverflow == m_x + m_width && leftVisualOverflow == m_x && rightVisualOverflow == m_x + m_width)
+            return;
+        m_overflow.set(new RenderOverflow(IntRect(m_x, m_y, m_width, m_renderer->style(m_firstLine)->font().height())));    
+    }
+
+    m_overflow->setLeftLayoutOverflow(leftLayoutOverflow);
+    m_overflow->setRightLayoutOverflow(rightLayoutOverflow);
+    m_overflow->setLeftVisualOverflow(leftVisualOverflow); 
+    m_overflow->setRightVisualOverflow(rightVisualOverflow);  
+}
+
+inline void InlineFlowBox::setVerticalOverflowPositions(int topLayoutOverflow, int bottomLayoutOverflow, int topVisualOverflow, int bottomVisualOverflow, int boxHeight)
+{
+    if (!m_overflow) {
+        if (topLayoutOverflow == m_y && bottomLayoutOverflow == m_y + boxHeight && topVisualOverflow == m_y && bottomVisualOverflow == m_y + boxHeight)
+            return;
+        m_overflow.set(new RenderOverflow(IntRect(m_x, m_y, m_width, boxHeight)));
+    }
+
+    m_overflow->setTopLayoutOverflow(topLayoutOverflow);
+    m_overflow->setBottomLayoutOverflow(bottomLayoutOverflow);
+    m_overflow->setTopVisualOverflow(topVisualOverflow); 
+    m_overflow->setBottomVisualOverflow(bottomVisualOverflow);  
+}
 
 #ifdef NDEBUG
 inline void InlineFlowBox::checkConsistency() const

@@ -23,19 +23,24 @@
 #include "config.h"
 #include "Navigator.h"
 
+#include "Chrome.h"
 #include "CookieJar.h"
+#include "ExceptionCode.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 #include "Geolocation.h"
+#include "KURL.h"
 #include "Language.h"
 #include "MimeTypeArray.h"
 #include "Page.h"
+#include "PageGroup.h"
 #include "PlatformString.h"
 #include "PluginArray.h"
 #include "PluginData.h"
 #include "ScriptController.h"
 #include "Settings.h"
+#include "StorageNamespace.h"
 
 namespace WebCore {
 
@@ -102,7 +107,13 @@ String Navigator::userAgent() const
 {
     if (!m_frame)
         return String();
-    return m_frame->loader()->userAgent(m_frame->document() ? m_frame->document()->url() : KURL());
+        
+    // If the frame is already detached, FrameLoader::userAgent may malfunction, because it calls a client method
+    // that uses frame's WebView (at least, in Mac WebKit).
+    if (!m_frame->page())
+        return String();
+        
+    return m_frame->loader()->userAgent(m_frame->document()->url());
 }
 
 PluginArray* Navigator::plugins() const
@@ -121,6 +132,9 @@ MimeTypeArray* Navigator::mimeTypes() const
 
 bool Navigator::cookieEnabled() const
 {
+    if (!m_frame)
+        return false;
+        
     if (m_frame->page() && !m_frame->page()->cookieEnabled())
         return false;
 
@@ -129,8 +143,9 @@ bool Navigator::cookieEnabled() const
 
 bool Navigator::javaEnabled() const
 {
-    if (!m_frame)
+    if (!m_frame || !m_frame->settings())
         return false;
+
     return m_frame->settings()->isJavaEnabled();
 }
 
@@ -149,6 +164,111 @@ bool Navigator::standalone() const
     if (!settings)
         return false;
     return settings->standalone();
+}
+
+#if ENABLE(DOM_STORAGE)
+void Navigator::getStorageUpdates()
+{
+    if (!m_frame)
+        return;
+
+    Page* page = m_frame->page();
+    if (!page)
+        return;
+
+    StorageNamespace* localStorage = page->group().localStorage();
+    if (localStorage)
+        localStorage->unlock();
+}
+#endif
+
+static bool verifyCustomHandlerURL(const String& baseURL, const String& url, ExceptionCode& ec)
+{
+    // The specification requires that it is a SYNTAX_ERR if the the "%s" token is not present.
+    static const char token[] = "%s";
+    int index = url.find(token);
+    if (-1 == index) {
+        ec = SYNTAX_ERR;
+        return false;
+    }
+
+    // It is also a SYNTAX_ERR if the custom handler URL, as created by removing
+    // the "%s" token and prepending the base url, does not resolve.
+    String newURL = url;
+    newURL.remove(index, sizeof(token) / sizeof(token[0]));
+
+    KURL base(ParsedURLString, baseURL);
+    KURL kurl(base, newURL);
+
+    if (kurl.isEmpty() || !kurl.isValid()) {
+        ec = SYNTAX_ERR;
+        return false;
+    }
+
+    return true;
+}
+
+static bool verifyProtocolHandlerScheme(const String& scheme, ExceptionCode& ec)
+{
+    // It is a SECURITY_ERR for these schemes to be handled by a custom handler.
+    if (equalIgnoringCase(scheme, "http") || equalIgnoringCase(scheme, "https") || equalIgnoringCase(scheme, "file")) {
+        ec = SECURITY_ERR;
+        return false;
+    }
+    return true;
+}
+
+void Navigator::registerProtocolHandler(const String& scheme, const String& url, const String& title, ExceptionCode& ec)
+{
+    if (!verifyProtocolHandlerScheme(scheme, ec))
+        return;
+
+    if (!m_frame)
+        return;
+
+    Document* document = m_frame->document();
+    if (!document)
+        return;
+
+    String baseURL = document->baseURL().baseAsString();
+
+    if (!verifyCustomHandlerURL(baseURL, url, ec))
+        return;
+
+    if (Page* page = m_frame->page())
+        page->chrome()->registerProtocolHandler(scheme, baseURL, url, m_frame->displayStringModifiedByEncoding(title));
+}
+
+static bool verifyProtocolHandlerMimeType(const String& type, ExceptionCode& ec)
+{
+    // It is a SECURITY_ERR for these mime types to be assigned to a custom
+    // handler.
+    if (equalIgnoringCase(type, "text/html") || equalIgnoringCase(type, "text/css") || equalIgnoringCase(type, "application/x-javascript")) {
+        ec = SECURITY_ERR;
+        return false;
+    }
+    return true;
+}
+
+void Navigator::registerContentHandler(const String& mimeType, const String& url, const String& title, ExceptionCode& ec)
+{
+    if (!verifyProtocolHandlerMimeType(mimeType, ec))
+        return;
+
+    if (!m_frame)
+        return;
+
+    Document* document = m_frame->document();
+    if (!document)
+        return;
+
+    String baseURL = document->baseURL().baseAsString();
+
+    if (!verifyCustomHandlerURL(baseURL, url, ec))
+        return;
+
+    if (Page* page = m_frame->page())
+        page->chrome()->registerContentHandler(mimeType, baseURL, url, m_frame->displayStringModifiedByEncoding(title));
 }
 
 } // namespace WebCore

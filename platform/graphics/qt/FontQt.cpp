@@ -1,6 +1,7 @@
 /*
     Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
     Copyright (C) 2008 Holger Hans Peter Freyther
+    Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -24,32 +25,31 @@
 #include "FontFallbackList.h"
 #include "FontSelector.h"
 
+#include "Gradient.h"
 #include "GraphicsContext.h"
-#include <QTextLayout>
-#include <QPainter>
-#include <QFontMetrics>
+#include "Pattern.h"
+#include "TransformationMatrix.h"
+
+#include <QBrush>
 #include <QFontInfo>
+#include <QFontMetrics>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPen>
+#include <QTextLayout>
 #include <qalgorithms.h>
 #include <qdebug.h>
 
 #include <limits.h>
 
-#if QT_VERSION >= 0x040400
 namespace WebCore {
 
-static QString qstring(const TextRun& run)
+static const QString fromRawDataWithoutRef(const String& string)
 {
-    QString string((QChar *)run.characters(), run.length());
-    QChar *uc = string.data();
-    for (int i = 0; i < string.length(); ++i) {
-        if (Font::treatAsSpace(uc[i].unicode()))
-            uc[i] = 0x20;
-        else if (Font::treatAsZeroWidthSpace(uc[i].unicode()))
-            uc[i] = 0x200c;
-    }
-    return string;
+    // We don't detach. This assumes the WebCore string data will stay valid for the
+    // lifetime of the QString we pass back, since we don't ref the WebCore string.
+    return QString::fromRawData(reinterpret_cast<const QChar*>(string.characters()), string.length());
 }
-
 
 static QTextLine setupLayout(QTextLayout* layout, const TextRun& style)
 {
@@ -72,10 +72,33 @@ void Font::drawComplexText(GraphicsContext* ctx, const TextRun& run, const Float
         to = run.length();
 
     QPainter *p = ctx->platformContext();
-    Color color = ctx->fillColor();
-    p->setPen(QColor(color));
 
-    QString string = qstring(run);
+    if (ctx->textDrawingMode() & cTextFill) {
+        if (ctx->fillGradient()) {
+            QBrush brush(*ctx->fillGradient()->platformGradient());
+            brush.setTransform(ctx->fillGradient()->gradientSpaceTransform());
+            p->setPen(QPen(brush, 0));
+        } else if (ctx->fillPattern()) {
+            TransformationMatrix affine;
+            p->setPen(QPen(QBrush(ctx->fillPattern()->createPlatformPattern(affine)), 0));
+        } else
+            p->setPen(QColor(ctx->fillColor()));
+    }
+
+    if (ctx->textDrawingMode() & cTextStroke) {
+        if (ctx->strokeGradient()) {
+            QBrush brush(*ctx->strokeGradient()->platformGradient());
+            brush.setTransform(ctx->strokeGradient()->gradientSpaceTransform());
+            p->setPen(QPen(brush, ctx->strokeThickness()));
+        } else if (ctx->strokePattern()) {
+            TransformationMatrix affine;
+            p->setPen(QPen(QBrush(ctx->strokePattern()->createPlatformPattern(affine)), ctx->strokeThickness()));
+        } else
+            p->setPen(QPen(QColor(ctx->strokeColor()), ctx->strokeThickness()));
+    }
+
+    String sanitized = Font::normalizeSpaces(String(run.characters(), run.length()));
+    QString string = fromRawDataWithoutRef(sanitized);
 
     // text shadow
     IntSize shadowSize;
@@ -137,14 +160,23 @@ void Font::drawComplexText(GraphicsContext* ctx, const TextRun& run, const Float
         p->drawText(pt, string, flags, run.padding());
         p->restore();
     }
-    p->drawText(pt, string, flags, run.padding());
+    if (ctx->textDrawingMode() & cTextStroke) {
+        QPainterPath path;
+        path.addText(pt, font(), string);
+        p->strokePath(path, p->pen());
+    }
+    if (ctx->textDrawingMode() & cTextFill)
+        p->drawText(pt, string, flags, run.padding());
 }
 
-float Font::floatWidthForComplexText(const TextRun& run) const
+float Font::floatWidthForComplexText(const TextRun& run, HashSet<const SimpleFontData*>*, GlyphOverflow*) const
 {
     if (!run.length())
         return 0;
-    QString string = qstring(run);
+
+    String sanitized = Font::normalizeSpaces(String(run.characters(), run.length()));
+    QString string = fromRawDataWithoutRef(sanitized);
+
     QTextLayout layout(string, font());
     QTextLine line = setupLayout(&layout, run);
     int w = int(line.naturalTextWidth());
@@ -155,9 +187,11 @@ float Font::floatWidthForComplexText(const TextRun& run) const
     return w + run.padding();
 }
 
-int Font::offsetForPositionForComplexText(const TextRun& run, int position, bool includePartialGlyphs) const
+int Font::offsetForPositionForComplexText(const TextRun& run, int position, bool) const
 {
-    QString string = qstring(run);
+    String sanitized = Font::normalizeSpaces(String(run.characters(), run.length()));
+    QString string = fromRawDataWithoutRef(sanitized);
+
     QTextLayout layout(string, font());
     QTextLine line = setupLayout(&layout, run);
     return line.xToCursor(position);
@@ -165,7 +199,9 @@ int Font::offsetForPositionForComplexText(const TextRun& run, int position, bool
 
 FloatRect Font::selectionRectForComplexText(const TextRun& run, const IntPoint& pt, int h, int from, int to) const
 {
-    QString string = qstring(run);
+    String sanitized = Font::normalizeSpaces(String(run.characters(), run.length()));
+    QString string = fromRawDataWithoutRef(sanitized);
+
     QTextLayout layout(string, font());
     QTextLine line = setupLayout(&layout, run);
 
@@ -179,10 +215,11 @@ FloatRect Font::selectionRectForComplexText(const TextRun& run, const IntPoint& 
 
 QFont Font::font() const
 {
-    return primaryFont()->getQtFont();
+    QFont f = primaryFont()->getQtFont();
+    f.setLetterSpacing(QFont::AbsoluteSpacing, m_letterSpacing);
+    f.setWordSpacing(m_wordSpacing);
+    return f;
 }
 
 }
-
-#endif
 

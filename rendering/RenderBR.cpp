@@ -1,6 +1,4 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 2000 Lars Knoll (knoll@kde.org)
  * Copyright (C) 2006 Apple Computer, Inc.
  *
@@ -38,15 +36,6 @@ RenderBR::RenderBR(Node* node)
 
 RenderBR::~RenderBR()
 {
-}
-
-InlineBox* RenderBR::createInlineBox(bool makePlaceholder, bool isRootLineBox, bool isOnlyRun)
-{
-    // We only treat a box as text for a <br> if we are on a line by ourself or in strict mode
-    // (Note the use of strict mode.  In "almost strict" mode, we don't treat the box for <br> as text.)
-    InlineTextBox* box = static_cast<InlineTextBox*>(RenderText::createInlineBox(makePlaceholder, isRootLineBox, isOnlyRun));
-    box->setIsText(isOnlyRun || document()->inStrictMode());
-    return box;
 }
 
 int RenderBR::baselinePosition(bool firstLine, bool isRootLineBox) const
@@ -103,9 +92,9 @@ unsigned RenderBR::caretMaxRenderedOffset() const
     return 1;
 }
 
-VisiblePosition RenderBR::positionForCoordinates(int /*x*/, int /*y*/)
+VisiblePosition RenderBR::positionForPoint(const IntPoint&)
 {
-    return VisiblePosition(element(), 0, DOWNSTREAM);
+    return createVisiblePosition(0, DOWNSTREAM);
 }
 
 } // namespace WebCore

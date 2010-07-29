@@ -59,8 +59,10 @@ void AutoTableLayout::recalcColumn(int effCol)
     RenderTableCell* maxContributor = 0;
 
     while (child) {
-        if (child->isTableSection()) {
-            RenderTableSection* section = static_cast<RenderTableSection*>(child);
+        if (child->isTableCol())
+            toRenderTableCol(child)->calcPrefWidths();
+        else if (child->isTableSection()) {
+            RenderTableSection* section = toRenderTableSection(child);
             int numRows = section->numRows();
             RenderTableCell* last = 0;
             for (int i = 0; i < numRows; i++) {
@@ -92,7 +94,7 @@ void AutoTableLayout::recalcColumn(int effCol)
                         w.setRawValue(32760);
                     if (w.isNegative())
                         w.setValue(0);
-                    switch(w.type()) {
+                    switch (w.type()) {
                     case Fixed:
                         // ignore width=0
                         if (w.value() > 0 && (int)l.width.type() != Percent) {
@@ -167,7 +169,7 @@ void AutoTableLayout::fullRecalc()
     int cCol = 0;
     while (child) {
         if (child->isTableCol()) {
-            RenderTableCol *col = static_cast<RenderTableCol*>(child);
+            RenderTableCol *col = toRenderTableCol(child);
             int span = col->span();
             if (col->firstChild()) {
                 grpWidth = col->style()->width();
@@ -225,7 +227,7 @@ static bool shouldScaleColumns(RenderTable* table)
                 if (tw.isPercent())
                     scale = false;
                 else {
-                    RenderTableCell* cell = static_cast<RenderTableCell*>(cb);
+                    RenderTableCell* cell = toRenderTableCell(cb);
                     if (cell->colSpan() > 1 || cell->table()->style()->width().isAuto())
                         scale = false;
                     else
@@ -380,7 +382,7 @@ int AutoTableLayout::calcEffectiveWidth()
                 float spanMax = max(maxWidth, cMaxWidth);
                 tMaxWidth = max(tMaxWidth, spanMax * 100 * percentScaleFactor / w.rawValue());
 
-                // all non percent columns in the span get percent vlaues to sum up correctly.
+                // all non percent columns in the span get percent values to sum up correctly.
                 int percentMissing = w.rawValue() - totalPercent;
                 float totalWidth = 0;
                 for (unsigned int pos = col; pos < lastCol; pos++) {
@@ -571,7 +573,7 @@ void AutoTableLayout::layout()
                     int reduction = min(w,  excess);
                     // the lines below might look inconsistent, but that's the way it's handled in mozilla
                     excess -= reduction;
-                    int newWidth = max(int (m_layoutStruct[i].effMinWidth), w - reduction);
+                    int newWidth = max(static_cast<int>(m_layoutStruct[i].effMinWidth), w - reduction);
                     available += w - newWidth;
                     m_layoutStruct[i].calcWidth = newWidth;
                 }
@@ -662,8 +664,8 @@ void AutoTableLayout::layout()
         }
     }
 
-    // if we have overallocated, reduce every cell according to the difference between desired width and minwidth
-    // this seems to produce to the pixel exaxt results with IE. Wonder is some of this also holds for width distributing.
+    // If we have overallocated, reduce every cell according to the difference between desired width and minwidth
+    // this seems to produce to the pixel exact results with IE. Wonder is some of this also holds for width distributing.
     if (available < 0) {
         // Need to reduce cells with the following prioritization:
         // (1) Auto

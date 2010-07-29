@@ -29,10 +29,12 @@
 
 #include "AtomicStringHash.h"
 #include "EventListener.h"
+#include "EventNames.h"
 #include "EventTarget.h"
-
+#include "MessagePortChannel.h"
 #include <wtf/HashMap.h>
-#include <wtf/MessageQueue.h>
+#include <wtf/OwnPtr.h>
+#include <wtf/PassOwnPtr.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
@@ -42,93 +44,85 @@ namespace WebCore {
     class AtomicStringImpl;
     class Event;
     class Frame;
+    class MessagePort;
     class ScriptExecutionContext;
     class String;
-    class WorkerContext;
+
+    // The overwhelmingly common case is sending a single port, so handle that efficiently with an inline buffer of size 1.
+    typedef Vector<RefPtr<MessagePort>, 1> MessagePortArray;
 
     class MessagePort : public RefCounted<MessagePort>, public EventTarget {
     public:
-        static PassRefPtr<MessagePort> create(ScriptExecutionContext* scriptExecutionContext) { return adoptRef(new MessagePort(scriptExecutionContext)); }
+        static PassRefPtr<MessagePort> create(ScriptExecutionContext& scriptExecutionContext) { return adoptRef(new MessagePort(scriptExecutionContext)); }
         ~MessagePort();
 
-        PassRefPtr<MessagePort> clone(ExceptionCode&); // Returns a port that isn't attached to any context.
+        void postMessage(PassRefPtr<SerializedScriptValue> message, ExceptionCode&);
+        void postMessage(PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, ExceptionCode&);
+        // FIXME: remove this when we update the ObjC bindings (bug #28774).
+        void postMessage(PassRefPtr<SerializedScriptValue> message, MessagePort*, ExceptionCode&);
 
-        bool active() const { return m_entangledPort; }
-        void postMessage(const String& message, ExceptionCode&);
-        void postMessage(const String& message, MessagePort*, ExceptionCode&);
-        PassRefPtr<MessagePort> startConversation(ScriptExecutionContext*, const String& message);
         void start();
         void close();
 
-        bool queueIsOpen() const { return m_queueIsOpen; }
+        void entangle(PassOwnPtr<MessagePortChannel>);
+        PassOwnPtr<MessagePortChannel> disentangle(ExceptionCode&);
 
-        MessagePort* entangledPort() { return m_entangledPort; }
-        static void entangle(MessagePort*, MessagePort*);
-        void unentangle();
+        // Disentangle an array of ports, returning the entangled channels.
+        // Per section 8.3.3 of the HTML5 spec, generates an INVALID_STATE_ERR exception if any of the passed ports are null or not entangled.
+        // Returns 0 if there is an exception, or if the passed-in array is 0/empty.
+        static PassOwnPtr<MessagePortChannelArray> disentanglePorts(const MessagePortArray*, ExceptionCode&);
+
+        // Entangles an array of channels, returning an array of MessagePorts in matching order.
+        // Returns 0 if the passed array is 0/empty.
+        static PassOwnPtr<MessagePortArray> entanglePorts(ScriptExecutionContext&, PassOwnPtr<MessagePortChannelArray>);
+
+        void messageAvailable();
+        bool started() const { return m_started; }
 
         void contextDestroyed();
-        void attachToContext(ScriptExecutionContext*);
+
         virtual ScriptExecutionContext* scriptExecutionContext() const;
 
         virtual MessagePort* toMessagePort() { return this; }
 
-        void queueCloseEvent();
         void dispatchMessages();
-
-        virtual void addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture);
-        virtual void removeEventListener(const AtomicString& eventType, EventListener*, bool useCapture);
-        virtual bool dispatchEvent(PassRefPtr<Event>, ExceptionCode&);
-
-        typedef Vector<RefPtr<EventListener> > ListenerVector;
-        typedef HashMap<AtomicString, ListenerVector> EventListenersMap;
-        EventListenersMap& eventListeners() { return m_eventListeners; }
 
         using RefCounted<MessagePort>::ref;
         using RefCounted<MessagePort>::deref;
 
         bool hasPendingActivity();
 
-        // FIXME: Per current spec, setting onmessage should automagically start the port (unlike addEventListener("message", ...)).
-        void setOnmessage(PassRefPtr<EventListener> eventListener) { m_onMessageListener = eventListener; }
-        EventListener* onmessage() const { return m_onMessageListener.get(); }
+        void setOnmessage(PassRefPtr<EventListener> listener)
+        {
+            setAttributeEventListener(eventNames().messageEvent, listener);
+            start();
+        }
+        EventListener* onmessage() { return getAttributeEventListener(eventNames().messageEvent); }
 
-        void setOnclose(PassRefPtr<EventListener> eventListener) { m_onCloseListener = eventListener; }
-        EventListener* onclose() const { return m_onCloseListener.get(); }
+        // Returns null if there is no entangled port, or if the entangled port is run by a different thread.
+        // Returns null otherwise.
+        // NOTE: This is used solely to enable a GC optimization. Some platforms may not be able to determine ownership of the remote port (since it may live cross-process) - those platforms may always return null.
+        MessagePort* locallyEntangledPort();
+        // A port starts out its life entangled, and remains entangled until it is closed or is cloned.
+        bool isEntangled() { return !m_closed && !isCloned(); }
+        // A port is cloned if its entangled channel has been removed and sent to a new owner via postMessage().
+        bool isCloned() { return !m_entangledChannel; }
 
     private:
-        friend class MessagePortCloseEventTask;
-
-        MessagePort(ScriptExecutionContext*);
+        MessagePort(ScriptExecutionContext&);
 
         virtual void refEventTarget() { ref(); }
         virtual void derefEventTarget() { deref(); }
+        virtual EventTargetData* eventTargetData();
+        virtual EventTargetData* ensureEventTargetData();
 
-        void dispatchCloseEvent();
+        OwnPtr<MessagePortChannel> m_entangledChannel;
 
-        MessagePort* m_entangledPort;
-
-        // FIXME: EventData is necessary to pass messages to other threads. In single threaded case, we can just queue a created event.
-        struct EventData : public RefCounted<EventData> {
-            static PassRefPtr<EventData> create(const String& message, PassRefPtr<MessagePort>);
-            ~EventData();
-
-            String message;
-            RefPtr<MessagePort> messagePort;
-
-        private:
-            EventData(const String& message, PassRefPtr<MessagePort>);
-        };
-        MessageQueue<RefPtr<EventData> > m_messageQueue; // FIXME: No need to use MessageQueue in single threaded case.
-        bool m_queueIsOpen;
+        bool m_started;
+        bool m_closed;
 
         ScriptExecutionContext* m_scriptExecutionContext;
-
-        RefPtr<EventListener> m_onMessageListener;
-        RefPtr<EventListener> m_onCloseListener;
-
-        EventListenersMap m_eventListeners;
-
-        bool m_pendingCloseEvent; // The port is GC protected while waiting for a close event to be dispatched.
+        EventTargetData m_eventTargetData;
     };
 
 } // namespace WebCore

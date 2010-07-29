@@ -30,7 +30,7 @@
 
 namespace WebCore {
 
-class CounterContent {
+class CounterContent : public FastAllocBase {
 public:
     CounterContent(const AtomicString& identifier, EListStyleType style, const AtomicString& separator)
         : m_identifier(identifier)
@@ -49,11 +49,11 @@ private:
     AtomicString m_separator;
 };
 
-static inline bool operator!=(const CounterContent& a, const CounterContent& b)
+static inline bool operator==(const CounterContent& a, const CounterContent& b)
 {
-    return a.identifier() != b.identifier()
-        || a.listStyle() != b.listStyle()
-        || a.separator() != b.separator();
+    return a.identifier() == b.identifier()
+        && a.listStyle() == b.listStyle()
+        && a.separator() == b.separator();
 }
 
 

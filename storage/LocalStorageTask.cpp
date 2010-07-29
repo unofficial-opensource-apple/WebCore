@@ -20,59 +20,48 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "config.h"
 #include "LocalStorageTask.h"
 
-#include "LocalStorage.h"
-#include "LocalStorageArea.h"
+#if ENABLE(DOM_STORAGE)
+
 #include "LocalStorageThread.h"
+#include "StorageAreaSync.h"
 
 namespace WebCore {
 
-LocalStorageTask::LocalStorageTask(Type type, PassRefPtr<LocalStorageArea> area)
+LocalStorageTask::LocalStorageTask(Type type, StorageAreaSync* area)
     : m_type(type)
     , m_area(area)
+    , m_thread(0)
 {
     ASSERT(m_area);
     ASSERT(m_type == AreaImport || m_type == AreaSync);
 }
 
-LocalStorageTask::LocalStorageTask(Type type, PassRefPtr<LocalStorage> storage)
+LocalStorageTask::LocalStorageTask(Type type, LocalStorageThread* thread)
     : m_type(type)
-    , m_storage(storage)
-{
-    ASSERT(m_storage);
-    ASSERT(m_type == StorageImport || m_type == StorageSync);
-}
-
-LocalStorageTask::LocalStorageTask(Type type, PassRefPtr<LocalStorageThread> thread)
-    : m_type(type)
+    , m_area(0)
     , m_thread(thread)
 {
     ASSERT(m_thread);
     ASSERT(m_type == TerminateThread);
 }
 
+LocalStorageTask::~LocalStorageTask()
+{
+}
+
 void LocalStorageTask::performTask()
 {
     switch (m_type) {
-        case StorageImport:
-            ASSERT(m_storage);
-            m_storage->performImport();
-            break;
-        case StorageSync:
-            ASSERT(m_storage);
-            m_storage->performSync();
-            break;
         case AreaImport:
-            ASSERT(m_area);
             m_area->performImport();
             break;
         case AreaSync:
-            ASSERT(m_area);
             m_area->performSync();
             break;
         case TerminateThread:
@@ -82,3 +71,5 @@ void LocalStorageTask::performTask()
 }
 
 }
+
+#endif // ENABLE(DOM_STORAGE)

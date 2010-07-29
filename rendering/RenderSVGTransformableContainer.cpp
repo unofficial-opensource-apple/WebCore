@@ -1,8 +1,7 @@
 /*
-    Copyright (C) 2004, 2005 Nikolas Zimmermann <wildfox@kde.org>
-    2004, 2005, 2006 Rob Buis <buis@kde.org>
-
-    This file is part of the KDE project
+    Copyright (C) 2004, 2005 Nikolas Zimmermann <zimmermann@kde.org>
+                  2004, 2005, 2006 Rob Buis <buis@kde.org>
+                  2009 Google, Inc.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -21,12 +20,12 @@
  */
 
 #include "config.h"
-#if ENABLE(SVG)
 
+#if ENABLE(SVG)
 #include "RenderSVGTransformableContainer.h"
 
+#include "SVGShadowTreeElements.h"
 #include "SVGStyledTransformableElement.h"
-#include "SVGTransformList.h"
 
 namespace WebCore {
     
@@ -35,11 +34,27 @@ RenderSVGTransformableContainer::RenderSVGTransformableContainer(SVGStyledTransf
 {
 }
 
-bool RenderSVGTransformableContainer::calculateLocalTransform()
+const TransformationMatrix& RenderSVGTransformableContainer::localToParentTransform() const
 {
-    TransformationMatrix oldTransform = m_localTransform;
-    m_localTransform = static_cast<SVGStyledTransformableElement*>(element())->animatedLocalTransform();
-    return (m_localTransform != oldTransform);
+    return m_localTransform;
+}
+
+TransformationMatrix RenderSVGTransformableContainer::localTransform() const
+{
+    return m_localTransform;
+}
+
+void RenderSVGTransformableContainer::calculateLocalTransform()
+{
+    m_localTransform = static_cast<SVGStyledTransformableElement*>(node())->animatedLocalTransform();
+    if (!node()->hasTagName(SVGNames::gTag) || !static_cast<SVGGElement*>(node())->isShadowTreeContainerElement())
+        return;
+
+    FloatSize translation = static_cast<SVGShadowTreeContainerElement*>(node())->containerTranslation();
+    if (translation.width() == 0 && translation.height() == 0)
+        return;
+
+    m_localTransform.translateRight(translation.width(), translation.height());
 }
 
 }

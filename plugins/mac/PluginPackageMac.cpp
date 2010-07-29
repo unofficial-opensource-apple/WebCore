@@ -33,7 +33,6 @@
 #include <wtf/RetainPtr.h>
 #include "CString.h"
 #include "MIMETypeRegistry.h"
-#include "NotImplemented.h"
 #include "npruntime_impl.h"
 #include "PluginDatabase.h"
 #include "PluginDebug.h"
@@ -51,7 +50,7 @@ void PluginPackage::determineQuirks(const String& mimeType)
 {
     if (MIMETypeRegistry::isJavaAppletMIMEType(mimeType)) {
         // Because a single process cannot create multiple VMs, and we cannot reliably unload a
-        // Java VM, we cannot unload the Java plugin, or we'll lose reference to our only VM
+        // Java VM, we cannot unload the Java Plugin, or we'll lose reference to our only VM
         m_quirks.add(PluginQuirkDontUnloadPlugin);
 
         // Setting the window region to an empty region causes bad scrolling repaint problems
@@ -160,7 +159,8 @@ bool PluginPackage::fetchInfo()
             plist = readPListFile(path.get(), /*createFile*/ true, m_module);
         }
 
-        mimeDict = (CFDictionaryRef)CFDictionaryGetValue(plist.get(), CFSTR("WebPluginMIMETypes"));
+        if (plist)
+            mimeDict = (CFDictionaryRef)CFDictionaryGetValue(plist.get(), CFSTR("WebPluginMIMETypes"));
     }
 
     if (!mimeDict)
@@ -177,7 +177,7 @@ bool PluginPackage::fetchInfo()
 
             WTF::RetainPtr<CFDictionaryRef> extensionsDict = (CFDictionaryRef)values[i];
 
-            WTF:RetainPtr<CFNumberRef> enabled = (CFNumberRef)CFDictionaryGetValue(extensionsDict.get(), CFSTR("WebPluginTypeEnabled"));
+            WTF::RetainPtr<CFNumberRef> enabled = (CFNumberRef)CFDictionaryGetValue(extensionsDict.get(), CFSTR("WebPluginTypeEnabled"));
             if (enabled) {
                 int enabledValue = 0;
                 if (CFNumberGetValue(enabled.get(), kCFNumberIntType, &enabledValue) && enabledValue == 0)
@@ -236,9 +236,9 @@ bool PluginPackage::fetchInfo()
         CFBundleCloseBundleResourceMap(m_module, resFile);
     }
 
-    LOG(Plugin, "PluginPackage::fetchInfo(): Found plug-in '%s'", m_name.utf8().data());
+    LOG(Plugins, "PluginPackage::fetchInfo(): Found plug-in '%s'", m_name.utf8().data());
     if (isPluginBlacklisted()) {
-        LOG(Plugin, "\tPlug-in is blacklisted!");
+        LOG(Plugins, "\tPlug-in is blacklisted!");
         return false;
     }
 
@@ -247,9 +247,6 @@ bool PluginPackage::fetchInfo()
 
 bool PluginPackage::isPluginBlacklisted()
 {
-    if (name() == "Silverlight Plug-In" || name().startsWith("QuickTime Plug-in"))
-        return true;
-
     return false;
 }
 
@@ -265,7 +262,7 @@ bool PluginPackage::load()
                                                                         kCFURLPOSIXPathStyle, false));
     m_module = CFBundleCreate(NULL, url.get());
     if (!m_module || !CFBundleLoadExecutable(m_module)) {
-        LOG(Plugin, "%s not loaded", m_path.utf8().data());
+        LOG(Plugins, "%s not loaded", m_path.utf8().data());
         return false;
     }
 
@@ -285,51 +282,7 @@ bool PluginPackage::load()
     memset(&m_pluginFuncs, 0, sizeof(m_pluginFuncs));
     m_pluginFuncs.size = sizeof(m_pluginFuncs);
 
-    m_browserFuncs.size = sizeof(m_browserFuncs);
-    m_browserFuncs.version = NP_VERSION_MINOR;
-    m_browserFuncs.geturl = NPN_GetURL;
-    m_browserFuncs.posturl = NPN_PostURL;
-    m_browserFuncs.requestread = NPN_RequestRead;
-    m_browserFuncs.newstream = NPN_NewStream;
-    m_browserFuncs.write = NPN_Write;
-    m_browserFuncs.destroystream = NPN_DestroyStream;
-    m_browserFuncs.status = NPN_Status;
-    m_browserFuncs.uagent = NPN_UserAgent;
-    m_browserFuncs.memalloc = NPN_MemAlloc;
-    m_browserFuncs.memfree = NPN_MemFree;
-    m_browserFuncs.memflush = NPN_MemFlush;
-    m_browserFuncs.reloadplugins = NPN_ReloadPlugins;
-    m_browserFuncs.geturlnotify = NPN_GetURLNotify;
-    m_browserFuncs.posturlnotify = NPN_PostURLNotify;
-    m_browserFuncs.getvalue = NPN_GetValue;
-    m_browserFuncs.setvalue = NPN_SetValue;
-    m_browserFuncs.invalidaterect = NPN_InvalidateRect;
-    m_browserFuncs.invalidateregion = NPN_InvalidateRegion;
-    m_browserFuncs.forceredraw = NPN_ForceRedraw;
-    m_browserFuncs.getJavaEnv = NPN_GetJavaEnv;
-    m_browserFuncs.getJavaPeer = NPN_GetJavaPeer;
-    m_browserFuncs.pushpopupsenabledstate = NPN_PushPopupsEnabledState;
-    m_browserFuncs.poppopupsenabledstate = NPN_PopPopupsEnabledState;
-
-    m_browserFuncs.releasevariantvalue = _NPN_ReleaseVariantValue;
-    m_browserFuncs.getstringidentifier = _NPN_GetStringIdentifier;
-    m_browserFuncs.getstringidentifiers = _NPN_GetStringIdentifiers;
-    m_browserFuncs.getintidentifier = _NPN_GetIntIdentifier;
-    m_browserFuncs.identifierisstring = _NPN_IdentifierIsString;
-    m_browserFuncs.utf8fromidentifier = _NPN_UTF8FromIdentifier;
-    m_browserFuncs.createobject = _NPN_CreateObject;
-    m_browserFuncs.retainobject = _NPN_RetainObject;
-    m_browserFuncs.releaseobject = _NPN_ReleaseObject;
-    m_browserFuncs.invoke = _NPN_Invoke;
-    m_browserFuncs.invokeDefault = _NPN_InvokeDefault;
-    m_browserFuncs.evaluate = _NPN_Evaluate;
-    m_browserFuncs.getproperty = _NPN_GetProperty;
-    m_browserFuncs.setproperty = _NPN_SetProperty;
-    m_browserFuncs.removeproperty = _NPN_RemoveProperty;
-    m_browserFuncs.hasproperty = _NPN_HasMethod;
-    m_browserFuncs.hasmethod = _NPN_HasProperty;
-    m_browserFuncs.setexception = _NPN_SetException;
-    m_browserFuncs.enumerate = _NPN_Enumerate;
+    initializeBrowserFuncs();
 
     npErr = NP_Initialize(&m_browserFuncs);
     LOG_NPERROR(npErr);
@@ -349,30 +302,10 @@ abort:
     return false;
 }
 
-unsigned PluginPackage::hash() const
-{
-    unsigned hashCodes[2] = {
-        m_path.impl()->hash(),
-        m_lastModified
-    };
-
-    return StringImpl::computeHash(reinterpret_cast<UChar*>(hashCodes), 2 * sizeof(unsigned) / sizeof(UChar));
-}
-
-bool PluginPackage::equal(const PluginPackage& a, const PluginPackage& b)
-{
-    return a.m_description == b.m_description;
-}
-
-int PluginPackage::compareFileVersion(const PlatformModuleVersion& compareVersion) const
-{
-    // return -1, 0, or 1 if plug-in version is less than, equal to, or greater than
-    // the passed version
-    if (m_moduleVersion != compareVersion)
-        return m_moduleVersion > compareVersion ? 1 : -1;
-    return 0;
-}
-
 } // namespace WebCore
+
+#else
+
+#include "../PluginPackageNone.cpp"
 
 #endif // !__LP64__

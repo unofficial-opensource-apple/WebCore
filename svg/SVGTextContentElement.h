@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2006, 2008 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -31,8 +29,6 @@
 
 namespace WebCore {
 
-    extern char SVGTextContentElementIdentifier[];
-
     class SVGLength;
 
     class SVGTextContentElement : public SVGStyledElement,
@@ -52,26 +48,27 @@ namespace WebCore {
         virtual bool isValid() const { return SVGTests::isValid(); }
         virtual bool isTextContent() const { return true; }
 
-        long getNumberOfChars() const;
+        unsigned getNumberOfChars() const;
         float getComputedTextLength() const;
-        float getSubStringLength(long charnum, long nchars, ExceptionCode&) const;
-        FloatPoint getStartPositionOfChar(long charnum, ExceptionCode&) const;
-        FloatPoint getEndPositionOfChar(long charnum, ExceptionCode&) const;
-        FloatRect getExtentOfChar(long charnum, ExceptionCode&) const;
-        float getRotationOfChar(long charnum, ExceptionCode&) const;
-        long getCharNumAtPosition(const FloatPoint&) const;
-        void selectSubString(long charnum, long nchars, ExceptionCode&) const;
+        float getSubStringLength(unsigned charnum, unsigned nchars, ExceptionCode&) const;
+        FloatPoint getStartPositionOfChar(unsigned charnum, ExceptionCode&) const;
+        FloatPoint getEndPositionOfChar(unsigned charnum, ExceptionCode&) const;
+        FloatRect getExtentOfChar(unsigned charnum, ExceptionCode&) const;
+        float getRotationOfChar(unsigned charnum, ExceptionCode&) const;
+        int getCharNumAtPosition(const FloatPoint&) const;
+        void selectSubString(unsigned charnum, unsigned nchars, ExceptionCode&) const;
 
         virtual void parseMappedAttribute(MappedAttribute*);
+        virtual void synchronizeProperty(const QualifiedName&);
 
         bool isKnownAttribute(const QualifiedName&);
 
-    protected:
-        virtual const SVGElement* contextElement() const { return this; }
-
     private:
-        ANIMATED_PROPERTY_DECLARATIONS(SVGTextContentElement, SVGTextContentElementIdentifier, SVGNames::textLengthAttrString, SVGLength, TextLength, textLength)
-        ANIMATED_PROPERTY_DECLARATIONS(SVGTextContentElement, SVGTextContentElementIdentifier, SVGNames::lengthAdjustAttrString, int, LengthAdjust, lengthAdjust)
+        DECLARE_ANIMATED_PROPERTY(SVGTextContentElement, SVGNames::textLengthAttr, SVGLength, TextLength, textLength)
+        DECLARE_ANIMATED_PROPERTY(SVGTextContentElement, SVGNames::lengthAdjustAttr, int, LengthAdjust, lengthAdjust)
+
+        // SVGExternalResourcesRequired
+        DECLARE_ANIMATED_PROPERTY(SVGTextContentElement, SVGNames::externalResourcesRequiredAttr, bool, ExternalResourcesRequired, externalResourcesRequired) 
     };
 
 } // namespace WebCore

@@ -37,8 +37,9 @@
 #include "FrameLoader.h"
 #include "HTMLNames.h"
 #include "KeyboardEvent.h"
+#include "MappedAttribute.h"
 #include "MouseEvent.h"
-#include "RenderFlow.h"
+#include "RenderBox.h"
 #include "WMLNames.h"
 
 namespace WebCore {
@@ -56,7 +57,7 @@ void WMLAElement::parseMappedAttribute(MappedAttribute* attr)
         bool wasLink = isLink();
         setIsLink(!attr->isNull());
         if (wasLink != isLink())
-            setChanged();
+            setNeedsStyleRecalc();
         if (isLink() && document()->isDNSPrefetchEnabled()) {
             String value = attr->value();
             if (protocolIs(value, "http") || protocolIs(value, "https") || value.startsWith("//"))
@@ -72,17 +73,7 @@ void WMLAElement::parseMappedAttribute(MappedAttribute* attr)
 
 bool WMLAElement::supportsFocus() const
 {
-    return isFocusable() || (isLink() && document() && !document()->haveStylesheetsLoaded());
-}
-
-bool WMLAElement::isFocusable() const
-{
-    // FIXME: Even if we are not visible, we might have a child that is visible.
-    // Dave wants to fix that some day with a "has visible content" flag or the like.
-    if (!(isLink() && renderer() && renderer()->style()->visibility() == VISIBLE))
-        return false;
-
-    return true;
+    return isLink() || WMLElement::supportsFocus();
 }
 
 bool WMLAElement::isMouseFocusable() const
@@ -101,15 +92,14 @@ bool WMLAElement::isKeyboardFocusable(KeyboardEvent* event) const
     if (!document()->frame()->eventHandler()->tabsToLinks(event))
         return false;
 
+    if (!renderer() || !renderer()->isBoxModelObject())
+        return false;
+
     // Before calling absoluteRects, check for the common case where the renderer
-    // or one of the continuations is non-empty, since this is a faster check and
-    // almost always returns true.
-    RenderBox* box = toRenderBox(renderer());
+    // is non-empty, since this is a faster check and almost always returns true.
+    RenderBoxModelObject* box = toRenderBoxModelObject(renderer());
     if (!box->borderBoundingBox().isEmpty())
         return true;
-    for (RenderFlow* r = box->virtualContinuation(); r; r = r->continuation())
-        if (!r->borderBoundingBox().isEmpty())
-            return true;
 
     Vector<IntRect> rects;
     FloatPoint absPos = renderer()->localToAbsolute();
@@ -150,8 +140,8 @@ void WMLAElement::defaultEventHandler(Event* event)
         }
  
         if (!event->defaultPrevented() && document()->frame()) {
-            KURL url = document()->completeURL(parseURL(getAttribute(HTMLNames::hrefAttr)));
-            document()->frame()->loader()->urlSelected(url, target(), event, false, true);
+            String url = document()->completeURL(deprecatedParseURL(getAttribute(HTMLNames::hrefAttr)));
+            document()->frame()->loader()->urlSelected(url, target(), event, false, false, true, SendReferrer);
         }
 
         event->setDefaultHandled();

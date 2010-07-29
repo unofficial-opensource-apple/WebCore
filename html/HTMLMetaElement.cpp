@@ -19,11 +19,13 @@
  * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "HTMLMetaElement.h"
 
 #include "Document.h"
 #include "HTMLNames.h"
+#include "MappedAttribute.h"
 
 namespace WebCore {
 
@@ -48,8 +50,6 @@ void HTMLMetaElement::parseMappedAttribute(MappedAttribute* attr)
         m_content = attr->value();
         process();
     } else if (attr->name() == nameAttr) {
-        if (equalIgnoringCase(attr->value(), "viewport"))
-            process();
         // Do nothing.
     } else
         HTMLElement::parseMappedAttribute(attr);

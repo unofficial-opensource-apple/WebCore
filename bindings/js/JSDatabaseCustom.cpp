@@ -29,6 +29,8 @@
 #include "config.h"
 #include "JSDatabase.h"
 
+#if ENABLE(DATABASE)
+
 #include "DOMWindow.h"
 #include "Database.h"
 #include "Document.h"
@@ -45,84 +47,89 @@ namespace WebCore {
 
 using namespace JSC;
 
-JSValuePtr JSDatabase::changeVersion(ExecState* exec, const ArgList& args)
+JSValue JSDatabase::changeVersion(ExecState* exec, const ArgList& args)
 {
-    String oldVersion = args.at(exec, 0).toString(exec);
-    String newVersion = args.at(exec, 1).toString(exec);
+    String oldVersion = args.at(0).toString(exec);
+    String newVersion = args.at(1).toString(exec);
 
-    Frame* frame = asJSDOMWindow(exec->dynamicGlobalObject())->impl()->frame();
-    if (!frame)
-        return jsUndefined();
-    
     JSObject* object;
-    if (!(object = args.at(exec, 2).getObject())) {
+    if (!(object = args.at(2).getObject())) {
         setDOMException(exec, TYPE_MISMATCH_ERR);
         return jsUndefined();
     }
     
-    RefPtr<SQLTransactionCallback> callback(JSCustomSQLTransactionCallback::create(object, frame));
+    RefPtr<SQLTransactionCallback> callback(JSCustomSQLTransactionCallback::create(object, static_cast<JSDOMGlobalObject*>(exec->dynamicGlobalObject())));
     
     RefPtr<SQLTransactionErrorCallback> errorCallback;
-    if (!args.at(exec, 3).isNull()) {
-        if (!(object = args.at(exec, 3).getObject())) {
+    if (!args.at(3).isNull()) {
+        if (!(object = args.at(3).getObject())) {
             setDOMException(exec, TYPE_MISMATCH_ERR);
             return jsUndefined();
         }
         
-        errorCallback = JSCustomSQLTransactionErrorCallback::create(object, frame);
+        errorCallback = JSCustomSQLTransactionErrorCallback::create(object, static_cast<JSDOMGlobalObject*>(exec->dynamicGlobalObject()));
     }
     
     RefPtr<VoidCallback> successCallback;
-    if (!args.at(exec, 4).isNull()) {
-        successCallback = toVoidCallback(exec, args.at(exec, 4));
-        if (!successCallback) {
+    if (!args.at(4).isNull()) {
+        if (!(object = args.at(4).getObject())) {
             setDOMException(exec, TYPE_MISMATCH_ERR);
             return jsUndefined();
         }
+
+        successCallback = JSCustomVoidCallback::create(object, static_cast<JSDOMGlobalObject*>(exec->dynamicGlobalObject()));
     }
-    
+
     m_impl->changeVersion(oldVersion, newVersion, callback.release(), errorCallback.release(), successCallback.release());
     
     return jsUndefined();
 }
 
-JSValuePtr JSDatabase::transaction(ExecState* exec, const ArgList& args)
+static JSValue createTransaction(ExecState* exec, const ArgList& args, Database* database, JSDOMGlobalObject* globalObject, bool readOnly)
 {
     JSObject* object;
     
-    if (!(object = args.at(exec, 0).getObject())) {
+    if (!(object = args.at(0).getObject())) {
         setDOMException(exec, TYPE_MISMATCH_ERR);
         return jsUndefined();
     }        
- 
-    Frame* frame = asJSDOMWindow(exec->dynamicGlobalObject())->impl()->frame();
-    if (!frame)
-        return jsUndefined();
-    
-    RefPtr<SQLTransactionCallback> callback(JSCustomSQLTransactionCallback::create(object, frame));
+     
+    RefPtr<SQLTransactionCallback> callback(JSCustomSQLTransactionCallback::create(object, globalObject));
     RefPtr<SQLTransactionErrorCallback> errorCallback;
     
-    if (args.size() > 1 && !args.at(exec, 1).isNull()) {
-        if (!(object = args.at(exec, 1).getObject())) {
+    if (args.size() > 1 && !args.at(1).isNull()) {
+        if (!(object = args.at(1).getObject())) {
             setDOMException(exec, TYPE_MISMATCH_ERR);
             return jsUndefined();
         }
 
-        errorCallback = JSCustomSQLTransactionErrorCallback::create(object, frame);
+        errorCallback = JSCustomSQLTransactionErrorCallback::create(object, globalObject);
     }
 
     RefPtr<VoidCallback> successCallback;
-    if (args.size() > 2 && !args.at(exec, 2).isNull()) {
-        successCallback = toVoidCallback(exec, args.at(exec, 2));
-        if (!successCallback) {
+    if (args.size() > 2 && !args.at(2).isNull()) {
+        if (!(object = args.at(2).getObject())) {
             setDOMException(exec, TYPE_MISMATCH_ERR);
             return jsUndefined();
         }
+
+        successCallback = JSCustomVoidCallback::create(object, globalObject);
     }
     
-    m_impl->transaction(callback.release(), errorCallback.release(), successCallback.release());
-
+    database->transaction(callback.release(), errorCallback.release(), successCallback.release(), readOnly);
     return jsUndefined();
 }
-    
+
+JSValue JSDatabase::transaction(ExecState* exec, const ArgList& args)
+{
+    return createTransaction(exec, args, m_impl.get(), static_cast<JSDOMGlobalObject*>(exec->dynamicGlobalObject()), false);
 }
+    
+JSValue JSDatabase::readTransaction(ExecState* exec, const ArgList& args)
+{
+    return createTransaction(exec, args, m_impl.get(), static_cast<JSDOMGlobalObject*>(exec->dynamicGlobalObject()), true);
+}
+
+}
+
+#endif // ENABLE(DATABASE)

@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2006 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -22,9 +20,10 @@
 
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEColorMatrixElement.h"
 
+#include "MappedAttribute.h"
 #include "SVGNames.h"
 #include "SVGNumberList.h"
 #include "SVGResourceFilter.h"
@@ -33,10 +32,8 @@ namespace WebCore {
 
 SVGFEColorMatrixElement::SVGFEColorMatrixElement(const QualifiedName& tagName, Document* doc)
     : SVGFilterPrimitiveStandardAttributes(tagName, doc)
-    , m_in1(this, SVGNames::inAttr)
-    , m_type(this, SVGNames::typeAttr, FECOLORMATRIX_TYPE_UNKNOWN)
-    , m_values(this, SVGNames::valuesAttr, SVGNumberList::create(SVGNames::valuesAttr))
-    , m_filterEffect(0)
+    , m_type(FECOLORMATRIX_TYPE_UNKNOWN)
+    , m_values(SVGNumberList::create(SVGNames::valuesAttr))
 {
 }
 
@@ -65,17 +62,30 @@ void SVGFEColorMatrixElement::parseMappedAttribute(MappedAttribute* attr)
         SVGFilterPrimitiveStandardAttributes::parseMappedAttribute(attr);
 }
 
-SVGFilterEffect* SVGFEColorMatrixElement::filterEffect(SVGResourceFilter* filter) const
+void SVGFEColorMatrixElement::synchronizeProperty(const QualifiedName& attrName)
 {
-    ASSERT_NOT_REACHED();
-    return 0;
+    SVGFilterPrimitiveStandardAttributes::synchronizeProperty(attrName);
+
+    if (attrName == anyQName()) {
+        synchronizeType();
+        synchronizeIn1();
+        synchronizeValues();
+        return;
+    }
+
+    if (attrName == SVGNames::typeAttr)
+        synchronizeType();
+    else if (attrName == SVGNames::inAttr)
+        synchronizeIn1();
+    else if (attrName == SVGNames::valuesAttr)
+        synchronizeValues();
 }
 
-bool SVGFEColorMatrixElement::build(FilterBuilder* builder)
+bool SVGFEColorMatrixElement::build(SVGResourceFilter* filterResource)
 {
-    FilterEffect* input1 = builder->getEffectById(in1());
+    FilterEffect* input1 = filterResource->builder()->getEffectById(in1());
 
-    if(!input1)
+    if (!input1)
         return false;
 
     Vector<float> _values;
@@ -86,7 +96,8 @@ bool SVGFEColorMatrixElement::build(FilterBuilder* builder)
     for (unsigned int i = 0;i < nr;i++)
         _values.append(numbers->getItem(i, ec));
 
-    builder->add(result(), FEColorMatrix::create(input1, static_cast<ColorMatrixType> (type()), _values));
+    RefPtr<FilterEffect> effect = FEColorMatrix::create(input1, static_cast<ColorMatrixType>(type()), _values);
+    filterResource->addFilterEffect(this, effect.release());
     
     return true;
 }

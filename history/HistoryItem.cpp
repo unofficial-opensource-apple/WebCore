@@ -33,22 +33,31 @@
 #include "PageCache.h"
 #include "ResourceRequest.h"
 #include <stdio.h>
+#include <wtf/CurrentTime.h>
 
 namespace WebCore {
 
-static void defaultNotifyHistoryItemChanged()
+static long long generateDocumentSequenceNumber()
+{
+    // Initialize to the current time to reduce the likelihood of generating
+    // identifiers that overlap with those from past/future browser sessions.
+    static long long next = static_cast<long long>(currentTime() * 1000000.0);
+    return ++next;
+}
+
+static void defaultNotifyHistoryItemChanged(HistoryItem*)
 {
 }
 
-void (*notifyHistoryItemChanged)() = defaultNotifyHistoryItemChanged;
+void (*notifyHistoryItemChanged)(HistoryItem*) = defaultNotifyHistoryItemChanged;
 
 HistoryItem::HistoryItem()
     : m_lastVisitedTime(0)
     , m_lastVisitWasHTTPNonGet(false)
     , m_lastVisitWasFailure(false)
-    , m_isInPageCache(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
     , m_scale(0.0f)
     , m_scaleIsInitial(false)
 {
@@ -61,9 +70,9 @@ HistoryItem::HistoryItem(const String& urlString, const String& title, double ti
     , m_lastVisitedTime(time)
     , m_lastVisitWasHTTPNonGet(false)
     , m_lastVisitWasFailure(false)
-    , m_isInPageCache(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
     , m_scale(0.0f)
     , m_scaleIsInitial(false)
 {    
@@ -78,9 +87,9 @@ HistoryItem::HistoryItem(const String& urlString, const String& title, const Str
     , m_lastVisitedTime(time)
     , m_lastVisitWasHTTPNonGet(false)
     , m_lastVisitWasFailure(false)
-    , m_isInPageCache(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
     , m_scale(0.0f)
     , m_scaleIsInitial(false)
 {
@@ -96,9 +105,9 @@ HistoryItem::HistoryItem(const KURL& url, const String& target, const String& pa
     , m_lastVisitedTime(0)
     , m_lastVisitWasHTTPNonGet(false)
     , m_lastVisitWasFailure(false)
-    , m_isInPageCache(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
     , m_scale(0.0f)
     , m_scaleIsInitial(false)
 {    
@@ -107,8 +116,12 @@ HistoryItem::HistoryItem(const KURL& url, const String& target, const String& pa
 
 HistoryItem::~HistoryItem()
 {
-    ASSERT(!m_isInPageCache);
+    ASSERT(!m_cachedPage);
     iconDatabase()->releaseIconForPageURL(m_urlString);
+#if PLATFORM(ANDROID)
+    if (m_bridge)
+        m_bridge->detachHistoryItem();
+#endif
 }
 
 inline HistoryItem::HistoryItem(const HistoryItem& item)
@@ -124,11 +137,11 @@ inline HistoryItem::HistoryItem(const HistoryItem& item)
     , m_lastVisitWasHTTPNonGet(item.m_lastVisitWasHTTPNonGet)
     , m_scrollPoint(item.m_scrollPoint)
     , m_lastVisitWasFailure(item.m_lastVisitWasFailure)
-    , m_isInPageCache(item.m_isInPageCache)
     , m_isTargetItem(item.m_isTargetItem)
     , m_visitCount(item.m_visitCount)
     , m_dailyVisitCounts(item.m_dailyVisitCounts)
     , m_weeklyVisitCounts(item.m_weeklyVisitCounts)
+    , m_documentSequenceNumber(generateDocumentSequenceNumber())
     , m_formContentType(item.m_formContentType)
     , m_scale(item.m_scale)
     , m_scaleIsInitial(item.m_scaleIsInitial)
@@ -174,8 +187,8 @@ const String& HistoryItem::alternateTitle() const
 
 Image* HistoryItem::icon() const
 {
-    Image* result = iconDatabase()->iconForPageURL(m_urlString, IntSize(16,16));
-    return result ? result : iconDatabase()->defaultIcon(IntSize(16,16));
+    Image* result = iconDatabase()->iconForPageURL(m_urlString, IntSize(16, 16));
+    return result ? result : iconDatabase()->defaultIcon(IntSize(16, 16));
 }
 
 double HistoryItem::lastVisitedTime() const
@@ -185,12 +198,12 @@ double HistoryItem::lastVisitedTime() const
 
 KURL HistoryItem::url() const
 {
-    return KURL(m_urlString);
+    return KURL(ParsedURLString, m_urlString);
 }
 
 KURL HistoryItem::originalURL() const
 {
-    return KURL(m_originalURLString);
+    return KURL(ParsedURLString, m_originalURLString);
 }
 
 const String& HistoryItem::referrer() const
@@ -211,7 +224,7 @@ const String& HistoryItem::parent() const
 void HistoryItem::setAlternateTitle(const String& alternateTitle)
 {
     m_displayTitle = alternateTitle;
-    notifyHistoryItemChanged();
+    notifyHistoryItemChanged(this);
 }
 
 void HistoryItem::setURLString(const String& urlString)
@@ -222,7 +235,7 @@ void HistoryItem::setURLString(const String& urlString)
         iconDatabase()->retainIconForPageURL(m_urlString);
     }
     
-    notifyHistoryItemChanged();
+    notifyHistoryItemChanged(this);
 }
 
 void HistoryItem::setURL(const KURL& url)
@@ -235,25 +248,25 @@ void HistoryItem::setURL(const KURL& url)
 void HistoryItem::setOriginalURLString(const String& urlString)
 {
     m_originalURLString = urlString;
-    notifyHistoryItemChanged();
+    notifyHistoryItemChanged(this);
 }
 
 void HistoryItem::setReferrer(const String& referrer)
 {
     m_referrer = referrer;
-    notifyHistoryItemChanged();
+    notifyHistoryItemChanged(this);
 }
 
 void HistoryItem::setTitle(const String& title)
 {
     m_title = title;
-    notifyHistoryItemChanged();
+    notifyHistoryItemChanged(this);
 }
 
 void HistoryItem::setTarget(const String& target)
 {
     m_target = target;
-    notifyHistoryItemChanged();
+    notifyHistoryItemChanged(this);
 }
 
 void HistoryItem::setParent(const String& parent)
@@ -300,14 +313,16 @@ void HistoryItem::collapseDailyVisitsToWeekly()
         m_weeklyVisitCounts.shrink(maxWeeklyCounts);
 }
 
-void HistoryItem::recordVisitAtTime(double time)
+void HistoryItem::recordVisitAtTime(double time, VisitCountBehavior visitCountBehavior)
 {
     padDailyCountsForNewVisit(time);
 
     m_lastVisitedTime = time;
-    m_visitCount++;
 
-    m_dailyVisitCounts[0]++;
+    if (visitCountBehavior == IncreaseVisitCount) {
+        ++m_visitCount;
+        ++m_dailyVisitCounts[0];
+    }
 
     collapseDailyVisitsToWeekly();
 }
@@ -318,10 +333,10 @@ void HistoryItem::setLastVisitedTime(double time)
         recordVisitAtTime(time);
 }
 
-void HistoryItem::visited(const String& title, double time)
+void HistoryItem::visited(const String& title, double time, VisitCountBehavior visitCountBehavior)
 {
     m_title = title;
-    recordVisitAtTime(time);
+    recordVisitAtTime(time, visitCountBehavior);
 }
 
 int HistoryItem::visitCount() const
@@ -342,10 +357,10 @@ void HistoryItem::setVisitCount(int count)
 
 void HistoryItem::adoptVisitCounts(Vector<int>& dailyCounts, Vector<int>& weeklyCounts)
 {
-  m_dailyVisitCounts.clear();
-  m_dailyVisitCounts.swap(dailyCounts);
-  m_weeklyVisitCounts.clear();
-  m_weeklyVisitCounts.swap(weeklyCounts);
+    m_dailyVisitCounts.clear();
+    m_dailyVisitCounts.swap(dailyCounts);
+    m_weeklyVisitCounts.clear();
+    m_weeklyVisitCounts.swap(weeklyCounts);
 }
 
 const IntPoint& HistoryItem::scrollPoint() const
@@ -367,6 +382,9 @@ void HistoryItem::clearScrollPoint()
 void HistoryItem::setDocumentState(const Vector<String>& state)
 {
     m_documentState = state;
+#if PLATFORM(ANDROID)
+    notifyHistoryItemChanged(this);
+#endif
 }
 
 const Vector<String>& HistoryItem::documentState() const
@@ -377,6 +395,9 @@ const Vector<String>& HistoryItem::documentState() const
 void HistoryItem::clearDocumentState()
 {
     m_documentState.clear();
+#if PLATFORM(ANDROID)
+    notifyHistoryItemChanged(this);
+#endif
 }
 
 bool HistoryItem::isTargetItem() const
@@ -387,12 +408,23 @@ bool HistoryItem::isTargetItem() const
 void HistoryItem::setIsTargetItem(bool flag)
 {
     m_isTargetItem = flag;
+#if PLATFORM(ANDROID)
+    notifyHistoryItemChanged(this);
+#endif
+}
+
+void HistoryItem::setStateObject(PassRefPtr<SerializedScriptValue> object)
+{
+    m_stateObject = object;
 }
 
 void HistoryItem::addChildItem(PassRefPtr<HistoryItem> child)
 {
     ASSERT(!childItemWithTarget(child->target()));
     m_children.append(child);
+#if PLATFORM(ANDROID)
+    notifyHistoryItemChanged(this);
+#endif
 }
 
 void HistoryItem::setChildItem(PassRefPtr<HistoryItem> child)
@@ -448,6 +480,11 @@ bool HistoryItem::hasChildren() const
     return !m_children.isEmpty();
 }
 
+void HistoryItem::clearChildren()
+{
+    m_children.clear();
+}
+
 String HistoryItem::formContentType() const
 {
     return m_formContentType;
@@ -466,6 +503,19 @@ void HistoryItem::setFormInfoFromRequest(const ResourceRequest& request)
         m_formData = 0;
         m_formContentType = String();
     }
+#if PLATFORM(ANDROID)
+    notifyHistoryItemChanged(this);
+#endif
+}
+
+void HistoryItem::setFormData(PassRefPtr<FormData> formData)
+{
+    m_formData = formData;
+}
+
+void HistoryItem::setFormContentType(const String& formContentType)
+{
+    m_formContentType = formContentType;
 }
 
 FormData* HistoryItem::formData()
@@ -476,7 +526,7 @@ FormData* HistoryItem::formData()
 bool HistoryItem::isCurrentDocument(Document* doc) const
 {
     // FIXME: We should find a better way to check if this is the current document.
-    return urlString() == doc->url();
+    return equalIgnoringFragmentIdentifier(url(), doc->url());
 }
 
 void HistoryItem::mergeAutoCompleteHints(HistoryItem* otherItem)
@@ -505,9 +555,9 @@ Vector<String>* HistoryItem::redirectURLs() const
     return m_redirectURLs.get();
 }
 
-void HistoryItem::setRedirectURLs(std::auto_ptr<Vector<String> > redirectURLs)
+void HistoryItem::setRedirectURLs(PassOwnPtr<Vector<String> > redirectURLs)
 {
-    m_redirectURLs.adopt(redirectURLs);
+    m_redirectURLs = redirectURLs;
 }
 
 #ifndef NDEBUG

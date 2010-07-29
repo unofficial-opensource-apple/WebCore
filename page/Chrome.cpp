@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
  *
  * This library is free software; you can redistribute it and/or
@@ -35,7 +35,8 @@
 #include "HitTestResult.h"
 #include "InspectorController.h"
 #include "Page.h"
-#include "PageGroup.h"
+#include "PageGroupLoadDeferrer.h"
+#include "RenderObject.h"
 #include "ResourceHandle.h"
 #include "ScriptController.h"
 #include "SecurityOrigin.h"
@@ -46,21 +47,13 @@
 #include <wtf/Vector.h>
 
 #if ENABLE(DOM_STORAGE)
-#include "SessionStorage.h"
+#include "StorageNamespace.h"
 #endif
 
 namespace WebCore {
 
 using namespace HTMLNames;
 using namespace std;
-
-class PageGroupLoadDeferrer : Noncopyable {
-public:
-    PageGroupLoadDeferrer(Page*, bool deferSelf);
-    ~PageGroupLoadDeferrer();
-private:
-    Vector<RefPtr<Frame>, 16> m_deferredFrames;
-};
 
 Chrome::Chrome(Page* page, ChromeClient* client)
     : m_page(page)
@@ -94,9 +87,9 @@ IntRect Chrome::windowToScreen(const IntRect& rect) const
     return m_client->windowToScreen(rect);
 }
 
-PlatformWidget Chrome::platformWindow() const
+PlatformPageClient Chrome::platformPageClient() const
 {
-    return m_client->platformWindow();
+    return m_client->platformPageClient();
 }
 
 void Chrome::contentsSizeChanged(Frame* frame, const IntSize& size) const
@@ -107,6 +100,11 @@ void Chrome::contentsSizeChanged(Frame* frame, const IntSize& size) const
 void Chrome::scrollRectIntoView(const IntRect& rect, const ScrollView* scrollView) const
 {
     m_client->scrollRectIntoView(rect, scrollView);
+}
+
+void Chrome::scrollbarsModeDidChange() const
+{
+    m_client->scrollbarsModeDidChange();
 }
 
 void Chrome::setWindowRect(const FloatRect& rect) const
@@ -123,15 +121,15 @@ FloatRect Chrome::pageRect() const
 {
     return m_client->pageRect();
 }
-        
+
 float Chrome::scaleFactor()
 {
     return m_client->scaleFactor();
 }
-    
-void Chrome::focus(bool userGesture) const
+
+void Chrome::focus() const
 {
-    m_client->focus(userGesture);
+    m_client->focus();
 }
 
 void Chrome::unfocus() const
@@ -148,17 +146,23 @@ void Chrome::takeFocus(FocusDirection direction) const
 {
     m_client->takeFocus(direction);
 }
-    
-Page* Chrome::createWindow(Frame* frame, const FrameLoadRequest& request, const WindowFeatures& features, const bool userGesture) const
+
+void Chrome::focusedNodeChanged(Node* node) const
 {
-    Page* newPage = m_client->createWindow(frame, request, features, userGesture);
+    m_client->focusedNodeChanged(node);
+}
+
+Page* Chrome::createWindow(Frame* frame, const FrameLoadRequest& request, const WindowFeatures& features) const
+{
+    Page* newPage = m_client->createWindow(frame, request, features);
+
 #if ENABLE(DOM_STORAGE)
-    
     if (newPage) {
-        if (SessionStorage* oldSessionStorage = m_page->sessionStorage(false))
-                newPage->setSessionStorage(oldSessionStorage->copy(newPage));
+        if (StorageNamespace* oldSessionStorage = m_page->sessionStorage(false))
+            newPage->setSessionStorage(oldSessionStorage->copy());
     }
 #endif
+
     return newPage;
 }
 
@@ -241,7 +245,7 @@ bool Chrome::canRunBeforeUnloadConfirmPanel()
 
 bool Chrome::runBeforeUnloadConfirmPanel(const String& message, Frame* frame)
 {
-    // Defer loads in case the client method runs a new event loop that would 
+    // Defer loads in case the client method runs a new event loop that would
     // otherwise cause the load to continue while we're in the middle of executing JavaScript.
     PageGroupLoadDeferrer deferrer(m_page, true);
 
@@ -255,7 +259,7 @@ void Chrome::closeWindowSoon()
 
 void Chrome::runJavaScriptAlert(Frame* frame, const String& message)
 {
-    // Defer loads in case the client method runs a new event loop that would 
+    // Defer loads in case the client method runs a new event loop that would
     // otherwise cause the load to continue while we're in the middle of executing JavaScript.
     PageGroupLoadDeferrer deferrer(m_page, true);
 
@@ -265,7 +269,7 @@ void Chrome::runJavaScriptAlert(Frame* frame, const String& message)
 
 bool Chrome::runJavaScriptConfirm(Frame* frame, const String& message)
 {
-    // Defer loads in case the client method runs a new event loop that would 
+    // Defer loads in case the client method runs a new event loop that would
     // otherwise cause the load to continue while we're in the middle of executing JavaScript.
     PageGroupLoadDeferrer deferrer(m_page, true);
 
@@ -275,16 +279,16 @@ bool Chrome::runJavaScriptConfirm(Frame* frame, const String& message)
 
 bool Chrome::runJavaScriptPrompt(Frame* frame, const String& prompt, const String& defaultValue, String& result)
 {
-    // Defer loads in case the client method runs a new event loop that would 
+    // Defer loads in case the client method runs a new event loop that would
     // otherwise cause the load to continue while we're in the middle of executing JavaScript.
     PageGroupLoadDeferrer deferrer(m_page, true);
 
     ASSERT(frame);
     bool ok = m_client->runJavaScriptPrompt(frame, frame->displayStringModifiedByEncoding(prompt), frame->displayStringModifiedByEncoding(defaultValue), result);
-    
+
     if (ok)
         result = frame->displayStringModifiedByEncoding(result);
-    
+
     return ok;
 }
 
@@ -296,11 +300,21 @@ void Chrome::setStatusbarText(Frame* frame, const String& status)
 
 bool Chrome::shouldInterruptJavaScript()
 {
-    // Defer loads in case the client method runs a new event loop that would 
+    // Defer loads in case the client method runs a new event loop that would
     // otherwise cause the load to continue while we're in the middle of executing JavaScript.
     PageGroupLoadDeferrer deferrer(m_page, true);
 
     return m_client->shouldInterruptJavaScript();
+}
+
+void Chrome::registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title)
+{
+    m_client->registerProtocolHandler(scheme, baseURL, url, title);
+}
+
+void Chrome::registerContentHandler(const String& mimeType, const String& baseURL, const String& url, const String& title)
+{
+    m_client->registerContentHandler(mimeType,  baseURL, url,  title);
 }
 
 IntRect Chrome::windowResizerRect() const
@@ -317,12 +331,17 @@ void Chrome::mouseDidMoveOverElement(const HitTestResult& result, unsigned modif
     }
     m_client->mouseDidMoveOverElement(result, modifierFlags);
 
+#if ENABLE(INSPECTOR)
+    if (InspectorController* inspector = m_page->inspectorController())
+        inspector->mouseDidMoveOverElement(result, modifierFlags);
+#endif
 }
 
 void Chrome::setToolTip(const HitTestResult& result)
 {
     // First priority is a potential toolTip representing a spelling or grammar error
-    String toolTip = result.spellingToolTip();
+    TextDirection toolTipDirection;
+    String toolTip = result.spellingToolTip(toolTipDirection);
 
     // Next priority is a toolTip from a URL beneath the mouse (if preference is set to show those).
     if (toolTip.isEmpty() && m_page->settings()->showsURLsInToolTips()) {
@@ -331,20 +350,28 @@ void Chrome::setToolTip(const HitTestResult& result)
             if (node->hasTagName(inputTag)) {
                 HTMLInputElement* input = static_cast<HTMLInputElement*>(node);
                 if (input->inputType() == HTMLInputElement::SUBMIT)
-                    if (HTMLFormElement* form = input->form())
+                    if (HTMLFormElement* form = input->form()) {
                         toolTip = form->action();
+                        if (form->renderer())
+                            toolTipDirection = form->renderer()->style()->direction();
+                        else
+                            toolTipDirection = LTR;
+                    }
             }
         }
 
         // Get tooltip representing link's URL
-        if (toolTip.isEmpty())
+        if (toolTip.isEmpty()) {
             // FIXME: Need to pass this URL through userVisibleString once that's in WebCore
             toolTip = result.absoluteLinkURL().string();
+            // URL always display as LTR.
+            toolTipDirection = LTR;
+        }
     }
 
     // Next we'll consider a tooltip for element with "title" attribute
     if (toolTip.isEmpty())
-        toolTip = result.title();
+        toolTip = result.title(toolTipDirection);
 
     // Lastly, for <input type="file"> that allow multiple files, we'll consider a tooltip for the selected filenames
     if (toolTip.isEmpty()) {
@@ -362,13 +389,15 @@ void Chrome::setToolTip(const HitTestResult& result)
                                 names.append('\n');
                         }
                         toolTip = String::adopt(names);
+                        // filename always display as LTR.
+                        toolTipDirection = LTR;
                     }
                 }
             }
         }
     }
-    
-    m_client->setToolTip(toolTip);
+
+    m_client->setToolTip(toolTip, toolTipDirection);
 }
 
 void Chrome::print(Frame* frame)
@@ -376,30 +405,24 @@ void Chrome::print(Frame* frame)
     m_client->print(frame);
 }
 
-void Chrome::disableSuddenTermination()
+void Chrome::requestGeolocationPermissionForFrame(Frame* frame, Geolocation* geolocation)
 {
-    m_client->disableSuddenTermination();
+    m_client->requestGeolocationPermissionForFrame(frame, geolocation);
 }
 
-void Chrome::enableSuddenTermination()
-{
-    m_client->enableSuddenTermination();
-}
-
-bool Chrome::requestGeolocationPermissionForFrame(Frame* frame, Geolocation* geolocation)
-{
-    // Defer loads in case the client method runs a new event loop that would 
-    // otherwise cause the load to continue while we're in the middle of executing JavaScript.
-    PageGroupLoadDeferrer deferrer(m_page, true);
-        
-    ASSERT(frame);
-    return m_client->requestGeolocationPermissionForFrame(frame, geolocation);
-}
-    
 void Chrome::runOpenPanel(Frame* frame, PassRefPtr<FileChooser> fileChooser)
 {
     m_client->runOpenPanel(frame, fileChooser);
 }
+
+
+#if ENABLE(NOTIFICATIONS)
+NotificationPresenter* Chrome::notificationPresenter() const
+{
+    return m_client->notificationPresenter();
+}
+#endif
+
 // --------
 
 #if ENABLE(DASHBOARD_SUPPORT)
@@ -429,18 +452,10 @@ bool ChromeClient::shouldReplaceWithGeneratedFileForUpload(const String&, String
 String ChromeClient::generateReplacementFile(const String&)
 {
     ASSERT_NOT_REACHED();
-    return String(); 
+    return String();
 }
 
-void ChromeClient::disableSuddenTermination()
-{
-}
-
-void ChromeClient::enableSuddenTermination()
-{
-}
-
-bool ChromeClient::paintCustomScrollbar(GraphicsContext*, const FloatRect&, ScrollbarControlSize, 
+bool ChromeClient::paintCustomScrollbar(GraphicsContext*, const FloatRect&, ScrollbarControlSize,
                                         ScrollbarControlState, ScrollbarPart, bool,
                                         float, float, ScrollbarControlPartMask)
 {
@@ -450,50 +465,6 @@ bool ChromeClient::paintCustomScrollbar(GraphicsContext*, const FloatRect&, Scro
 bool ChromeClient::paintCustomScrollCorner(GraphicsContext*, const FloatRect&)
 {
     return false;
-}
-
-// --------
-
-PageGroupLoadDeferrer::PageGroupLoadDeferrer(Page* page, bool deferSelf)
-{
-    const HashSet<Page*>& pages = page->group().pages();
-
-    HashSet<Page*>::const_iterator end = pages.end();
-    for (HashSet<Page*>::const_iterator it = pages.begin(); it != end; ++it) {
-        Page* otherPage = *it;
-        if ((deferSelf || otherPage != page)) {
-            if (!otherPage->defersLoading())
-                m_deferredFrames.append(otherPage->mainFrame());
-
-#if !PLATFORM(MAC)
-            for (Frame* frame = otherPage->mainFrame(); frame; frame = frame->tree()->traverseNext()) {
-                if (Document* document = frame->document())
-                    document->suspendActiveDOMObjects();
-            }
-#endif
-        }
-    }
-
-    size_t count = m_deferredFrames.size();
-    for (size_t i = 0; i < count; ++i)
-        if (Page* page = m_deferredFrames[i]->page())
-            page->setDefersLoading(true);
-}
-
-PageGroupLoadDeferrer::~PageGroupLoadDeferrer()
-{
-    for (size_t i = 0; i < m_deferredFrames.size(); ++i) {
-        if (Page* page = m_deferredFrames[i]->page()) {
-            page->setDefersLoading(false);
-
-#if !PLATFORM(MAC)
-            for (Frame* frame = page->mainFrame(); frame; frame = frame->tree()->traverseNext()) {
-                if (Document* document = frame->document())
-                    document->resumeActiveDOMObjects();
-            }
-#endif
-        }
-    }
 }
 
 

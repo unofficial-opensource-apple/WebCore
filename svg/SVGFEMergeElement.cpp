@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2006 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -22,7 +20,7 @@
 
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEMergeElement.h"
 
 #include "SVGFEMergeNodeElement.h"
@@ -32,7 +30,6 @@ namespace WebCore {
 
 SVGFEMergeElement::SVGFEMergeElement(const QualifiedName& tagName, Document* doc)
     : SVGFilterPrimitiveStandardAttributes(tagName, doc)
-    , m_filterEffect(0)
 {
 }
 
@@ -40,26 +37,23 @@ SVGFEMergeElement::~SVGFEMergeElement()
 {
 }
 
-SVGFilterEffect* SVGFEMergeElement::filterEffect(SVGResourceFilter* filter) const
+bool SVGFEMergeElement::build(SVGResourceFilter* filterResource)
 {
-    ASSERT_NOT_REACHED();
-    return 0;
-}
-
-bool SVGFEMergeElement::build(FilterBuilder* builder)
-{
-    Vector<FilterEffect*> mergeInputs;
+    Vector<RefPtr<FilterEffect> > mergeInputs;
     for (Node* n = firstChild(); n != 0; n = n->nextSibling()) {
         if (n->hasTagName(SVGNames::feMergeNodeTag)) {
-            FilterEffect* mergeEffect = builder->getEffectById(static_cast<SVGFEMergeNodeElement*>(n)->in1());
+            FilterEffect* mergeEffect = filterResource->builder()->getEffectById(static_cast<SVGFEMergeNodeElement*>(n)->in1());
+            if (!mergeEffect)
+                return false;
             mergeInputs.append(mergeEffect);
         }
     }
 
-    if(mergeInputs.isEmpty())
+    if (mergeInputs.isEmpty())
         return false;
 
-    builder->add(result(), FEMerge::create(mergeInputs));
+    RefPtr<FilterEffect> effect = FEMerge::create(mergeInputs);
+    filterResource->addFilterEffect(this, effect.release());
 
     return true;
 }

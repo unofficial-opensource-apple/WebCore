@@ -27,19 +27,19 @@
 #import "SelectionController.h"
 
 #import "AXObjectCache.h"
-#import "Document.h"
 #import "Frame.h"
-#import "FrameView.h"
 #import "RenderView.h"
-#import "Selection.h"
 #import "WebCoreViewFactory.h"
-
 
 namespace WebCore {
 
 void SelectionController::notifyAccessibilityForSelectionChange()
 {
-}
+    Document* document = m_frame->document();
 
+    if (AXObjectCache::accessibilityEnabled() && m_selection.start().isNotNull() && m_selection.end().isNotNull())
+        document->axObjectCache()->postNotification(m_selection.start().node()->renderer(), AXObjectCache::AXSelectedTextChanged, false);
+
+}
 
 } // namespace WebCore

@@ -24,6 +24,7 @@
 
 #include "Document.h"
 #include "Frame.h"
+#include "JSSVGContextCache.h"
 #include "JSSVGPathSeg.h"
 #include "SVGDocumentExtensions.h"
 #include "SVGElement.h"
@@ -35,129 +36,135 @@ using namespace JSC;
 
 namespace WebCore {
 
-JSValuePtr JSSVGPathSegList::clear(ExecState* exec, const ArgList&)
+JSValue JSSVGPathSegList::clear(ExecState* exec, const ArgList&)
 {
     ExceptionCode ec = 0;
 
-    SVGPathSegList* imp = static_cast<SVGPathSegList*>(impl());
-    imp->clear(ec);
+    SVGPathSegList* list = impl();
+    list->clear(ec);
 
     setDOMException(exec, ec);
 
-    m_context->svgAttributeChanged(imp->associatedAttributeName());
+    JSSVGContextCache::propagateSVGDOMChange(this, list->associatedAttributeName());
     return jsUndefined();
 }
 
-JSValuePtr JSSVGPathSegList::initialize(ExecState* exec, const ArgList& args)
+JSValue JSSVGPathSegList::initialize(ExecState* exec, const ArgList& args)
 {
     ExceptionCode ec = 0;
-    SVGPathSeg* newItem = toSVGPathSeg(args.at(exec, 0));
+    SVGPathSeg* newItem = toSVGPathSeg(args.at(0));
 
-    SVGPathSegList* imp = static_cast<SVGPathSegList*>(impl());
+    SVGPathSegList* list = impl();
 
-    SVGPathSeg* obj = WTF::getPtr(imp->initialize(newItem, ec));
+    SVGPathSeg* obj = WTF::getPtr(list->initialize(newItem, ec));
+    SVGElement* context = JSSVGContextCache::svgContextForDOMObject(this);
 
-    JSC::JSValuePtr result = toJS(exec, obj, m_context.get());
+    JSValue result = toJS(exec, globalObject(), obj, context);
     setDOMException(exec, ec);
 
-    m_context->svgAttributeChanged(imp->associatedAttributeName());    
+    JSSVGContextCache::propagateSVGDOMChange(this, list->associatedAttributeName());
     return result;
 }
 
-JSValuePtr JSSVGPathSegList::getItem(ExecState* exec, const ArgList& args)
+JSValue JSSVGPathSegList::getItem(ExecState* exec, const ArgList& args)
 {
     ExceptionCode ec = 0;
 
     bool indexOk;
-    unsigned index = args.at(exec, 0).toInt32(exec, indexOk);
+    unsigned index = args.at(0).toInt32(exec, indexOk);
     if (!indexOk) {
         setDOMException(exec, TYPE_MISMATCH_ERR);
         return jsUndefined();
     }
 
-    SVGPathSegList* imp = static_cast<SVGPathSegList*>(impl());
-    SVGPathSeg* obj = WTF::getPtr(imp->getItem(index, ec));
+    SVGPathSegList* list = impl();
+    SVGPathSeg* obj = WTF::getPtr(list->getItem(index, ec));
+    SVGElement* context = JSSVGContextCache::svgContextForDOMObject(this);
 
-    JSC::JSValuePtr result = toJS(exec, obj, m_context.get());
+    JSValue result = toJS(exec, globalObject(), obj, context);
     setDOMException(exec, ec);
     return result;
 }
 
-JSValuePtr JSSVGPathSegList::insertItemBefore(ExecState* exec, const ArgList& args)
+JSValue JSSVGPathSegList::insertItemBefore(ExecState* exec, const ArgList& args)
 {
     ExceptionCode ec = 0;
-    SVGPathSeg* newItem = toSVGPathSeg(args.at(exec, 0));
+    SVGPathSeg* newItem = toSVGPathSeg(args.at(0));
 
     bool indexOk;
-    unsigned index = args.at(exec, 1).toInt32(exec, indexOk);
+    unsigned index = args.at(1).toInt32(exec, indexOk);
     if (!indexOk) {
         setDOMException(exec, TYPE_MISMATCH_ERR);
         return jsUndefined();
     }
 
-    SVGPathSegList* imp = static_cast<SVGPathSegList*>(impl());
+    SVGPathSegList* list = impl();
+    SVGElement* context = JSSVGContextCache::svgContextForDOMObject(this);
 
-    JSC::JSValuePtr result = toJS(exec, WTF::getPtr(imp->insertItemBefore(newItem, index, ec)), m_context.get());
+    JSValue result = toJS(exec, globalObject(), WTF::getPtr(list->insertItemBefore(newItem, index, ec)), context);
     setDOMException(exec, ec);
 
-    m_context->svgAttributeChanged(imp->associatedAttributeName());    
+    JSSVGContextCache::propagateSVGDOMChange(this, list->associatedAttributeName());
     return result;
 }
 
-JSValuePtr JSSVGPathSegList::replaceItem(ExecState* exec, const ArgList& args)
+JSValue JSSVGPathSegList::replaceItem(ExecState* exec, const ArgList& args)
 {
     ExceptionCode ec = 0;
-    SVGPathSeg* newItem = toSVGPathSeg(args.at(exec, 0));
+    SVGPathSeg* newItem = toSVGPathSeg(args.at(0));
     
     bool indexOk;
-    unsigned index = args.at(exec, 1).toInt32(exec, indexOk);
+    unsigned index = args.at(1).toInt32(exec, indexOk);
     if (!indexOk) {
         setDOMException(exec, TYPE_MISMATCH_ERR);
         return jsUndefined();
     }
 
-    SVGPathSegList* imp = static_cast<SVGPathSegList*>(impl());
+    SVGPathSegList* list = impl();
+    SVGElement* context = JSSVGContextCache::svgContextForDOMObject(this);
 
-    JSC::JSValuePtr result = toJS(exec, WTF::getPtr(imp->replaceItem(newItem, index, ec)), m_context.get());
+    JSValue result = toJS(exec, globalObject(), WTF::getPtr(list->replaceItem(newItem, index, ec)), context);
     setDOMException(exec, ec);
 
-    m_context->svgAttributeChanged(imp->associatedAttributeName());    
+    JSSVGContextCache::propagateSVGDOMChange(this, list->associatedAttributeName());
     return result;
 }
 
-JSValuePtr JSSVGPathSegList::removeItem(ExecState* exec, const ArgList& args)
+JSValue JSSVGPathSegList::removeItem(ExecState* exec, const ArgList& args)
 {
     ExceptionCode ec = 0;
     
     bool indexOk;
-    unsigned index = args.at(exec, 0).toInt32(exec, indexOk);
+    unsigned index = args.at(0).toInt32(exec, indexOk);
     if (!indexOk) {
         setDOMException(exec, TYPE_MISMATCH_ERR);
         return jsUndefined();
     }
 
-    SVGPathSegList* imp = static_cast<SVGPathSegList*>(impl());
+    SVGPathSegList* list = impl();
 
-    RefPtr<SVGPathSeg> obj(imp->removeItem(index, ec));
+    RefPtr<SVGPathSeg> obj(list->removeItem(index, ec));
+    SVGElement* context = JSSVGContextCache::svgContextForDOMObject(this);
 
-    JSC::JSValuePtr result = toJS(exec, obj.get(), m_context.get());
+    JSValue result = toJS(exec, globalObject(), obj.get(), context);
     setDOMException(exec, ec);
 
-    m_context->svgAttributeChanged(imp->associatedAttributeName());    
+    JSSVGContextCache::propagateSVGDOMChange(this, list->associatedAttributeName());
     return result;
 }
 
-JSValuePtr JSSVGPathSegList::appendItem(ExecState* exec, const ArgList& args)
+JSValue JSSVGPathSegList::appendItem(ExecState* exec, const ArgList& args)
 {
     ExceptionCode ec = 0;
-    SVGPathSeg* newItem = toSVGPathSeg(args.at(exec, 0));
+    SVGPathSeg* newItem = toSVGPathSeg(args.at(0));
 
-    SVGPathSegList* imp = static_cast<SVGPathSegList*>(impl());
+    SVGPathSegList* list = impl();
+    SVGElement* context = JSSVGContextCache::svgContextForDOMObject(this);
 
-    JSC::JSValuePtr result = toJS(exec, WTF::getPtr(imp->appendItem(newItem, ec)), m_context.get());
+    JSValue result = toJS(exec, globalObject(), WTF::getPtr(list->appendItem(newItem, ec)), context);
     setDOMException(exec, ec);
 
-    m_context->svgAttributeChanged(imp->associatedAttributeName());    
+    JSSVGContextCache::propagateSVGDOMChange(this, list->associatedAttributeName());
     return result;
 }
 

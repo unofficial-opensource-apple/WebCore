@@ -41,32 +41,43 @@ namespace WebCore {
     class ResourceRequest : public ResourceRequestBase {
     public:
         ResourceRequest(const String& url) 
-            : ResourceRequestBase(KURL(url), UseProtocolCachePolicy)
+            : ResourceRequestBase(KURL(ParsedURLString, url), UseProtocolCachePolicy)
+            , m_mainResourceRequest(false)
         {
         }
 
         ResourceRequest(const KURL& url) 
             : ResourceRequestBase(url, UseProtocolCachePolicy)
+            , m_mainResourceRequest(false)
         {
         }
 
         ResourceRequest(const KURL& url, const String& referrer, ResourceRequestCachePolicy policy = UseProtocolCachePolicy) 
             : ResourceRequestBase(url, policy)
+            , m_mainResourceRequest(false)
         {
             setHTTPReferrer(referrer);
         }
         
         ResourceRequest()
             : ResourceRequestBase(KURL(), UseProtocolCachePolicy)
+            , m_mainResourceRequest(false)
         {
         }
         
         ResourceRequest(NSURLRequest* nsRequest)
             : ResourceRequestBase()
+            , m_mainResourceRequest(false)
             , m_nsRequest(nsRequest) { }
         
         void applyWebArchiveHackForMail();
         NSURLRequest* nsURLRequest() const;
+        
+        void setMainResourceRequest(bool isMainResourceRequest) {m_mainResourceRequest = isMainResourceRequest;}
+        bool isMainResourceRequest() const {return m_mainResourceRequest;}
+        
+    private:
+        bool m_mainResourceRequest;
 
     private:
         friend class ResourceRequestBase;

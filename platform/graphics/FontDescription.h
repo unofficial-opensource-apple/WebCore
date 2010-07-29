@@ -27,7 +27,9 @@
 
 #include "FontFamily.h"
 #include "FontRenderingMode.h"
+#include "FontSmoothingMode.h"
 #include "FontTraitsMask.h"
+#include "TextRenderingMode.h"
 
 namespace WebCore {
 
@@ -61,6 +63,8 @@ public:
         , m_usePrinterFont(false)
         , m_renderingMode(NormalRenderingMode)
         , m_keywordSize(0)
+        , m_fontSmoothing(AutoSmoothing)
+        , m_textRendering(AutoTextRendering)
     {
     }
 
@@ -80,8 +84,12 @@ public:
     FontWeight bolderWeight() const;
     GenericFamilyType genericFamily() const { return static_cast<GenericFamilyType>(m_genericFamily); }
     bool usePrinterFont() const { return m_usePrinterFont; }
+    // only use fixed default size when there is only one font family, and that family is "monospace"
+    bool useFixedDefaultSize() const { return genericFamily() == MonospaceFamily && !family().next() && family().family() == "-webkit-monospace"; }
     FontRenderingMode renderingMode() const { return static_cast<FontRenderingMode>(m_renderingMode); }
-    int keywordSize() const { return m_keywordSize; }
+    unsigned keywordSize() const { return m_keywordSize; }
+    FontSmoothingMode fontSmoothing() const { return static_cast<FontSmoothingMode>(m_fontSmoothing); }
+    TextRenderingMode textRenderingMode() const { return static_cast<TextRenderingMode>(m_textRendering); }
 
     FontTraitsMask traitsMask() const;
 
@@ -95,7 +103,9 @@ public:
     void setGenericFamily(GenericFamilyType genericFamily) { m_genericFamily = genericFamily; }
     void setUsePrinterFont(bool p) { m_usePrinterFont = p; }
     void setRenderingMode(FontRenderingMode mode) { m_renderingMode = mode; }
-    void setKeywordSize(int s) { m_keywordSize = s; }
+    void setKeywordSize(unsigned s) { m_keywordSize = s; }
+    void setFontSmoothing(FontSmoothingMode smoothing) { m_fontSmoothing = smoothing; }
+    void setTextRenderingMode(TextRenderingMode rendering) { m_textRendering = rendering; }
 
     bool equalForTextAutoSizing (const FontDescription& other) const {
         return m_familyList == other.m_familyList
@@ -123,9 +133,12 @@ private:
 
     unsigned m_renderingMode : 1;  // Used to switch between CG and GDI text on Windows.
 
-    int m_keywordSize : 4; // We cache whether or not a font is currently represented by a CSS keyword (e.g., medium).  If so,
+    unsigned m_keywordSize : 4; // We cache whether or not a font is currently represented by a CSS keyword (e.g., medium).  If so,
                            // then we can accurately translate across different generic families to adjust for different preference settings
                            // (e.g., 13px monospace vs. 16px everything else).  Sizes are 1-8 (like the HTML size values for <font>).
+
+    unsigned m_fontSmoothing : 2; // FontSmoothingMode
+    unsigned m_textRendering : 2; // TextRenderingMode
 };
 
 inline bool FontDescription::operator==(const FontDescription& other) const
@@ -140,7 +153,9 @@ inline bool FontDescription::operator==(const FontDescription& other) const
         && m_genericFamily == other.m_genericFamily
         && m_usePrinterFont == other.m_usePrinterFont
         && m_renderingMode == other.m_renderingMode
-        && m_keywordSize == other.m_keywordSize;
+        && m_keywordSize == other.m_keywordSize
+        && m_fontSmoothing == other.m_fontSmoothing
+        && m_textRendering == other.m_textRendering;
 }
 
 }

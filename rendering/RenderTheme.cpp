@@ -1,7 +1,7 @@
 /**
  * This file is part of the theme implementation for form controls in WebCore.
  *
- * Copyright (C) 2005, 2006, 2007, 2008 Apple Computer, Inc.
+ * Copyright (C) 2005, 2006, 2007, 2008, 2009 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -30,6 +30,7 @@
 #include "GraphicsContext.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
+#include "MediaControlElements.h"
 #include "Page.h"
 #include "RenderStyle.h"
 #include "RenderView.h"
@@ -43,6 +44,12 @@
 namespace WebCore {
 
 using namespace HTMLNames;
+
+static Color& customFocusRingColor()
+{
+    DEFINE_STATIC_LOCAL(Color, color, ());
+    return color;
+}
 
 RenderTheme::RenderTheme()
 #if USE(NEW_THEME)
@@ -64,7 +71,7 @@ void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, El
     else if (style->display() == COMPACT || style->display() == RUN_IN || style->display() == LIST_ITEM || style->display() == TABLE)
         style->setDisplay(BLOCK);
 
-    if (UAHasAppearance && theme()->isControlStyled(style, border, background, backgroundColor)) {
+    if (UAHasAppearance && isControlStyled(style, border, background, backgroundColor)) {
         if (part == MenulistPart) {
             style->setAppearance(MenulistButtonPart);
             part = MenulistButtonPart;
@@ -80,7 +87,10 @@ void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, El
     
 #if USE(NEW_THEME)
     switch (part) {
+        case ListButtonPart:
         case CheckboxPart:
+        case InnerSpinButtonPart:
+        case OuterSpinButtonPart:
         case RadioPart:
         case PushButtonPart:
         case SquareButtonPart:
@@ -166,9 +176,14 @@ void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, El
             return adjustRadioStyle(selector, style, e);
         case PushButtonPart:
         case SquareButtonPart:
+        case ListButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
             return adjustButtonStyle(selector, style, e);
+        case InnerSpinButtonPart:
+            return adjustInnerSpinButtonStyle(selector, style, e);
+        case OuterSpinButtonPart:
+            return adjustOuterSpinButtonStyle(selector, style, e);
 #endif
         case TextFieldPart:
             return adjustTextFieldStyle(selector, style, e);
@@ -179,6 +194,7 @@ void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, El
         case MenulistButtonPart:
             return adjustMenuListButtonStyle(selector, style, e);
         case MediaSliderPart:
+        case MediaVolumeSliderPart:
         case SliderHorizontalPart:
         case SliderVerticalPart:
             return adjustSliderTrackStyle(selector, style, e);
@@ -211,8 +227,11 @@ bool RenderTheme::paint(RenderObject* o, const RenderObject::PaintInfo& paintInf
         case RadioPart:
         case PushButtonPart:
         case SquareButtonPart:
+        case ListButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
+        case InnerSpinButtonPart:
+        case OuterSpinButtonPart:
             m_theme->paint(part, controlStatesForRenderer(o), const_cast<GraphicsContext*>(paintInfo.context), r, o->style()->effectiveZoom(), o->view()->frameView());
             return false;
         default:
@@ -229,9 +248,14 @@ bool RenderTheme::paint(RenderObject* o, const RenderObject::PaintInfo& paintInf
             return paintRadio(o, paintInfo, r);
         case PushButtonPart:
         case SquareButtonPart:
+        case ListButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
             return paintButton(o, paintInfo, r);
+        case InnerSpinButtonPart:
+            return paintInnerSpinButton(o, paintInfo, r);
+        case OuterSpinButtonPart:
+            return paintOuterSpinButton(o, paintInfo, r);
 #endif
         case MenulistPart:
             return paintMenuList(o, paintInfo, r);
@@ -254,18 +278,32 @@ bool RenderTheme::paint(RenderObject* o, const RenderObject::PaintInfo& paintInf
             return paintMediaSeekBackButton(o, paintInfo, r);
         case MediaSeekForwardButtonPart:
             return paintMediaSeekForwardButton(o, paintInfo, r);
+        case MediaRewindButtonPart:
+            return paintMediaRewindButton(o, paintInfo, r);
+        case MediaReturnToRealtimeButtonPart:
+            return paintMediaReturnToRealtimeButton(o, paintInfo, r);
+        case MediaToggleClosedCaptionsButtonPart:
+            return paintMediaToggleClosedCaptionsButton(o, paintInfo, r);
         case MediaSliderPart:
             return paintMediaSliderTrack(o, paintInfo, r);
         case MediaSliderThumbPart:
             if (o->parent()->isSlider())
                 return paintMediaSliderThumb(o, paintInfo, r);
             break;
+        case MediaVolumeSliderContainerPart:
+            return paintMediaVolumeSliderContainer(o, paintInfo, r);
+        case MediaVolumeSliderPart:
+            return paintMediaVolumeSliderTrack(o, paintInfo, r);
+        case MediaVolumeSliderThumbPart:
+            if (o->parent()->isSlider())
+                return paintMediaVolumeSliderThumb(o, paintInfo, r);
+            break;
         case MediaTimeRemainingPart:
             return paintMediaTimeRemaining(o, paintInfo, r);
         case MediaCurrentTimePart:
             return paintMediaCurrentTime(o, paintInfo, r);
-        case MediaTimelineContainerPart:
-            return paintMediaTimelineContainer(o, paintInfo, r);
+        case MediaControlsBackgroundPart:
+            return paintMediaControlsBackground(o, paintInfo, r);
         case MenulistButtonPart:
         case TextFieldPart:
         case TextAreaPart:
@@ -327,6 +365,25 @@ bool RenderTheme::hitTestMediaControlPart(RenderObject* o, const IntPoint& absPo
 
     FloatPoint localPoint = o->absoluteToLocal(absPoint, false, true);  // respect transforms
     return toRenderBox(o)->borderBoxRect().contains(roundedIntPoint(localPoint));
+}
+
+bool RenderTheme::shouldRenderMediaControlPart(ControlPart part, Element* e)
+{
+    HTMLMediaElement* mediaElement = static_cast<HTMLMediaElement*>(e);
+    switch (part) {
+    case MediaMuteButtonPart:
+        return mediaElement->hasAudio();
+    case MediaRewindButtonPart:
+        return mediaElement->movieLoadType() != MediaPlayer::LiveStream;
+    case MediaReturnToRealtimeButtonPart:
+        return mediaElement->movieLoadType() == MediaPlayer::LiveStream;
+    case MediaFullscreenButtonPart:
+        return mediaElement->supportsFullscreen();
+    case MediaToggleClosedCaptionsButtonPart:
+        return mediaElement->hasClosedCaptions();
+    default:
+        return true;
+    }
 }
 #endif
 
@@ -492,7 +549,7 @@ bool RenderTheme::supportsFocusRing(const RenderStyle* style) const
 
 bool RenderTheme::stateChanged(RenderObject* o, ControlState state) const
 {
-    // Default implementation assumes the controls dont respond to changes in :hover state
+    // Default implementation assumes the controls don't respond to changes in :hover state
     if (state == HoverState && !supportsHover(o->style()))
         return false;
 
@@ -531,7 +588,7 @@ ControlStates RenderTheme::controlStatesForRenderer(const RenderObject* o) const
 
 bool RenderTheme::isActive(const RenderObject* o) const
 {
-    Node* node = o->element();
+    Node* node = o->node();
     if (!node)
         return false;
 
@@ -548,28 +605,39 @@ bool RenderTheme::isActive(const RenderObject* o) const
 
 bool RenderTheme::isChecked(const RenderObject* o) const
 {
-    if (!o->element())
+    if (!o->node() || !o->node()->isElementNode())
         return false;
-    return o->element()->isChecked();
+
+    InputElement* inputElement = toInputElement(static_cast<Element*>(o->node()));
+    if (!inputElement)
+        return false;
+
+    return inputElement->isChecked();
 }
 
 bool RenderTheme::isIndeterminate(const RenderObject* o) const
 {
-    if (!o->element())
+    if (!o->node() || !o->node()->isElementNode())
         return false;
-    return o->element()->isIndeterminate();
+
+    InputElement* inputElement = toInputElement(static_cast<Element*>(o->node()));
+    if (!inputElement)
+        return false;
+
+    return inputElement->isIndeterminate();
 }
 
 bool RenderTheme::isEnabled(const RenderObject* o) const
 {
-    if (!o->element())
+    Node* node = o->node();
+    if (!node || !node->isElementNode())
         return true;
-    return o->element()->isEnabled();
+    return static_cast<Element*>(node)->isEnabledFormControl();
 }
 
 bool RenderTheme::isFocused(const RenderObject* o) const
 {
-    Node* node = o->element();
+    Node* node = o->node();
     if (!node)
         return false;
     Document* document = node->document();
@@ -579,27 +647,32 @@ bool RenderTheme::isFocused(const RenderObject* o) const
 
 bool RenderTheme::isPressed(const RenderObject* o) const
 {
-    if (!o->element())
+    if (!o->node())
         return false;
-    return o->element()->active();
+    return o->node()->active();
 }
 
 bool RenderTheme::isReadOnlyControl(const RenderObject* o) const
 {
-    if (!o->element())
+    Node* node = o->node();
+    if (!node || !node->isElementNode())
         return false;
-    return o->element()->isReadOnlyControl();
+    return static_cast<Element*>(node)->isReadOnlyFormControl();
 }
 
 bool RenderTheme::isHovered(const RenderObject* o) const
 {
-    if (!o->element())
+    if (!o->node())
         return false;
-    return o->element()->hovered();
+    return o->node()->hovered();
 }
 
 bool RenderTheme::isDefault(const RenderObject* o) const
 {
+    // A button should only have the default appearance if the page is active
+    if (!isActive(o))
+        return false;
+
     if (!o->document())
         return false;
 
@@ -653,6 +726,14 @@ void RenderTheme::adjustButtonStyle(CSSStyleSelector*, RenderStyle* style, Eleme
     setButtonSize(style);
 }
 
+void RenderTheme::adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+{
+}
+
+void RenderTheme::adjustOuterSpinButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+{
+}
+
 #endif
 
 void RenderTheme::adjustTextFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const
@@ -668,10 +749,6 @@ void RenderTheme::adjustMenuListStyle(CSSStyleSelector*, RenderStyle*, Element*)
 }
 
 void RenderTheme::adjustMenuListButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const
-{
-}
-
-void RenderTheme::adjustButtonInnerStyle(RenderStyle*) const
 {
 }
 
@@ -785,9 +862,24 @@ Color RenderTheme::systemColor(int cssValueId) const
     return Color();
 }
 
-Color RenderTheme::platformTextSearchHighlightColor() const
+Color RenderTheme::platformActiveTextSearchHighlightColor() const
 {
-    return Color(255, 255, 0);
+    return Color(255, 150, 50); // Orange.
+}
+
+Color RenderTheme::platformInactiveTextSearchHighlightColor() const
+{
+    return Color(255, 255, 0); // Yellow.
+}
+
+void RenderTheme::setCustomFocusRingColor(const Color& c)
+{
+    customFocusRingColor() = c;
+}
+
+Color RenderTheme::focusRingColor()
+{
+    return customFocusRingColor().isValid() ? customFocusRingColor() : defaultTheme()->platformFocusRingColor();
 }
 
 } // namespace WebCore

@@ -21,6 +21,7 @@
 #include "FrameTree.h"
 
 #include "Frame.h"
+#include "FrameView.h"
 #include "Page.h"
 #include "PageGroup.h"
 #include <stdarg.h>
@@ -82,10 +83,6 @@ void FrameTree::appendChild(PassRefPtr<Frame> child)
 void FrameTree::removeChild(Frame* child)
 {
     child->tree()->m_parent = 0;
-    child->setView(0);
-    if (child->ownerElement())
-        child->page()->decrementFrameCount();
-    child->pageDestroyed();
 
     // Slightly tricky way to prevent deleting the child until we are done with it, w/o
     // extra refs. These swaps leave the child in a circular list by itself. Clearing its
@@ -94,7 +91,7 @@ void FrameTree::removeChild(Frame* child)
     RefPtr<Frame>& newLocationForNext = m_firstChild == child ? m_firstChild : child->tree()->m_previousSibling->tree()->m_nextSibling;
     Frame*& newLocationForPrevious = m_lastChild == child ? m_lastChild : child->tree()->m_nextSibling->tree()->m_previousSibling;
     swap(newLocationForNext, child->tree()->m_nextSibling);
-    // For some inexplicable reason, the following line does not compile without the explicit std:: namepsace
+    // For some inexplicable reason, the following line does not compile without the explicit std:: namespace
     std::swap(newLocationForPrevious, child->tree()->m_previousSibling);
 
     child->tree()->m_previousSibling = 0;

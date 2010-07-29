@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, Google Inc. All rights reserved.
+ * Copyright (C) 2009 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -43,22 +43,32 @@ namespace WebCore {
     class ScriptExecutionContext;
     class ThreadableLoaderClient;
 
-    enum LoadCallbacks {
-        SendLoadCallbacks,
-        DoNotSendLoadCallbacks
+    enum StoredCredentials {
+        AllowStoredCredentials,
+        DoNotAllowStoredCredentials
     };
-
-    enum ContentSniff {
-        SniffContent,
-        DoNotSniffContent
+    
+    enum CrossOriginRequestPolicy {
+        DenyCrossOriginRequests,
+        UseAccessControl,
+        AllowCrossOriginRequests
+    };
+    
+    struct ThreadableLoaderOptions {
+        ThreadableLoaderOptions() : sendLoadCallbacks(false), sniffContent(false), allowCredentials(false), forcePreflight(false), crossOriginRequestPolicy(DenyCrossOriginRequests) { }
+        bool sendLoadCallbacks;
+        bool sniffContent;
+        bool allowCredentials;  // Whether HTTP credentials and cookies are sent with the request.
+        bool forcePreflight;  // If AccessControl is used, whether to force a preflight.
+        CrossOriginRequestPolicy crossOriginRequestPolicy;
     };
 
     // Useful for doing loader operations from any thread (not threadsafe, 
     // just able to run on threads other than the main thread).
-    class ThreadableLoader : Noncopyable {
+    class ThreadableLoader : public Noncopyable {
     public:
-        static PassRefPtr<ThreadableLoader> create(ScriptExecutionContext*, ThreadableLoaderClient*, const ResourceRequest&, LoadCallbacks, ContentSniff);
-        static unsigned long loadResourceSynchronously(ScriptExecutionContext*, const ResourceRequest&, ResourceError&, ResourceResponse&, Vector<char>& data);
+        static void loadResourceSynchronously(ScriptExecutionContext*, const ResourceRequest&, ThreadableLoaderClient&, const ThreadableLoaderOptions&);
+        static PassRefPtr<ThreadableLoader> create(ScriptExecutionContext*, ThreadableLoaderClient*, const ResourceRequest&, const ThreadableLoaderOptions&);
 
         virtual void cancel() = 0;
         void ref() { refThreadableLoader(); }

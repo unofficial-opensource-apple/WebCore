@@ -3,6 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
  * Copyright (C) 2003, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009 Rob Buis (rwlbuis@gmail.com)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -33,10 +34,13 @@
 #include "FrameLoaderClient.h"
 #include "FrameTree.h"
 #include "HTMLNames.h"
+#include "MappedAttribute.h"
 #include "MediaList.h"
 #include "MediaQueryEvaluator.h"
 #include "Page.h"
+#include "ScriptEventListener.h"
 #include "Settings.h"
+#include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
@@ -114,7 +118,7 @@ void HTMLLinkElement::parseMappedAttribute(MappedAttribute *attr)
         tokenizeRelAttribute(attr->value(), m_isStyleSheet, m_alternate, m_isIcon, m_isDNSPrefetch);
         process();
     } else if (attr->name() == hrefAttr) {
-        m_url = document()->completeURL(parseURL(attr->value()));
+        m_url = document()->completeURL(deprecatedParseURL(attr->value()));
         process();
     } else if (attr->name() == typeAttr) {
         m_type = attr->value();
@@ -124,7 +128,9 @@ void HTMLLinkElement::parseMappedAttribute(MappedAttribute *attr)
         process();
     } else if (attr->name() == disabledAttr) {
         setDisabledState(!attr->isNull());
-    } else {
+    } else if (attr->name() == onbeforeloadAttr)
+        setAttributeEventListener(eventNames().beforeloadEvent, createAttributeEventListener(this, attr));
+    else {
         if (attr->name() == titleAttr && m_sheet)
             m_sheet->setTitle(attr->value());
         HTMLElement::parseMappedAttribute(attr);
@@ -179,40 +185,43 @@ void HTMLLinkElement::process()
     if (m_isDNSPrefetch && m_url.isValid() && !m_url.isEmpty())
         prefetchDNS(m_url.host());
 
+    bool acceptIfTypeContainsTextCSS = document()->page() && document()->page()->settings() && document()->page()->settings()->treatsAnyTextCSSLinkAsStylesheet();
+
     // Stylesheet
     // This was buggy and would incorrectly match <link rel="alternate">, which has a different specified meaning. -dwh
-    if (m_disabledState != 2 && m_isStyleSheet && document()->frame() && m_url.isValid()) {
-        // no need to load style sheets which aren't for the screen output
-        // ### there may be in some situations e.g. for an editor or script to manipulate
+    if (m_disabledState != 2 && (m_isStyleSheet || (acceptIfTypeContainsTextCSS && type.contains("text/css"))) && document()->frame() && m_url.isValid()) {
         // also, don't load style sheets for standalone documents
-        MediaQueryEvaluator allEval(true);
-        MediaQueryEvaluator screenEval("screen", true);
-        MediaQueryEvaluator printEval("print", true);
-        RefPtr<MediaList> media = MediaList::createAllowingDescriptionSyntax(m_media);
-        if (allEval.eval(media.get()) || screenEval.eval(media.get()) || printEval.eval(media.get())) {
+        
+        String charset = getAttribute(charsetAttr);
+        if (charset.isEmpty() && document()->frame())
+            charset = document()->frame()->loader()->encoding();
 
-            // Add ourselves as a pending sheet, but only if we aren't an alternate 
-            // stylesheet.  Alternate stylesheets don't hold up render tree construction.
-            if (!isAlternate())
-                document()->addPendingSheet();
-
-            String chset = getAttribute(charsetAttr);
-            if (chset.isEmpty() && document()->frame())
-                chset = document()->frame()->loader()->encoding();
-            
-            if (m_cachedSheet) {
-                if (m_loading)
-                    document()->removePendingSheet();
-                m_cachedSheet->removeClient(this);
-            }
-            m_loading = true;
-            m_cachedSheet = document()->docLoader()->requestCSSStyleSheet(m_url.string(), chset);
-            if (m_cachedSheet)
-                m_cachedSheet->addClient(this);
-            else if (!isAlternate()) { // request may have been denied if stylesheet is local and document is remote.
-                m_loading = false;
+        if (m_cachedSheet) {
+            if (m_loading)
                 document()->removePendingSheet();
-            }
+            m_cachedSheet->removeClient(this);
+            m_cachedSheet = 0;
+        }
+
+        if (!dispatchBeforeLoadEvent(m_url))
+            return;
+        
+        m_loading = true;
+        
+        // Add ourselves as a pending sheet, but only if we aren't an alternate 
+        // stylesheet.  Alternate stylesheets don't hold up render tree construction.
+        if (!isAlternate())
+            document()->addPendingSheet();
+
+        m_cachedSheet = document()->docLoader()->requestCSSStyleSheet(m_url, charset);
+        
+        if (m_cachedSheet)
+            m_cachedSheet->addClient(this);
+        else {
+            // The request may have been denied if (for example) the stylesheet is local and the document is remote.
+            m_loading = false;
+            if (!isAlternate())
+                document()->removePendingSheet();
         }
     } else if (m_sheet) {
         // we no longer contain a stylesheet, e.g. perhaps rel or type was changed
@@ -232,11 +241,11 @@ void HTMLLinkElement::removedFromDocument()
 {
     HTMLElement::removedFromDocument();
 
+    document()->removeStyleSheetCandidateNode(this);
+
     // FIXME: It's terrible to do a synchronous update of the style selector just because a <style> or <link> element got removed.
-    if (document()->renderer()) {
-        document()->removeStyleSheetCandidateNode(this);
+    if (document()->renderer())
         document()->updateStyleSelector();
-    }
 }
 
 void HTMLLinkElement::finishParsingChildren()
@@ -245,19 +254,57 @@ void HTMLLinkElement::finishParsingChildren()
     HTMLElement::finishParsingChildren();
 }
 
-void HTMLLinkElement::setCSSStyleSheet(const String& url, const String& charset, const CachedCSSStyleSheet* sheet)
+void HTMLLinkElement::setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet* sheet)
 {
-    m_sheet = CSSStyleSheet::create(this, url, charset);
+    m_sheet = CSSStyleSheet::create(this, href, baseURL, charset);
 
     bool strictParsing = !document()->inCompatMode();
     bool enforceMIMEType = strictParsing;
+    bool crossOriginCSS = false;
+    bool validMIMEType = false;
+    bool needsSiteSpecificQuirks = document()->page() && document()->page()->settings()->needsSiteSpecificQuirks();
 
     // Check to see if we should enforce the MIME type of the CSS resource in strict mode.
     // Running in iWeb 2 is one example of where we don't want to - <rdar://problem/6099748>
     if (enforceMIMEType && document()->page() && !document()->page()->settings()->enforceCSSMIMETypeInStrictMode())
         enforceMIMEType = false;
 
-    m_sheet->parseString(sheet->sheetText(enforceMIMEType), strictParsing);
+#if defined(BUILDING_ON_TIGER) || defined(BUILDING_ON_LEOPARD)
+    if (enforceMIMEType && needsSiteSpecificQuirks) {
+        // Covers both http and https, with or without "www."
+        if (baseURL.string().contains("mcafee.com/japan/", false))
+            enforceMIMEType = false;
+    }
+#endif
+
+    String sheetText = sheet->sheetText(enforceMIMEType, &validMIMEType);
+    m_sheet->parseString(sheetText, strictParsing);
+
+    // If we're loading a stylesheet cross-origin, and the MIME type is not
+    // standard, require the CSS to at least start with a syntactically
+    // valid CSS rule.
+    // This prevents an attacker playing games by injecting CSS strings into
+    // HTML, XML, JSON, etc. etc.
+    if (!document()->securityOrigin()->canRequest(baseURL))
+        crossOriginCSS = true;
+
+    if (crossOriginCSS && !validMIMEType && !m_sheet->hasSyntacticallyValidCSSHeader())
+        m_sheet = CSSStyleSheet::create(this, href, baseURL, charset);
+
+    if (strictParsing && needsSiteSpecificQuirks) {
+        // Work around <https://bugs.webkit.org/show_bug.cgi?id=28350>.
+        DEFINE_STATIC_LOCAL(const String, slashKHTMLFixesDotCss, ("/KHTMLFixes.css"));
+        DEFINE_STATIC_LOCAL(const String, mediaWikiKHTMLFixesStyleSheet, ("/* KHTML fix stylesheet */\n/* work around the horizontal scrollbars */\n#column-content { margin-left: 0; }\n\n"));
+        // There are two variants of KHTMLFixes.css. One is equal to mediaWikiKHTMLFixesStyleSheet,
+        // while the other lacks the second trailing newline.
+        if (baseURL.string().endsWith(slashKHTMLFixesDotCss) && !sheetText.isNull() && mediaWikiKHTMLFixesStyleSheet.startsWith(sheetText)
+                && sheetText.length() >= mediaWikiKHTMLFixesStyleSheet.length() - 1) {
+            ASSERT(m_sheet->length() == 1);
+            ExceptionCode ec;
+            m_sheet->deleteRule(0, ec);
+        }
+    }
+
     m_sheet->setTitle(title());
 
     RefPtr<MediaList> media = MediaList::createAllowingDescriptionSyntax(m_media);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2010 Apple Inc. All rights reserved.
  * Copyright (C) 2007 Alp Toker <alp@atoker.com>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,6 +28,8 @@
 #include "Gradient.h"
 
 #include "Color.h"
+#include "FloatRect.h"
+#include <wtf/UnusedParam.h>
 
 namespace WebCore {
 
@@ -39,6 +41,7 @@ Gradient::Gradient(const FloatPoint& p0, const FloatPoint& p1)
     , m_r1(0)
     , m_stopsSorted(false)
     , m_lastStop(0)
+    , m_spreadMethod(SpreadMethodPad)
 {
     platformInit();
 }
@@ -51,6 +54,7 @@ Gradient::Gradient(const FloatPoint& p0, float r0, const FloatPoint& p1, float r
     , m_r1(r1)
     , m_stopsSorted(false)
     , m_lastStop(0)
+    , m_spreadMethod(SpreadMethodPad)
 {
     platformInit();
 }
@@ -58,6 +62,28 @@ Gradient::Gradient(const FloatPoint& p0, float r0, const FloatPoint& p1, float r
 Gradient::~Gradient()
 {
     platformDestroy();
+}
+
+void Gradient::adjustParametersForTiledDrawing(IntSize& size, FloatRect& srcRect)
+{
+    if (m_radial)
+        return;
+
+    if (srcRect.isEmpty())
+        return;
+
+    if (m_p0.x() == m_p1.x()) {
+        size.setWidth(1);
+        srcRect.setWidth(1);
+        srcRect.setX(0);
+        return;
+    }
+    if (m_p0.y() != m_p1.y())
+        return;
+
+    size.setHeight(1);
+    srcRect.setHeight(1);
+    srcRect.setY(0);
 }
 
 void Gradient::addColorStop(float value, const Color& color)
@@ -145,5 +171,25 @@ int Gradient::findStop(float value) const
     m_lastStop = i - 1;
     return m_lastStop;
 }
+
+void Gradient::setSpreadMethod(GradientSpreadMethod spreadMethod)
+{
+    // FIXME: Should it become necessary, allow calls to this method after m_gradient has been set.
+    ASSERT(m_gradient == 0);
+    m_spreadMethod = spreadMethod;
+}
+
+void Gradient::setGradientSpaceTransform(const TransformationMatrix& gradientSpaceTransformation)
+{ 
+    m_gradientSpaceTransformation = gradientSpaceTransformation;
+    setPlatformGradientSpaceTransform(gradientSpaceTransformation);
+}
+
+#if !PLATFORM(SKIA)
+void Gradient::setPlatformGradientSpaceTransform(const TransformationMatrix&)
+{
+}
+#endif
+
 
 } //namespace

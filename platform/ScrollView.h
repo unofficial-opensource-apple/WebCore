@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2004, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2009 Holger Hans Peter Freyther
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,8 +37,14 @@
 
 #ifdef __OBJC__
 @class WAKScrollView;
+@class WAKView;
 #else
 class WAKScrollView;
+class WAKView;
+#endif
+
+#ifndef NSScrollView
+#define NSScrollView WAKScrollView
 #endif
 
 #ifndef NSView
@@ -56,9 +63,6 @@ typedef struct _GtkAdjustment GtkAdjustment;
 class wxScrollWinEvent;
 #endif
 
-// DANGER WILL ROBINSON! THIS FILE IS UNDERGOING HEAVY REFACTORING.
-// Everything is changing!
-// Port authors should wait until this refactoring is complete before attempting to implement this interface.
 namespace WebCore {
 
 class HostWindow;
@@ -67,7 +71,6 @@ class Scrollbar;
 
 class ScrollView : public Widget, public ScrollbarClient {
 public:
-    ScrollView();
     ~ScrollView();
 
     // ScrollbarClient method.  FrameView overrides the other two.
@@ -81,8 +84,8 @@ public:
     virtual IntRect windowClipRect(bool clipToContents = true) const = 0;
 
     // Methods for child manipulation and inspection.
-    const HashSet<Widget*>* children() const { return &m_children; }
-    void addChild(Widget*);
+    const HashSet<RefPtr<Widget> >* children() const { return &m_children; }
+    void addChild(PassRefPtr<Widget>);
     void removeChild(Widget*);
     
     // If the scroll view does not use a native widget, then it will have cross-platform Scrollbars.  These methods
@@ -102,8 +105,15 @@ public:
     void scrollbarModes(ScrollbarMode& horizontalMode, ScrollbarMode& verticalMode) const;
     ScrollbarMode horizontalScrollbarMode() const { ScrollbarMode horizontal, vertical; scrollbarModes(horizontal, vertical); return horizontal; }
     ScrollbarMode verticalScrollbarMode() const { ScrollbarMode horizontal, vertical; scrollbarModes(horizontal, vertical); return vertical; }
-    virtual void setCanHaveScrollbars(bool flag);
+    virtual void setCanHaveScrollbars(bool);
     bool canHaveScrollbars() const { return horizontalScrollbarMode() != ScrollbarAlwaysOff || verticalScrollbarMode() != ScrollbarAlwaysOff; }
+
+    virtual bool avoidScrollbarCreation() { return false; }
+
+    // By default you only receive paint events for the area that is visible. In the case of using a
+    // tiled backing store, this method can be set, so that the view paints the entire contents.
+    bool paintsEntireContents() const { return m_paintsEntireContents; }
+    void setPaintsEntireContents(bool);
 
     // Overridden by FrameView to create custom CSS scrollbars if applicable.
     virtual PassRefPtr<Scrollbar> createScrollbar(ScrollbarOrientation);
@@ -123,7 +133,8 @@ public:
     IntRect visibleContentRect(bool includeScrollbars = false) const;
     int visibleWidth() const { return visibleContentRect().width(); }
     int visibleHeight() const { return visibleContentRect().height(); }
-    IntRect actualVisualContentRect() const;
+    IntRect actualVisibleContentRect() const;
+    void setActualScrollPosition(const IntPoint&);
 
     // Methods for getting/setting the size webkit should use to layout the contents.  By default this is the same as the visible
     // content size.  Explicitly setting a layout size value will cause webkit to layout the contents using this size instead.
@@ -136,7 +147,7 @@ public:
     
     // Methods for getting/setting the size of the document contained inside the ScrollView (as an IntSize or as individual width and height
     // values).
-    IntSize contentsSize() const;
+    IntSize contentsSize() const; // Always at least as big as the visibleWidth()/visibleHeight().
     int contentsWidth() const { return contentsSize().width(); }
     int contentsHeight() const { return contentsSize().height(); }
     virtual void setContentsSize(const IntSize&);
@@ -194,7 +205,7 @@ public:
     virtual void setFrameRect(const IntRect&);
 
     // For platforms that need to hit test scrollbars from within the engine's event handlers (like Win32).
-    Scrollbar* scrollbarUnderMouse(const PlatformMouseEvent& mouseEvent);
+    Scrollbar* scrollbarAtPoint(const IntPoint& windowPoint);
 
     // This method exists for scrollviews that need to handle wheel events manually.
     // On Mac the underlying NSScrollView just does the scrolling, but on other platforms
@@ -221,29 +232,44 @@ public:
 
     // Widget override.  Handles painting of the contents of the view as well as the scrollbars.
     virtual void paint(GraphicsContext*, const IntRect&);
+    void paintScrollbars(GraphicsContext*, const IntRect&);
 
     // Widget overrides to ensure that our children's visibility status is kept up to date when we get shown and hidden.
     virtual void show();
     virtual void hide();
     virtual void setParentVisible(bool);
     
-    // Pan scrolling methods.
+    // Pan scrolling.
+    static const int noPanScrollRadius = 15;
     void addPanScrollIcon(const IntPoint&);
     void removePanScrollIcon();
+    void paintPanScrollIcon(GraphicsContext*);
 
+    virtual bool isPointInScrollbarCorner(const IntPoint&);
     virtual bool scrollbarCornerPresent() const;
 
+    virtual IntRect convertFromScrollbarToContainingView(const Scrollbar*, const IntRect&) const;
+    virtual IntRect convertFromContainingViewToScrollbar(const Scrollbar*, const IntRect&) const;
+    virtual IntPoint convertFromScrollbarToContainingView(const Scrollbar*, const IntPoint&) const;
+    virtual IntPoint convertFromContainingViewToScrollbar(const Scrollbar*, const IntPoint&) const;
+
 protected:
+    ScrollView();
+
     virtual void repaintContentRectangle(const IntRect&, bool now = false);
     virtual void paintContents(GraphicsContext*, const IntRect& damageRect) = 0;
     
     virtual void contentsResized() = 0;
     virtual void visibleContentsResized() = 0;
-    
+
     // These methods are used to create/destroy scrollbars.
     void setHasHorizontalScrollbar(bool);
     void setHasVerticalScrollbar(bool);
 
+    IntRect scrollCornerRect() const;
+    virtual void updateScrollCorner();
+    virtual void paintScrollCorner(GraphicsContext*, const IntRect& cornerRect);
+    
 private:
     RefPtr<Scrollbar> m_horizontalScrollbar;
     RefPtr<Scrollbar> m_verticalScrollbar;
@@ -251,7 +277,7 @@ private:
     ScrollbarMode m_verticalScrollbarMode;
     bool m_prohibitsScrolling;
 
-    HashSet<Widget*> m_children;
+    HashSet<RefPtr<Widget> > m_children;
 
     // This bool is unused on Mac OS because we directly ask the platform widget
     // whether it is safe to blit on scroll.
@@ -265,10 +291,13 @@ private:
     bool m_scrollbarsSuppressed;
 
     bool m_inUpdateScrollbars;
+    unsigned m_updateScrollbarsPass;
 
     IntPoint m_panScrollIconPoint;
     bool m_drawPanScrollIcon;
     bool m_useFixedLayout;
+
+    bool m_paintsEntireContents;
 
     void init();
     void destroy();
@@ -294,10 +323,6 @@ private:
     void platformSetScrollbarsSuppressed(bool repaintOnUnsuppress);
     void platformRepaintContentRectangle(const IntRect&, bool now);
     bool platformIsOffscreen() const;
-    bool platformHandleHorizontalAdjustment(const IntSize&);
-    bool platformHandleVerticalAdjustment(const IntSize&);
-    bool platformHasHorizontalAdjustment() const;
-    bool platformHasVerticalAdjustment() const;
 
 #if PLATFORM(MAC) && defined __OBJC__
 public:
@@ -305,14 +330,6 @@ public:
 
 private:
     NSScrollView<WebCoreFrameScrollView>* scrollView() const;
-#endif
-
-#if PLATFORM(QT)
-private:
-    bool rootPreventsBlitting() const { return root()->m_widgetsThatPreventBlitting > 0; }
-    unsigned m_widgetsThatPreventBlitting;
-#else
-    bool rootPreventsBlitting() const { return false; }
 #endif
 
 #if PLATFORM(GTK)

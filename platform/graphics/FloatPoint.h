@@ -44,8 +44,8 @@ class QPointF;
 QT_END_NAMESPACE
 #endif
 
-#if PLATFORM(SYMBIAN)
-class TPoint;
+#if PLATFORM(HAIKU)
+class BPoint;
 #endif
 
 #if PLATFORM(SKIA)
@@ -83,9 +83,9 @@ public:
     operator QPointF() const;
 #endif
 
-#if PLATFORM(SYMBIAN)
-    operator TPoint() const;
-    FloatPoint(const TPoint&);
+#if PLATFORM(HAIKU)
+    FloatPoint(const BPoint&);
+    operator BPoint() const;
 #endif
 
 #if PLATFORM(SKIA)

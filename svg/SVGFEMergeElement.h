@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2006 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -23,7 +21,7 @@
 #ifndef SVGFEMergeElement_h
 #define SVGFEMergeElement_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEMerge.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 
@@ -34,11 +32,7 @@ namespace WebCore {
         SVGFEMergeElement(const QualifiedName&, Document*);
         virtual ~SVGFEMergeElement();
 
-        virtual SVGFilterEffect* filterEffect(SVGResourceFilter*) const;
-        bool build(FilterBuilder*);
-
-    private:
-        mutable RefPtr<FEMerge> m_filterEffect;
+        virtual bool build(SVGResourceFilter*);
     };
 
 } // namespace WebCore

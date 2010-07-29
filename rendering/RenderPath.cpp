@@ -2,8 +2,8 @@
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2008 Rob Buis <buis@kde.org>
                   2005, 2007 Eric Seidel <eric@webkit.org>
-
-    This file is part of the KDE project
+                  2009 Google, Inc.
+                  2009 Dirk Schulze <krit@webkit.org>
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -64,25 +64,19 @@ private:
     RenderStyle* m_style;
 };
 
-// RenderPath
 RenderPath::RenderPath(SVGStyledTransformableElement* node)
-    : RenderObject(node)
+    : RenderSVGModelObject(node)
 {
+}
+
+const TransformationMatrix& RenderPath::localToParentTransform() const
+{
+    return m_localTransform;
 }
 
 TransformationMatrix RenderPath::localTransform() const
 {
     return m_localTransform;
-}
-
-FloatPoint RenderPath::mapAbsolutePointToLocal(const FloatPoint& point) const
-{
-    // FIXME: does it make sense to map incoming points with the inverse of the
-    // absolute transform? 
-    double localX;
-    double localY;
-    absoluteTransform().inverse().map(point.x(), point.y(), localX, localY);
-    return FloatPoint::narrowPrecision(localX, localY);
 }
 
 bool RenderPath::fillContains(const FloatPoint& point, bool requiresFill) const
@@ -108,97 +102,96 @@ bool RenderPath::strokeContains(const FloatPoint& point, bool requiresStroke) co
     return m_path.strokeContains(&strokeStyle, point);
 }
 
-FloatRect RenderPath::relativeBBox(bool includeStroke) const
+FloatRect RenderPath::objectBoundingBox() const
 {
     if (m_path.isEmpty())
         return FloatRect();
 
-    if (includeStroke) {
-        if (m_strokeBbox.isEmpty()) {
-            if (style()->svgStyle()->hasStroke()) {
-                BoundingRectStrokeStyleApplier strokeStyle(this, style());
-                m_strokeBbox = m_path.strokeBoundingRect(&strokeStyle);
-            } else {
-                if (m_fillBBox.isEmpty())
-                    m_fillBBox = m_path.boundingRect();
+    if (m_cachedLocalFillBBox.isEmpty())
+        m_cachedLocalFillBBox = m_path.boundingRect();
 
-                m_strokeBbox = m_fillBBox;
-            }
-        }
+    return m_cachedLocalFillBBox;
+}
 
-        return m_strokeBbox;
+FloatRect RenderPath::strokeBoundingBox() const
+{
+    if (m_path.isEmpty())
+        return FloatRect();
+
+    if (!m_cachedLocalStrokeBBox.isEmpty())
+        return m_cachedLocalStrokeBBox;
+
+    m_cachedLocalStrokeBBox = objectBoundingBox();
+    if (style()->svgStyle()->hasStroke()) {
+        BoundingRectStrokeStyleApplier strokeStyle(this, style());
+        m_cachedLocalStrokeBBox.unite(m_path.strokeBoundingRect(&strokeStyle));
     }
 
-    if (m_fillBBox.isEmpty())
-        m_fillBBox = m_path.boundingRect();
+    return m_cachedLocalStrokeBBox;
+}
 
-    return m_fillBBox;
+FloatRect RenderPath::markerBoundingBox() const
+{
+    if (m_path.isEmpty())
+        return FloatRect();
+
+    if (m_cachedLocalMarkerBBox.isEmpty())
+        calculateMarkerBoundsIfNeeded();
+
+    return m_cachedLocalMarkerBBox;
+}
+
+FloatRect RenderPath::repaintRectInLocalCoordinates() const
+{
+    if (m_path.isEmpty())
+        return FloatRect();
+
+    // If we already have a cached repaint rect, return that
+    if (!m_cachedLocalRepaintRect.isEmpty())
+        return m_cachedLocalRepaintRect;
+
+    // FIXME: We need to be careful here. We assume that there is no filter,
+    // clipper, marker or masker if the rects are empty.
+    FloatRect rect = filterBoundingBoxForRenderer(this);
+    if (!rect.isEmpty())
+        m_cachedLocalRepaintRect = rect;
+    else {
+        m_cachedLocalRepaintRect = strokeBoundingBox();
+        m_cachedLocalRepaintRect.unite(markerBoundingBox());
+    }
+
+    rect = clipperBoundingBoxForRenderer(this);
+    if (!rect.isEmpty())
+        m_cachedLocalRepaintRect.intersect(rect);
+
+    rect = maskerBoundingBoxForRenderer(this);
+    if (!rect.isEmpty())
+        m_cachedLocalRepaintRect.intersect(rect);
+
+    style()->svgStyle()->inflateForShadow(m_cachedLocalRepaintRect);
+
+    return m_cachedLocalRepaintRect;
 }
 
 void RenderPath::setPath(const Path& newPath)
 {
     m_path = newPath;
-    m_strokeBbox = FloatRect();
-    m_fillBBox = FloatRect();
-}
-
-const Path& RenderPath::path() const
-{
-    return m_path;
-}
-
-bool RenderPath::calculateLocalTransform()
-{
-    TransformationMatrix oldTransform = m_localTransform;
-    m_localTransform = static_cast<SVGStyledTransformableElement*>(element())->animatedLocalTransform();
-    return (m_localTransform != oldTransform);
+    m_cachedLocalRepaintRect = FloatRect();
+    m_cachedLocalStrokeBBox = FloatRect();
+    m_cachedLocalFillBBox = FloatRect();
+    m_cachedLocalMarkerBBox = FloatRect();
 }
 
 void RenderPath::layout()
 {
-    // FIXME: using m_absoluteBounds breaks if containerForRepaint() is not the root
-    LayoutRepainter repainter(*this, checkForRepaintDuringLayout() && selfNeedsLayout(), &m_absoluteBounds);
-    
-    calculateLocalTransform();
+    LayoutRepainter repainter(*this, checkForRepaintDuringLayout() && selfNeedsLayout());
 
-    setPath(static_cast<SVGStyledTransformableElement*>(element())->toPathData());
-
-    m_absoluteBounds = absoluteClippedOverflowRect();
+    SVGStyledTransformableElement* element = static_cast<SVGStyledTransformableElement*>(node());
+    m_localTransform = element->animatedLocalTransform();
+    setPath(element->toPathData());
 
     repainter.repaintAfterLayout();
-
     setNeedsLayout(false);
-}
-
-IntRect RenderPath::clippedOverflowRectForRepaint(RenderBox* /*repaintContainer*/)
-{
-    // FIXME: handle non-root repaintContainer
-    FloatRect repaintRect = absoluteTransform().mapRect(relativeBBox(true));
-
-    // Markers can expand the bounding box
-    repaintRect.unite(m_markerBounds);
-
-#if ENABLE(SVG_FILTERS)
-    // Filters can expand the bounding box
-    SVGResourceFilter* filter = getFilterById(document(), style()->svgStyle()->filter());
-    if (filter)
-        repaintRect.unite(filter->filterBBoxForItemBBox(repaintRect));
-#endif
-
-    if (!repaintRect.isEmpty())
-        repaintRect.inflate(1); // inflate 1 pixel for antialiasing
-
-    return enclosingIntRect(repaintRect);
-}
-
-int RenderPath::lineHeight(bool, bool) const
-{
-    return relativeBBox(true).height();
-}
-
-int RenderPath::baselinePosition(bool, bool) const
-{
-    return relativeBBox(true).height();
 }
 
 static inline void fillAndStrokePath(const Path& path, GraphicsContext* context, RenderStyle* style, RenderPath* object)
@@ -222,65 +215,65 @@ void RenderPath::paint(PaintInfo& paintInfo, int, int)
 {
     if (paintInfo.context->paintingDisabled() || style()->visibility() == HIDDEN || m_path.isEmpty())
         return;
-            
-    paintInfo.context->save();
-    paintInfo.context->concatCTM(localTransform());
 
+    FloatRect boundingBox = repaintRectInLocalCoordinates();
+    FloatRect nonLocalBoundingBox = m_localTransform.mapRect(boundingBox);
+    // FIXME: The empty rect check is to deal with incorrect initial clip in renderSubtreeToImage
+    // unfortunately fixing that problem is fairly complex unless we were willing to just futz the
+    // rect to something "close enough"
+    if (!nonLocalBoundingBox.intersects(paintInfo.rect) && !paintInfo.rect.isEmpty())
+        return;
+
+    PaintInfo childPaintInfo(paintInfo);
+    childPaintInfo.context->save();
+    applyTransformToPaintInfo(childPaintInfo, m_localTransform);
     SVGResourceFilter* filter = 0;
 
-    FloatRect boundingBox = relativeBBox(true);
-    if (paintInfo.phase == PaintPhaseForeground) {
-        PaintInfo savedInfo(paintInfo);
+    if (childPaintInfo.phase == PaintPhaseForeground) {
+        PaintInfo savedInfo(childPaintInfo);
 
-        prepareToRenderSVGContent(this, paintInfo, boundingBox, filter);
-        if (style()->svgStyle()->shapeRendering() == SR_CRISPEDGES)
-            paintInfo.context->setShouldAntialias(false);
-        fillAndStrokePath(m_path, paintInfo.context, style(), this);
+        if (prepareToRenderSVGContent(this, childPaintInfo, boundingBox, filter)) {
+            if (style()->svgStyle()->shapeRendering() == SR_CRISPEDGES)
+                childPaintInfo.context->setShouldAntialias(false);
+            fillAndStrokePath(m_path, childPaintInfo.context, style(), this);
 
-        if (static_cast<SVGStyledElement*>(element())->supportsMarkers())
-            m_markerBounds = drawMarkersIfNeeded(paintInfo.context, paintInfo.rect, m_path);
-
-        finishRenderSVGContent(this, paintInfo, boundingBox, filter, savedInfo.context);
+            if (static_cast<SVGStyledElement*>(node())->supportsMarkers())
+                m_markerLayoutInfo.drawMarkers(childPaintInfo);
+        }
+        finishRenderSVGContent(this, childPaintInfo, filter, savedInfo.context);
     }
 
-    if ((paintInfo.phase == PaintPhaseOutline || paintInfo.phase == PaintPhaseSelfOutline) && style()->outlineWidth())
-        paintOutline(paintInfo.context, static_cast<int>(boundingBox.x()), static_cast<int>(boundingBox.y()),
+    if ((childPaintInfo.phase == PaintPhaseOutline || childPaintInfo.phase == PaintPhaseSelfOutline) && style()->outlineWidth())
+        paintOutline(childPaintInfo.context, static_cast<int>(boundingBox.x()), static_cast<int>(boundingBox.y()),
             static_cast<int>(boundingBox.width()), static_cast<int>(boundingBox.height()), style());
     
-    paintInfo.context->restore();
+    childPaintInfo.context->restore();
 }
 
-void RenderPath::addFocusRingRects(GraphicsContext* graphicsContext, int, int) 
+// This method is called from inside paintOutline() since we call paintOutline()
+// while transformed to our coord system, return local coords
+void RenderPath::addFocusRingRects(Vector<IntRect>& rects, int, int) 
 {
-    graphicsContext->addFocusRingRect(enclosingIntRect(relativeBBox(true)));
+    IntRect rect = enclosingIntRect(repaintRectInLocalCoordinates());
+    if (!rect.isEmpty())
+        rects.append(rect);
 }
 
-void RenderPath::absoluteRects(Vector<IntRect>& rects, int, int, bool)
-{
-    rects.append(absoluteClippedOverflowRect());
-}
-
-void RenderPath::absoluteQuads(Vector<FloatQuad>& quads, bool)
-{
-    quads.append(absoluteClippedOverflowRect());
-}
-
-bool RenderPath::nodeAtPoint(const HitTestRequest&, HitTestResult& result, int _x, int _y, int, int, HitTestAction hitTestAction)
+bool RenderPath::nodeAtFloatPoint(const HitTestRequest&, HitTestResult& result, const FloatPoint& pointInParent, HitTestAction hitTestAction)
 {
     // We only draw in the forground phase, so we only hit-test then.
     if (hitTestAction != HitTestForeground)
         return false;
-    
-    IntPoint absolutePoint(_x, _y);
+
+    FloatPoint localPoint = m_localTransform.inverse().mapPoint(pointInParent);
 
     PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_PATH_HITTESTING, style()->pointerEvents());
 
     bool isVisible = (style()->visibility() == VISIBLE);
     if (isVisible || !hitRules.requireVisible) {
-        FloatPoint hitPoint = mapAbsolutePointToLocal(absolutePoint);
-        if ((hitRules.canHitStroke && (style()->svgStyle()->hasStroke() || !hitRules.requireStroke) && strokeContains(hitPoint, hitRules.requireStroke))
-            || (hitRules.canHitFill && (style()->svgStyle()->hasFill() || !hitRules.requireFill) && fillContains(hitPoint, hitRules.requireFill))) {
-            updateHitTestResult(result, absolutePoint);
+        if ((hitRules.canHitStroke && (style()->svgStyle()->hasStroke() || !hitRules.requireStroke) && strokeContains(localPoint, hitRules.requireStroke))
+            || (hitRules.canHitFill && (style()->svgStyle()->hasFill() || !hitRules.requireFill) && fillContains(localPoint, hitRules.requireFill))) {
+            updateHitTestResult(result, roundedIntPoint(localPoint));
             return true;
         }
     }
@@ -288,143 +281,27 @@ bool RenderPath::nodeAtPoint(const HitTestRequest&, HitTestResult& result, int _
     return false;
 }
 
-enum MarkerType {
-    Start,
-    Mid,
-    End
-};
-
-struct MarkerData {
-    FloatPoint origin;
-    FloatPoint subpathStart;
-    double strokeWidth;
-    FloatPoint inslopePoints[2];
-    FloatPoint outslopePoints[2];
-    MarkerType type;
-    SVGResourceMarker* marker;
-};
-
-struct DrawMarkersData {
-    DrawMarkersData(GraphicsContext*, SVGResourceMarker* startMarker, SVGResourceMarker* midMarker, double strokeWidth);
-    GraphicsContext* context;
-    int elementIndex;
-    MarkerData previousMarkerData;
-    SVGResourceMarker* midMarker;
-};
-
-DrawMarkersData::DrawMarkersData(GraphicsContext* c, SVGResourceMarker *start, SVGResourceMarker *mid, double strokeWidth)
-    : context(c)
-    , elementIndex(0)
-    , midMarker(mid)
-{
-    previousMarkerData.origin = FloatPoint();
-    previousMarkerData.subpathStart = FloatPoint();
-    previousMarkerData.strokeWidth = strokeWidth;
-    previousMarkerData.marker = start;
-    previousMarkerData.type = Start;
-}
-
-static void drawMarkerWithData(GraphicsContext* context, MarkerData &data)
-{
-    if (!data.marker)
-        return;
-
-    FloatPoint inslopeChange = data.inslopePoints[1] - FloatSize(data.inslopePoints[0].x(), data.inslopePoints[0].y());
-    FloatPoint outslopeChange = data.outslopePoints[1] - FloatSize(data.outslopePoints[0].x(), data.outslopePoints[0].y());
-
-    double inslope = rad2deg(atan2(inslopeChange.y(), inslopeChange.x()));
-    double outslope = rad2deg(atan2(outslopeChange.y(), outslopeChange.x()));
-
-    double angle = 0.0;
-    switch (data.type) {
-        case Start:
-            angle = outslope;
-            break;
-        case Mid:
-            angle = (inslope + outslope) / 2;
-            break;
-        case End:
-            angle = inslope;
-    }
-
-    data.marker->draw(context, FloatRect(), data.origin.x(), data.origin.y(), data.strokeWidth, angle);
-}
-
-static inline void updateMarkerDataForElement(MarkerData& previousMarkerData, const PathElement* element)
-{
-    FloatPoint* points = element->points;
-    
-    switch (element->type) {
-    case PathElementAddQuadCurveToPoint:
-        // TODO
-        previousMarkerData.origin = points[1];
-        break;
-    case PathElementAddCurveToPoint:
-        previousMarkerData.inslopePoints[0] = points[1];
-        previousMarkerData.inslopePoints[1] = points[2];
-        previousMarkerData.origin = points[2];
-        break;
-    case PathElementMoveToPoint:
-        previousMarkerData.subpathStart = points[0];
-    case PathElementAddLineToPoint:
-        previousMarkerData.inslopePoints[0] = previousMarkerData.origin;
-        previousMarkerData.inslopePoints[1] = points[0];
-        previousMarkerData.origin = points[0];
-        break;
-    case PathElementCloseSubpath:
-        previousMarkerData.inslopePoints[0] = previousMarkerData.origin;
-        previousMarkerData.inslopePoints[1] = points[0];
-        previousMarkerData.origin = previousMarkerData.subpathStart;
-        previousMarkerData.subpathStart = FloatPoint();
-    }
-}
-
-static void drawStartAndMidMarkers(void* info, const PathElement* element)
-{
-    DrawMarkersData& data = *reinterpret_cast<DrawMarkersData*>(info);
-
-    int elementIndex = data.elementIndex;
-    MarkerData& previousMarkerData = data.previousMarkerData;
-
-    FloatPoint* points = element->points;
-
-    // First update the outslope for the previous element
-    previousMarkerData.outslopePoints[0] = previousMarkerData.origin;
-    previousMarkerData.outslopePoints[1] = points[0];
-
-    // Draw the marker for the previous element
-    if (elementIndex != 0)
-        drawMarkerWithData(data.context, previousMarkerData);
-
-    // Update our marker data for this element
-    updateMarkerDataForElement(previousMarkerData, element);
-
-    if (elementIndex == 1) {
-        // After drawing the start marker, switch to drawing mid markers
-        previousMarkerData.marker = data.midMarker;
-        previousMarkerData.type = Mid;
-    }
-
-    data.elementIndex++;
-}
-
-FloatRect RenderPath::drawMarkersIfNeeded(GraphicsContext* context, const FloatRect&, const Path& path) const
+void RenderPath::calculateMarkerBoundsIfNeeded() const
 {
     Document* doc = document();
 
-    SVGElement* svgElement = static_cast<SVGElement*>(element());
-    ASSERT(svgElement && svgElement->document() && svgElement->isStyled());
+    SVGElement* svgElement = static_cast<SVGElement*>(node());
+    ASSERT(svgElement && svgElement->document());
+    if (!svgElement->isStyled())
+        return;
 
     SVGStyledElement* styledElement = static_cast<SVGStyledElement*>(svgElement);
-    const SVGRenderStyle* svgStyle = style()->svgStyle();
+    if (!styledElement->supportsMarkers())
+        return;
 
+    const SVGRenderStyle* svgStyle = style()->svgStyle();
     AtomicString startMarkerId(svgStyle->startMarker());
     AtomicString midMarkerId(svgStyle->midMarker());
     AtomicString endMarkerId(svgStyle->endMarker());
 
-    SVGResourceMarker* startMarker = getMarkerById(doc, startMarkerId);
-    SVGResourceMarker* midMarker = getMarkerById(doc, midMarkerId);
-    SVGResourceMarker* endMarker = getMarkerById(doc, endMarkerId);
+    SVGResourceMarker* startMarker = getMarkerById(doc, startMarkerId, this);
+    SVGResourceMarker* midMarker = getMarkerById(doc, midMarkerId, this);
+    SVGResourceMarker* endMarker = getMarkerById(doc, endMarkerId, this);
 
     if (!startMarker && !startMarkerId.isEmpty())
         svgElement->document()->accessSVGExtensions()->addPendingResource(startMarkerId, styledElement);
@@ -442,40 +319,10 @@ FloatRect RenderPath::drawMarkersIfNeeded(GraphicsContext* context, const FloatR
         endMarker->addClient(styledElement);
 
     if (!startMarker && !midMarker && !endMarker)
-        return FloatRect();
+        return;
 
-    double strokeWidth = SVGRenderStyle::cssPrimitiveToLength(this, svgStyle->strokeWidth(), 1.0f);
-    DrawMarkersData data(context, startMarker, midMarker, strokeWidth);
-
-    path.apply(&data, drawStartAndMidMarkers);
-
-    data.previousMarkerData.marker = endMarker;
-    data.previousMarkerData.type = End;
-    drawMarkerWithData(context, data.previousMarkerData);
-
-    // We know the marker boundaries, only after they're drawn!
-    // Otherwhise we'd need to do all the marker calculation twice
-    // once here (through paint()) and once in absoluteClippedOverflowRect().
-    FloatRect bounds;
-
-    if (startMarker)
-        bounds.unite(startMarker->cachedBounds());
-
-    if (midMarker)
-        bounds.unite(midMarker->cachedBounds());
-
-    if (endMarker)
-        bounds.unite(endMarker->cachedBounds());
-
-    return bounds;
-}
-
-IntRect RenderPath::outlineBoundsForRepaint(RenderBox* /*repaintContainer*/) const
-{
-    // FIXME: handle non-root repaintContainer
-    IntRect result = m_absoluteBounds;
-    adjustRectForOutlineAndShadow(result);
-    return result;
+    float strokeWidth = SVGRenderStyle::cssPrimitiveToLength(this, svgStyle->strokeWidth(), 1.0f);
+    m_cachedLocalMarkerBBox = m_markerLayoutInfo.calculateBoundaries(startMarker, midMarker, endMarker, strokeWidth, m_path);
 }
 
 }

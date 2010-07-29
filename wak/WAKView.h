@@ -1,13 +1,16 @@
 //
 //  WAKView.h
 //
-//  Copyright (C) 2005, 2006, 2007, 2008, Apple Inc.  All rights reserved.
+//  Copyright (C) 2005, 2006, 2007, 2008, 2009 Apple Inc.  All rights reserved.
 //
-#import <Foundation/Foundation.h>
-#import <CoreGraphics/CoreGraphics.h>
+
+#ifndef WAKView_h
+#define WAKView_h
 
 #import "WAKResponder.h"
 #import "WKView.h"
+#import <Foundation/Foundation.h>
+#import <CoreGraphics/CoreGraphics.h>
 
 #ifndef NSRect
 #define NSRect CGRect
@@ -63,6 +66,7 @@ extern NSString *WAKViewDidScrollNotification;
 - (void)displayIfNeeded;
 - (void)displayRect:(NSRect)rect;
 - (void)displayRectIgnoringOpacity:(NSRect)rect;
+- (void)displayRectIgnoringOpacity:(NSRect)rect inContext:(CGContextRef)context;
 - (void)drawRect:(CGRect)rect;
 - (void)viewWillDraw;
 
@@ -106,3 +110,5 @@ extern NSString *WAKViewDidScrollNotification;
 - (void)_setDrawsOwnDescendants:(BOOL)draw;
 
 @end
+
+#endif // WAKView_h

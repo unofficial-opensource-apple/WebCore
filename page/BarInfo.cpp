@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 Apple Inc.  All rights reserved.
+ * Copyright (C) 2007, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -41,32 +41,44 @@ BarInfo::BarInfo(Frame* frame, Type type)
 {
 }
 
+Frame* BarInfo::frame() const
+{
+    return m_frame;
+}
+
 void BarInfo::disconnectFrame()
 {
     m_frame = 0;
+}
+
+BarInfo::Type BarInfo::type() const
+{
+    return m_type;
 }
 
 bool BarInfo::visible() const
 {
     if (!m_frame)
         return false;
+    Page* page = m_frame->page();
+    if (!page)
+        return false;
 
     switch (m_type) {
-        case Locationbar:
-            return m_frame->page()->chrome()->toolbarsVisible();
-        case Toolbar:
-            return m_frame->page()->chrome()->toolbarsVisible();
-        case Personalbar:
-            return m_frame->page()->chrome()->toolbarsVisible();
-        case Menubar: 
-            return m_frame->page()->chrome()->menubarVisible();
-        case Scrollbars: 
-            return m_frame->page()->chrome()->scrollbarsVisible();
-        case Statusbar:
-            return m_frame->page()->chrome()->statusbarVisible();
-        default:
-            return false;
+    case Locationbar:
+    case Personalbar:
+    case Toolbar:
+        return page->chrome()->toolbarsVisible();
+    case Menubar:
+        return page->chrome()->menubarVisible();
+    case Scrollbars:
+        return page->chrome()->scrollbarsVisible();
+    case Statusbar:
+        return page->chrome()->statusbarVisible();
     }
+
+    ASSERT_NOT_REACHED();
+    return false;
 }
 
 } // namespace WebCore

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006 Nikolas Zimmermann <zimmermann@kde.org>
- * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,8 +32,8 @@
 #include "IntSize.h"
 #include "ImageBufferData.h"
 #include <wtf/OwnPtr.h>
+#include <wtf/PassOwnPtr.h>
 #include <wtf/PassRefPtr.h>
-#include <memory>
 
 namespace WebCore {
 
@@ -43,16 +43,28 @@ namespace WebCore {
     class IntRect;
     class String;
 
-    class ImageBuffer : Noncopyable {
+    enum ImageColorSpace {
+        Unknown,
+        DeviceRGB, // like sRGB
+        GrayScale,
+        LinearRGB
+    };
+
+    enum Multiply {
+        Premultiplied,
+        Unmultiplied
+    };
+
+    class ImageBuffer : public Noncopyable {
     public:
         // Will return a null pointer on allocation failure.
-        static std::auto_ptr<ImageBuffer> create(const IntSize& size, bool grayScale)
+        static PassOwnPtr<ImageBuffer> create(const IntSize& size, ImageColorSpace colorSpace = DeviceRGB)
         {
             bool success = false;
-            std::auto_ptr<ImageBuffer> buf(new ImageBuffer(size, grayScale, success));
+            OwnPtr<ImageBuffer> buf(new ImageBuffer(size, colorSpace, success));
             if (success)
-                return buf;
-            return std::auto_ptr<ImageBuffer>();
+                return buf.release();
+            return 0;
         }
 
         ~ImageBuffer();
@@ -64,12 +76,17 @@ namespace WebCore {
 
         void clearImage() { m_image.clear(); }
 
-        PassRefPtr<ImageData> getImageData(const IntRect& rect) const;
-        void putImageData(ImageData* source, const IntRect& sourceRect, const IntPoint& destPoint);
+        PassRefPtr<ImageData> getUnmultipliedImageData(const IntRect&) const;
+        PassRefPtr<ImageData> getPremultipliedImageData(const IntRect&) const;
+
+        void putUnmultipliedImageData(ImageData*, const IntRect& sourceRect, const IntPoint& destPoint);
+        void putPremultipliedImageData(ImageData*, const IntRect& sourceRect, const IntPoint& destPoint);
 
         String toDataURL(const String& mimeType) const;
 #if !PLATFORM(CG)
         TransformationMatrix baseTransform() const { return TransformationMatrix(); }
+        void transformColorSpace(ImageColorSpace srcColorSpace, ImageColorSpace dstColorSpace);
+        void platformTransformColorSpace(const Vector<int>&);
 #else
         TransformationMatrix baseTransform() const { return TransformationMatrix(1, 0, 0, -1, 0, m_size.height()); }
 #endif
@@ -80,9 +97,14 @@ namespace WebCore {
         OwnPtr<GraphicsContext> m_context;
         mutable RefPtr<Image> m_image;
 
-        // This constructor will place its succes into the given out-variable
+#if !PLATFORM(CG)
+        Vector<int> m_linearRgbLUT;
+        Vector<int> m_deviceRgbLUT;
+#endif
+
+        // This constructor will place its success into the given out-variable
         // so that create() knows when it should return failure.
-        ImageBuffer(const IntSize&, bool grayScale, bool& success);
+        ImageBuffer(const IntSize&, ImageColorSpace colorSpace, bool& success);
     };
 
 } // namespace WebCore

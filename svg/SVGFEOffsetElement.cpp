@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -22,20 +20,17 @@
 
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEOffsetElement.h"
 
 #include "Attr.h"
+#include "MappedAttribute.h"
 #include "SVGResourceFilter.h"
 
 namespace WebCore {
 
 SVGFEOffsetElement::SVGFEOffsetElement(const QualifiedName& tagName, Document* doc)
     : SVGFilterPrimitiveStandardAttributes(tagName, doc)
-    , m_in1(this, SVGNames::inAttr)
-    , m_dx(this, SVGNames::dxAttr)
-    , m_dy(this, SVGNames::dyAttr)
-    , m_filterEffect(0)
 {
 }
 
@@ -56,20 +51,34 @@ void SVGFEOffsetElement::parseMappedAttribute(MappedAttribute* attr)
         SVGFilterPrimitiveStandardAttributes::parseMappedAttribute(attr);
 }
 
-SVGFilterEffect* SVGFEOffsetElement::filterEffect(SVGResourceFilter* filter) const
+void SVGFEOffsetElement::synchronizeProperty(const QualifiedName& attrName)
 {
-    ASSERT_NOT_REACHED();
-    return 0;
+    SVGFilterPrimitiveStandardAttributes::synchronizeProperty(attrName);
+
+    if (attrName == anyQName()) {
+        synchronizeDx();
+        synchronizeDy();
+        synchronizeIn1();
+        return;
+    }
+
+    if (attrName == SVGNames::dxAttr)
+        synchronizeDx();
+    else if (attrName == SVGNames::dyAttr)
+        synchronizeDy();
+    else if (attrName == SVGNames::inAttr)
+        synchronizeIn1();
 }
 
-bool SVGFEOffsetElement::build(FilterBuilder* builder)
+bool SVGFEOffsetElement::build(SVGResourceFilter* filterResource)
 {
-    FilterEffect* input1 = builder->getEffectById(in1());
+    FilterEffect* input1 = filterResource->builder()->getEffectById(in1());
 
-    if(!input1)
+    if (!input1)
         return false;
 
-    builder->add(result(), FEOffset::create(input1, dx(), dy()));
+    RefPtr<FilterEffect> effect = FEOffset::create(input1, dx(), dy());
+    filterResource->addFilterEffect(this, effect.release());
 
     return true;
 }

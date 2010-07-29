@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,6 +20,7 @@
 #ifndef Chrome_h
 #define Chrome_h
 
+#include "Cursor.h"
 #include "FileChooser.h"
 #include "FocusDirection.h"
 #include "HostWindow.h"
@@ -47,8 +48,12 @@ namespace WebCore {
     class Geolocation;
     class HitTestResult;
     class IntRect;
+    class Node;
     class Page;
     class String;
+#if ENABLE(NOTIFICATIONS)
+    class NotificationPresenter;
+#endif
 
     struct FrameLoadRequest;
     struct WindowFeatures;
@@ -65,8 +70,9 @@ namespace WebCore {
         virtual void scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, const IntRect& clipRect);
         virtual IntPoint screenToWindow(const IntPoint&) const;
         virtual IntRect windowToScreen(const IntRect&) const;
-        virtual PlatformWidget platformWindow() const;
+        virtual PlatformPageClient platformPageClient() const;
         virtual void scrollRectIntoView(const IntRect&, const ScrollView*) const;
+        virtual void scrollbarsModeDidChange() const;
 
         void contentsSizeChanged(Frame*, const IntSize&) const;
 
@@ -77,13 +83,15 @@ namespace WebCore {
         
         float scaleFactor();
 
-        void focus(bool userGesture) const;
+        void focus() const;
         void unfocus() const;
 
         bool canTakeFocus(FocusDirection) const;
         void takeFocus(FocusDirection) const;
 
-        Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&, const bool) const;
+        void focusedNodeChanged(Node*) const;
+
+        Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&) const;
         void show() const;
 
         bool canRunModal() const;
@@ -115,6 +123,9 @@ namespace WebCore {
         void setStatusbarText(Frame*, const String&);
         bool shouldInterruptJavaScript();
 
+        void registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title);
+        void registerContentHandler(const String& mimeType, const String& baseURL, const String& url, const String& title);
+
         IntRect windowResizerRect() const;
 
         void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags);
@@ -123,15 +134,17 @@ namespace WebCore {
 
         void print(Frame*);
 
-        void enableSuddenTermination();
-        void disableSuddenTermination();
-
-        bool requestGeolocationPermissionForFrame(Frame*, Geolocation*);
+        void requestGeolocationPermissionForFrame(Frame*, Geolocation*);
             
         void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
 
+
 #if PLATFORM(MAC)
         void focusNSView(NSView*);
+#endif
+
+#if ENABLE(NOTIFICATIONS)
+        NotificationPresenter* notificationPresenter() const; 
 #endif
 
     private:

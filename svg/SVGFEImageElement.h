@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -23,14 +21,15 @@
 #ifndef SVGFEImageElement_h
 #define SVGFEImageElement_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "CachedResourceHandle.h"
-#include "SVGFilterPrimitiveStandardAttributes.h"
-#include "SVGURIReference.h"
-#include "SVGLangSpace.h"
+#include "ImageBuffer.h"
 #include "SVGExternalResourcesRequired.h"
 #include "SVGFEImage.h"
+#include "SVGFilterPrimitiveStandardAttributes.h"
+#include "SVGLangSpace.h"
 #include "SVGPreserveAspectRatio.h"
+#include "SVGURIReference.h"
 
 namespace WebCore {
 
@@ -44,20 +43,25 @@ namespace WebCore {
         virtual ~SVGFEImageElement();
 
         virtual void parseMappedAttribute(MappedAttribute*);
+        virtual void synchronizeProperty(const QualifiedName&);
         virtual void notifyFinished(CachedResource*);
 
         virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
-        bool build(FilterBuilder*);
-
-    protected:
-        virtual SVGFilterEffect* filterEffect(SVGResourceFilter*) const;
-        virtual const SVGElement* contextElement() const { return this; }
+        virtual bool build(SVGResourceFilter*);
 
     private:
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEImageElement, SVGNames::feImageTagString, SVGNames::preserveAspectRatioAttrString, SVGPreserveAspectRatio, PreserveAspectRatio, preserveAspectRatio)
+        void requestImageResource();
+
+        DECLARE_ANIMATED_PROPERTY(SVGFEImageElement, SVGNames::preserveAspectRatioAttr, SVGPreserveAspectRatio, PreserveAspectRatio, preserveAspectRatio)
+
+        // SVGURIReference
+        DECLARE_ANIMATED_PROPERTY(SVGFEImageElement, XLinkNames::hrefAttr, String, Href, href)
+
+        // SVGExternalResourcesRequired
+        DECLARE_ANIMATED_PROPERTY(SVGFEImageElement, SVGNames::externalResourcesRequiredAttr, bool, ExternalResourcesRequired, externalResourcesRequired)
 
         CachedResourceHandle<CachedImage> m_cachedImage;
-        mutable RefPtr<FEImage> m_filterEffect;
+        OwnPtr<ImageBuffer> m_targetImage;
     };
 
 } // namespace WebCore

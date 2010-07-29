@@ -21,7 +21,7 @@
 module ranges {
 
     // Introduced in DOM Level 2:
-    interface [GenerateConstructor] Range {
+    interface Range {
 
         readonly attribute Node startContainer
             getter raises(DOMException);
@@ -85,6 +85,13 @@ module ranges {
         void detach()
             raises(DOMException);
 
+#if defined(LANGUAGE_JAVASCRIPT) || LANGUAGE_JAVASCRIPT
+        // CSSOM View Module API extensions
+
+        ClientRectList getClientRects();
+        ClientRect getBoundingClientRect();
+#endif
+
         // extensions
 
         DocumentFragment createContextualFragment(in DOMString html)
@@ -112,7 +119,10 @@ module ranges {
                                in long offset)
             raises(RangeException, DOMException);
 
-#if !defined(LANGUAGE_JAVASCRIPT)
+        void expand(in DOMString unit)
+            raises(RangeException, DOMException);
+
+#if !defined(LANGUAGE_JAVASCRIPT) || !LANGUAGE_JAVASCRIPT
         readonly attribute DOMString text;
 #endif
     };

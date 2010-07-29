@@ -26,14 +26,9 @@
 #include "config.h"
 #include "ScrollbarThemeMac.h"
 
-#include "GraphicsContext.h"
 #include "ImageBuffer.h"
-#include "IntRect.h"
-#include "Page.h"
 #include "PlatformMouseEvent.h"
-#include "Scrollbar.h"
-#include "ScrollbarClient.h"
-#include "Settings.h"
+#include "ScrollView.h"
 #include <Carbon/Carbon.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/UnusedParam.h>
@@ -367,13 +362,16 @@ bool ScrollbarThemeMac::paint(Scrollbar* scrollbar, GraphicsContext* context, co
     trackInfo.min = 0;
     trackInfo.max = scrollbar->maximum();
     trackInfo.value = scrollbar->currentPos();
-    trackInfo.trackInfo.scrollbar.viewsize = scrollbar->pageStep();
+    trackInfo.trackInfo.scrollbar.viewsize = scrollbar->visibleSize();
     trackInfo.attributes = 0;
     if (scrollbar->orientation() == HorizontalScrollbar)
         trackInfo.attributes |= kThemeTrackHorizontal;
-    trackInfo.enableState = scrollbar->client()->isActive() ? kThemeTrackActive : kThemeTrackInactive;
+
     if (!scrollbar->enabled())
         trackInfo.enableState = kThemeTrackDisabled;
+    else
+        trackInfo.enableState = scrollbar->client()->isActive() ? kThemeTrackActive : kThemeTrackInactive;
+
     if (hasThumb(scrollbar))
         trackInfo.attributes |= kThemeTrackShowThumb;
     else if (!hasButtons(scrollbar))
@@ -393,12 +391,12 @@ bool ScrollbarThemeMac::paint(Scrollbar* scrollbar, GraphicsContext* context, co
         bufferRect.intersect(damageRect);
         bufferRect.move(-scrollbar->frameRect().x(), -scrollbar->frameRect().y());
         
-        auto_ptr<ImageBuffer> imageBuffer = ImageBuffer::create(bufferRect.size(), false);
-        if (!imageBuffer.get())
+        OwnPtr<ImageBuffer> imageBuffer = ImageBuffer::create(bufferRect.size());
+        if (!imageBuffer)
             return true;
         
         HIThemeDrawTrack(&trackInfo, 0, imageBuffer->context()->platformContext(), kHIThemeOrientationNormal);
-        context->drawImage(imageBuffer->image(), scrollbar->frameRect().location());
+        context->drawImage(imageBuffer->image(), DeviceColorSpace, scrollbar->frameRect().location());
     }
 
     return true;

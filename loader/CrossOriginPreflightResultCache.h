@@ -26,13 +26,15 @@
 
 #include "KURLHash.h"
 #include "StringHash.h"
+#include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
 
 namespace WebCore {
 
     class HTTPHeaderMap;
     class ResourceResponse;
 
-    class CrossOriginPreflightResultCacheItem : Noncopyable {
+    class CrossOriginPreflightResultCacheItem : public Noncopyable {
     public:
         CrossOriginPreflightResultCacheItem(bool credentials)
             : m_absoluteExpiryTime(0)
@@ -57,12 +59,14 @@ namespace WebCore {
         HeadersSet m_headers;
     };
 
-    class CrossOriginPreflightResultCache : Noncopyable {
+    class CrossOriginPreflightResultCache : public Noncopyable {
     public:
         static CrossOriginPreflightResultCache& shared();
 
         void appendEntry(const String& origin, const KURL&, CrossOriginPreflightResultCacheItem*);
         bool canSkipPreflight(const String& origin, const KURL&, bool includeCredentials, const String& method, const HTTPHeaderMap& requestHeaders);
+
+        void empty();
 
     private:
         CrossOriginPreflightResultCache() { }
@@ -70,7 +74,6 @@ namespace WebCore {
         typedef HashMap<std::pair<String, KURL>, CrossOriginPreflightResultCacheItem*> CrossOriginPreflightResultHashMap;
 
         CrossOriginPreflightResultHashMap m_preflightHashMap;
-        Mutex m_mutex;
     };
 
 } // namespace WebCore

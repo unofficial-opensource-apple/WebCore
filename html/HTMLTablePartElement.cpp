@@ -1,6 +1,4 @@
 /**
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
@@ -23,6 +21,7 @@
  * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "HTMLTablePartElement.h"
 
@@ -31,6 +30,7 @@
 #include "CSSValueKeywords.h"
 #include "Document.h"
 #include "HTMLNames.h"
+#include "MappedAttribute.h"
 
 namespace WebCore {
 
@@ -64,7 +64,7 @@ void HTMLTablePartElement::parseMappedAttribute(MappedAttribute *attr)
     if (attr->name() == bgcolorAttr)
         addCSSColor(attr, CSSPropertyBackgroundColor, attr->value());
     else if (attr->name() == backgroundAttr) {
-        String url = parseURL(attr->value());
+        String url = deprecatedParseURL(attr->value());
         if (!url.isEmpty())
             addCSSImageProperty(attr, CSSPropertyBackgroundImage, document()->completeURL(url).string());
     } else if (attr->name() == bordercolorAttr) {

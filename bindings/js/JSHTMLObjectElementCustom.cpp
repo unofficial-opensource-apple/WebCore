@@ -33,12 +33,17 @@ namespace WebCore {
 
 using namespace JSC;
 
-bool JSHTMLObjectElement::customGetOwnPropertySlot(ExecState* exec, const Identifier& propertyName, PropertySlot& slot)
+bool JSHTMLObjectElement::getOwnPropertySlotDelegate(ExecState* exec, const Identifier& propertyName, PropertySlot& slot)
 {
     return runtimeObjectCustomGetOwnPropertySlot(exec, propertyName, slot, this);
 }
 
-bool JSHTMLObjectElement::customPut(ExecState* exec, const Identifier& propertyName, JSValuePtr value, PutPropertySlot& slot)
+bool JSHTMLObjectElement::getOwnPropertyDescriptorDelegate(ExecState* exec, const Identifier& propertyName, PropertyDescriptor& descriptor)
+{
+    return runtimeObjectCustomGetOwnPropertyDescriptor(exec, propertyName, descriptor, this);
+}
+
+bool JSHTMLObjectElement::putDelegate(ExecState* exec, const Identifier& propertyName, JSValue value, PutPropertySlot& slot)
 {
     return runtimeObjectCustomPut(exec, propertyName, value, impl(), slot);
 }
@@ -53,7 +58,7 @@ bool JSHTMLObjectElement::canGetItemsForName(ExecState*, HTMLObjectElement*, con
     return propertyName == "__apple_runtime_object";
 }
 
-JSValuePtr JSHTMLObjectElement::nameGetter(ExecState* exec, const Identifier& propertyName, const PropertySlot& slot)
+JSValue JSHTMLObjectElement::nameGetter(ExecState* exec, const Identifier& propertyName, const PropertySlot& slot)
 {
     return runtimeObjectGetter(exec, propertyName, slot);
 }

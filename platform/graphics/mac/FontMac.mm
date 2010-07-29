@@ -28,12 +28,11 @@
 #import "Logging.h"
 #import "SimpleFontData.h"
 #import "WebCoreSystemInterface.h"
-#import "WebCoreTextRenderer.h"
 
+#import "BitmapImage.h"
+#import "WAKView.h"
 #import "WKGraphics.h"
 #import <GraphicsServices/GraphicsServices.h>
-#import "WAKView.h"
-#import "BitmapImage.h"
 #import <wtf/StdLibExtras.h>
 #import <wtf/Threading.h>
 
@@ -50,6 +49,7 @@ using namespace std;
 namespace WebCore {
 
 // 1600 bytes each (20 x 20 x 4 bytes pp), so 50 emoji is only ~80k.
+// For hi-res images, the cache size increases to 160k
 #define EMOJI_CACHE_SIZE 50
 
 static PassRefPtr<Image> smileImage(int imageNumber)
@@ -59,13 +59,37 @@ static PassRefPtr<Image> smileImage(int imageNumber)
     
     if (emojiCache.contains(imageNumber))
         return emojiCache.get(imageNumber).get();
-    
-    char name[30];
-    snprintf(name, 29, "%c%c%c%c%c-%04X", 101, 109, 111, 106, 105, imageNumber);
 
+    char name[30];
+    NSString *imagePath = nil;
+    NSData *namedImageData = nil;
+#if PLATFORM(IPHONE_SIMULATOR)
     NSBundle *bundle = [NSBundle bundleForClass:[WAKView class]];
-    NSString *imagePath = [bundle pathForResource:[NSString stringWithUTF8String:name] ofType:@"png"];
-    NSData *namedImageData = [NSData dataWithContentsOfFile:imagePath];
+#endif
+    if (wkGetScreenScaleFactor() == 2.0f) {
+        // Try loading the hi-res image
+        snprintf(name, 29, "%c%c%c%c%c-%04X%c%c%c", 101, 109, 111, 106, 105, imageNumber, 64, 50, 120);
+#if PLATFORM(IPHONE_SIMULATOR)
+        imagePath = [bundle pathForResource:[NSString stringWithUTF8String:name] ofType:@"png"];
+#else
+        imagePath = [NSString stringWithFormat:@"/System/Library/PrivateFrameworks/WebCore.framework/%s.png", name];
+#endif
+        namedImageData = [NSData dataWithContentsOfFile:imagePath];
+    }
+
+    if (!namedImageData) {
+        // If we reached here, we're either on a non-hi-res device or did not find
+        // the hi-res image file. Fall back to the old image file.
+        snprintf(name, 29, "%c%c%c%c%c-%04X", 101, 109, 111, 106, 105, imageNumber);
+#if PLATFORM(IPHONE_SIMULATOR)
+        imagePath = [bundle pathForResource:[NSString stringWithUTF8String:name] ofType:@"png"];
+#else
+        // See comment above on why we do this.
+        imagePath = [NSString stringWithFormat:@"/System/Library/PrivateFrameworks/WebCore.framework/%s.png", name];
+#endif
+        namedImageData = [NSData dataWithContentsOfFile:imagePath];
+    }
+
     if (namedImageData) {
         RefPtr<Image> image = BitmapImage::create();
         image->setData(SharedBuffer::wrapNSData(namedImageData), true);
@@ -77,10 +101,15 @@ static PassRefPtr<Image> smileImage(int imageNumber)
     }
     return 0;
 }
-    
+
+bool Font::canReturnFallbackFontsForComplexText()
+{
+    return true;
+}
+
 void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, const GlyphBuffer& glyphBuffer, int from, int numGlyphs, const FloatPoint& point, bool /*setColor*/) const
 {
-    CGContextRef cgContext = WKGetCurrentGraphicsContext();
+    CGContextRef cgContext = context->platformContext();
 
     if (font->isImageFont()) {
         if (!context->emojiDrawingEnabled())
@@ -93,7 +122,7 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
         for (int i = from; i < from + numGlyphs; i++) {
             const Glyph glyph = glyphBuffer.glyphAt(i);
             
-            const int pointSize = font->m_font.m_size;
+            const int pointSize = font->platformData().m_size;
             const int imageGlyphSize = std::min(pointSize + (pointSize <= 15 ? 2 : 4), 20); // scale images below 16 pt.
             IntRect dstRect;
             dstRect.setWidth(imageGlyphSize);
@@ -101,37 +130,61 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
             dstRect.setX(point.x() + 1 + advance);
             
             // these magic rules place the image glyph vertically as per HI specifications.
-            if (font->m_font.m_size >= 26)
+            if (font->platformData().m_size >= 26)
                 dstRect.setY(point.y() -  20);                
-            else if (font->m_font.m_size >= 16)
-                dstRect.setY(point.y() -  font->m_font.m_size * 0.35f - 10);
+            else if (font->platformData().m_size >= 16)
+                dstRect.setY(point.y() -  font->platformData().m_size * 0.35f - 10);
             else
-                dstRect.setY(point.y() -  font->m_font.m_size);
+                dstRect.setY(point.y() -  font->platformData().m_size);
 
             RefPtr<Image> image = smileImage(glyph);
             if (image)
-                context->drawImage(image.get(), dstRect);
+                context->drawImage(image.get(), DeviceColorSpace, dstRect);
             advance += glyphBuffer.advanceAt(i);
         }
         return;
     }
 
+    bool newShouldUseFontSmoothing = shouldUseSmoothing();
+
+    switch(fontDescription().fontSmoothing()) {
+    case Antialiased: {
+        context->setShouldAntialias(true);
+        newShouldUseFontSmoothing = false;
+        break;
+    }
+    case SubpixelAntialiased: {
+        context->setShouldAntialias(true);
+        newShouldUseFontSmoothing = true;
+        break;
+    }
+    case NoSmoothing: {
+        context->setShouldAntialias(false);
+        newShouldUseFontSmoothing = false;
+        break;
+    }
+    case AutoSmoothing: {
+        // For the AutoSmooth case, don't do anything! Keep the default settings.
+        break; 
+    }
+    default: 
+        ASSERT_NOT_REACHED();
+    }
+
     bool originalShouldUseFontSmoothing = CGContextGetShouldSmoothFonts(cgContext);
-    bool newShouldUseFontSmoothing = WebCoreShouldUseFontSmoothing();
-    
     if (originalShouldUseFontSmoothing != newShouldUseFontSmoothing)
         CGContextSetShouldSmoothFonts(cgContext, newShouldUseFontSmoothing);
 
 #if !PLATFORM(IPHONE_SIMULATOR)
     // Font smoothing style
     CGFontSmoothingStyle originalFontSmoothingStyle = CGContextGetFontSmoothingStyle(cgContext);
-    CGFontSmoothingStyle fontSmoothingStyle = WebCoreFontSmoothingStyle();
+    CGFontSmoothingStyle fontSmoothingStyle = Font::smoothingStyle();
     if (newShouldUseFontSmoothing && fontSmoothingStyle != originalFontSmoothingStyle)
         CGContextSetFontSmoothingStyle(cgContext, fontSmoothingStyle);
     
     // Font antialiasing style
     CGFontAntialiasingStyle originalFontAntialiasingStyle = CGContextGetFontAntialiasingStyle(cgContext);
-    CGFontAntialiasingStyle fontAntialiasingStyle = WebCoreFontAntialiasingStyle();
+    CGFontAntialiasingStyle fontAntialiasingStyle = Font::antialiasingStyle();
     if (fontAntialiasingStyle != originalFontAntialiasingStyle)
         CGContextSetFontAntialiasingStyle(cgContext, fontAntialiasingStyle);
 #endif
@@ -153,6 +206,7 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
     IntSize shadowSize;
     int shadowBlur;
     Color shadowColor;
+    ColorSpace fillColorSpace = context->fillColorSpace();
     context->getShadow(shadowSize, shadowBlur, shadowColor);
 
     bool hasSimpleShadow = context->textDrawingMode() == cTextFill && shadowColor.isValid() && !shadowBlur;
@@ -161,25 +215,25 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
         context->clearShadow();
         Color fillColor = context->fillColor();
         Color shadowFillColor(shadowColor.red(), shadowColor.green(), shadowColor.blue(), shadowColor.alpha() * fillColor.alpha() / 255);
-        context->setFillColor(shadowFillColor);
+        context->setFillColor(shadowFillColor, fillColorSpace);
         CGContextSetTextPosition(cgContext, point.x() + shadowSize.width(), point.y() + shadowSize.height());
         CGContextShowGlyphsWithAdvances(cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
-        if (font->m_syntheticBoldOffset) {
-            CGContextSetTextPosition(cgContext, point.x() + shadowSize.width() + font->m_syntheticBoldOffset, point.y() + shadowSize.height());
+        if (font->syntheticBoldOffset()) {
+            CGContextSetTextPosition(cgContext, point.x() + shadowSize.width() + font->syntheticBoldOffset(), point.y() + shadowSize.height());
             CGContextShowGlyphsWithAdvances(cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
         }
-        context->setFillColor(fillColor);
+        context->setFillColor(fillColor, fillColorSpace);
     }
 
     CGContextSetTextPosition(cgContext, point.x(), point.y());
     CGContextShowGlyphsWithAdvances(cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
-    if (font->m_syntheticBoldOffset) {
-        CGContextSetTextPosition(cgContext, point.x() + font->m_syntheticBoldOffset, point.y());
+    if (font->syntheticBoldOffset()) {
+        CGContextSetTextPosition(cgContext, point.x() + font->syntheticBoldOffset(), point.y());
         CGContextShowGlyphsWithAdvances(cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
     }
 
     if (hasSimpleShadow)
-        context->setShadow(shadowSize, shadowBlur, shadowColor);
+        context->setShadow(shadowSize, shadowBlur, shadowColor, fillColorSpace);
 
     if (originalShouldUseFontSmoothing != newShouldUseFontSmoothing)
         CGContextSetShouldSmoothFonts(cgContext, originalShouldUseFontSmoothing);

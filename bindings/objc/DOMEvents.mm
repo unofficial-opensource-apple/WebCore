@@ -28,6 +28,7 @@
 #import "config.h"
 #import "DOMEventInternal.h"
 
+#import "DOMBeforeLoadEvent.h"
 #import "DOMKeyboardEvent.h"
 #import "DOMMessageEvent.h"
 #import "DOMMouseEvent.h"
@@ -42,10 +43,8 @@
 #import "DOMSVGZoomEvent.h"
 #endif
 
-#if ENABLE(TOUCH_EVENTS)
 #import "DOMGestureEvent.h"
 #import "DOMTouchEvent.h"
-#endif
 
 Class kitClass(WebCore::Event* impl)
 {
@@ -62,12 +61,10 @@ Class kitClass(WebCore::Event* impl)
         if (impl->isSVGZoomEvent())
             return [DOMSVGZoomEvent class];
 #endif
-#if ENABLE(TOUCH_EVENTS)
         if (impl->isTouchEvent())
             return [DOMTouchEvent class];
         if (impl->isGestureEvent())
             return [DOMGestureEvent class];
-#endif
         return [DOMUIEvent class];
     }
     if (impl->isMutationEvent())
@@ -78,5 +75,7 @@ Class kitClass(WebCore::Event* impl)
         return [DOMMessageEvent class];
     if (impl->isProgressEvent())
         return [DOMProgressEvent class];
+    if (impl->isBeforeLoadEvent())
+        return [DOMBeforeLoadEvent class];
     return [DOMEvent class];
 }

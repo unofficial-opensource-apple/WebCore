@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2009 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -20,27 +20,43 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "config.h"
 #include "StorageEvent.h"
 
-#include "DOMWindow.h"
+#if ENABLE(DOM_STORAGE)
+
+#include "Storage.h"
 
 namespace WebCore {
 
-StorageEvent::StorageEvent(const AtomicString& type, const String& key, const String& oldValue, const String& newValue, const String& uri, PassRefPtr<DOMWindow> source)
-    : Event(type, false, true)
+PassRefPtr<StorageEvent> StorageEvent::create()
+{
+    return adoptRef(new StorageEvent);
+}
+
+StorageEvent::StorageEvent()
+{
+}
+
+PassRefPtr<StorageEvent> StorageEvent::create(const AtomicString& type, const String& key, const String& oldValue, const String& newValue, const String& uri, Storage* storageArea)
+{
+    return adoptRef(new StorageEvent(type, key, oldValue, newValue, uri, storageArea));
+}
+
+StorageEvent::StorageEvent(const AtomicString& type, const String& key, const String& oldValue, const String& newValue, const String& uri, Storage* storageArea)
+    : Event(type, false, false)
     , m_key(key)
     , m_oldValue(oldValue)
     , m_newValue(newValue)
     , m_uri(uri)
-    , m_source(source)
+    , m_storageArea(storageArea)
 {
 }
 
-void StorageEvent::initStorageEvent(const AtomicString& type, bool canBubble, bool cancelable, const String& key, const String& oldValue, const String& newValue, const String& uri, PassRefPtr<DOMWindow> source)
+void StorageEvent::initStorageEvent(const AtomicString& type, bool canBubble, bool cancelable, const String& key, const String& oldValue, const String& newValue, const String& uri, Storage* storageArea)
 {
     if (dispatched())
         return;
@@ -51,7 +67,9 @@ void StorageEvent::initStorageEvent(const AtomicString& type, bool canBubble, bo
     m_oldValue = oldValue;
     m_newValue = newValue;
     m_uri = uri;
-    m_source = source;
+    m_storageArea = storageArea;
 }
 
-}
+} // namespace WebCore
+
+#endif // ENABLE(DOM_STORAGE)

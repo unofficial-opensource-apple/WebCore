@@ -19,7 +19,7 @@
 
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEPointLightElement.h"
 #include "SVGPointLightSource.h"
 
@@ -34,10 +34,10 @@ SVGFEPointLightElement::~SVGFEPointLightElement()
 {
 }
 
-LightSource* SVGFEPointLightElement::lightSource() const
+PassRefPtr<LightSource> SVGFEPointLightElement::lightSource() const
 {
     FloatPoint3D pos(x(), y(), z());
-    return new PointLightSource(pos);
+    return PointLightSource::create(pos);
 }
 
 }

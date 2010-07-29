@@ -31,9 +31,11 @@
 #include "DocLoader.h"
 #include "Document.h"
 #include "FrameLoader.h"
+#include "FrameLoaderTypes.h"
 #include "FrameView.h"
 #include "Image.h"
 #include "ResourceHandle.h"
+#include "SecurityOrigin.h"
 #include <stdio.h>
 #include <wtf/CurrentTime.h>
 
@@ -104,7 +106,7 @@ CachedResource* Cache::requestResource(DocLoader* docLoader, CachedResource::Typ
     if (resource && requestIsPreload && !resource->isPreloaded())
         return 0;
     
-    if (FrameLoader::restrictAccessToLocal() && !FrameLoader::canLoad(url, String(), docLoader->doc())) {
+    if (SecurityOrigin::restrictAccessToLocal() && !SecurityOrigin::canLoad(url, String(), docLoader->doc())) {
         Document* doc = docLoader->doc();
         if (doc && !requestIsPreload)
             FrameLoader::reportLocalLoadFailed(doc->frame(), url.string());
@@ -122,31 +124,26 @@ CachedResource* Cache::requestResource(DocLoader* docLoader, CachedResource::Typ
         
         resource->load(docLoader);
         
+        if (resource->errorOccurred()) {
+            // We don't support immediate loads, but we do support immediate failure.
+            // In that case we should to delete the resource now and return 0 because otherwise
+            // it would leak if no ref/deref was ever done on it.
+            resource->setInCache(false);
+            delete resource;
+            return 0;
+        }
+
         if (!disabled())
             m_resources.set(url.string(), resource);  // The size will be added in later once the resource is loaded and calls back to us with the new size.
         else {
             // Kick the resource out of the cache, because the cache is disabled.
             resource->setInCache(false);
             resource->setDocLoader(docLoader);
-            if (resource->errorOccurred()) {
-                // We don't support immediate loads, but we do support immediate failure.
-                // In that case we should to delete the resource now and return 0 because otherwise
-                // it would leak if no ref/deref was ever done on it.
-                delete resource;
-                return 0;
-            }
         }
     }
 
     if (resource->type() != type)
         return 0;
-
-#if USE(LOW_BANDWIDTH_DISPLAY)
-    // addLowBandwidthDisplayRequest() returns true if requesting CSS or JS during low bandwidth display.
-    // Here, return 0 to not block parsing or layout.
-    if (docLoader->frame() && docLoader->frame()->loader()->addLowBandwidthDisplayRequest(resource))
-        return 0;
-#endif
 
     if (!disabled()) {
         // This will move the resource to the front of its LRU list and increase its access count.
@@ -170,7 +167,7 @@ CachedCSSStyleSheet* Cache::requestUserCSSStyleSheet(DocLoader* docLoader, const
         // FIXME: CachedResource should just use normal refcounting instead.
         userSheet->setInCache(true);
         // Don't load incrementally, skip load checks, don't send resource load callbacks.
-        userSheet->load(docLoader, false, true, false);
+        userSheet->load(docLoader, false, SkipSecurityCheck, false);
         if (!disabled())
             m_resources.set(url, userSheet);
         else
@@ -188,6 +185,8 @@ CachedCSSStyleSheet* Cache::requestUserCSSStyleSheet(DocLoader* docLoader, const
 void Cache::revalidateResource(CachedResource* resource, DocLoader* docLoader)
 {
     ASSERT(resource);
+    ASSERT(resource->inCache());
+    ASSERT(resource == m_resources.get(resource->url()));
     ASSERT(!disabled());
     if (resource->resourceToRevalidate())
         return;
@@ -196,7 +195,7 @@ void Cache::revalidateResource(CachedResource* resource, DocLoader* docLoader)
         return;
     }
     const String& url = resource->url();
-    CachedResource* newResource = createResource(resource->type(), KURL(url), resource->encoding());
+    CachedResource* newResource = createResource(resource->type(), KURL(ParsedURLString, url), resource->encoding());
     newResource->setResourceToRevalidate(resource);
     evict(resource);
     m_resources.set(url, newResource);
@@ -211,13 +210,14 @@ void Cache::revalidationSucceeded(CachedResource* revalidatingResource, const Re
     ASSERT(resource);
     ASSERT(!resource->inCache());
     ASSERT(resource->isLoaded());
+    ASSERT(revalidatingResource->inCache());
     
     evict(revalidatingResource);
 
     ASSERT(!m_resources.get(resource->url()));
     m_resources.set(resource->url(), resource);
     resource->setInCache(true);
-    resource->setExpirationDate(response.expirationDate());
+    resource->updateResponseAfterRevalidation(response);
     insertInLRUList(resource);
     int delta = resource->size();
     if (resource->decodedSize() && resource->hasClients())
@@ -278,6 +278,12 @@ void Cache::pruneLiveResources(bool critical)
     
     // Destroy any decoded data in live objects that we can.
     // Start from the tail, since this is the least recently accessed of the objects.
+
+    // The list might not be sorted by the m_lastDecodedAccessTime. The impact
+    // of this weaker invariant is minor as the below if statement to check the
+    // elapsedTime will evaluate to false as the currentTime will be a lot
+    // greater than the current->m_lastDecodedAccessTime.
+    // For more details see: https://bugs.webkit.org/show_bug.cgi?id=30209
     CachedResource* current = m_liveDecodedResources.m_tail;
     while (current) {
         CachedResource* prev = current->m_prevInLiveResourcesList;
@@ -289,7 +295,7 @@ void Cache::pruneLiveResources(bool critical)
                 return;
 
             // Destroy our decoded data. This will remove us from 
-            // m_liveDecodedResources, and possibly move us to a differnt LRU 
+            // m_liveDecodedResources, and possibly move us to a different LRU 
             // list in m_allResources.
             current->destroyDecodedData();
 
@@ -341,7 +347,7 @@ void Cache::pruneDeadResources()
             CachedResource* prev = current->m_prevInAllResourcesList;
             if (!current->hasClients() && !current->isPreloaded() && current->isLoaded()) {
                 // Destroy our decoded data. This will remove us from 
-                // m_liveDecodedResources, and possibly move us to a differnt 
+                // m_liveDecodedResources, and possibly move us to a different 
                 // LRU list in m_allResources.
                 current->destroyDecodedData();
                 
@@ -357,7 +363,7 @@ void Cache::pruneDeadResources()
         current = m_allResources[i].m_tail;
         while (current) {
             CachedResource* prev = current->m_prevInAllResourcesList;
-            if (!current->hasClients() && !current->isPreloaded()) {
+            if (!current->hasClients() && !current->isPreloaded() && !current->isCacheValidator()) {
                 evict(current);
                 // If evict() caused pruneDeadResources() to be re-entered, bail out. This can happen when removing an
                 // SVG CachedImage that has subresources.
@@ -397,15 +403,6 @@ void Cache::evict(CachedResource* resource)
     // The resource may have already been removed by someone other than our caller,
     // who needed a fresh copy for a reload. See <http://bugs.webkit.org/show_bug.cgi?id=12479#c6>.
     if (resource->inCache()) {
-        if (!resource->isCacheValidator()) {
-            // Notify all doc loaders that might be observing this object still that it has been
-            // extracted from the set of resources.
-            // No need to do this for cache validator resources, they are replaced automatically by using CachedResourceHandles.
-            HashSet<DocLoader*>::iterator end = m_docLoaders.end();
-            for (HashSet<DocLoader*>::iterator itr = m_docLoaders.begin(); itr != end; ++itr)
-                (*itr)->removeCachedResource(resource);
-        }
-        
         // Remove from the resource map.
         m_resources.remove(resource->url());
         resource->setInCache(false);
@@ -471,13 +468,13 @@ void Cache::removeFromLRUList(CachedResource* resource)
     if (resource->accessCount() == 0)
         return;
 
-#ifndef NDEBUG
+#if !ASSERT_DISABLED
     unsigned oldListIndex = resource->m_lruIndex;
 #endif
 
     LRUList* list = lruListFor(resource);
 
-#ifndef NDEBUG
+#if !ASSERT_DISABLED
     // Verify that the list we got is the list we want.
     ASSERT(resource->m_lruIndex == oldListIndex);
 

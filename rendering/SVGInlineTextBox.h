@@ -1,6 +1,4 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 2007 Rob Buis <buis@kde.org>
  *           (C) 2007 Nikolas Zimmermann <zimmermann@kde.org>
  *
@@ -29,13 +27,31 @@
 
 namespace WebCore {
 
-    class SVGChar;
     class SVGRootInlineBox;
-    class SVGTextDecorationInfo;
+
+    struct SVGChar;
+    struct SVGTextDecorationInfo;
+
+    enum SVGTextPaintSubphase {
+        SVGTextPaintSubphaseBackground,
+        SVGTextPaintSubphaseGlyphFill,
+        SVGTextPaintSubphaseGlyphStroke,
+        SVGTextPaintSubphaseForeground
+    };
+
+    struct SVGTextPaintInfo {
+        SVGTextPaintInfo() : activePaintServer(0), subphase(SVGTextPaintSubphaseBackground) {}
+
+        SVGPaintServer* activePaintServer;
+        SVGTextPaintSubphase subphase;
+    };
 
     class SVGInlineTextBox : public InlineTextBox {
     public:
         SVGInlineTextBox(RenderObject* obj);
+
+        virtual int virtualHeight() const { return m_height; }
+        void setHeight(int h) { m_height = h; }
 
         virtual int selectionTop();
         virtual int selectionHeight();
@@ -47,7 +63,7 @@ namespace WebCore {
         virtual IntRect selectionRect(int absx, int absy, int startPos, int endPos);
 
         // SVGs custom paint text method
-        void paintCharacters(RenderObject::PaintInfo&, int tx, int ty, const SVGChar&, const UChar* chars, int length, SVGPaintServer*);
+        void paintCharacters(RenderObject::PaintInfo&, int tx, int ty, const SVGChar&, const UChar* chars, int length, SVGTextPaintInfo&);
 
         // SVGs custom paint selection method
         void paintSelection(int boxStartOffset, const SVGChar&, const UChar*, int length, GraphicsContext*, RenderStyle*, const Font&);
@@ -67,6 +83,8 @@ namespace WebCore {
     private:
         friend class RenderSVGInlineText;
         bool svgCharacterHitsPosition(int x, int y, int& offset) const;
+        
+        int m_height;
     };
 
 } // namespace WebCore

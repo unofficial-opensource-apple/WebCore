@@ -29,35 +29,38 @@
 #ifndef JSCustomSQLStatementErrorCallback_h
 #define JSCustomSQLStatementErrorCallback_h
 
-#include "SQLStatementErrorCallback.h"
+#if ENABLE(DATABASE)
 
-#include <runtime/JSObject.h>
+#include "JSDOMGlobalObject.h"
+#include "SQLStatementErrorCallback.h"
 #include <runtime/Protect.h>
 #include <wtf/Forward.h>
 
-namespace JSC {
-    class JSObject;
-}
-
 namespace WebCore {
-    
-class Frame;
+
+class JSCallbackData;    
 class SQLError;
     
 class JSCustomSQLStatementErrorCallback : public SQLStatementErrorCallback {
 public:
-    static PassRefPtr<JSCustomSQLStatementErrorCallback> create(JSC::JSObject* callback, Frame* frame) { return adoptRef(new JSCustomSQLStatementErrorCallback(callback, frame)); }
-        
+    static PassRefPtr<JSCustomSQLStatementErrorCallback> create(JSC::JSObject* callback, JSDOMGlobalObject* globalObject)
+    {
+        return adoptRef(new JSCustomSQLStatementErrorCallback(callback, globalObject));
+    }
+
+    virtual ~JSCustomSQLStatementErrorCallback();
+
     virtual bool handleEvent(SQLTransaction*, SQLError*);
 
 private:
-    JSCustomSQLStatementErrorCallback(JSC::JSObject* callback, Frame*);
+    JSCustomSQLStatementErrorCallback(JSC::JSObject* callback, JSDOMGlobalObject*);
 
-    JSC::ProtectedPtr<JSC::JSObject> m_callback;
-    RefPtr<Frame> m_frame;
+    JSCallbackData* m_data;
 };
     
 }
+
+#endif // ENABLE(DATABASE)
 
 #endif // JSCustomSQLStatementErrorCallback_h
 

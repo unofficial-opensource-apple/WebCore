@@ -34,17 +34,13 @@
 #include "ChromiumBridge.h"
 #include "CString.h"
 #include "MediaPlayer.h"
+#include "PluginDataChromium.h"
 
 // NOTE: Unlike other ports, we don't use the shared implementation bits in
 // MIMETypeRegistry.cpp.  Instead, we need to route most functions via the
 // ChromiumBridge to the embedder.
 
 namespace WebCore {
-
-// Checks if any of the plugins handle this extension, and if so returns the
-// plugin's mime type for this extension.  Otherwise returns an empty string.
-// See PluginsChromium.cpp for the implementation of this function.
-String getPluginMimeTypeFromExtension(const String& extension);
 
 String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
 {
@@ -78,13 +74,14 @@ String MIMETypeRegistry::getMIMETypeForPath(const String& path)
         // if a plugin can handle the extension.
         mimeType = getPluginMimeTypeFromExtension(extension);
     }
+    if (mimeType.isEmpty())
+        return "application/octet-stream";
     return mimeType;
 }
 
 bool MIMETypeRegistry::isSupportedImageMIMEType(const String& mimeType)
 { 
-    return !mimeType.isEmpty()
-        && ChromiumBridge::isSupportedImageMIMEType(mimeType.latin1().data());
+    return ChromiumBridge::isSupportedImageMIMEType(mimeType);
 }
 
 bool MIMETypeRegistry::isSupportedImageResourceMIMEType(const String& mimeType)
@@ -100,14 +97,12 @@ bool MIMETypeRegistry::isSupportedImageMIMETypeForEncoding(const String& mimeTyp
 
 bool MIMETypeRegistry::isSupportedJavaScriptMIMEType(const String& mimeType)
 {
-    return !mimeType.isEmpty()
-        && ChromiumBridge::isSupportedJavascriptMIMEType(mimeType.latin1().data());
+    return ChromiumBridge::isSupportedJavaScriptMIMEType(mimeType);
 }
     
 bool MIMETypeRegistry::isSupportedNonImageMIMEType(const String& mimeType)
 {
-    return !mimeType.isEmpty()
-        && ChromiumBridge::isSupportedNonImageMIMEType(mimeType.latin1().data());
+    return ChromiumBridge::isSupportedNonImageMIMEType(mimeType);
 }
 
 bool MIMETypeRegistry::isSupportedMediaMIMEType(const String& mimeType)
@@ -128,6 +123,11 @@ bool MIMETypeRegistry::isJavaAppletMIMEType(const String& mimeType)
     return mimeType.startsWith("application/x-java-applet", false) 
         || mimeType.startsWith("application/x-java-bean", false) 
         || mimeType.startsWith("application/x-java-vm", false);
+}
+
+String MIMETypeRegistry::getMediaMIMETypeForExtension(const String&)
+{
+    return String();
 }
 
 static HashSet<String>& dummyHashSet()

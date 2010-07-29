@@ -9,8 +9,8 @@
 module events {
     interface [
         AppleCopyright,
-        Conditional=TOUCH_EVENTS,
         HasIndexGetter,
+        OmitConstructor
     ] TouchList  {
         readonly attribute unsigned long    length;
         Touch           item(in unsigned long index);

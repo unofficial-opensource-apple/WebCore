@@ -1,10 +1,8 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -26,12 +24,12 @@
 #ifndef HTMLFrameSetElement_h
 #define HTMLFrameSetElement_h
 
-#include "HTMLElement.h"
 #include "Color.h"
+#include "Document.h"
+#include "HTMLElement.h"
 
 namespace WebCore {
 
-    
 class HTMLFrameSetElement : public HTMLElement {
     friend class RenderFrameSet;
 public:
@@ -47,7 +45,7 @@ public:
 
     virtual void attach();
     virtual bool rendererIsNeeded(RenderStyle*);
-    virtual RenderObject *createRenderer(RenderArena*, RenderStyle*);
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     
     virtual void defaultEventHandler(Event*);
 
@@ -60,7 +58,7 @@ public:
 
     bool hasBorderColor() const { return m_borderColorSet; }
 
-    virtual void recalcStyle( StyleChange ch );
+    virtual void recalcStyle(StyleChange);
     
     String cols() const;
     void setCols(const String&);
@@ -70,6 +68,25 @@ public:
 
     const Length* rowLengths() const { return m_rows; }
     const Length* colLengths() const { return m_cols; }
+
+    // Declared virtual in Element
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(blur);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(error);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(focus);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(load);
+
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(beforeunload);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(hashchange);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(message);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(offline);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(online);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(popstate);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(resize);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(storage);
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(unload);
+#if ENABLE(ORIENTATION_EVENTS)
+    DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(orientationchange);
+#endif
 
 private:
     Length* m_rows;
@@ -88,6 +105,6 @@ private:
     bool noresize;
 };
 
-} //namespace
+} // namespace WebCore
 
-#endif
+#endif // HTMLFrameSetElement_h

@@ -6,6 +6,8 @@
  * Other contributors:
  *   Stuart Parmenter <stuart@mozilla.com>
  *
+ * Copyright (C) 2007-2009 Torch Mobile, Inc.
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -37,34 +39,20 @@
 
 #include "config.h"
 #include "JPEGImageDecoder.h"
-#include <assert.h>
-#include <stdio.h>
+#include <stdio.h>  // Needed by jpeglib.h for FILE.
 
-#if PLATFORM(CAIRO) || PLATFORM(QT) || PLATFORM(WX)
+#if OS(WINCE)
+// Remove warning: 'FAR' macro redefinition
+#undef FAR
 
-#if COMPILER(MSVC)
-// Remove warnings from warning level 4.
-#pragma warning(disable : 4611) // warning C4611: interaction between '_setjmp' and C++ object destruction is non-portable
-
-// if ADDRESS_TAG_BIT is dfined, INT32 has been declared as a typedef in the PlatformSDK (BaseTsd.h),
-// so we need to stop jpeglib.h from trying to #define it 
-// see here for more info: http://www.cygwin.com/ml/cygwin/2004-07/msg01051.html
-# if defined(ADDRESS_TAG_BIT) && !defined(XMD_H)
-#  define XMD_H
-#  define VTK_JPEG_XMD_H
-# endif
-#endif // COMPILER(MSVC)
+// jmorecfg.h in libjpeg checks for XMD_H with the comment: "X11/xmd.h correctly defines INT32"
+// fix INT32 redefinition error by pretending we are X11/xmd.h
+#define XMD_H
+#endif
 
 extern "C" {
 #include "jpeglib.h"
 }
-
-#if COMPILER(MSVC)
-# if defined(VTK_JPEG_XMD_H)
-#  undef VTK_JPEG_XMD_H
-#  undef XMD_H
-# endif
-#endif // COMPILER(MSVC)
 
 #include <setjmp.h>
 
@@ -205,6 +193,10 @@ public:
                         break;
                     case JCS_CMYK:
                     case JCS_YCCK:
+                        // jpeglib cannot convert these to rgb, but it can
+                        // convert ycck to cmyk
+                        m_info.out_color_space = JCS_CMYK;
+                        break;
                     default:
                         m_state = JPEG_ERROR;
                         return false;
@@ -236,7 +228,10 @@ public:
                 m_state = JPEG_START_DECOMPRESS;
 
                 // We can fill in the size now that the header is available.
-                m_decoder->setSize(m_info.image_width, m_info.image_height);
+                if (!m_decoder->setSize(m_info.image_width, m_info.image_height)) {
+                    m_state = JPEG_ERROR;
+                    return false;
+                }
 
                 if (m_decodingSizeOnly) {
                     // We can stop here.
@@ -275,7 +270,7 @@ public:
                         return true; /* I/O suspension */
       
                     /* If we've completed image output ... */
-                    assert(m_info.output_scanline == m_info.output_height);
+                    ASSERT(m_info.output_scanline == m_info.output_height);
                     m_state = JPEG_DONE;
                 }
             }
@@ -405,12 +400,11 @@ void term_source (j_decompress_ptr jd)
 }
 
 JPEGImageDecoder::JPEGImageDecoder()
-: m_reader(0)
-{}
+{
+}
 
 JPEGImageDecoder::~JPEGImageDecoder()
 {
-    delete m_reader;
 }
 
 // Take the data and store it.
@@ -424,23 +418,24 @@ void JPEGImageDecoder::setData(SharedBuffer* data, bool allDataReceived)
 
     // Create the JPEG reader.
     if (!m_reader && !m_failed)
-        m_reader = new JPEGImageReader(this);
+        m_reader.set(new JPEGImageReader(this));
 }
 
 // Whether or not the size information has been decoded yet.
-bool JPEGImageDecoder::isSizeAvailable() const
+bool JPEGImageDecoder::isSizeAvailable()
 {
-    // If we have pending data to decode, send it to the JPEG reader now.
-    if (!m_sizeAvailable && m_reader) {
-        if (m_failed)
-            return false;
+    if (!ImageDecoder::isSizeAvailable() && !failed() && m_reader)
+         decode(true);
 
-        // The decoder will go ahead and aggressively consume everything up until the
-        // size is encountered.
-        decode(true);
-    }
+    return ImageDecoder::isSizeAvailable();
+}
 
-    return m_sizeAvailable;
+bool JPEGImageDecoder::setSize(unsigned width, unsigned height)
+{
+    if (!ImageDecoder::setSize(width, height))
+        return false;
+    prepareScaleDataIfNecessary();
+    return true;
 }
 
 RGBA32Buffer* JPEGImageDecoder::frameBufferAtIndex(size_t index)
@@ -459,17 +454,15 @@ RGBA32Buffer* JPEGImageDecoder::frameBufferAtIndex(size_t index)
 }
 
 // Feed data to the JPEG reader.
-void JPEGImageDecoder::decode(bool sizeOnly) const
+void JPEGImageDecoder::decode(bool sizeOnly)
 {
     if (m_failed)
         return;
 
     m_failed = !m_reader->decode(m_data->buffer(), sizeOnly);
 
-    if (m_failed || (!m_frameBufferCache.isEmpty() && m_frameBufferCache[0].status() == RGBA32Buffer::FrameComplete)) {
-        delete m_reader;
-        m_reader = 0;
-    }
+    if (m_failed || (!m_frameBufferCache.isEmpty() && m_frameBufferCache[0].status() == RGBA32Buffer::FrameComplete))
+        m_reader.clear();
 }
 
 bool JPEGImageDecoder::outputScanlines()
@@ -477,40 +470,57 @@ bool JPEGImageDecoder::outputScanlines()
     if (m_frameBufferCache.isEmpty())
         return false;
 
-    // Resize to the width and height of the image.
+    // Initialize the framebuffer if needed.
     RGBA32Buffer& buffer = m_frameBufferCache[0];
     if (buffer.status() == RGBA32Buffer::FrameEmpty) {
-        // Let's resize our buffer now to the correct width/height.
-        RGBA32Array& bytes = buffer.bytes();
-        bytes.resize(m_size.width() * m_size.height());
-
-        // Update our status to be partially complete.
+        if (!buffer.setSize(scaledSize().width(), scaledSize().height())) {
+            m_failed = true;
+            return false;
+        }
         buffer.setStatus(RGBA32Buffer::FramePartial);
+        buffer.setHasAlpha(false);
 
         // For JPEGs, the frame always fills the entire image.
-        buffer.setRect(IntRect(0, 0, m_size.width(), m_size.height()));
-
-        // We don't have alpha (this is the default when the buffer is constructed).
+        buffer.setRect(IntRect(IntPoint(), size()));
     }
 
     jpeg_decompress_struct* info = m_reader->info();
     JSAMPARRAY samples = m_reader->samples();
 
-    unsigned* dst = buffer.bytes().data() + info->output_scanline * m_size.width();
-   
     while (info->output_scanline < info->output_height) {
+        // jpeg_read_scanlines will increase the scanline counter, so we
+        // save the scanline before calling it.
+        int sourceY = info->output_scanline;
         /* Request one scanline.  Returns 0 or 1 scanlines. */
         if (jpeg_read_scanlines(info, samples, 1) != 1)
             return false;
-        JSAMPLE *j1 = samples[0];
-        for (unsigned i = 0; i < info->output_width; ++i) {
-            unsigned r = *j1++;
-            unsigned g = *j1++;
-            unsigned b = *j1++;
-            RGBA32Buffer::setRGBA(*dst++, r, g, b, 0xFF);
-        }
 
-        buffer.ensureHeight(info->output_scanline);
+        int destY = scaledY(sourceY);
+        if (destY < 0)
+            continue;
+        int width = m_scaled ? m_scaledColumns.size() : info->output_width;
+        for (int x = 0; x < width; ++x) {
+            JSAMPLE* jsample = *samples + (m_scaled ? m_scaledColumns[x] : x) * ((info->out_color_space == JCS_RGB) ? 3 : 4);
+            if (info->out_color_space == JCS_RGB)
+                buffer.setRGBA(x, destY, jsample[0], jsample[1], jsample[2], 0xFF);
+            else if (info->out_color_space == JCS_CMYK) {
+                // Source is 'Inverted CMYK', output is RGB.
+                // See: http://www.easyrgb.com/math.php?MATH=M12#text12
+                // Or:  http://www.ilkeratalay.com/colorspacesfaq.php#rgb
+                // From CMYK to CMY:
+                // X =   X    * (1 -   K   ) +   K  [for X = C, M, or Y]
+                // Thus, from Inverted CMYK to CMY is:
+                // X = (1-iX) * (1 - (1-iK)) + (1-iK) => 1 - iX*iK
+                // From CMY (0..1) to RGB (0..1):
+                // R = 1 - C => 1 - (1 - iC*iK) => iC*iK  [G and B similar]
+                unsigned k = jsample[3];
+                buffer.setRGBA(x, destY, jsample[0] * k / 255, jsample[1] * k / 255, jsample[2] * k / 255, 0xFF);
+            } else {
+                ASSERT_NOT_REACHED();
+                m_failed = true;
+                return false;
+            }
+        }
     }
 
     return true;
@@ -527,5 +537,3 @@ void JPEGImageDecoder::jpegComplete()
 }
 
 }
-
-#endif // PLATFORM(CAIRO)

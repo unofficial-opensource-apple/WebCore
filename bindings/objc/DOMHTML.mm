@@ -28,19 +28,24 @@
 
 #import "DOMDocumentFragmentInternal.h"
 #import "DOMExtensions.h"
+#import "DOMHTMLCollectionInternal.h"
 #import "DOMHTMLDocumentInternal.h"
 #import "DOMHTMLInputElementInternal.h"
 #import "DOMHTMLSelectElementInternal.h"
 #import "DOMHTMLTextAreaElementInternal.h"
+#import "DOMNodeInternal.h"
 #import "DOMPrivate.h"
 #import "DocumentFragment.h"
 #import "FrameView.h"
+#import "HTMLCollection.h"
 #import "HTMLDocument.h"
 #import "HTMLInputElement.h"
 #import "HTMLSelectElement.h"
 #import "HTMLTextAreaElement.h"
+#import "Page.h"
 #import "Range.h"
 #import "RenderTextControl.h"
+#import "Settings.h"
 #import "markup.h"
 
 #import "DOMHTMLElementInternal.h"
@@ -48,6 +53,7 @@
 #import "WAKWindow.h"
 #import "WebCoreThreadMessage.h"
 #import "WKWindowPrivate.h"
+
 
 using namespace WebCore;
 
@@ -143,7 +149,7 @@ using namespace WebCore;
 
 - (DOMDocumentFragment *)_createDocumentFragmentWithMarkupString:(NSString *)markupString baseURLString:(NSString *)baseURLString
 {
-    NSURL *baseURL = core(self)->completeURL(WebCore::parseURL(baseURLString));
+    NSURL *baseURL = core(self)->completeURL(WebCore::deprecatedParseURL(baseURLString));
     return [self createDocumentFragmentWithMarkupString:markupString baseURL:baseURL];
 }
 
@@ -154,37 +160,30 @@ using namespace WebCore;
 
 @end
 
+#ifdef BUILDING_ON_TIGER
+@implementation DOMHTMLDocument (DOMHTMLDocumentOverrides)
+
+- (DOMNode *)firstChild
+{
+    WebCore::HTMLDocument* coreHTMLDocument = core(self);
+    if (!coreHTMLDocument->page() || !coreHTMLDocument->page()->settings()->needsTigerMailQuirks())
+        return kit(coreHTMLDocument->firstChild());
+
+    WebCore::Node* child = coreHTMLDocument->firstChild();
+    while (child && child->nodeType() == WebCore::Node::DOCUMENT_TYPE_NODE)
+        child = child->nextSibling();
+    
+    return kit(child);
+}
+
+@end
+#endif
+
 @implementation DOMHTMLInputElement (FormAutoFillTransition)
 
 - (BOOL)_isTextField
 {
-    // We could make this public API as-is, or we could change it into a method that returns whether
-    // the element is a text field or a button or ... ?
-    static NSArray *textInputTypes = nil;
-#ifndef NDEBUG
-    static NSArray *nonTextInputTypes = nil;
-#endif
-    
-    NSString *fieldType = [self type];
-    
-    // No type at all is treated as text type
-    if ([fieldType length] == 0)
-        return YES;
-    
-    if (textInputTypes == nil)
-        textInputTypes = [[NSSet alloc] initWithObjects:@"text", @"password", @"search", @"isindex", nil];
-    
-    BOOL isText = [textInputTypes containsObject:[fieldType lowercaseString]];
-    
-#ifndef NDEBUG
-    if (nonTextInputTypes == nil)
-        nonTextInputTypes = [[NSSet alloc] initWithObjects:@"checkbox", @"radio", @"submit", @"reset", @"file", @"hidden", @"image", @"button", @"range", nil];
-    
-    // Catch cases where a new input type has been added that's not in these lists.
-    ASSERT(isText || [nonTextInputTypes containsObject:[fieldType lowercaseString]]);
-#endif    
-    
-    return isText;
+    return core(self)->isTextField();
 }
 
 
@@ -208,7 +207,12 @@ using namespace WebCore;
         return NSMakeRange(start, end - start); 
     }
     return NSMakeRange(NSNotFound, 0);
-}    
+}
+
+- (BOOL)_isAutofilled
+{
+    return core(self)->isAutofilled();
+}
 
 - (void)_setAutofilled:(BOOL)filled
 {
@@ -224,8 +228,9 @@ using namespace WebCore;
 
 - (void)_activateItemAtIndex:(int)index
 {
+    // Use the setSelectedIndexByUser function so a change event will be fired. <rdar://problem/6760590>
     if (WebCore::HTMLSelectElement* select = core(self))
-        select->setSelectedIndex(index);
+        select->setSelectedIndexByUser(index, true, true);
 }
 
 @end
@@ -235,7 +240,7 @@ using namespace WebCore;
 - (BOOL)_isEdited
 {
     WebCore::RenderObject *renderer = core(self)->renderer();
-    return renderer && [self _isTextField] && static_cast<WebCore::RenderTextControl *>(renderer)->isUserEdited();
+    return renderer && [self _isTextField] && static_cast<WebCore::RenderTextControl *>(renderer)->lastChangeWasUserEdit();
 }
 
 @end
@@ -245,14 +250,14 @@ using namespace WebCore;
 - (BOOL)_isEdited
 {
     WebCore::RenderObject* renderer = core(self)->renderer();
-    return renderer && static_cast<WebCore::RenderTextControl*>(renderer)->isUserEdited();
+    return renderer && static_cast<WebCore::RenderTextControl*>(renderer)->lastChangeWasUserEdit();
 }
 
 @end
 
 Class kitClass(WebCore::HTMLCollection* collection)
 {
-    if (collection->type() == WebCore::HTMLCollection::SelectOptions)
+    if (collection->type() == WebCore::SelectOptions)
         return [DOMHTMLOptionsCollection class];
     return [DOMHTMLCollection class];
 }

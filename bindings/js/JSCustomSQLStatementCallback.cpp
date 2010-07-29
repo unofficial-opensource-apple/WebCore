@@ -29,66 +29,47 @@
 #include "config.h"
 #include "JSCustomSQLStatementCallback.h"
 
-#include "CString.h"
-#include "DOMWindow.h"
+#if ENABLE(DATABASE)
+
 #include "Frame.h"
 #include "ScriptController.h"
 #include "JSSQLResultSet.h"
 #include "JSSQLTransaction.h"
 #include <runtime/JSLock.h>
+#include <wtf/MainThread.h>
 
 namespace WebCore {
     
 using namespace JSC;
     
-JSCustomSQLStatementCallback::JSCustomSQLStatementCallback(JSObject* callback, Frame* frame)
-    : m_callback(callback)
-    , m_frame(frame)
+JSCustomSQLStatementCallback::JSCustomSQLStatementCallback(JSObject* callback, JSDOMGlobalObject* globalObject)
+    : m_data(new JSCallbackData(callback, globalObject))
 {
 }
     
+JSCustomSQLStatementCallback::~JSCustomSQLStatementCallback()
+{
+    callOnMainThread(JSCallbackData::deleteData, m_data);
+#ifndef NDEBUG
+    m_data = 0;
+#endif
+}
+
 void JSCustomSQLStatementCallback::handleEvent(SQLTransaction* transaction, SQLResultSet* resultSet, bool& raisedException)
 {
-    ASSERT(m_callback);
-    ASSERT(m_frame);
-        
-    if (!m_frame->script()->isEnabled())
-        return;
-
-    JSGlobalObject* globalObject = m_frame->script()->globalObject();
-    ExecState* exec = globalObject->globalExec();
-        
-    JSC::JSLock lock(false);
-
-    JSValuePtr function = m_callback->get(exec, Identifier(exec, "handleEvent"));
-    CallData callData;
-    CallType callType = function.getCallData(callData);
-    if (callType == CallTypeNone) {
-        callType = m_callback->getCallData(callData);
-        if (callType == CallTypeNone) {
-            // FIXME: Should an exception be thrown here?
-            return;
-        }
-        function = m_callback;
-    }
+    ASSERT(m_data);
 
     RefPtr<JSCustomSQLStatementCallback> protect(this);
 
-    ArgList args;
-    args.append(toJS(exec, transaction));
-    args.append(toJS(exec, resultSet));
-        
-    globalObject->startTimeoutCheck();
-    call(exec, function, callType, callData, m_callback, args);
-    globalObject->stopTimeoutCheck();
+    JSC::JSLock lock(SilenceAssertionsOnly);
+    ExecState* exec = m_data->globalObject()->globalExec();
+    MarkedArgumentBuffer args;
+    args.append(toJS(exec, deprecatedGlobalObjectForPrototype(exec), transaction));
+    args.append(toJS(exec, deprecatedGlobalObjectForPrototype(exec), resultSet));
 
-    if (exec->hadException()) {
-        reportCurrentException(exec);
-
-        raisedException = true;
-    }
-
-    Document::updateDocumentsRendering();
+    m_data->invokeCallback(args, &raisedException);
 }
 
 }
+
+#endif // ENABLE(DATABASE)

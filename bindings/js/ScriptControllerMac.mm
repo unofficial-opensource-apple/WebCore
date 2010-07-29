@@ -29,6 +29,7 @@
 #import "config.h"
 #import "ScriptController.h"
 
+#import "Bridge.h"
 #import "DOMAbstractViewFrame.h"
 #import "DOMWindow.h"
 #import "Frame.h"
@@ -37,6 +38,8 @@
 #import "JSDOMWindow.h"
 #import "WebScriptObjectPrivate.h"
 #import "Widget.h"
+#import "objc_instance.h"
+#import "runtime_root.h"
 #import <JavaScriptCore/APICast.h>
 #import <runtime/JSLock.h>
 
@@ -46,12 +49,8 @@
 #import "npruntime_impl.h"
 #endif
 
-#import "objc_instance.h"
-#import "runtime_root.h"
-#import "runtime.h"
-
 #if ENABLE(MAC_JAVA_BRIDGE)
-#import "jni_instance.h"
+#import "JavaInstanceJSC.h"
 #endif
 
 @interface NSObject (WebPlugin)
@@ -108,13 +107,13 @@ PassScriptInstance ScriptController::createScriptInstanceForWidget(Widget* widge
 
 WebScriptObject* ScriptController::windowScriptObject()
 {
-    if (!isEnabled())
+    if (!canExecuteScripts())
         return 0;
 
     if (!m_windowScriptObject) {
-        JSC::JSLock lock(false);
+        JSC::JSLock lock(JSC::SilenceAssertionsOnly);
         JSC::Bindings::RootObject* root = bindingRootObject();
-        m_windowScriptObject = [WebScriptObject scriptObjectForJSObject:toRef(windowShell()) originRootObject:root rootObject:root];
+        m_windowScriptObject = [WebScriptObject scriptObjectForJSObject:toRef(windowShell(pluginWorld())) originRootObject:root rootObject:root];
     }
 
     ASSERT([m_windowScriptObject.get() isKindOfClass:[DOMAbstractView class]]);
@@ -141,7 +140,7 @@ void ScriptController::disconnectPlatformScriptObjects()
 
 static pthread_t mainThread;
 
-static void updateRenderingForBindings(JSC::ExecState*, JSC::JSObject* rootObject)
+static void updateStyleIfNeededForBindings(JSC::ExecState*, JSC::JSObject* rootObject)
 {
     if (pthread_self() != mainThread)
         return;
@@ -157,18 +156,14 @@ static void updateRenderingForBindings(JSC::ExecState*, JSC::JSObject* rootObjec
     if (!frame)
         return;
 
-    Document* document = frame->document();
-    if (!document)
-        return;
-
-    document->updateRendering();
+    frame->document()->updateStyleIfNeeded();
 }
 
 void ScriptController::initJavaJSBindings()
 {
     mainThread = pthread_self();
     JSC::Bindings::JavaJSObject::initializeJNIThreading();
-    JSC::Bindings::Instance::setDidExecuteFunction(updateRenderingForBindings);
+    JSC::Bindings::Instance::setDidExecuteFunction(updateStyleIfNeededForBindings);
 }
 
 #endif

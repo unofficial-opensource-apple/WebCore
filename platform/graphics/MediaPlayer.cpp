@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +35,7 @@
 #include "FrameView.h"
 #include "Frame.h"
 #include "Document.h"
+#include "TimeRanges.h"
 
 #include "MediaPlayerPrivateIPhone.h"
 
@@ -49,12 +50,16 @@ public:
     virtual void load(const String&) { }
     virtual void cancelLoad() { }
     
+    virtual void prepareToPlay() { }
     virtual void play() { }
     virtual void pause() { }    
+
+    virtual PlatformMedia platformMedia() const { return NoPlatformMedia; }
 
     virtual IntSize naturalSize() const { return IntSize(0, 0); }
 
     virtual bool hasVideo() const { return false; }
+    virtual bool hasAudio() const { return false; }
 
     virtual void setVisible(bool) { }
 
@@ -64,22 +69,21 @@ public:
     virtual void seek(float) { }
     virtual bool seeking() const { return false; }
 
-    virtual void setEndTime(float) { }
-
     virtual void setRate(float) { }
+    virtual void setPreservesPitch(bool) { }
     virtual bool paused() const { return false; }
 
     virtual void setVolume(float) { }
+
+    virtual bool hasClosedCaptions() const { return false; }
+    virtual void setClosedCaptionsVisible(bool) { };
 
     virtual MediaPlayer::NetworkState networkState() const { return MediaPlayer::Empty; }
     virtual MediaPlayer::ReadyState readyState() const { return MediaPlayer::HaveNothing; }
 
     virtual float maxTimeSeekable() const { return 0; }
-    virtual float maxTimeBuffered() const { return 0; }
+    virtual PassRefPtr<TimeRanges> buffered() const { return TimeRanges::create(); }
 
-    virtual int dataRate() const { return 0; }
-
-    virtual bool totalBytesKnown() const { return false; }
     virtual unsigned totalBytes() const { return 0; }
     virtual unsigned bytesLoaded() const { return 0; }
 
@@ -87,11 +91,16 @@ public:
 
     virtual void paint(GraphicsContext*, const IntRect&) { }
 
+    virtual bool canLoadPoster() const { return false; }
+    virtual void setPoster(const String&) { }
+
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
-    virtual void setPoster(const String& /*url*/) { }
     virtual void deliverNotification(MediaPlayerProxyNotificationType) { }
     virtual void setMediaPlayerProxy(WebMediaPlayerProxy*) { }
+    virtual void setControls(bool) { }
 #endif
+
+    virtual bool hasSingleSecurityOrigin() const { return true; }
 };
 
 static MediaPlayerPrivateInterface* createNullMediaPlayer(MediaPlayer* player) 
@@ -102,7 +111,7 @@ static MediaPlayerPrivateInterface* createNullMediaPlayer(MediaPlayer* player)
 
 // engine support
 
-struct MediaPlayerFactory {
+struct MediaPlayerFactory : Noncopyable {
     MediaPlayerFactory(CreateMediaEnginePlayer constructor, MediaEngineSupportedTypes getSupportedTypes, MediaEngineSupportsType supportsTypeAndCodecs) 
         : constructor(constructor)
         , getSupportedTypes(getSupportedTypes)
@@ -125,8 +134,8 @@ static Vector<MediaPlayerFactory*>& installedMediaEngines()
 
     if (!enginesQueried) {
         enginesQueried = true;
-
         MediaPlayerPrivateiPhone::registerMediaEngine(addMediaEngine);
+
         // register additional engines here
     }
     
@@ -173,6 +182,7 @@ MediaPlayer::MediaPlayer(MediaPlayerClient* client)
     , m_visible(false)
     , m_rate(1.0f)
     , m_volume(1.0f)
+    , m_preservesPitch(true)
     , m_autobuffer(false)
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
     , m_playerProxy(0)
@@ -197,14 +207,23 @@ void MediaPlayer::load(const String& url, const ContentType& contentType)
     String type = contentType.type();
     String codecs = contentType.parameter("codecs");
 
-    // if we don't know the MIME type, see if the path can help
-    if (type.isEmpty()) 
-        type = MIMETypeRegistry::getMIMETypeForPath(url);
+    // if we don't know the MIME type, see if the extension can help
+    if (type.isEmpty() || type == "application/octet-stream" || type == "text/plain") {
+        int pos = url.reverseFind('.');
+        if (pos >= 0) {
+            String extension = url.substring(pos + 1);
+            String mediaType = MIMETypeRegistry::getMediaMIMETypeForExtension(extension);
+            if (!mediaType.isEmpty())
+                type = mediaType;
+        }
+    }
 
-    MediaPlayerFactory* engine = chooseBestEngineForTypeAndCodecs(type, codecs);
+    MediaPlayerFactory* engine = 0;
+    if (!type.isEmpty())
+        engine = chooseBestEngineForTypeAndCodecs(type, codecs);
 
     // if we didn't find an engine that claims the MIME type, just use the first engine
-    if (!engine)
+    if (!engine && !installedMediaEngines().isEmpty())
         engine = installedMediaEngines()[0];
     
     // don't delete and recreate the player unless it comes from a different engine
@@ -215,7 +234,8 @@ void MediaPlayer::load(const String& url, const ContentType& contentType)
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
         m_private->setMediaPlayerProxy(m_playerProxy);
 #endif
-
+        m_private->setAutobuffer(autobuffer());
+        m_private->setPreservesPitch(preservesPitch());
     }
 
     if (m_private)
@@ -224,18 +244,31 @@ void MediaPlayer::load(const String& url, const ContentType& contentType)
         m_private.set(createNullMediaPlayer(this));
 }    
 
-#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+bool MediaPlayer::hasAvailableVideoFrame() const
+{
+    return m_private->hasAvailableVideoFrame();
+}
+    
+bool MediaPlayer::canLoadPoster() const
+{
+    return m_private->canLoadPoster();
+}
+    
 void MediaPlayer::setPoster(const String& url)
 {
     m_private->setPoster(url);
 }    
-#endif
 
 void MediaPlayer::cancelLoad()
 {
     m_private->cancelLoad();
 }    
 
+void MediaPlayer::prepareToPlay()
+{
+    m_private->prepareToPlay();
+}
+    
 void MediaPlayer::play()
 {
     m_private->play();
@@ -249,6 +282,11 @@ void MediaPlayer::pause()
 float MediaPlayer::duration() const
 {
     return m_private->duration();
+}
+
+float MediaPlayer::startTime() const
+{
+    return m_private->startTime();
 }
 
 float MediaPlayer::currentTime() const
@@ -271,14 +309,29 @@ bool MediaPlayer::seeking() const
     return m_private->seeking();
 }
 
+bool MediaPlayer::supportsFullscreen() const
+{
+    return m_private->supportsFullscreen();
+}
+
+bool MediaPlayer::supportsSave() const
+{
+    return m_private->supportsSave();
+}
+
 IntSize MediaPlayer::naturalSize()
 {
     return m_private->naturalSize();
 }
 
-bool MediaPlayer::hasVideo()
+bool MediaPlayer::hasVideo() const
 {
     return m_private->hasVideo();
+}
+
+bool MediaPlayer::hasAudio() const
+{
+    return m_private->hasAudio();
 }
 
 bool MediaPlayer::inMediaDocument()
@@ -287,6 +340,11 @@ bool MediaPlayer::inMediaDocument()
     Document* document = frame ? frame->document() : 0;
     
     return document && document->isMediaDocument();
+}
+
+PlatformMedia MediaPlayer::platformMedia() const
+{
+    return m_private->platformMedia();
 }
 
 MediaPlayer::NetworkState MediaPlayer::networkState()
@@ -310,6 +368,16 @@ void MediaPlayer::setVolume(float volume)
     m_private->setVolume(volume);   
 }
 
+bool MediaPlayer::hasClosedCaptions() const
+{
+    return m_private->hasClosedCaptions();
+}
+
+void MediaPlayer::setClosedCaptionsVisible(bool closedCaptionsVisible)
+{
+    m_private->setClosedCaptionsVisible(closedCaptionsVisible);
+}
+
 float MediaPlayer::rate() const
 {
     return m_rate;
@@ -321,19 +389,20 @@ void MediaPlayer::setRate(float rate)
     m_private->setRate(rate);   
 }
 
-int MediaPlayer::dataRate() const
+bool MediaPlayer::preservesPitch() const
 {
-    return m_private->dataRate();
+    return m_preservesPitch;
 }
 
-void MediaPlayer::setEndTime(float time)
+void MediaPlayer::setPreservesPitch(bool preservesPitch)
 {
-    m_private->setEndTime(time);
+    m_preservesPitch = preservesPitch;
+    m_private->setPreservesPitch(preservesPitch);
 }
 
-float MediaPlayer::maxTimeBuffered()
+PassRefPtr<TimeRanges> MediaPlayer::buffered()
 {
-    return m_private->maxTimeBuffered();
+    return m_private->buffered();
 }
 
 float MediaPlayer::maxTimeSeekable()
@@ -344,16 +413,6 @@ float MediaPlayer::maxTimeSeekable()
 unsigned MediaPlayer::bytesLoaded()
 {
     return m_private->bytesLoaded();
-}
-
-bool MediaPlayer::totalBytesKnown()
-{
-    return m_private->totalBytesKnown();
-}
-
-unsigned MediaPlayer::totalBytes()
-{
-    return m_private->totalBytes();
 }
 
 void MediaPlayer::setSize(const IntSize& size)
@@ -389,6 +448,11 @@ void MediaPlayer::setAutobuffer(bool b)
 void MediaPlayer::paint(GraphicsContext* p, const IntRect& r)
 {
     m_private->paint(p, r);
+}
+
+void MediaPlayer::paintCurrentFrameInContext(GraphicsContext* p, const IntRect& r)
+{
+    m_private->paintCurrentFrameInContext(p, r);
 }
 
 MediaPlayer::SupportsType MediaPlayer::supportsType(ContentType contentType)
@@ -430,8 +494,46 @@ void MediaPlayer::setMediaPlayerProxy(WebMediaPlayerProxy* proxy)
     m_playerProxy = proxy;
     m_private->setMediaPlayerProxy(proxy);
 }
+
+void MediaPlayer::setControls(bool controls)
+{
+    m_private->setControls(controls);
+}    
+
+void MediaPlayer::enterFullScreen()
+{
+    m_private->enterFullScreen();
+}    
+
+void MediaPlayer::exitFullScreen()
+{
+    m_private->exitFullScreen();
+}    
 #endif
 
+#if USE(ACCELERATED_COMPOSITING)
+void MediaPlayer::acceleratedRenderingStateChanged()
+{
+    m_private->acceleratedRenderingStateChanged();
+}
+
+bool MediaPlayer::supportsAcceleratedRendering() const
+{
+    return m_private->supportsAcceleratedRendering();
+}
+#endif // USE(ACCELERATED_COMPOSITING)
+
+bool MediaPlayer::hasSingleSecurityOrigin() const
+{
+    return m_private->hasSingleSecurityOrigin();
+}
+
+MediaPlayer::MovieLoadType MediaPlayer::movieLoadType() const
+{
+    return m_private->movieLoadType();
+}
+
+// Client callbacks.
 void MediaPlayer::networkStateChanged()
 {
     if (m_mediaPlayerClient)
@@ -481,4 +583,5 @@ void MediaPlayer::rateChanged()
 }
 
 }
+
 #endif

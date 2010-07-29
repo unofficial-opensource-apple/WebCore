@@ -33,7 +33,7 @@ public:
     HTMLButtonElement(const QualifiedName&, Document*, HTMLFormElement* = 0);
     virtual ~HTMLButtonElement();
 
-    virtual const AtomicString& type() const;
+    virtual const AtomicString& formControlType() const;
         
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
@@ -56,13 +56,13 @@ public:
 
     String value() const;
     void setValue(const String&);
-
-    virtual bool willValidate() const { return false; }
     
     virtual bool willRespondToMouseClickEvents();
 
 private:
     enum Type { SUBMIT, RESET, BUTTON };
+    virtual bool isOptionalFormControl() const { return true; }
+    virtual bool recalcWillValidate() const { return false; }
 
     Type m_type;
     bool m_activeSubmit;

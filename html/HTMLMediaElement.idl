@@ -24,7 +24,7 @@
  */
 
 module html {
-interface [GenerateConstructor, Conditional=VIDEO] HTMLMediaElement : HTMLElement {
+interface [Conditional=VIDEO] HTMLMediaElement : HTMLElement {
 
     // error state
     readonly attribute MediaError error;
@@ -42,7 +42,7 @@ interface [GenerateConstructor, Conditional=VIDEO] HTMLMediaElement : HTMLElemen
     attribute boolean autobuffer;
 
     readonly attribute TimeRanges buffered;
-    void load() 
+    [NeedsUserGestureCheck] void load() 
         raises (DOMException);
     DOMString canPlayType(in DOMString type);
 
@@ -58,6 +58,7 @@ interface [GenerateConstructor, Conditional=VIDEO] HTMLMediaElement : HTMLElemen
     // playback state
     attribute float currentTime
         setter raises (DOMException);
+    readonly attribute float startTime;
     readonly attribute float duration;
     readonly attribute boolean paused;
     attribute float defaultPlaybackRate;
@@ -67,13 +68,19 @@ interface [GenerateConstructor, Conditional=VIDEO] HTMLMediaElement : HTMLElemen
     readonly attribute boolean ended;
     attribute boolean autoplay;
     attribute boolean loop;
-    void play();
-    void pause();
+    [NeedsUserGestureCheck] void play();
+    [NeedsUserGestureCheck] void pause();
 
     // controls
     attribute boolean controls;
     attribute float volume 
         setter raises (DOMException);
     attribute boolean muted;
+    
+    // WebKit extensions
+    attribute boolean webkitPreservesPitch;
+
+    readonly attribute boolean webkitHasClosedCaptions;
+    attribute boolean webkitClosedCaptionsVisible;
 };
 }

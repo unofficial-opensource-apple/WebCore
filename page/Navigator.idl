@@ -20,11 +20,12 @@
 module window {
 
     interface [
-        CustomMarkFunction
+        CustomMarkFunction,
+        OmitConstructor
     ] Navigator {
         readonly attribute DOMString appCodeName;
         readonly attribute DOMString appName;
-        readonly attribute [CustomGetter] DOMString appVersion;
+        readonly attribute DOMString appVersion;
         readonly attribute DOMString language;
         readonly attribute DOMString userAgent;
         readonly attribute DOMString platform;
@@ -38,12 +39,21 @@ module window {
         boolean javaEnabled();
         
         readonly attribute boolean onLine;
-#if ENABLE_GEOLOCATION
-        readonly attribute Geolocation geolocation;
+
+#if defined(ENABLE_GEOLOCATION) && ENABLE_GEOLOCATION
+        readonly attribute [EnabledAtRuntime] Geolocation geolocation;
 #endif
-#if WTF_PLATFORM_IPHONE
+
         readonly attribute boolean standalone;
+
+#if defined(ENABLE_DOM_STORAGE) && ENABLE_DOM_STORAGE
+        void getStorageUpdates();
 #endif
+
+        void registerProtocolHandler(in DOMString scheme, in DOMString url, in DOMString title)
+            raises(DomException);
+        void registerContentHandler(in DOMString mimeType, in DOMString url, in DOMString title)
+            raises(DomException);
     };
 
 }

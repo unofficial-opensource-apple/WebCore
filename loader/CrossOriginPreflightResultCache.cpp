@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2009 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +30,14 @@
 #include "CrossOriginAccessControl.h"
 #include "ResourceResponse.h"
 #include <wtf/CurrentTime.h>
+#include <wtf/StdLibExtras.h>
+#include <wtf/Threading.h>
 
 namespace WebCore {
+
+// These values are at the discretion of the user agent.
+static const unsigned defaultPreflightCacheTimeoutSeconds = 5;
+static const unsigned maxPreflightCacheTimeoutSeconds = 600; // Should be short enough to minimize the risk of using a poisoned cache after switching to a secure network.
 
 static bool parseAccessControlMaxAge(const String& string, unsigned& expiryDelta)
 {
@@ -60,8 +66,7 @@ static void addToAccessControlAllowList(const String& string, unsigned start, un
     while (end && isSpaceOrNewline((*stringImpl)[end]))
         --end;
 
-    // substringCopy() is called on the strings because the cache is accessed on multiple threads.
-    set.add(string.substringCopy(start, end - start + 1));
+    set.add(string.substring(start, end - start + 1));
 }
 
 template<class HashType>
@@ -93,8 +98,11 @@ bool CrossOriginPreflightResultCacheItem::parse(const ResourceResponse& response
         return false;
 
     unsigned expiryDelta;
-    if (!parseAccessControlMaxAge(response.httpHeaderField("Access-Control-Max-Age"), expiryDelta))
-        expiryDelta = 5;
+    if (parseAccessControlMaxAge(response.httpHeaderField("Access-Control-Max-Age"), expiryDelta)) {
+        if (expiryDelta > maxPreflightCacheTimeoutSeconds)
+            expiryDelta = maxPreflightCacheTimeoutSeconds;
+    } else
+        expiryDelta = defaultPreflightCacheTimeoutSeconds;
 
     m_absoluteExpiryTime = currentTime() + expiryDelta;
     return true;
@@ -130,20 +138,20 @@ bool CrossOriginPreflightResultCacheItem::allowsRequest(bool includeCredentials,
 
 CrossOriginPreflightResultCache& CrossOriginPreflightResultCache::shared()
 {
-    AtomicallyInitializedStatic(CrossOriginPreflightResultCache&, cache = *new CrossOriginPreflightResultCache);
+    DEFINE_STATIC_LOCAL(CrossOriginPreflightResultCache, cache, ());
+    ASSERT(isMainThread() || pthread_main_np());
     return cache;
 }
 
 void CrossOriginPreflightResultCache::appendEntry(const String& origin, const KURL& url, CrossOriginPreflightResultCacheItem* preflightResult)
 {
-    MutexLocker lock(m_mutex);
-    // Note that the entry may already be present in the HashMap if another thread is accessing the same location.
-    m_preflightHashMap.set(std::make_pair(origin.copy(), url.copy()), preflightResult);
+    ASSERT(isMainThread() || pthread_main_np());
+    m_preflightHashMap.set(std::make_pair(origin, url), preflightResult);
 }
 
 bool CrossOriginPreflightResultCache::canSkipPreflight(const String& origin, const KURL& url, bool includeCredentials, const String& method, const HTTPHeaderMap& requestHeaders)
 {
-    MutexLocker lock(m_mutex);
+    ASSERT(isMainThread() || pthread_main_np());
     CrossOriginPreflightResultHashMap::iterator cacheIt = m_preflightHashMap.find(std::make_pair(origin, url));
     if (cacheIt == m_preflightHashMap.end())
         return false;
@@ -154,6 +162,13 @@ bool CrossOriginPreflightResultCache::canSkipPreflight(const String& origin, con
     delete cacheIt->second;
     m_preflightHashMap.remove(cacheIt);
     return false;
+}
+
+void CrossOriginPreflightResultCache::empty()
+{
+    ASSERT(isMainThread() || pthread_main_np());
+    deleteAllValues(m_preflightHashMap);
+    m_preflightHashMap.clear();
 }
 
 } // namespace WebCore

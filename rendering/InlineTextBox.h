@@ -24,7 +24,7 @@
 #define InlineTextBox_h
 
 #include "InlineRunBox.h"
-#include "RenderText.h" // so textObject() can be inline
+#include "RenderText.h" // so textRenderer() can be inline
 
 namespace WebCore {
 
@@ -34,7 +34,7 @@ const unsigned short cNoTruncation = USHRT_MAX;
 const unsigned short cFullTruncation = USHRT_MAX - 1;
 
 // Helper functions shared by InlineTextBox / SVGRootInlineBox
-void updateGraphicsContext(GraphicsContext* context, const Color& fillColor, const Color& strokeColor, float strokeThickness);
+void updateGraphicsContext(GraphicsContext*, const Color& fillColor, const Color& strokeColor, float strokeThickness, ColorSpace);
 Color correctedTextColor(Color textColor, Color backgroundColor);
 
 class InlineTextBox : public InlineRunBox {
@@ -59,6 +59,20 @@ public:
 
     void offsetRun(int d) { m_start += d; }
 
+    void setFallbackFonts(const HashSet<const SimpleFontData*>&);
+    Vector<const SimpleFontData*>* fallbackFonts() const;
+
+    void setGlyphOverflow(const GlyphOverflow&);
+    GlyphOverflow* glyphOverflow() const;
+
+    static void clearGlyphOverflowAndFallbackFontMap()
+    {
+        if (s_glyphOverflowAndFallbackFontsMap)
+            s_glyphOverflowAndFallbackFontsMap->clear();
+    }
+
+    unsigned short truncation() { return m_truncation; }
+
 private:
     virtual int selectionTop();
     virtual int selectionHeight();
@@ -73,7 +87,7 @@ private:
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty);
 
 public:
-    RenderText* textObject() const;
+    RenderText* textRenderer() const;
 
 private:
     virtual void deleteLine(RenderArena*);
@@ -85,7 +99,7 @@ public:
 
 private:
     virtual void clearTruncation() { m_truncation = cNoTruncation; }
-    virtual int placeEllipsisBox(bool ltr, int blockEdge, int ellipsisWidth, bool& foundBox);
+    virtual int placeEllipsisBox(bool flowIsLTR, int visibleLeftEdge, int visibleRightEdge, int ellipsisWidth, bool& foundBox);
 
 public:
     virtual bool isLineBreak() const;
@@ -96,9 +110,6 @@ private:
     virtual bool isInlineTextBox() { return true; }    
 
 public:
-    virtual bool isText() const { return m_treatAsText; }
-    void setIsText(bool b) { m_treatAsText = b; }
-
     virtual int caretMinOffset() const;
     virtual int caretMaxOffset() const;
 
@@ -120,6 +131,9 @@ private:
     unsigned short m_truncation; // Where to truncate when text overflow is applied.  We use special constants to
                       // denote no truncation (the whole run paints) and full truncation (nothing paints at all).
 
+    typedef HashMap<const InlineTextBox*, pair<Vector<const SimpleFontData*>, GlyphOverflow> > GlyphOverflowAndFallbackFontsMap;
+    static GlyphOverflowAndFallbackFontsMap* s_glyphOverflowAndFallbackFontsMap;
+
 protected:
     void paintCompositionBackground(GraphicsContext*, int tx, int ty, RenderStyle*, const Font&, int startPos, int endPos);
     void paintDocumentMarkers(GraphicsContext*, int tx, int ty, RenderStyle*, const Font&, bool background);
@@ -131,13 +145,14 @@ protected:
 private:
     void paintDecoration(GraphicsContext*, int tx, int ty, int decoration, ShadowData*);
     void paintSelection(GraphicsContext*, int tx, int ty, RenderStyle*, const Font&);
-    void paintSpellingOrGrammarMarker(GraphicsContext*, int tx, int ty, DocumentMarker, RenderStyle*, const Font&, bool grammar);
-    void paintTextMatchMarker(GraphicsContext*, int tx, int ty, DocumentMarker, RenderStyle*, const Font&);
+    void paintSpellingOrGrammarMarker(GraphicsContext*, int tx, int ty, const DocumentMarker&, RenderStyle*, const Font&, bool grammar);
+    void paintTextMatchMarker(GraphicsContext*, int tx, int ty, const DocumentMarker&, RenderStyle*, const Font&);
+    void computeRectForReplacementMarker(int tx, int ty, const DocumentMarker&, RenderStyle*, const Font&);
 };
 
-inline RenderText* InlineTextBox::textObject() const
+inline RenderText* InlineTextBox::textRenderer() const
 {
-    return toRenderText(m_object);
+    return toRenderText(renderer());
 }
 
 } // namespace WebCore

@@ -26,16 +26,25 @@
 module window {
 
     interface [
-        CustomGetOwnPropertySlot,
-        CustomPutFunction,
+#if defined(V8_BINDING) && V8_BINDING
+        CheckDomainSecurity,
+#endif
+        DelegatingGetOwnPropertySlot,
+        DelegatingPutFunction,
         CustomDeleteProperty,
-        CustomGetPropertyNames
+        CustomGetPropertyNames,
+        OmitConstructor
     ] History {
         readonly attribute unsigned long length;
 
-        void back();
-        void forward();
-        void go(in long distance);
+        [DoNotCheckDomainSecurity] void back();
+        [DoNotCheckDomainSecurity] void forward();
+        [DoNotCheckDomainSecurity] void go(in long distance);
+        
+        [Custom] void pushState(in any data, in DOMString title, in optional DOMString url)
+            raises(DOMException);
+        [Custom] void replaceState(in any data, in DOMString title, in optional DOMString url)
+            raises(DOMException);
     };
 
 }

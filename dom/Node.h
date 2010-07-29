@@ -2,7 +2,8 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2009 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,44 +25,48 @@
 #ifndef Node_h
 #define Node_h
 
-#include "DocPtr.h"
+#include "EventTarget.h"
 #include "KURLHash.h"
-#include "PlatformString.h"
+#include "ScriptWrappable.h"
 #include "TreeShared.h"
-#include "FloatPoint.h"
-#include <wtf/Assertions.h>
 #include <wtf/ListHashSet.h>
-#include <wtf/OwnPtr.h>
-#include <wtf/PassRefPtr.h>
 
 namespace WebCore {
 
 class AtomicString;
+class Attribute;
 class ContainerNode;
 class Document;
 class DynamicNodeList;
 class Element;
 class Event;
 class EventListener;
+class FloatPoint;
+class Frame;
 class IntRect;
 class KeyboardEvent;
 class NSResolver;
-class NamedAttrMap;
+class NamedNodeMap;
 class NodeList;
+class NodeRareData;
 class PlatformKeyboardEvent;
 class PlatformMouseEvent;
 class PlatformWheelEvent;
 class QualifiedName;
+class RegisteredEventListener;
 class RenderArena;
 class RenderBox;
+class RenderBoxModelObject;
 class RenderObject;
 class RenderStyle;
 class StringBuilder;
-class NodeRareData;
 
 typedef int ExceptionCode;
 
-enum StyleChangeType { NoStyleChange, InlineStyleChange, FullStyleChange, AnimationStyleChange };
+// SyntheticStyleChange means that we need to go through the entire style change logic even though
+// no style property has actually changed. It is used to restructure the tree when, for instance,
+// RenderLayers are created or destroyed due to animation changes.
+enum StyleChangeType { NoStyleChange, InlineStyleChange, FullStyleChange, SyntheticStyleChange };
 
 const unsigned short DOCUMENT_POSITION_EQUIVALENT = 0x00;
 const unsigned short DOCUMENT_POSITION_DISCONNECTED = 0x01;
@@ -72,7 +77,7 @@ const unsigned short DOCUMENT_POSITION_CONTAINED_BY = 0x10;
 const unsigned short DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC = 0x20;
 
 // this class implements nodes, which can have a parent but no children:
-class Node : public TreeShared<Node> {
+class Node : public EventTarget, public TreeShared<Node>, public ScriptWrappable {
     friend class Document;
 public:
     enum NodeType {
@@ -99,9 +104,8 @@ public:
     static void dumpStatistics();
 
     enum StyleChange { NoChange, NoInherit, Inherit, Detach, Force };    
-    static StyleChange diff(RenderStyle*, RenderStyle*);
+    static StyleChange diff(const RenderStyle*, const RenderStyle*);
 
-    Node(Document*, bool isElement = false, bool isContainer = false, bool isText = false);
     virtual ~Node();
 
     // DOM methods & attributes for Node
@@ -119,7 +123,7 @@ public:
     Node* firstChild() const { return isContainerNode() ? containerFirstChild() : 0; }
     Node* lastChild() const { return isContainerNode() ? containerLastChild() : 0; }
     bool hasAttributes() const;
-    NamedAttrMap* attributes() const;
+    NamedNodeMap* attributes() const;
 
     virtual KURL baseURI() const;
     
@@ -175,13 +179,20 @@ public:
     static bool isWMLElement() { return false; }
 #endif
 
+#if ENABLE(MATHML)
+    virtual bool isMathMLElement() const { return false; }
+#else
+    static bool isMathMLElement() { return false; }
+#endif
+
+
+    virtual bool isMediaControlElement() const { return false; }
     virtual bool isStyledElement() const { return false; }
     virtual bool isFrameOwnerElement() const { return false; }
     virtual bool isAttributeNode() const { return false; }
     virtual bool isCommentNode() const { return false; }
     virtual bool isCharacterDataNode() const { return false; }
     bool isDocumentNode() const;
-    virtual bool isEventTargetNode() const { return false; }
     virtual bool isShadowNode() const { return false; }
     virtual Node* shadowParentNode() { return 0; }
     Node* shadowAncestorNode();
@@ -190,6 +201,12 @@ public:
 
     // The node's parent for the purpose of event capture and bubbling.
     virtual ContainerNode* eventParentNode();
+
+    // Returns the enclosing event parent node (or self) that, when clicked, would trigger a navigation.
+    Node* enclosingLinkEventParentOrSelf();
+
+    // Node ancestors when concerned about event flow
+    void eventAncestors(Vector<RefPtr<ContainerNode> > &ancestors);
 
     bool isBlockFlow() const;
     bool isBlockFlowOrBlockTable() const;
@@ -234,7 +251,7 @@ public:
     virtual ContainerNode* addChild(PassRefPtr<Node>);
 
     // Called by the parser when this element's close tag is reached,
-    // signalling that all child tags have been parsed and added.
+    // signaling that all child tags have been parsed and added.
     // This is needed for <applet> and <object> elements, which can't lay themselves out
     // until they know all of their nested <param>s. [Radar 3603191, 4040848].
     // Also used for script elements and some SVG elements for similar purposes,
@@ -259,20 +276,17 @@ public:
     bool focused() const { return hasRareData() ? rareDataFocused() : false; }
     bool attached() const { return m_attached; }
     void setAttached(bool b = true) { m_attached = b; }
-    bool changed() const { return m_styleChange != NoStyleChange; }
+    bool needsStyleRecalc() const { return m_styleChange != NoStyleChange; }
     StyleChangeType styleChangeType() const { return static_cast<StyleChangeType>(m_styleChange); }
-    bool hasChangedChild() const { return m_hasChangedChild; }
+    bool childNeedsStyleRecalc() const { return m_childNeedsStyleRecalc; }
     bool isLink() const { return m_isLink; }
     void setHasID(bool b = true) { m_hasId = b; }
     void setHasClass(bool b = true) { m_hasClass = b; }
-    void setHasChangedChild( bool b = true ) { m_hasChangedChild = b; }
+    void setChildNeedsStyleRecalc(bool b = true) { m_childNeedsStyleRecalc = b; }
     void setInDocument(bool b = true) { m_inDocument = b; }
     void setInActiveChain(bool b = true) { m_inActiveChain = b; }
-    void setChanged(StyleChangeType changeType = FullStyleChange);
+    void setNeedsStyleRecalc(StyleChangeType changeType = FullStyleChange);
     void setIsLink(bool b = true) { m_isLink = b; }
-
-    bool inSubtreeMark() const { return m_inSubtreeMark; }
-    void setInSubtreeMark(bool b = true) { m_inSubtreeMark = b; }
 
     void lazyAttach();
     virtual bool canLazyAttach();
@@ -283,21 +297,13 @@ public:
 
     virtual short tabIndex() const;
 
-    /**
-     * Whether this node can receive the keyboard focus.
-     */
-    virtual bool supportsFocus() const { return isFocusable(); }
+    // Whether this kind of node can receive focus by default. Most nodes are
+    // not focusable but some elements, such as form controls and links are.
+    virtual bool supportsFocus() const;
+    // Whether the node can actually be focused.
     virtual bool isFocusable() const;
     virtual bool isKeyboardFocusable(KeyboardEvent*) const;
     virtual bool isMouseFocusable() const;
-
-    virtual bool isAutofilled() const { return false; }
-    virtual bool isControl() const { return false; } // Eventually the notion of what is a control will be extensible.
-    virtual bool isEnabled() const { return true; }
-    virtual bool isChecked() const { return false; }
-    virtual bool isIndeterminate() const { return false; }
-    virtual bool isReadOnlyControl() const { return false; }
-    virtual bool isTextControl() const { return false; }
 
     virtual bool isContentEditable() const;
     virtual bool isContentRichlyEditable() const;
@@ -317,8 +323,8 @@ public:
     Document* document() const
     {
         ASSERT(this);
-        ASSERT(m_document || nodeType() == DOCUMENT_TYPE_NODE && !inDocument());
-        return m_document.get();
+        ASSERT(m_document || (nodeType() == DOCUMENT_TYPE_NODE && !inDocument()));
+        return m_document;
     }
     void setDocument(Document*);
 
@@ -376,10 +382,10 @@ public:
     RenderObject* previousRenderer();
     void setRenderer(RenderObject* renderer) { m_renderer = renderer; }
     
-    // Use with caution. Does no type checking.  Mostly a convenience method for shadow nodes of form controls, where we know exactly
-    // what kind of renderer we made.
+    // Use these two methods with caution.
     RenderBox* renderBox() const;
-    
+    RenderBoxModelObject* renderBoxModelObject() const;
+
     void checkSetPrefix(const AtomicString& prefix, ExceptionCode&);
     bool isDescendantOrShadowDescendantOf(const Node* otherNode);
     bool isDescendantOf(const Node*) const;
@@ -431,7 +437,7 @@ public:
     void createRendererIfNeeded();
     PassRefPtr<RenderStyle> styleForRenderer();
     virtual bool rendererIsNeeded(RenderStyle*);
-#if ENABLE(SVG)
+#if ENABLE(SVG) || ENABLE(XHTMLMP)
     virtual bool childShouldCreateRenderer(Node*) const { return true; }
 #endif
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
@@ -506,19 +512,88 @@ public:
 
     unsigned short compareDocumentPosition(Node*);
 
+    virtual Node* toNode() { return this; }
+
+    virtual ScriptExecutionContext* scriptExecutionContext() const;
+
+    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture);
+    virtual bool removeEventListener(const AtomicString& eventType, EventListener*, bool useCapture);
+
+    // Handlers to do/undo actions on the target node before an event is dispatched to it and after the event
+    // has been dispatched.  The data pointer is handed back by the preDispatch and passed to postDispatch.
+    virtual void* preDispatchEventHandler(Event*) { return 0; }
+    virtual void postDispatchEventHandler(Event*, void* /*dataFromPreDispatch*/) { }
+
+    using EventTarget::dispatchEvent;
+    virtual bool dispatchEvent(PassRefPtr<Event>);
+
+    bool dispatchGenericEvent(PassRefPtr<Event>);
+    virtual void handleLocalEvents(Event*);
+
+    void dispatchSubtreeModifiedEvent();
+    void dispatchUIEvent(const AtomicString& eventType, int detail, PassRefPtr<Event> underlyingEvent);
+    bool dispatchKeyEvent(const PlatformKeyboardEvent&);
+    void dispatchWheelEvent(PlatformWheelEvent&);
+    bool dispatchMouseEvent(const PlatformMouseEvent&, const AtomicString& eventType,
+        int clickCount = 0, Node* relatedTarget = 0);
+    bool dispatchMouseEvent(const AtomicString& eventType, int button, int clickCount,
+        int pageX, int pageY, int screenX, int screenY,
+        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
+        bool isSimulated, Node* relatedTarget, PassRefPtr<Event> underlyingEvent);
+    void dispatchSimulatedMouseEvent(const AtomicString& eventType, PassRefPtr<Event> underlyingEvent);
+    void dispatchSimulatedClick(PassRefPtr<Event> underlyingEvent, bool sendMouseEvents = false, bool showPressedLook = true);
+
+    virtual void dispatchFocusEvent();
+    virtual void dispatchBlurEvent();
+
+    /**
+     * Perform the default action for an event e.g. submitting a form
+     */
+    virtual void defaultEventHandler(Event*);
+
+    /**
+     * Used for disabled form elements; if true, prevents mouse events from being dispatched
+     * to event listeners, and prevents DOMActivate events from being sent at all.
+     */
+    virtual bool disabled() const;
+
+    using TreeShared<Node>::ref;
+    using TreeShared<Node>::deref;
+
+    virtual EventTargetData* eventTargetData();
+    virtual EventTargetData* ensureEventTargetData();
+
 protected:
-    virtual void willMoveToNewOwnerDocument() { }
-    virtual void didMoveToNewOwnerDocument() { }
+    // CreateElementZeroRefCount is deprecated and can be removed once we convert all element
+    // classes to start with a reference count of 1.
+    enum ConstructionType { CreateContainer, CreateElement, CreateOther, CreateText, CreateElementZeroRefCount };
+    Node(Document*, ConstructionType);
+
+    virtual void willMoveToNewOwnerDocument();
+    virtual void didMoveToNewOwnerDocument();
     
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const { }
     void setTabIndexExplicitly(short);
     
     bool hasRareData() const { return m_hasRareData; }
-    
+#if ENABLE(SVG)
+    bool hasRareSVGData() const { return m_hasRareSVGData; }
+#endif
+
     NodeRareData* rareData() const;
     NodeRareData* ensureRareData();
 
 private:
+    static bool initialRefCount(ConstructionType);
+    static bool isContainer(ConstructionType);
+    static bool isElement(ConstructionType);
+    static bool isText(ConstructionType);
+
+    virtual void refEventTarget() { ref(); }
+    virtual void derefEventTarget() { deref(); }
+
+    void removeAllEventListenersSlowCase();
+
     virtual NodeRareData* createRareData();
     Node* containerChildNode(unsigned index) const;
     unsigned containerChildNodeCount() const;
@@ -536,7 +611,7 @@ private:
 
     void appendTextContent(bool convertBRsToNewlines, StringBuilder&) const;
 
-    DocPtr<Document> m_document;
+    Document* m_document;
     Node* m_previous;
     Node* m_next;
     RenderObject* m_renderer;
@@ -545,39 +620,33 @@ private:
     bool m_hasId : 1;
     bool m_hasClass : 1;
     bool m_attached : 1;
-    bool m_hasChangedChild : 1;
+    bool m_childNeedsStyleRecalc : 1;
     bool m_inDocument : 1;
     bool m_isLink : 1;
     bool m_active : 1;
     bool m_hovered : 1;
     bool m_inActiveChain : 1;
     bool m_inDetach : 1;
-    bool m_inSubtreeMark : 1;
     bool m_hasRareData : 1;
     const bool m_isElement : 1;
     const bool m_isContainer : 1;
     const bool m_isText : 1;
 
 protected:
-    // These bits are used by the Element derived class, pulled up here so they can
+    // These bits are used by derived classes, pulled up here so they can
     // be stored in the same memory word as the Node bits above.
-    bool m_parsingChildrenFinished : 1;
-#if ENABLE(SVG)
-    mutable bool m_areSVGAttributesValid : 1;
-#endif
 
-    // These bits are used by the StyledElement derived class, and live here for the
-    // same reason as above.
-    mutable bool m_isStyleAttributeValid : 1;
-    mutable bool m_synchronizingStyleAttribute : 1;
+    bool m_parsingChildrenFinished : 1; // Element
+    mutable bool m_isStyleAttributeValid : 1; // StyledElement
+    mutable bool m_synchronizingStyleAttribute : 1; // StyledElement
 
 #if ENABLE(SVG)
-    // This bit is used by the SVGElement derived class, and lives here for the same
-    // reason as above.
-    mutable bool m_synchronizingSVGAttributes : 1;
+    mutable bool m_areSVGAttributesValid : 1; // Element
+    mutable bool m_synchronizingSVGAttributes : 1; // SVGElement
+    bool m_hasRareSVGData : 1; // SVGElement
 #endif
 
-    // 11 bits remaining
+    // 10 bits remaining
 };
 
 // Used in Node::addSubresourceAttributeURLs() and in addSubresourceStyleURLs()

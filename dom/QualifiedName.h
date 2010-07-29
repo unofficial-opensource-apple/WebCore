@@ -1,7 +1,5 @@
 /*
- * This file is part of the DOM implementation for KDE.
- *
- * Copyright (C) 2005 Apple Computer, Inc.
+ * Copyright (C) 2005, 2006, 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,50 +17,54 @@
  * Boston, MA 02110-1301, USA.
  *
  */
+
 #ifndef QualifiedName_h
 #define QualifiedName_h
 
 #include "AtomicString.h"
-#include <wtf/HashFunctions.h>
+#include <wtf/HashTraits.h>
 
 namespace WebCore {
-    
+
 struct QualifiedNameComponents {
     StringImpl* m_prefix;
     StringImpl* m_localName;
     StringImpl* m_namespace;
 };
 
-class QualifiedName {
+class QualifiedName : public FastAllocBase {
 public:
     class QualifiedNameImpl : public RefCounted<QualifiedNameImpl> {
     public:
-        static PassRefPtr<QualifiedNameImpl> create(const AtomicString& p, const AtomicString& l, const AtomicString& n)
+        static PassRefPtr<QualifiedNameImpl> create(const AtomicString& prefix, const AtomicString& localName, const AtomicString& namespaceURI)
         {
-            return adoptRef(new QualifiedNameImpl(p, l, n));
+            return adoptRef(new QualifiedNameImpl(prefix, localName, namespaceURI));
         }
-        
-        AtomicString m_prefix;
-        AtomicString m_localName;
-        AtomicString m_namespace;
+
+        const AtomicString m_prefix;
+        const AtomicString m_localName;
+        const AtomicString m_namespace;
+        mutable AtomicString m_localNameUpper;
 
     private:
-        QualifiedNameImpl(const AtomicString& p, const AtomicString& l, const AtomicString& n)
-            : m_prefix(p)
-            , m_localName(l)
-            , m_namespace(n)
+        QualifiedNameImpl(const AtomicString& prefix, const AtomicString& localName, const AtomicString& namespaceURI)
+            : m_prefix(prefix)
+            , m_localName(localName)
+            , m_namespace(namespaceURI)
         {
+            ASSERT(!namespaceURI.isEmpty() || namespaceURI.isNull());
         }        
     };
 
     QualifiedName(const AtomicString& prefix, const AtomicString& localName, const AtomicString& namespaceURI);
-    ~QualifiedName();
+    QualifiedName(const AtomicString& prefix, const char* localName, const AtomicString& namespaceURI);
+    ~QualifiedName() { deref(); }
 #ifdef QNAME_DEFAULT_CONSTRUCTOR
     QualifiedName() : m_impl(0) { }
 #endif
 
-    QualifiedName(const QualifiedName&);
-    const QualifiedName& operator=(const QualifiedName&);
+    QualifiedName(const QualifiedName& other) : m_impl(other.m_impl) { ref(); }
+    const QualifiedName& operator=(const QualifiedName& other) { other.ref(); deref(); m_impl = other.m_impl; return *this; }
 
     bool operator==(const QualifiedName& other) const { return m_impl == other.m_impl; }
     bool operator!=(const QualifiedName& other) const { return !(*this == other); }
@@ -70,11 +72,14 @@ public:
     bool matches(const QualifiedName& other) const { return m_impl == other.m_impl || (localName() == other.localName() && namespaceURI() == other.namespaceURI()); }
 
     bool hasPrefix() const { return m_impl->m_prefix != nullAtom; }
-    void setPrefix(const AtomicString& prefix);
+    void setPrefix(const AtomicString& prefix) { *this = QualifiedName(prefix, localName(), namespaceURI()); }
 
     const AtomicString& prefix() const { return m_impl->m_prefix; }
     const AtomicString& localName() const { return m_impl->m_localName; }
     const AtomicString& namespaceURI() const { return m_impl->m_namespace; }
+
+    // Uppercased localName, cached for efficiency
+    const AtomicString& localNameUpper() const;
 
     String toString() const;
 
@@ -84,7 +89,8 @@ public:
     static void init();
     
 private:
-    void ref() { m_impl->ref(); }
+    void init(const AtomicString& prefix, const AtomicString& localName, const AtomicString& namespaceURI);
+    void ref() const { m_impl->ref(); }
     void deref();
     
     QualifiedNameImpl* m_impl;
@@ -99,7 +105,6 @@ inline bool operator==(const AtomicString& a, const QualifiedName& q) { return a
 inline bool operator!=(const AtomicString& a, const QualifiedName& q) { return a != q.localName(); }
 inline bool operator==(const QualifiedName& q, const AtomicString& a) { return a == q.localName(); }
 inline bool operator!=(const QualifiedName& q, const AtomicString& a) { return a != q.localName(); }
-
 
 inline unsigned hashComponents(const QualifiedNameComponents& buf)
 {
@@ -154,6 +159,7 @@ struct QualifiedNameHash {
 namespace WTF {
     
     template<typename T> struct DefaultHash;
+
     template<> struct DefaultHash<WebCore::QualifiedName> {
         typedef WebCore::QualifiedNameHash Hash;
     };

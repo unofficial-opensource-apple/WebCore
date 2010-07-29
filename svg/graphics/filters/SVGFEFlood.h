@@ -22,8 +22,9 @@
 #ifndef SVGFEFlood_h
 #define SVGFEFlood_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "Color.h"
+#include "Filter.h"
 #include "FilterEffect.h"
 
 namespace WebCore {
@@ -38,8 +39,8 @@ namespace WebCore {
         float floodOpacity() const;
         void setFloodOpacity(float);
 
-        virtual void apply();
-        virtual void dump();
+        void apply(Filter*);
+        void dump();
         TextStream& externalRepresentation(TextStream& ts) const;
 
     private:
@@ -51,6 +52,6 @@ namespace WebCore {
 
 } // namespace WebCore
 
-#endif // ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#endif // ENABLE(SVG) && ENABLE(FILTERS)
 
 #endif // SVGFEFlood_h

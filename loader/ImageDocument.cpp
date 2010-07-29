@@ -25,6 +25,7 @@
 #include "config.h"
 #include "ImageDocument.h"
 
+#include "CSSStyleDeclaration.h"
 #include "CachedImage.h"
 #include "DocumentLoader.h"
 #include "Element.h"
@@ -32,11 +33,13 @@
 #include "EventNames.h"
 #include "Frame.h"
 #include "FrameLoader.h"
+#include "FrameLoaderClient.h"
 #include "FrameView.h"
 #include "HTMLImageElement.h"
 #include "HTMLNames.h"
 #include "LocalizedStrings.h"
 #include "MouseEvent.h"
+#include "NotImplemented.h"
 #include "Page.h"
 #include "SegmentedString.h"
 #include "Settings.h"
@@ -52,10 +55,24 @@ using namespace HTMLNames;
 class ImageEventListener : public EventListener {
 public:
     static PassRefPtr<ImageEventListener> create(ImageDocument* document) { return adoptRef(new ImageEventListener(document)); }
-    virtual void handleEvent(Event*, bool isWindowEvent);
+    static const ImageEventListener* cast(const EventListener* listener)
+    {
+        return listener->type() == ImageEventListenerType
+            ? static_cast<const ImageEventListener*>(listener)
+            : 0;
+    }
+
+    virtual bool operator==(const EventListener& other);
 
 private:
-    ImageEventListener(ImageDocument* document) : m_doc(document) { }
+    ImageEventListener(ImageDocument* document)
+        : EventListener(ImageEventListenerType)
+        , m_doc(document)
+    {
+    }
+
+    virtual void handleEvent(ScriptExecutionContext*, Event*);
+
     ImageDocument* m_doc;
 };
     
@@ -63,7 +80,7 @@ class ImageTokenizer : public Tokenizer {
 public:
     ImageTokenizer(ImageDocument* doc) : m_doc(doc) {}
 
-    virtual bool write(const SegmentedString&, bool appendData);
+    virtual void write(const SegmentedString&, bool appendData);
     virtual void finish();
     virtual bool isWaitingForScripts() const;
     
@@ -91,16 +108,21 @@ private:
 
 // --------
 
-bool ImageTokenizer::write(const SegmentedString&, bool)
+void ImageTokenizer::write(const SegmentedString&, bool)
 {
-    ASSERT_NOT_REACHED();
-    return false;
+    // <https://bugs.webkit.org/show_bug.cgi?id=25397>: JS code can always call document.write, we need to handle it.
+    notImplemented();
 }
 
 bool ImageTokenizer::writeRawData(const char*, int)
 {
+    Frame* frame = m_doc->frame();
+    Settings* settings = frame->settings();
+    if (!frame->loader()->client()->allowImages(!settings || settings->areImagesEnabled()))
+        return false;
+    
     CachedImage* cachedImage = m_doc->cachedImage();
-    cachedImage->data(m_doc->frame()->loader()->documentLoader()->mainResourceData(), false);
+    cachedImage->data(frame->loader()->documentLoader()->mainResourceData(), false);
 
     m_doc->imageChanged();
     
@@ -125,9 +147,9 @@ void ImageTokenizer::finish()
 
         IntSize size = cachedImage->imageSize(m_doc->frame()->pageZoomFactor());
         if (size.width()) {
-            // Compute the title, we use the filename of the resource, falling
-            // back on the hostname if there is no path.
-            String fileName = m_doc->url().lastPathComponent();
+            // Compute the title, we use the decoded filename of the resource, falling
+            // back on the (decoded) hostname if there is no path.
+            String fileName = decodeURLEscapeSequences(m_doc->url().lastPathComponent());
             if (fileName.isEmpty())
                 fileName = m_doc->url().host();
             m_doc->setTitle(imageTitle(fileName, size));
@@ -166,10 +188,10 @@ void ImageDocument::createDocumentStructure()
 {
     ExceptionCode ec;
     
-    RefPtr<Element> rootElement = createElementNS(xhtmlNamespaceURI, "html", ec);
+    RefPtr<Element> rootElement = Document::createElement(htmlTag, false);
     appendChild(rootElement, ec);
     
-    RefPtr<Element> body = createElementNS(xhtmlNamespaceURI, "body", ec);
+    RefPtr<Element> body = Document::createElement(bodyTag, false);
     body->setAttribute(styleAttr, "margin: 0px;");
     
     rootElement->appendChild(body, ec);
@@ -185,7 +207,8 @@ void ImageDocument::createDocumentStructure()
     if (shouldShrinkToFit()) {
         // Add event listeners
         RefPtr<EventListener> listener = ImageEventListener::create(this);
-        addWindowEventListener("resize", listener, false);
+        if (DOMWindow* domWindow = this->domWindow())
+            domWindow->addEventListener("resize", listener, false);
         imageElement->addEventListener("click", listener.release(), false);
     }
 
@@ -348,7 +371,7 @@ bool ImageDocument::shouldShrinkToFit() const
 
 // --------
 
-void ImageEventListener::handleEvent(Event* event, bool)
+void ImageEventListener::handleEvent(ScriptExecutionContext*, Event* event)
 {
     if (event->type() == eventNames().resizeEvent)
         m_doc->windowSizeChanged();
@@ -356,6 +379,13 @@ void ImageEventListener::handleEvent(Event* event, bool)
         MouseEvent* mouseEvent = static_cast<MouseEvent*>(event);
         m_doc->imageClicked(mouseEvent->x(), mouseEvent->y());
     }
+}
+
+bool ImageEventListener::operator==(const EventListener& listener)
+{
+    if (const ImageEventListener* imageEventListener = ImageEventListener::cast(&listener))
+        return m_doc == imageEventListener->m_doc;
+    return false;
 }
 
 // --------

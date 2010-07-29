@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2003, 2006, 2009 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -89,6 +89,7 @@ String copyImageUnknownFileLabel()
     return String();
 }
 
+#if ENABLE(CONTEXT_MENUS)
 String contextMenuItemTagOpenLinkInNewWindow()
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
@@ -433,6 +434,110 @@ String contextMenuItemTagRightToLeft()
     return String();
 }
 
+String contextMenuItemTagCorrectSpellingAutomatically()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagCorrectSpellingAutomatically];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagSubstitutionsMenu()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagSubstitutionsMenu];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagShowSubstitutions(bool show)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagShowSubstitutions:show];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagSmartCopyPaste()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagSmartCopyPaste];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagSmartQuotes()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagSmartQuotes];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagSmartDashes()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagSmartDashes];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagSmartLinks()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagSmartLinks];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagTextReplacement()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagTextReplacement];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagTransformationsMenu()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagTransformationsMenu];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagMakeUpperCase()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagMakeUpperCase];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagMakeLowerCase()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagMakeLowerCase];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagCapitalize()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagCapitalize];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String contextMenuItemTagChangeBack(const String& replacedString)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] contextMenuItemTagChangeBack:replacedString];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return replacedString;
+}
+    
 String contextMenuItemTagInspectElement()
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
@@ -440,6 +545,7 @@ String contextMenuItemTagInspectElement()
     END_BLOCK_OBJC_EXCEPTIONS;
     return String();
 }
+#endif // ENABLE(CONTEXT_MENUS)
 
 String searchMenuNoRecentSearchesText()
 {
@@ -521,6 +627,14 @@ String AXDefinitionListDefinitionText()
     return String();
 }
     
+String AXARIAContentGroupText(const String& ariaType)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] AXARIAContentGroupText:ariaType];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();        
+}
+    
 String AXButtonActionVerb()
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
@@ -569,6 +683,23 @@ String AXLinkActionVerb()
     return String();
 }
 
+String AXMenuListPopupActionVerb()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] AXMenuListPopupActionVerb];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String AXMenuListActionVerb()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] AXMenuListActionVerb];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+
 String multipleFileUploadText(unsigned numberOfFiles)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
@@ -589,6 +720,102 @@ String imageTitle(const String& filename, const IntSize& size)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     return [[WebCoreViewFactory sharedFactory] imageTitleForFilename:filename width:size.width() height:size.height()];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String mediaElementLoadingStateText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] mediaElementLoadingStateText];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String mediaElementLiveBroadcastStateText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] mediaElementLiveBroadcastStateText];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String localizedMediaControlElementString(const String& controlName)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] localizedMediaControlElementString:controlName];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String localizedMediaControlElementHelpText(const String& controlName)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] localizedMediaControlElementHelpText:controlName];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String localizedMediaTimeDescription(float time)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] localizedMediaTimeDescription:time];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String validationMessageValueMissingText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] validationMessageValueMissingText];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String validationMessageTypeMismatchText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] validationMessageTypeMismatchText];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String validationMessagePatternMismatchText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] validationMessagePatternMismatchText];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String validationMessageTooLongText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] validationMessageTooLongText];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String validationMessageRangeUnderflowText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] validationMessageRangeUnderflowText];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String validationMessageRangeOverflowText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] validationMessageRangeOverflowText];
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String validationMessageStepMismatchText()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return [[WebCoreViewFactory sharedFactory] validationMessageStepMismatchText];
     END_BLOCK_OBJC_EXCEPTIONS;
     return String();
 }

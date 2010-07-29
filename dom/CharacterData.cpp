@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -30,20 +30,11 @@
 
 namespace WebCore {
 
-CharacterData::CharacterData(Document *doc, bool isText)
-    : EventTargetNode(doc, false, false, isText)
-    , m_data(StringImpl::empty())
+CharacterData::CharacterData(Document* document, const String& text, ConstructionType type)
+    : Node(document, type)
+    , m_data(text.impl() ? text.impl() : StringImpl::empty())
 {
-}
-
-CharacterData::CharacterData(Document* document, const String& text, bool isText)
-    : EventTargetNode(document, false, false, isText)
-{
-    m_data = text.impl() ? text.impl() : StringImpl::empty();
-}
-
-CharacterData::~CharacterData()
-{
+    ASSERT(type == CreateOther || type == CreateText);
 }
 
 void CharacterData::setData(const String& data, ExceptionCode&)
@@ -93,7 +84,7 @@ void CharacterData::appendData(const String& arg, ExceptionCode&)
     dispatchModifiedEvent(oldStr.get());
 }
 
-void CharacterData::insertData(unsigned offset, const String& arg, ExceptionCode& ec)
+void CharacterData::insertData(unsigned offset, const String& arg, ExceptionCode& ec, bool canShowLastCharacterIfSecure)
 {
     checkCharDataOperation(offset, ec);
     if (ec)
@@ -112,7 +103,7 @@ void CharacterData::insertData(unsigned offset, const String& arg, ExceptionCode
         attach();
     } else if (renderer()) {
         RenderText *renderText = toRenderText(renderer());
-        if (atEnd && renderText->isSecure()) {
+        if (atEnd && renderText->isSecure() && canShowLastCharacterIfSecure) {
             renderText->momentarilyRevealLastCharacter();
         }
         renderText->setTextWithOffset(m_data, offset, 0);            
@@ -210,10 +201,8 @@ void CharacterData::dispatchModifiedEvent(StringImpl* prevValue)
 {
     if (parentNode())
         parentNode()->childrenChanged();
-    if (document()->hasListenerType(Document::DOMCHARACTERDATAMODIFIED_LISTENER)) {
-        ExceptionCode ec;
-        dispatchEvent(MutationEvent::create(eventNames().DOMCharacterDataModifiedEvent, true, false, 0, prevValue, m_data, String(), 0), ec);
-    }
+    if (document()->hasListenerType(Document::DOMCHARACTERDATAMODIFIED_LISTENER))
+        dispatchEvent(MutationEvent::create(eventNames().DOMCharacterDataModifiedEvent, true, 0, prevValue, m_data));
     dispatchSubtreeModifiedEvent();
 }
 
@@ -238,7 +227,7 @@ bool CharacterData::rendererIsNeeded(RenderStyle *style)
 {
     if (!m_data || !length())
         return false;
-    return EventTargetNode::rendererIsNeeded(style);
+    return Node::rendererIsNeeded(style);
 }
 
 bool CharacterData::offsetInCharacters() const

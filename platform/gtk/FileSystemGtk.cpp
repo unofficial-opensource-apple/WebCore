@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 Holger Hans Peter Freyther
+ * Copyright (C) 2007, 2009 Holger Hans Peter Freyther
  * Copyright (C) 2008 Collabora, Ltd.
  * Copyright (C) 2008 Apple Inc. All rights reserved.
  *
@@ -22,8 +22,7 @@
 #include "config.h"
 #include "FileSystem.h"
 
-#include "guriescape.h"
-#include "NotImplemented.h"
+#include "GOwnPtr.h"
 #include "PlatformString.h"
 #include "CString.h"
 
@@ -43,7 +42,7 @@ String filenameToString(const char* filename)
     if (!filename)
         return String();
 
-#if PLATFORM(WIN_OS)
+#if OS(WINDOWS)
     return String::fromUTF8(filename);
 #else
     gchar* escapedString = g_uri_escape_string(filename, "/:", false);
@@ -55,7 +54,7 @@ String filenameToString(const char* filename)
 
 char* filenameFromString(const String& string)
 {
-#if PLATFORM(WIN_OS)
+#if OS(WINDOWS)
     return g_strdup(string.utf8().data());
 #else
     return g_uri_unescape_string(string.utf8().data(), 0);
@@ -65,7 +64,7 @@ char* filenameFromString(const String& string)
 // Converts a string to something suitable to be displayed to the user.
 String filenameForDisplay(const String& string)
 {
-#if PLATFORM(WIN_OS)
+#if OS(WINDOWS)
     return string;
 #else
     gchar* filename = filenameFromString(string);
@@ -180,6 +179,9 @@ String homeDirectoryPath()
 
 String pathGetFileName(const String& pathName)
 {
+    if (pathName.isEmpty())
+        return pathName;
+
     char* tmpFilename = filenameFromString(pathName);
     char* baseName = g_path_get_basename(tmpFilename);
     String fileName = String::fromUTF8(baseName);
@@ -191,8 +193,10 @@ String pathGetFileName(const String& pathName)
 
 String directoryName(const String& path)
 {
-    notImplemented();
-    return String();
+    /* No null checking needed */
+    GOwnPtr<char> tmpFilename(filenameFromString(path));
+    GOwnPtr<char> dirname(g_path_get_dirname(tmpFilename.get()));
+    return String::fromUTF8(dirname.get());
 }
 
 Vector<String> listDirectory(const String& path, const String& filter)
@@ -229,7 +233,7 @@ CString openTemporaryFile(const char* prefix, PlatformFileHandle& handle)
     if (!isHandleValid(fileDescriptor)) {
         LOG_ERROR("Can't create a temporary file.");
         g_free(tempPath);
-        return 0;
+        return CString();
     }
     CString tempFilePath = tempPath;
     g_free(tempPath);

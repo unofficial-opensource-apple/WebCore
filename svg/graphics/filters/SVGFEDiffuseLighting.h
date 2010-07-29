@@ -22,9 +22,10 @@
 #ifndef SVGFEDiffuseLighting_h
 #define SVGFEDiffuseLighting_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "Color.h"
 #include "FilterEffect.h"
+#include "Filter.h"
 
 namespace WebCore {
 
@@ -33,7 +34,7 @@ namespace WebCore {
     class FEDiffuseLighting : public FilterEffect {
     public:
         static PassRefPtr<FEDiffuseLighting> create(FilterEffect*, const Color&, const float&, const float&,
-                const float&, const float&, LightSource*);
+                const float&, const float&, PassRefPtr<LightSource>);
         virtual ~FEDiffuseLighting();
 
         Color lightingColor() const;
@@ -52,15 +53,16 @@ namespace WebCore {
         void setKernelUnitLengthY(float);
 
         const LightSource* lightSource() const;
-        void setLightSource(LightSource*);
+        void setLightSource(PassRefPtr<LightSource>);
 
-        virtual void apply();
-        virtual void dump();
+        virtual FloatRect uniteChildEffectSubregions(Filter* filter) { return calculateUnionOfChildEffectSubregions(filter, m_in.get()); }
+        void apply(Filter*);
+        void dump();
         TextStream& externalRepresentation(TextStream& ts) const;
         
     private:
         FEDiffuseLighting(FilterEffect*, const Color&, const float&, const float&,
-                const float&, const float&, LightSource*);
+                const float&, const float&, PassRefPtr<LightSource>);
 
         RefPtr<FilterEffect> m_in;
         Color m_lightingColor;
@@ -73,6 +75,6 @@ namespace WebCore {
 
 } // namespace WebCore
 
-#endif // ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#endif // ENABLE(SVG) && ENABLE(FILTERS)
 
 #endif // SVGFEDiffuseLighting_h

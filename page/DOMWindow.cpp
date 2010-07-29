@@ -27,15 +27,21 @@
 #include "DOMWindow.h"
 
 #include "BarInfo.h"
+#include "BeforeUnloadEvent.h"
 #include "CSSComputedStyleDeclaration.h"
 #include "CSSRuleList.h"
 #include "CSSStyleSelector.h"
 #include "CString.h"
 #include "Chrome.h"
 #include "Console.h"
+#include "Database.h"
+#include "DOMApplicationCache.h"
 #include "DOMSelection.h"
+#include "DOMTimer.h"
+#include "PageTransitionEvent.h"
 #include "Document.h"
 #include "Element.h"
+#include "EventException.h"
 #include "EventListener.h"
 #include "EventNames.h"
 #include "ExceptionCode.h"
@@ -46,35 +52,31 @@
 #include "FrameView.h"
 #include "HTMLFrameOwnerElement.h"
 #include "History.h"
+#include "InspectorController.h"
+#include "InspectorTimelineAgent.h"
 #include "Location.h"
+#include "Media.h"
 #include "MessageEvent.h"
 #include "Navigator.h"
+#include "NotificationCenter.h"
 #include "Page.h"
 #include "PageGroup.h"
 #include "PlatformScreen.h"
 #include "PlatformString.h"
 #include "Screen.h"
 #include "SecurityOrigin.h"
+#include "SerializedScriptValue.h"
 #include "Settings.h"
-#include "WebkitPoint.h"
+#include "Storage.h"
+#include "StorageArea.h"
+#include "StorageNamespace.h"
+#include "SuddenTermination.h"
+#include "WebKitPoint.h"
 #include <algorithm>
 #include <wtf/MathExtras.h>
 
-#if ENABLE(DATABASE)
-#include "Database.h"
-#endif
-
-#if ENABLE(DOM_STORAGE)
-#include "LocalStorage.h"
-#include "SessionStorage.h"
-#include "Storage.h"
-#include "StorageArea.h"
-#endif
-
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-#include "DOMApplicationCache.h"
-#endif
-
+#include "ChromeClient.h"
+#include "WKContentObservation.h"
 #include <wtf/UnusedParam.h>
 
 using std::min;
@@ -84,14 +86,21 @@ namespace WebCore {
 
 class PostMessageTimer : public TimerBase {
 public:
-    PostMessageTimer(DOMWindow* window, PassRefPtr<MessageEvent> event, SecurityOrigin* targetOrigin)
+    PostMessageTimer(DOMWindow* window, PassRefPtr<SerializedScriptValue> message, const String& sourceOrigin, PassRefPtr<DOMWindow> source, PassOwnPtr<MessagePortChannelArray> channels, SecurityOrigin* targetOrigin)
         : m_window(window)
-        , m_event(event)
+        , m_message(message)
+        , m_origin(sourceOrigin)
+        , m_source(source)
+        , m_channels(channels)
         , m_targetOrigin(targetOrigin)
     {
     }
 
-    MessageEvent* event() const { return m_event.get(); }
+    PassRefPtr<MessageEvent> event(ScriptExecutionContext* context)
+    {
+        OwnPtr<MessagePortArray> messagePorts = MessagePort::entanglePorts(*context, m_channels.release());
+        return MessageEvent::create(messagePorts.release(), m_message, m_origin, "", m_source);
+    }
     SecurityOrigin* targetOrigin() const { return m_targetOrigin.get(); }
 
 private:
@@ -101,9 +110,171 @@ private:
     }
 
     RefPtr<DOMWindow> m_window;
-    RefPtr<MessageEvent> m_event;
+    RefPtr<SerializedScriptValue> m_message;
+    String m_origin;
+    RefPtr<DOMWindow> m_source;
+    OwnPtr<MessagePortChannelArray> m_channels;
     RefPtr<SecurityOrigin> m_targetOrigin;
 };
+
+typedef HashCountedSet<DOMWindow*> DOMWindowSet;
+
+static DOMWindowSet& windowsWithUnloadEventListeners()
+{
+    DEFINE_STATIC_LOCAL(DOMWindowSet, windowsWithUnloadEventListeners, ());
+    return windowsWithUnloadEventListeners;
+}
+
+static DOMWindowSet& windowsWithBeforeUnloadEventListeners()
+{
+    DEFINE_STATIC_LOCAL(DOMWindowSet, windowsWithBeforeUnloadEventListeners, ());
+    return windowsWithBeforeUnloadEventListeners;
+}
+
+static void addUnloadEventListener(DOMWindow* domWindow)
+{
+    DOMWindowSet& set = windowsWithUnloadEventListeners();
+    if (set.isEmpty())
+        disableSuddenTermination();
+    set.add(domWindow);
+}
+
+static void removeUnloadEventListener(DOMWindow* domWindow)
+{
+    DOMWindowSet& set = windowsWithUnloadEventListeners();
+    DOMWindowSet::iterator it = set.find(domWindow);
+    if (it == set.end())
+        return;
+    set.remove(it);
+    if (set.isEmpty())
+        enableSuddenTermination();
+}
+
+static void removeAllUnloadEventListeners(DOMWindow* domWindow)
+{
+    DOMWindowSet& set = windowsWithUnloadEventListeners();
+    DOMWindowSet::iterator it = set.find(domWindow);
+    if (it == set.end())
+        return;
+    set.removeAll(it);
+    if (set.isEmpty())
+        enableSuddenTermination();
+}
+
+static void addBeforeUnloadEventListener(DOMWindow* domWindow)
+{
+    DOMWindowSet& set = windowsWithBeforeUnloadEventListeners();
+    if (set.isEmpty())
+        disableSuddenTermination();
+    set.add(domWindow);
+}
+
+static void removeBeforeUnloadEventListener(DOMWindow* domWindow)
+{
+    DOMWindowSet& set = windowsWithBeforeUnloadEventListeners();
+    DOMWindowSet::iterator it = set.find(domWindow);
+    if (it == set.end())
+        return;
+    set.remove(it);
+    if (set.isEmpty())
+        enableSuddenTermination();
+}
+
+static void removeAllBeforeUnloadEventListeners(DOMWindow* domWindow)
+{
+    DOMWindowSet& set = windowsWithBeforeUnloadEventListeners();
+    DOMWindowSet::iterator it = set.find(domWindow);
+    if (it == set.end())
+        return;
+    set.removeAll(it);
+    if (set.isEmpty())
+        enableSuddenTermination();
+}
+
+static bool allowsBeforeUnloadListeners(DOMWindow* window)
+{
+    ASSERT_ARG(window, window);
+    Frame* frame = window->frame();
+    if (!frame)
+        return false;
+    Page* page = frame->page();
+    if (!page)
+        return false;
+    return frame == page->mainFrame();
+}
+
+bool DOMWindow::dispatchAllPendingBeforeUnloadEvents()
+{
+    DOMWindowSet& set = windowsWithBeforeUnloadEventListeners();
+    if (set.isEmpty())
+        return true;
+
+    static bool alreadyDispatched = false;
+    ASSERT(!alreadyDispatched);
+    if (alreadyDispatched)
+        return true;
+
+    Vector<RefPtr<DOMWindow> > windows;
+    DOMWindowSet::iterator end = set.end();
+    for (DOMWindowSet::iterator it = set.begin(); it != end; ++it)
+        windows.append(it->first);
+
+    size_t size = windows.size();
+    for (size_t i = 0; i < size; ++i) {
+        DOMWindow* window = windows[i].get();
+        if (!set.contains(window))
+            continue;
+
+        Frame* frame = window->frame();
+        if (!frame)
+            continue;
+
+        if (!frame->shouldClose())
+            return false;
+    }
+
+    enableSuddenTermination();
+
+    alreadyDispatched = true;
+
+    return true;
+}
+
+unsigned DOMWindow::pendingUnloadEventListeners() const
+{
+    return windowsWithUnloadEventListeners().count(const_cast<DOMWindow*>(this));
+}
+
+void DOMWindow::dispatchAllPendingUnloadEvents()
+{
+    DOMWindowSet& set = windowsWithUnloadEventListeners();
+    if (set.isEmpty())
+        return;
+
+    static bool alreadyDispatched = false;
+    ASSERT(!alreadyDispatched);
+    if (alreadyDispatched)
+        return;
+
+    Vector<RefPtr<DOMWindow> > windows;
+    DOMWindowSet::iterator end = set.end();
+    for (DOMWindowSet::iterator it = set.begin(); it != end; ++it)
+        windows.append(it->first);
+
+    size_t size = windows.size();
+    for (size_t i = 0; i < size; ++i) {
+        DOMWindow* window = windows[i].get();
+        if (!set.contains(window))
+            continue;
+
+        window->dispatchEvent(PageTransitionEvent::create(eventNames().pagehideEvent, false), window->document());
+        window->dispatchEvent(Event::create(eventNames().unloadEvent, false, false), window->document());
+    }
+
+    enableSuddenTermination();
+
+    alreadyDispatched = true;
+}
 
 // This function:
 // 1) Validates the pending changes are not changing to NaN
@@ -121,8 +292,64 @@ void DOMWindow::adjustWindowRect(const FloatRect& screen, FloatRect& window, con
     UNUSED_PARAM(pendingChanges);
 }
 
+void DOMWindow::parseModalDialogFeatures(const String& featuresArg, HashMap<String, String>& map)
+{
+    Vector<String> features;
+    featuresArg.split(';', features);
+    Vector<String>::const_iterator end = features.end();
+    for (Vector<String>::const_iterator it = features.begin(); it != end; ++it) {
+        String s = *it;
+        int pos = s.find('=');
+        int colonPos = s.find(':');
+        if (pos >= 0 && colonPos >= 0)
+            continue; // ignore any strings that have both = and :
+        if (pos < 0)
+            pos = colonPos;
+        if (pos < 0) {
+            // null string for value means key without value
+            map.set(s.stripWhiteSpace().lower(), String());
+        } else {
+            String key = s.left(pos).stripWhiteSpace().lower();
+            String val = s.substring(pos + 1).stripWhiteSpace().lower();
+            int spacePos = val.find(' ');
+            if (spacePos != -1)
+                val = val.left(spacePos);
+            map.set(key, val);
+        }
+    }
+}
+
+bool DOMWindow::allowPopUp(Frame* activeFrame)
+{
+    ASSERT(activeFrame);
+    Settings* settings = activeFrame->settings();
+    return settings && settings->javaScriptCanOpenWindowsAutomatically();
+}
+
+bool DOMWindow::canShowModalDialog(const Frame* frame)
+{
+    if (!frame)
+        return false;
+    Page* page = frame->page();
+    if (!page)
+        return false;
+    return page->chrome()->canRunModal();
+}
+
+bool DOMWindow::canShowModalDialogNow(const Frame* frame)
+{
+    if (!frame)
+        return false;
+    Page* page = frame->page();
+    if (!page)
+        return false;
+    return page->chrome()->canRunModalNow();
+}
+
 DOMWindow::DOMWindow(Frame* frame)
     : m_frame(frame)
+    , m_scrollEventListenerCount(0)
+    , m_pageStatus(PageStatusNone)
 {
 }
 
@@ -130,6 +357,14 @@ DOMWindow::~DOMWindow()
 {
     if (m_frame)
         m_frame->clearFormerDOMWindow(this);
+
+    removeAllUnloadEventListeners(this);
+    removeAllBeforeUnloadEventListeners(this);
+}
+
+ScriptExecutionContext* DOMWindow::scriptExecutionContext() const
+{
+    return document();
 }
 
 void DOMWindow::disconnectFrame()
@@ -191,6 +426,10 @@ void DOMWindow::clear()
     if (m_location)
         m_location->disconnectFrame();
     m_location = 0;
+
+    if (m_media)
+        m_media->disconnectFrame();
+    m_media = 0;
     
 #if ENABLE(DOM_STORAGE)
     if (m_sessionStorage)
@@ -207,7 +446,23 @@ void DOMWindow::clear()
         m_applicationCache->disconnectFrame();
     m_applicationCache = 0;
 #endif
+
+#if ENABLE(NOTIFICATIONS)
+    if (m_notifications)
+        m_notifications->disconnectFrame();
+    m_notifications = 0;
+#endif
 }
+
+#if ENABLE(ORIENTATION_EVENTS)
+int DOMWindow::orientation() const
+{
+    if (!m_frame)
+        return 0;
+    
+    return m_frame->orientation();
+}
+#endif
 
 Screen* DOMWindow::screen() const
 {
@@ -300,16 +555,23 @@ Storage* DOMWindow::sessionStorage() const
 {
     if (m_sessionStorage)
         return m_sessionStorage.get();
-        
-    Page* page = m_frame->page();
+
+    Document* document = this->document();
+    if (!document)
+        return 0;
+    
+    if (!document->securityOrigin()->canAccessStorage())
+        return 0;
+
+    Page* page = document->page();
     if (!page)
         return 0;
 
-    Document* document = m_frame->document();
-    if (!document)
-        return 0;
-
     RefPtr<StorageArea> storageArea = page->sessionStorage()->storageArea(document->securityOrigin());
+#if ENABLE(INSPECTOR)
+    page->inspectorController()->didUseDOMStorage(storageArea.get(), false, m_frame);
+#endif
+
     m_sessionStorage = Storage::create(m_frame, storageArea.release());
     return m_sessionStorage.get();
 }
@@ -322,25 +584,58 @@ Storage* DOMWindow::localStorage() const
     Document* document = this->document();
     if (!document)
         return 0;
+    
+    if (!document->securityOrigin()->canAccessStorage())
+        return 0;
         
     Page* page = document->page();
     if (!page)
         return 0;
 
-    Settings* settings = document->settings();
-    if (!settings || !settings->localStorageEnabled())
+    if (!page->settings()->localStorageEnabled())
         return 0;
 
-    LocalStorage* localStorage = page->group().localStorage();
-    RefPtr<StorageArea> storageArea = localStorage ? localStorage->storageArea(document->securityOrigin()) : 0; 
-    if (storageArea)
-        m_localStorage = Storage::create(m_frame, storageArea.release());
+    RefPtr<StorageArea> storageArea = page->group().localStorage()->storageArea(document->securityOrigin());
+#if ENABLE(INSPECTOR)
+    page->inspectorController()->didUseDOMStorage(storageArea.get(), true, m_frame);
+#endif
 
+    m_localStorage = Storage::create(m_frame, storageArea.release());
     return m_localStorage.get();
 }
 #endif
 
-void DOMWindow::postMessage(const String& message, MessagePort* messagePort, const String& targetOrigin, DOMWindow* source, ExceptionCode& ec)
+#if ENABLE(NOTIFICATIONS)
+NotificationCenter* DOMWindow::webkitNotifications() const
+{
+    if (m_notifications)
+        return m_notifications.get();
+
+    Document* document = this->document();
+    if (!document)
+        return 0;
+    
+    Page* page = document->page();
+    if (!page)
+        return 0;
+
+    NotificationPresenter* provider = page->chrome()->notificationPresenter();
+    if (provider) 
+        m_notifications = NotificationCenter::create(document, provider);    
+      
+    return m_notifications.get();
+}
+#endif
+
+void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message, MessagePort* port, const String& targetOrigin, DOMWindow* source, ExceptionCode& ec)
+{
+    MessagePortArray ports;
+    if (port)
+        ports.append(port);
+    postMessage(message, &ports, targetOrigin, source, ec);
+}
+
+void DOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message, const MessagePortArray* ports, const String& targetOrigin, DOMWindow* source, ExceptionCode& ec)
 {
     if (!m_frame)
         return;
@@ -356,9 +651,7 @@ void DOMWindow::postMessage(const String& message, MessagePort* messagePort, con
         }
     }
 
-    RefPtr<MessagePort> newMessagePort;
-    if (messagePort)
-        newMessagePort = messagePort->clone(ec);
+    OwnPtr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(ports, ec);
     if (ec)
         return;
 
@@ -370,7 +663,7 @@ void DOMWindow::postMessage(const String& message, MessagePort* messagePort, con
     String sourceOrigin = sourceDocument->securityOrigin()->toString();
 
     // Schedule the message.
-    PostMessageTimer* timer = new PostMessageTimer(this, MessageEvent::create(message, sourceOrigin, "", source, newMessagePort), target.get());
+    PostMessageTimer* timer = new PostMessageTimer(this, message, sourceOrigin, source, channels.release(), target.get());
     timer->startOneShot(0);
 }
 
@@ -386,17 +679,12 @@ void DOMWindow::postMessageTimerFired(PostMessageTimer* t)
         if (!timer->targetOrigin()->isSameSchemeHostPort(document()->securityOrigin())) {
             String message = String::format("Unable to post message to %s. Recipient has origin %s.\n", 
                 timer->targetOrigin()->toString().utf8().data(), document()->securityOrigin()->toString().utf8().data());
-            console()->addMessage(JSMessageSource, ErrorMessageLevel, message, 0, String());
+            console()->addMessage(JSMessageSource, LogMessageType, ErrorMessageLevel, message, 0, String());
             return;
         }
     }
 
-    MessagePort* messagePort = timer->event()->messagePort();
-    ASSERT(!messagePort || !messagePort->scriptExecutionContext());
-    if (messagePort)
-        messagePort->attachToContext(document());
-
-    document()->dispatchWindowEvent(timer->event());
+    dispatchEvent(timer->event(document()));
 }
 
 DOMSelection* DOMWindow::getSelection()
@@ -435,7 +723,17 @@ void DOMWindow::close()
     if (!m_frame)
         return;
 
-    if (m_frame->loader()->openedByDOM() || m_frame->loader()->getHistoryLength() <= 1)
+    Page* page = m_frame->page();
+    if (!page)
+        return;
+
+    if (m_frame != page->mainFrame())
+        return;
+
+    Settings* settings = m_frame->settings();
+    bool allowScriptsToCloseWindows = settings && settings->allowScriptsToCloseWindows();
+
+    if (page->openedByDOM() || page->getHistoryLength() <= 1 || allowScriptsToCloseWindows)
         m_frame->scheduleClose();
 }
 
@@ -466,10 +764,7 @@ void DOMWindow::alert(const String& message)
     if (!m_frame)
         return;
 
-    Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (doc)
-        doc->updateRendering();
+    m_frame->document()->updateStyleIfNeeded();
 
     Page* page = m_frame->page();
     if (!page)
@@ -483,10 +778,7 @@ bool DOMWindow::confirm(const String& message)
     if (!m_frame)
         return false;
 
-    Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (doc)
-        doc->updateRendering();
+    m_frame->document()->updateStyleIfNeeded();
 
     Page* page = m_frame->page();
     if (!page)
@@ -500,10 +792,7 @@ String DOMWindow::prompt(const String& message, const String& defaultValue)
     if (!m_frame)
         return String();
 
-    Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (doc)
-        doc->updateRendering();
+    m_frame->document()->updateStyleIfNeeded();
 
     Page* page = m_frame->page();
     if (!page)
@@ -563,7 +852,7 @@ int DOMWindow::innerHeight() const
     if (!view)
         return 0;
     
-    return static_cast<int>(view->actualVisualContentRect().height() / m_frame->pageZoomFactor());
+    return static_cast<int>(view->actualVisibleContentRect().height() / m_frame->pageZoomFactor());
 }
 
 int DOMWindow::innerWidth() const
@@ -575,7 +864,7 @@ int DOMWindow::innerWidth() const
     if (!view)
         return 0;
 
-    return static_cast<int>(view->actualVisualContentRect().width() / m_frame->pageZoomFactor());
+    return static_cast<int>(view->actualVisibleContentRect().width() / m_frame->pageZoomFactor());
 }
 
 int DOMWindow::screenX() const
@@ -602,14 +891,6 @@ int DOMWindow::screenY() const
     return static_cast<int>(page->chrome()->windowRect().y());
 }
 
-int DOMWindow::orientation() const
-{
-    if (!m_frame)
-        return 0;
-
-    return m_frame->orientation();
-}
-
 int DOMWindow::scrollX() const
 {
     if (!m_frame)
@@ -619,12 +900,9 @@ int DOMWindow::scrollX() const
     if (!view)
         return 0;
 
-    Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (doc)
-        doc->updateLayoutIgnorePendingStylesheets();
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
 
-    return static_cast<int>(view->actualVisualContentRect().x() / m_frame->pageZoomFactor());
+    return static_cast<int>(view->actualVisibleContentRect().x() / m_frame->pageZoomFactor());
 }
 
 int DOMWindow::scrollY() const
@@ -636,12 +914,9 @@ int DOMWindow::scrollY() const
     if (!view)
         return 0;
 
-    Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (doc)
-        doc->updateLayoutIgnorePendingStylesheets();
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
 
-    return static_cast<int>(view->actualVisualContentRect().y() / m_frame->pageZoomFactor());
+    return static_cast<int>(view->actualVisibleContentRect().y() / m_frame->pageZoomFactor());
 }
 
 bool DOMWindow::closed() const
@@ -751,11 +1026,24 @@ DOMWindow* DOMWindow::top() const
 
 Document* DOMWindow::document() const
 {
+    // FIXME: This function shouldn't need a frame to work.
     if (!m_frame)
+        return 0;
+
+    // The m_frame pointer is not zeroed out when the window is put into b/f cache, so it can hold an unrelated document/window pair.
+    // FIXME: We should always zero out the frame pointer on navigation to avoid accidentally accessing the new frame content.
+    if (m_frame->domWindow() != this)
         return 0;
 
     ASSERT(m_frame->document());
     return m_frame->document();
+}
+
+PassRefPtr<Media> DOMWindow::media() const
+{
+    if (!m_media)
+        m_media = Media::create(m_frame);
+    return m_media.get();
 }
 
 PassRefPtr<CSSStyleDeclaration> DOMWindow::getComputedStyle(Element* elt, const String&) const
@@ -773,9 +1061,6 @@ PassRefPtr<CSSRuleList> DOMWindow::getMatchedCSSRules(Element* elt, const String
         return 0;
 
     Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (!doc)
-        return 0;
 
     if (!pseudoElt.isEmpty())
         return doc->styleSelector()->pseudoStyleRulesForElement(elt, pseudoElt, authorOnly);
@@ -786,7 +1071,9 @@ PassRefPtr<WebKitPoint> DOMWindow::webkitConvertPointFromNodeToPage(Node* node, 
 {
     if (!node || !p)
         return 0;
-        
+
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
+
     FloatPoint pagePoint(p->x(), p->y());
     pagePoint = node->convertToPage(pagePoint);
     return WebKitPoint::create(pagePoint.x(), pagePoint.y());
@@ -796,7 +1083,9 @@ PassRefPtr<WebKitPoint> DOMWindow::webkitConvertPointFromPageToNode(Node* node, 
 {
     if (!node || !p)
         return 0;
-        
+
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
+
     FloatPoint nodePoint(p->x(), p->y());
     nodePoint = node->convertFromPage(nodePoint);
     return WebKitPoint::create(nodePoint.x(), nodePoint.y());
@@ -820,16 +1109,15 @@ PassRefPtr<Database> DOMWindow::openDatabase(const String& name, const String& v
     if (!m_frame)
         return 0;
 
-    Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (!doc)
+    Document* document = m_frame->document();
+    if (!document->securityOrigin()->canAccessDatabase())
         return 0;
 
     Settings* settings = m_frame->settings();
     if (!settings || !settings->databasesEnabled())
         return 0;
 
-    return Database::openDatabase(doc, name, version, displayName, estimatedSize, ec);
+    return Database::openDatabase(document, name, version, displayName, estimatedSize, ec);
 }
 #endif
 
@@ -838,16 +1126,13 @@ void DOMWindow::scrollBy(int x, int y) const
     if (!m_frame)
         return;
 
-    Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (doc)
-        doc->updateLayoutIgnorePendingStylesheets();
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
 
     FrameView* view = m_frame->view();
     if (!view)
         return;
 
-    view->scrollBy(IntSize(x, y));
+    view->setActualScrollPosition(view->actualVisibleContentRect().topLeft() + IntSize(x, y));
 }
 
 void DOMWindow::scrollTo(int x, int y) const
@@ -855,10 +1140,7 @@ void DOMWindow::scrollTo(int x, int y) const
     if (!m_frame)
         return;
 
-    Document* doc = m_frame->document();
-    ASSERT(doc);
-    if (doc)
-        doc->updateLayoutIgnorePendingStylesheets();
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
 
     FrameView* view = m_frame->view();
     if (!view)
@@ -866,7 +1148,8 @@ void DOMWindow::scrollTo(int x, int y) const
 
     int zoomedX = static_cast<int>(x * m_frame->pageZoomFactor());
     int zoomedY = static_cast<int>(y * m_frame->pageZoomFactor());
-    view->setScrollPosition(IntPoint(zoomedX, zoomedY));
+
+    view->setActualScrollPosition(IntPoint(zoomedX, zoomedY));
 }
 
 void DOMWindow::moveBy(float x, float y) const
@@ -949,392 +1232,225 @@ void DOMWindow::resizeTo(float width, float height) const
     page->chrome()->setWindowRect(fr);
 }
 
-inline void DOMWindow::setInlineEventListenerForType(const AtomicString& eventType, PassRefPtr<EventListener> eventListener)
+int DOMWindow::setTimeout(ScheduledAction* action, int timeout, ExceptionCode& ec)
 {
-    Document* document = this->document();
-    if (!document)
+    ScriptExecutionContext* context = scriptExecutionContext();
+    if (!context) {
+        ec = INVALID_ACCESS_ERR;
+        return -1;
+    }
+    return DOMTimer::install(context, action, timeout, true);
+}
+
+void DOMWindow::clearTimeout(int timeoutId)
+{
+    if (m_frame) {
+        if (timeoutId > 0 && m_frame->document()) {
+            DOMTimer* timer = m_frame->document()->findTimeout(timeoutId);
+            if (timer && WebThreadContainsObservedContentModifier(timer)) {
+                WebThreadRemoveObservedContentModifier(timer);
+
+                if (WebThreadCountOfObservedContentModifiers() == 0) {
+                    if (m_frame->page())
+                        m_frame->page()->chrome()->client()->observedContentChange(m_frame);
+                }
+            }
+        }
+    }
+    ScriptExecutionContext* context = scriptExecutionContext();
+    if (!context)
         return;
-    document->setWindowInlineEventListenerForType(eventType, eventListener);
+    DOMTimer::removeById(context, timeoutId);
 }
 
-inline EventListener* DOMWindow::inlineEventListenerForType(const AtomicString& eventType) const
+int DOMWindow::setInterval(ScheduledAction* action, int timeout, ExceptionCode& ec)
 {
-    Document* document = this->document();
-    if (!document)
-        return 0;
-    return document->windowInlineEventListenerForType(eventType);
+    ScriptExecutionContext* context = scriptExecutionContext();
+    if (!context) {
+        ec = INVALID_ACCESS_ERR;
+        return -1;
+    }
+    return DOMTimer::install(context, action, timeout, false);
 }
 
-EventListener* DOMWindow::onabort() const
+void DOMWindow::clearInterval(int timeoutId)
 {
-    return inlineEventListenerForType(eventNames().abortEvent);
+    ScriptExecutionContext* context = scriptExecutionContext();
+    if (!context)
+        return;
+    DOMTimer::removeById(context, timeoutId);
 }
 
-void DOMWindow::setOnabort(PassRefPtr<EventListener> eventListener)
+bool DOMWindow::addEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
 {
-    setInlineEventListenerForType(eventNames().abortEvent, eventListener);
-}
-
-EventListener* DOMWindow::onblur() const
-{
-    return inlineEventListenerForType(eventNames().blurEvent);
-}
-
-void DOMWindow::setOnblur(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().blurEvent, eventListener);
-}
-
-EventListener* DOMWindow::onchange() const
-{
-    return inlineEventListenerForType(eventNames().changeEvent);
-}
-
-void DOMWindow::setOnchange(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().changeEvent, eventListener);
-}
-
-EventListener* DOMWindow::onclick() const
-{
-    return inlineEventListenerForType(eventNames().clickEvent);
-}
-
-void DOMWindow::setOnclick(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().clickEvent, eventListener);
-}
-
-EventListener* DOMWindow::ondblclick() const
-{
-    return inlineEventListenerForType(eventNames().dblclickEvent);
-}
-
-void DOMWindow::setOndblclick(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().dblclickEvent, eventListener);
-}
-
-EventListener* DOMWindow::onerror() const
-{
-    return inlineEventListenerForType(eventNames().errorEvent);
-}
-
-void DOMWindow::setOnerror(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().errorEvent, eventListener);
-}
-
-EventListener* DOMWindow::onfocus() const
-{
-    return inlineEventListenerForType(eventNames().focusEvent);
-}
-
-void DOMWindow::setOnfocus(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().focusEvent, eventListener);
-}
-
-EventListener* DOMWindow::onkeydown() const
-{
-    return inlineEventListenerForType(eventNames().keydownEvent);
-}
-
-void DOMWindow::setOnkeydown(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().keydownEvent, eventListener);
-}
-
-EventListener* DOMWindow::onkeypress() const
-{
-    return inlineEventListenerForType(eventNames().keypressEvent);
-}
-
-void DOMWindow::setOnkeypress(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().keypressEvent, eventListener);
-}
-
-EventListener* DOMWindow::onkeyup() const
-{
-    return inlineEventListenerForType(eventNames().keyupEvent);
-}
-
-void DOMWindow::setOnkeyup(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().keyupEvent, eventListener);
-}
-
-EventListener* DOMWindow::onload() const
-{
-    return inlineEventListenerForType(eventNames().loadEvent);
-}
-
-void DOMWindow::setOnload(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().loadEvent, eventListener);
-}
-
-EventListener* DOMWindow::onmousedown() const
-{
-    return inlineEventListenerForType(eventNames().mousedownEvent);
-}
-
-void DOMWindow::setOnmousedown(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().mousedownEvent, eventListener);
-}
-
-EventListener* DOMWindow::onmousemove() const
-{
-    return inlineEventListenerForType(eventNames().mousemoveEvent);
-}
-
-void DOMWindow::setOnmousemove(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().mousemoveEvent, eventListener);
-}
-
-EventListener* DOMWindow::onmouseout() const
-{
-    return inlineEventListenerForType(eventNames().mouseoutEvent);
-}
-
-void DOMWindow::setOnmouseout(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().mouseoutEvent, eventListener);
-}
-
-EventListener* DOMWindow::onmouseover() const
-{
-    return inlineEventListenerForType(eventNames().mouseoverEvent);
-}
-
-void DOMWindow::setOnmouseover(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().mouseoverEvent, eventListener);
-}
-
-EventListener* DOMWindow::onmouseup() const
-{
-    return inlineEventListenerForType(eventNames().mouseupEvent);
-}
-
-void DOMWindow::setOnmouseup(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().mouseupEvent, eventListener);
-}
-
-EventListener* DOMWindow::onmousewheel() const
-{
-    return inlineEventListenerForType(eventNames().mousewheelEvent);
-}
-
-void DOMWindow::setOnmousewheel(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().mousewheelEvent, eventListener);
-}
-
-EventListener* DOMWindow::onreset() const
-{
-    return inlineEventListenerForType(eventNames().resetEvent);
-}
-
-void DOMWindow::setOnreset(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().resetEvent, eventListener);
-}
-
-EventListener* DOMWindow::onresize() const
-{
-    return inlineEventListenerForType(eventNames().resizeEvent);
-}
-
-void DOMWindow::setOnresize(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().resizeEvent, eventListener);
-}
-
-EventListener* DOMWindow::onscroll() const
-{
-    return inlineEventListenerForType(eventNames().scrollEvent);
-}
-
-void DOMWindow::setOnscroll(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().scrollEvent, eventListener);
-}
-
-EventListener* DOMWindow::onsearch() const
-{
-    return inlineEventListenerForType(eventNames().searchEvent);
-}
-
-void DOMWindow::setOnsearch(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().searchEvent, eventListener);
-}
-
-EventListener* DOMWindow::onselect() const
-{
-    return inlineEventListenerForType(eventNames().selectEvent);
-}
-
-void DOMWindow::setOnselect(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().selectEvent, eventListener);
-}
-
-EventListener* DOMWindow::onsubmit() const
-{
-    return inlineEventListenerForType(eventNames().submitEvent);
-}
-
-void DOMWindow::setOnsubmit(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().submitEvent, eventListener);
-}
-
-EventListener* DOMWindow::onunload() const
-{
-    return inlineEventListenerForType(eventNames().unloadEvent);
-}
-
-void DOMWindow::setOnunload(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().unloadEvent, eventListener);
-}
-
-EventListener* DOMWindow::onbeforeunload() const
-{
-    return inlineEventListenerForType(eventNames().beforeunloadEvent);
-}
-
-void DOMWindow::setOnbeforeunload(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().beforeunloadEvent, eventListener);
-}
-
-EventListener* DOMWindow::onwebkitanimationstart() const
-{
-    return inlineEventListenerForType(eventNames().webkitAnimationStartEvent);
-}
-
-void DOMWindow::setOnwebkitanimationstart(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().webkitAnimationStartEvent, eventListener);
-}
-
-EventListener* DOMWindow::onwebkitanimationiteration() const
-{
-    return inlineEventListenerForType(eventNames().webkitAnimationIterationEvent);
-}
-
-void DOMWindow::setOnwebkitanimationiteration(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().webkitAnimationIterationEvent, eventListener);
-}
-
-EventListener* DOMWindow::onwebkitanimationend() const
-{
-    return inlineEventListenerForType(eventNames().webkitAnimationEndEvent);
-}
-
-void DOMWindow::setOnwebkitanimationend(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().webkitAnimationEndEvent, eventListener);
-}
-
-EventListener* DOMWindow::onwebkittransitionend() const
-{
-    return inlineEventListenerForType(eventNames().webkitTransitionEndEvent);
-}
-
-void DOMWindow::setOnwebkittransitionend(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().webkitTransitionEndEvent, eventListener);
-}
-
-EventListener* DOMWindow::onorientationchange() const
-{
-    return inlineEventListenerForType(eventNames().orientationchangeEvent);
-}
+    if (!EventTarget::addEventListener(eventType, listener, useCapture))
+        return false;
 
-void DOMWindow::setOnorientationchange(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().orientationchangeEvent, eventListener);
-}
+    if (Document* document = this->document())
+        document->addListenerTypeIfNeeded(eventType);
 
-#if ENABLE(TOUCH_EVENTS)
-EventListener* DOMWindow::ontouchstart() const
-{
-    return inlineEventListenerForType(eventNames().touchstartEvent);
-}
+    if (eventType == eventNames().unloadEvent)
+        addUnloadEventListener(this);
+    else if (eventType == eventNames().beforeunloadEvent && allowsBeforeUnloadListeners(this))
+        addBeforeUnloadEventListener(this);
+    else if (eventType == eventNames().scrollEvent)
+        incrementScrollEventListenersCount();
 
-void DOMWindow::setOntouchstart(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().touchstartEvent, eventListener);
+    return true;
 }
 
-EventListener* DOMWindow::ontouchmove() const
-{
-    return inlineEventListenerForType(eventNames().touchmoveEvent);
-}
 
-void DOMWindow::setOntouchmove(PassRefPtr<EventListener> eventListener)
+void DOMWindow::incrementScrollEventListenersCount()
 {
-    setInlineEventListenerForType(eventNames().touchmoveEvent, eventListener);
+    if (++m_scrollEventListenerCount == 1 && document() == document()->topDocument()) {
+        if (frame()->page())
+            frame()->page()->chrome()->client()->setNeedsScrollNotifications(frame(), true);
+    }
 }
 
-EventListener* DOMWindow::ontouchend() const
+void DOMWindow::decrementScrollEventListenersCount()
 {
-    return inlineEventListenerForType(eventNames().touchendEvent);
+    if (--m_scrollEventListenerCount == 0 && document() == document()->topDocument()) {
+        if (frame()->page())
+            frame()->page()->chrome()->client()->setNeedsScrollNotifications(frame(), false);
+    }
 }
 
-void DOMWindow::setOntouchend(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().touchendEvent, eventListener);
-}
 
-EventListener* DOMWindow::ontouchcancel() const
+bool DOMWindow::removeEventListener(const AtomicString& eventType, EventListener* listener, bool useCapture)
 {
-    return inlineEventListenerForType(eventNames().touchcancelEvent);
-}
+    if (!EventTarget::removeEventListener(eventType, listener, useCapture))
+        return false;
 
-void DOMWindow::setOntouchcancel(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().touchcancelEvent, eventListener);
-}
+    if (eventType == eventNames().unloadEvent)
+        removeUnloadEventListener(this);
+    else if (eventType == eventNames().beforeunloadEvent && allowsBeforeUnloadListeners(this))
+        removeBeforeUnloadEventListener(this);
+    else if (eventType == eventNames().scrollEvent)
+        decrementScrollEventListenersCount();
 
-EventListener* DOMWindow::ongesturestart() const
-{
-    return inlineEventListenerForType(eventNames().gesturestartEvent);
+    return true;
 }
 
-void DOMWindow::setOngesturestart(PassRefPtr<EventListener> eventListener)
+void DOMWindow::dispatchLoadEvent()
 {
-    setInlineEventListenerForType(eventNames().gesturestartEvent, eventListener);
-}
+    dispatchEvent(Event::create(eventNames().loadEvent, false, false), document());
 
-EventListener* DOMWindow::ongesturechange() const
-{
-    return inlineEventListenerForType(eventNames().gesturechangeEvent);
-}
+    // For load events, send a separate load event to the enclosing frame only.
+    // This is a DOM extension and is independent of bubbling/capturing rules of
+    // the DOM.
+    Element* ownerElement = document()->ownerElement();
+    if (ownerElement) {
+        RefPtr<Event> ownerEvent = Event::create(eventNames().loadEvent, false, false);
+        ownerEvent->setTarget(ownerElement);
+        ownerElement->dispatchGenericEvent(ownerEvent.release());
+    }
 
-void DOMWindow::setOngesturechange(PassRefPtr<EventListener> eventListener)
-{
-    setInlineEventListenerForType(eventNames().gesturechangeEvent, eventListener);
-}
+#if ENABLE(INSPECTOR)
+    if (!frame() || !frame()->page())
+        return;
 
-EventListener* DOMWindow::ongestureend() const
-{
-    return inlineEventListenerForType(eventNames().gestureendEvent);
+    if (InspectorController* controller = frame()->page()->inspectorController())
+        controller->mainResourceFiredLoadEvent(frame()->loader()->documentLoader(), url());
+#endif
 }
 
-void DOMWindow::setOngestureend(PassRefPtr<EventListener> eventListener)
+#if ENABLE(INSPECTOR)
+InspectorTimelineAgent* DOMWindow::inspectorTimelineAgent() 
 {
-    setInlineEventListenerForType(eventNames().gestureendEvent, eventListener);
+    if (frame() && frame()->page())
+        return frame()->page()->inspectorTimelineAgent();
+    return 0;
 }
 #endif
+
+bool DOMWindow::dispatchEvent(PassRefPtr<Event> prpEvent, PassRefPtr<EventTarget> prpTarget)
+{
+    RefPtr<EventTarget> protect = this;
+    RefPtr<Event> event = prpEvent;
+
+    event->setTarget(prpTarget ? prpTarget : this);
+    event->setCurrentTarget(this);
+    event->setEventPhase(Event::AT_TARGET);
+
+    // Pausing a page may trigger pagehide and pageshow events. WebCore also
+    // implicitly fires these events when closing a WebView. Here we keep track
+    // of the state of the page to prevent duplicate, unbalanced events.
+    if (event->isPageTransitionEvent()) {
+        if (event->type() == eventNames().pageshowEvent) {
+            switch (m_pageStatus) {
+                case PageStatusShown:
+                    // A pageshow was already issued. Do not fire a duplicate.
+                    return true;
+                case PageStatusNone:
+                case PageStatusHidden:
+                    m_pageStatus = PageStatusShown;
+                    break;
+            }
+        } else if (event->type() == eventNames().pagehideEvent) {
+            switch (m_pageStatus) {
+                case PageStatusHidden:
+                    // A pagehide was already issued. Do not fire a duplicate.
+                    return true;
+                case PageStatusNone:
+                case PageStatusShown:
+                    m_pageStatus = PageStatusHidden;
+                    break;
+            }
+        }
+    }
+
+#if ENABLE(INSPECTOR)
+    InspectorTimelineAgent* timelineAgent = inspectorTimelineAgent();
+    bool timelineAgentIsActive = timelineAgent && hasEventListeners(event->type());
+    if (timelineAgentIsActive)
+        timelineAgent->willDispatchEvent(*event);
+#endif
+
+    bool result = fireEventListeners(event.get());
+
+#if ENABLE(INSPECTOR)
+    if (timelineAgentIsActive) {
+      timelineAgent = inspectorTimelineAgent();
+      if (timelineAgent)
+            timelineAgent->didDispatchEvent();
+    }
+#endif
+
+    return result;
+}
+
+void DOMWindow::removeAllEventListeners()
+{
+    EventTarget::removeAllEventListeners();
+
+    if (m_scrollEventListenerCount) {
+        m_scrollEventListenerCount = 1;
+        decrementScrollEventListenersCount();
+    }
+
+    removeAllUnloadEventListeners(this);
+    removeAllBeforeUnloadEventListeners(this);
+}
+
+void DOMWindow::captureEvents()
+{
+    // Not implemented.
+}
+
+void DOMWindow::releaseEvents()
+{
+    // Not implemented.
+}
+
+EventTargetData* DOMWindow::eventTargetData()
+{
+    return &m_eventTargetData;
+}
+
+EventTargetData* DOMWindow::ensureEventTargetData()
+{
+    return &m_eventTargetData;
+}
 
 } // namespace WebCore

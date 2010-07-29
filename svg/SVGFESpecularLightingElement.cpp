@@ -21,13 +21,14 @@
 
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFESpecularLightingElement.h"
 
+#include "MappedAttribute.h"
 #include "RenderObject.h"
 #include "SVGColor.h"
-#include "SVGNames.h"
 #include "SVGFELightElement.h"
+#include "SVGNames.h"
 #include "SVGParserUtilities.h"
 #include "SVGResourceFilter.h"
 
@@ -35,13 +36,9 @@ namespace WebCore {
 
 SVGFESpecularLightingElement::SVGFESpecularLightingElement(const QualifiedName& tagName, Document* doc)
     : SVGFilterPrimitiveStandardAttributes(tagName, doc)
-    , m_in1(this, SVGNames::inAttr)
-    , m_specularConstant(this, SVGNames::specularConstantAttr, 1.0f)
-    , m_specularExponent(this, SVGNames::specularExponentAttr, 1.0f)
-    , m_surfaceScale(this, SVGNames::surfaceScaleAttr, 1.0f)
-    , m_kernelUnitLengthX(this, SVGNames::kernelUnitLengthAttr)
-    , m_kernelUnitLengthY(this, SVGNames::kernelUnitLengthAttr)
-    , m_filterEffect(0)
+    , m_specularConstant(1.0f)
+    , m_specularExponent(1.0f)
+    , m_surfaceScale(1.0f)
 {
 }
 
@@ -70,42 +67,62 @@ void SVGFESpecularLightingElement::parseMappedAttribute(MappedAttribute* attr)
         SVGFilterPrimitiveStandardAttributes::parseMappedAttribute(attr);
 }
 
-SVGFilterEffect* SVGFESpecularLightingElement::filterEffect(SVGResourceFilter* filter) const
+void SVGFESpecularLightingElement::synchronizeProperty(const QualifiedName& attrName)
 {
-    ASSERT_NOT_REACHED();
-    return 0;
+    SVGFilterPrimitiveStandardAttributes::synchronizeProperty(attrName);
+
+    if (attrName == anyQName()) {
+        synchronizeIn1();
+        synchronizeSurfaceScale();
+        synchronizeSpecularConstant();
+        synchronizeSpecularExponent();
+        synchronizeKernelUnitLengthX();
+        synchronizeKernelUnitLengthY();
+        return;
+    }
+
+    if (attrName == SVGNames::inAttr)
+        synchronizeIn1();
+    else if (attrName == SVGNames::surfaceScaleAttr)
+        synchronizeSurfaceScale();
+    else if (attrName == SVGNames::specularConstantAttr)
+        synchronizeSpecularConstant();
+    else if (attrName == SVGNames::specularExponentAttr)
+        synchronizeSpecularExponent();
+    else if (attrName == SVGNames::kernelUnitLengthAttr) {
+        synchronizeKernelUnitLengthX();
+        synchronizeKernelUnitLengthY();
+    }
 }
 
-LightSource* SVGFESpecularLightingElement::findLights() const
+PassRefPtr<LightSource> SVGFESpecularLightingElement::findLights() const
 {
-    LightSource* light = 0;
     for (Node* n = firstChild(); n; n = n->nextSibling()) {
         if (n->hasTagName(SVGNames::feDistantLightTag) ||
             n->hasTagName(SVGNames::fePointLightTag) ||
             n->hasTagName(SVGNames::feSpotLightTag)) {
             SVGFELightElement* lightNode = static_cast<SVGFELightElement*>(n); 
-            light = lightNode->lightSource();
-            break;
+            return lightNode->lightSource();
         }
     }
 
-    return light;
+    return 0;
 }
 
-bool SVGFESpecularLightingElement::build(FilterBuilder* builder)
+bool SVGFESpecularLightingElement::build(SVGResourceFilter* filterResource)
 {
-    FilterEffect* input1 = builder->getEffectById(in1());
+    FilterEffect* input1 = filterResource->builder()->getEffectById(in1());
     
-    if(!input1)
+    if (!input1)
         return false;
     
     RefPtr<RenderStyle> filterStyle = styleForRenderer();    
     
     Color color = filterStyle->svgStyle()->lightingColor();
     
-    RefPtr<FilterEffect> addedEffect = FESpecularLighting::create(input1, color, surfaceScale(), specularConstant(), 
+    RefPtr<FilterEffect> effect = FESpecularLighting::create(input1, color, surfaceScale(), specularConstant(), 
                                         specularExponent(), kernelUnitLengthX(), kernelUnitLengthY(), findLights());
-    builder->add(result(), addedEffect.release());
+    filterResource->addFilterEffect(this, effect.release());
 
     return true;
 }

@@ -28,6 +28,8 @@
 #include "config.h"
 #include "SQLStatement.h"
 
+#if ENABLE(DATABASE)
+
 #include "Database.h"
 #include "DatabaseAuthorizer.h"
 #include "Logging.h"
@@ -42,33 +44,37 @@
 
 namespace WebCore {
 
-PassRefPtr<SQLStatement> SQLStatement::create(const String& statement, const Vector<SQLValue>& arguments, PassRefPtr<SQLStatementCallback> callback, PassRefPtr<SQLStatementErrorCallback> errorCallback)
+PassRefPtr<SQLStatement> SQLStatement::create(const String& statement, const Vector<SQLValue>& arguments, PassRefPtr<SQLStatementCallback> callback, PassRefPtr<SQLStatementErrorCallback> errorCallback, bool readOnly)
 {
-    return adoptRef(new SQLStatement(statement, arguments, callback, errorCallback));
+    return adoptRef(new SQLStatement(statement, arguments, callback, errorCallback, readOnly));
 }
 
-SQLStatement::SQLStatement(const String& statement, const Vector<SQLValue>& arguments, PassRefPtr<SQLStatementCallback> callback, PassRefPtr<SQLStatementErrorCallback> errorCallback)
-    : m_statement(statement.copy())
+SQLStatement::SQLStatement(const String& statement, const Vector<SQLValue>& arguments, PassRefPtr<SQLStatementCallback> callback, PassRefPtr<SQLStatementErrorCallback> errorCallback, bool readOnly)
+    : m_statement(statement.crossThreadString())
     , m_arguments(arguments)
     , m_statementCallback(callback)
     , m_statementErrorCallback(errorCallback)
+    , m_readOnly(readOnly)
 {
 }
-   
+
 bool SQLStatement::execute(Database* db)
 {
     ASSERT(!m_resultSet);
-        
+
     // If we're re-running this statement after a quota violation, we need to clear that error now
     clearFailureDueToQuota();
 
-    // This transaction might have been marked bad while it was being set up on the main thread, 
+    // This transaction might have been marked bad while it was being set up on the main thread,
     // so if there is still an error, return false.
     if (m_error)
         return false;
-        
+
+    if (m_readOnly)
+        db->setAuthorizerReadOnly();
+
     SQLiteDatabase* database = &db->m_sqliteDatabase;
-    
+
     SQLiteStatement statement(*database, m_statement);
     int result = statement.prepare();
 
@@ -92,7 +98,7 @@ bool SQLStatement::execute(Database* db)
             setFailureDueToQuota();
             return false;
         }
-        
+
         if (result != SQLResultOk) {
             LOG(StorageAPI, "Failed to bind value index %i to statement for query '%s'", i + 1, m_statement.ascii().data());
             m_error = SQLError::create(1, database->lastErrorMsg());
@@ -159,9 +165,9 @@ void SQLStatement::setVersionMismatchedError()
 bool SQLStatement::performCallback(SQLTransaction* transaction)
 {
     ASSERT(transaction);
-    
+
     bool callbackError = false;
-    
+
     // Call the appropriate statement callback and track if it resulted in an error,
     // because then we need to jump to the transaction error callback.
     if (m_error) {
@@ -189,9 +195,11 @@ void SQLStatement::clearFailureDueToQuota()
         m_error = 0;
 }
 
-bool SQLStatement::lastExecutionFailedDueToQuota() const 
-{ 
-    return m_error && m_error->code() == 4; 
+bool SQLStatement::lastExecutionFailedDueToQuota() const
+{
+    return m_error && m_error->code() == 4;
 }
 
 } // namespace WebCore
+
+#endif // ENABLE(DATABASE)

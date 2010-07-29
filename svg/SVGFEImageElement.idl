@@ -25,11 +25,12 @@
 
 module svg {
 
-    interface [Conditional=SVG&SVG_FILTERS] SVGFEImageElement : SVGElement,
-                                                    SVGURIReference,
-                                                    SVGLangSpace,
-                                                    SVGExternalResourcesRequired,
-                                                    SVGFilterPrimitiveStandardAttributes {
+    interface [Conditional=SVG&FILTERS] SVGFEImageElement : SVGElement,
+                                                            SVGURIReference,
+                                                            SVGLangSpace,
+                                                            SVGExternalResourcesRequired,
+                                                            SVGFilterPrimitiveStandardAttributes {
+        readonly attribute SVGAnimatedPreserveAspectRatio preserveAspectRatio;
     };
 
 }

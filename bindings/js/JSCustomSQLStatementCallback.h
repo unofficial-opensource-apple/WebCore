@@ -29,34 +29,35 @@
 #ifndef JSCustomSQLStatementCallback_h
 #define JSCustomSQLStatementCallback_h
 
+#if ENABLE(DATABASE)
+
+#include "JSCallbackData.h"
 #include "SQLStatementCallback.h"
-
-#include <runtime/JSObject.h>
-#include <runtime/Protect.h>
 #include <wtf/Forward.h>
-
-namespace JSC {
-    class JSObject;
-}
 
 namespace WebCore {
 
-class Frame;
 class SQLResultSet;
 
 class JSCustomSQLStatementCallback : public SQLStatementCallback {
 public:
-    static PassRefPtr<JSCustomSQLStatementCallback> create(JSC::JSObject* callback, Frame* frame) { return adoptRef(new JSCustomSQLStatementCallback(callback, frame)); }
+    static PassRefPtr<JSCustomSQLStatementCallback> create(JSC::JSObject* callback, JSDOMGlobalObject* globalObject)
+    {
+        return adoptRef(new JSCustomSQLStatementCallback(callback, globalObject));
+    }
+    
+    virtual ~JSCustomSQLStatementCallback();
 
     virtual void handleEvent(SQLTransaction*, SQLResultSet*, bool& raisedException);
 
 private:
-    JSCustomSQLStatementCallback(JSC::JSObject* callback, Frame*);
+    JSCustomSQLStatementCallback(JSC::JSObject* callback, JSDOMGlobalObject*);
 
-    JSC::ProtectedPtr<JSC::JSObject> m_callback;
-    RefPtr<Frame> m_frame;
+    JSCallbackData* m_data;
 };
 
 }
+
+#endif // ENABLE(DATABASE)
 
 #endif // JSCustomSQLStatementCallback_h

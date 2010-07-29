@@ -17,24 +17,20 @@
  Boston, MA 02110-1301, USA.
  */
 
-
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEDisplacementMapElement.h"
 
+#include "MappedAttribute.h"
 #include "SVGResourceFilter.h"
 
 namespace WebCore {
 
 SVGFEDisplacementMapElement::SVGFEDisplacementMapElement(const QualifiedName& tagName, Document* doc)
     : SVGFilterPrimitiveStandardAttributes(tagName, doc)
-    , m_in1(this, SVGNames::inAttr)
-    , m_in2(this, SVGNames::in2Attr)
-    , m_xChannelSelector(this, SVGNames::xChannelSelectorAttr, CHANNEL_A)
-    , m_yChannelSelector(this, SVGNames::yChannelSelectorAttr, CHANNEL_A)
-    , m_scale(this, SVGNames::scaleAttr)
-    , m_filterEffect(0)
+    , m_xChannelSelector(CHANNEL_A)
+    , m_yChannelSelector(CHANNEL_A)
 {
 }
 
@@ -73,24 +69,43 @@ void SVGFEDisplacementMapElement::parseMappedAttribute(MappedAttribute* attr)
         SVGFilterPrimitiveStandardAttributes::parseMappedAttribute(attr);
 }
 
-SVGFilterEffect* SVGFEDisplacementMapElement::filterEffect(SVGResourceFilter* filter) const
+void SVGFEDisplacementMapElement::synchronizeProperty(const QualifiedName& attrName)
 {
-    ASSERT_NOT_REACHED();
-    return 0;
+    SVGFilterPrimitiveStandardAttributes::synchronizeProperty(attrName);
+
+    if (attrName == anyQName()) {
+        synchronizeXChannelSelector();
+        synchronizeYChannelSelector();
+        synchronizeIn1();
+        synchronizeIn2();
+        synchronizeScale();
+        return;
+    }
+
+    if (attrName == SVGNames::xChannelSelectorAttr)
+        synchronizeXChannelSelector();
+    else if (attrName == SVGNames::yChannelSelectorAttr)
+        synchronizeYChannelSelector();
+    else if (attrName == SVGNames::inAttr)
+        synchronizeIn1();
+    else if (attrName == SVGNames::in2Attr)
+        synchronizeIn2();
+    else if (attrName == SVGNames::scaleAttr)
+        synchronizeScale();
 }
 
-bool SVGFEDisplacementMapElement::build(FilterBuilder* builder)
+bool SVGFEDisplacementMapElement::build(SVGResourceFilter* filterResource)
 {
-    FilterEffect* input1 = builder->getEffectById(in1());
-    FilterEffect* input2 = builder->getEffectById(in2());
+    FilterEffect* input1 = filterResource->builder()->getEffectById(in1());
+    FilterEffect* input2 = filterResource->builder()->getEffectById(in2());
     
-    if(!input1 || !input2)
+    if (!input1 || !input2)
         return false;
         
     
-    RefPtr<FilterEffect> addedEffect = FEDisplacementMap::create(input1, input2, static_cast<ChannelSelectorType> (xChannelSelector()), 
-                                        static_cast<ChannelSelectorType> (yChannelSelector()), scale());
-    builder->add(result(), addedEffect.release());
+    RefPtr<FilterEffect> effect = FEDisplacementMap::create(input1, input2, static_cast<ChannelSelectorType>(xChannelSelector()), 
+                                        static_cast<ChannelSelectorType>(yChannelSelector()), scale());
+    filterResource->addFilterEffect(this, effect.release());
     
     return true;
 }

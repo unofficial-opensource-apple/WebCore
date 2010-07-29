@@ -26,6 +26,7 @@
 #import "config.h"
 #import "DragController.h"
 
+#if ENABLE(DRAG_SUPPORT)
 #import "DragData.h"
 #import "Frame.h"
 #import "FrameView.h"
@@ -41,6 +42,20 @@ const int DragController::DragIconBottomInset = 3;
 
 const float DragController::DragImageAlpha = 0.75f;
 
+#if ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
+
+DragOperation DragController::dragOperation(DragData*)
+{
+    return DragOperationNone;
+} 
+
+bool DragController::isCopyKeyDown()
+{
+    return false;
+}
+
+#else
+
 bool DragController::isCopyKeyDown()
 {
     return [[NSApp currentEvent] modifierFlags] & NSAlternateKeyMask;
@@ -51,13 +66,15 @@ DragOperation DragController::dragOperation(DragData* dragData)
     ASSERT(dragData);
     if ([NSApp modalWindow] || !dragData->containsURL())
         return DragOperationNone;
-    
-    if (!m_document || ![[m_page->mainFrame()->view()->getOuterView() window] attachedSheet] 
+
+    if (!m_documentUnderMouse || ![[m_page->mainFrame()->view()->getOuterView() window] attachedSheet] 
         && [dragData->platformData() draggingSource] != m_page->mainFrame()->view()->getOuterView())
         return DragOperationCopy;
-        
+
     return DragOperationNone;
-} 
+}
+
+#endif
 
 const IntSize& DragController::maxDragImageSize()
 {
@@ -75,4 +92,6 @@ void DragController::cleanupAfterSystemDrag()
     dragEnded();
 }
 
-}
+} // namespace WebCore
+
+#endif // ENABLE(DRAG_SUPPORT)

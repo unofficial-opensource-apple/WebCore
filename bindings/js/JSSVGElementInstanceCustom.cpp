@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2008 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2009 Apple, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,37 +27,42 @@
 #include "config.h"
 
 #if ENABLE(SVG)
-#include "SVGElementInstance.h"
 #include "JSSVGElementInstance.h"
 
-#include "JSEventListener.h"
 #include "JSDOMWindow.h"
+#include "JSEventListener.h"
+#include "JSSVGElement.h"
+#include "SVGElementInstance.h"
 
 using namespace JSC;
 
 namespace WebCore {
 
-JSValuePtr JSSVGElementInstance::addEventListener(ExecState* exec, const ArgList& args)
+void JSSVGElementInstance::markChildren(MarkStack& markStack)
 {
-    JSDOMGlobalObject* globalObject = toJSDOMGlobalObject(impl()->scriptExecutionContext());
-    if (!globalObject)
+    Base::markChildren(markStack);
+
+    // Mark the wrapper for our corresponding element, so it can mark its event handlers.
+    markDOMNodeWrapper(markStack, impl()->correspondingElement()->document(), impl()->correspondingElement());
+}
+
+JSValue JSSVGElementInstance::addEventListener(ExecState* exec, const ArgList& args)
+{
+    JSValue listener = args.at(1);
+    if (!listener.isObject())
         return jsUndefined();
 
-    if (RefPtr<JSProtectedEventListener> listener = globalObject->findOrCreateJSProtectedEventListener(args.at(exec, 1)))
-        impl()->addEventListener(args.at(exec, 0).toString(exec), listener.release(), args.at(exec, 2).toBoolean(exec));
-
+    impl()->addEventListener(args.at(0).toString(exec), JSEventListener::create(asObject(listener), this, false, currentWorld(exec)), args.at(2).toBoolean(exec));
     return jsUndefined();
 }
 
-JSValuePtr JSSVGElementInstance::removeEventListener(ExecState* exec, const ArgList& args)
+JSValue JSSVGElementInstance::removeEventListener(ExecState* exec, const ArgList& args)
 {
-    JSDOMGlobalObject* globalObject = toJSDOMGlobalObject(impl()->scriptExecutionContext());
-    if (!globalObject)
+    JSValue listener = args.at(1);
+    if (!listener.isObject())
         return jsUndefined();
 
-    if (JSProtectedEventListener* listener = globalObject->findJSProtectedEventListener(args.at(exec, 1)))
-        impl()->removeEventListener(args.at(exec, 0).toString(exec), listener, args.at(exec, 2).toBoolean(exec));
-
+    impl()->removeEventListener(args.at(0).toString(exec), JSEventListener::create(asObject(listener), this, false, currentWorld(exec)).get(), args.at(2).toBoolean(exec));
     return jsUndefined();
 }
 
@@ -64,6 +70,17 @@ void JSSVGElementInstance::pushEventHandlerScope(ExecState*, ScopeChain&) const
 {
 }
 
+JSC::JSValue toJS(JSC::ExecState* exec, JSDOMGlobalObject* globalObject, SVGElementInstance* object)
+{
+    JSValue result = getDOMObjectWrapper<JSSVGElementInstance>(exec, globalObject, object);
+
+    // Ensure that our corresponding element has a JavaScript wrapper to keep its event handlers alive.
+    if (object)
+        toJS(exec, object->correspondingElement());
+
+    return result;
 }
 
-#endif
+} // namespace WebCore
+
+#endif // ENABLE(SVG)

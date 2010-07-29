@@ -26,6 +26,7 @@
 #include "config.h"
 #include "Pasteboard.h"
 
+#include "BitmapInfo.h"
 #include "CString.h"
 #include "ClipboardUtilitiesWin.h"
 #include "Document.h"
@@ -35,7 +36,6 @@
 #include "HitTestResult.h"
 #include "Image.h"
 #include "KURL.h"
-#include "NotImplemented.h"
 #include "Page.h"
 #include "Range.h"
 #include "RenderImage.h"
@@ -111,7 +111,7 @@ void Pasteboard::clear()
 void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
     clear();
-    
+
     // Put CF_HTML format on the pasteboard 
     if (::OpenClipboard(m_owner)) {
         ExceptionCode ec = 0;
@@ -142,6 +142,21 @@ void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete,
             ::CloseClipboard();
         }
         
+    }
+}
+
+void Pasteboard::writePlainText(const String& text)
+{
+    clear();
+
+    // Put plain string on the pasteboard. CF_UNICODETEXT covers CF_TEXT as well
+    String str = text;
+    replaceNewlinesWithWindowsStyleNewlines(str);
+    if (::OpenClipboard(m_owner)) {
+        HGLOBAL cbData = createGlobalData(str);
+        if (!::SetClipboardData(CF_UNICODETEXT, cbData))
+            ::GlobalFree(cbData);
+        ::CloseClipboard();
     }
 }
 
@@ -188,8 +203,8 @@ void Pasteboard::writeURL(const KURL& url, const String& titleStr, Frame* frame)
 void Pasteboard::writeImage(Node* node, const KURL&, const String&)
 {
     ASSERT(node && node->renderer() && node->renderer()->isImage());
-    RenderImage* renderer = static_cast<RenderImage*>(node->renderer());
-    CachedImage* cachedImage = static_cast<CachedImage*>(renderer->cachedImage());
+    RenderImage* renderer = toRenderImage(node->renderer());
+    CachedImage* cachedImage = renderer->cachedImage();
     ASSERT(cachedImage);
     Image* image = cachedImage->image();
     ASSERT(image);
@@ -202,13 +217,8 @@ void Pasteboard::writeImage(Node* node, const KURL&, const String&)
     HBITMAP resultBitmap = CreateCompatibleBitmap(dc, image->width(), image->height());
     HBITMAP oldBitmap = (HBITMAP)SelectObject(compatibleDC, resultBitmap);
 
-    BITMAPINFO bmInfo = {0};
-    bmInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmInfo.bmiHeader.biWidth = image->width();
-    bmInfo.bmiHeader.biHeight = image->height();
-    bmInfo.bmiHeader.biPlanes = 1;
-    bmInfo.bmiHeader.biBitCount = 32;
-    bmInfo.bmiHeader.biCompression = BI_RGB;
+    BitmapInfo bmInfo = BitmapInfo::create(image->size());
+
     HBITMAP coreBitmap = CreateDIBSection(dc, &bmInfo, DIB_RGB_COLORS, 0, 0, 0);
     HBITMAP oldSource = (HBITMAP)SelectObject(sourceDC, coreBitmap);
     image->getHBITMAP(coreBitmap);

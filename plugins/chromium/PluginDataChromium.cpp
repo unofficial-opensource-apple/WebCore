@@ -29,7 +29,7 @@
  */
 
 #include "config.h"
-#include "PluginData.h"
+#include "PluginDataChromium.h"
 
 #include "ChromiumBridge.h"
 
@@ -95,6 +95,7 @@ void PluginData::initPlugins()
 void PluginData::refresh()
 {
     pluginCache.reset(true);
+    pluginCache.plugins();  // Force the plugins to be reloaded now.
 }
 
 String getPluginMimeTypeFromExtension(const String& extension)

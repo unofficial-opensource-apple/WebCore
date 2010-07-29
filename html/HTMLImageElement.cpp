@@ -30,7 +30,9 @@
 #include "HTMLDocument.h"
 #include "HTMLFormElement.h"
 #include "HTMLNames.h"
+#include "MappedAttribute.h"
 #include "RenderImage.h"
+#include "ScriptEventListener.h"
 
 using namespace std;
 
@@ -52,8 +54,6 @@ HTMLImageElement::HTMLImageElement(const QualifiedName& tagName, Document* doc, 
 
 HTMLImageElement::~HTMLImageElement()
 {
-    if (m_form)
-        m_form->removeImgElement(this);
 }
 
 bool HTMLImageElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
@@ -80,7 +80,7 @@ void HTMLImageElement::parseMappedAttribute(MappedAttribute* attr)
     const QualifiedName& attrName = attr->name();
     if (attrName == altAttr) {
         if (renderer() && renderer()->isImage())
-            static_cast<RenderImage*>(renderer())->updateAltText();
+            toRenderImage(renderer())->updateAltText();
     } else if (attrName == srcAttr)
         m_imageLoader.updateFromElementIgnoringPreviousError();
     else if (attrName == widthAttr)
@@ -108,14 +108,16 @@ void HTMLImageElement::parseMappedAttribute(MappedAttribute* attr)
         if (attr->value().string()[0] == '#')
             usemap = attr->value();
         else
-            usemap = document()->completeURL(parseURL(attr->value())).string();
+            usemap = document()->completeURL(deprecatedParseURL(attr->value())).string();
         setIsLink(!attr->isNull());
     } else if (attrName == ismapAttr)
         ismap = true;
     else if (attrName == onabortAttr)
-        setInlineEventListenerForTypeAndAttribute(eventNames().abortEvent, attr);
+        setAttributeEventListener(eventNames().abortEvent, createAttributeEventListener(this, attr));
     else if (attrName == onloadAttr)
-        setInlineEventListenerForTypeAndAttribute(eventNames().loadEvent, attr);
+        setAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(this, attr));
+    else if (attrName == onbeforeloadAttr)
+        setAttributeEventListener(eventNames().beforeloadEvent, createAttributeEventListener(this, attr));
     else if (attrName == compositeAttr) {
         if (!parseCompositeOperator(attr->value(), m_compositeOperator))
             m_compositeOperator = CompositeSourceOver;
@@ -127,7 +129,7 @@ void HTMLImageElement::parseMappedAttribute(MappedAttribute* attr)
             document->addNamedItem(newName);
         }
         m_name = newName;
-    } else if (attr->name() == idAttr) {
+    } else if (attr->name() == idAttributeName()) {
         const AtomicString& newId = attr->value();
         if (inDocument() && document()->isHTMLDocument()) {
             HTMLDocument* document = static_cast<HTMLDocument*>(this->document());
@@ -165,8 +167,8 @@ void HTMLImageElement::attach()
 {
     HTMLElement::attach();
 
-    if (renderer() && renderer()->isImage()) {
-        RenderImage* imageObj = static_cast<RenderImage*>(renderer());
+    if (renderer() && renderer()->isImage() && m_imageLoader.haveFiredBeforeLoadEvent()) {
+        RenderImage* imageObj = toRenderImage(renderer());
         if (imageObj->hasImage())
             return;
         imageObj->setCachedImage(m_imageLoader.image());
@@ -203,6 +205,30 @@ void HTMLImageElement::removedFromDocument()
     }
 
     HTMLElement::removedFromDocument();
+}
+
+void HTMLImageElement::insertedIntoTree(bool deep)
+{
+    if (!m_form) {
+        // m_form can be non-null if it was set in constructor.
+        for (Node* ancestor = parentNode(); ancestor; ancestor = ancestor->parentNode()) {
+            if (ancestor->hasTagName(formTag)) {
+                m_form = static_cast<HTMLFormElement*>(ancestor);
+                m_form->registerImgElement(this);
+                break;
+            }
+        }
+    }
+
+    HTMLElement::insertedIntoTree(deep);
+}
+
+void HTMLImageElement::removedFromTree(bool deep)
+{
+    if (m_form)
+        m_form->removeImgElement(this);
+    m_form = 0;
+    HTMLElement::removedFromTree(deep);
 }
 
 int HTMLImageElement::width(bool ignorePendingStylesheets) const
@@ -277,44 +303,15 @@ bool HTMLImageElement::isURLAttribute(Attribute* attr) const
         || (attr->name() == usemapAttr && attr->value().string()[0] != '#');
 }
 
-String HTMLImageElement::name() const
-{
-    return getAttribute(nameAttr);
-}
-
-void HTMLImageElement::setName(const String& value)
-{
-    setAttribute(nameAttr, value);
-}
-
-String HTMLImageElement::align() const
-{
-    return getAttribute(alignAttr);
-}
-
-void HTMLImageElement::setAlign(const String& value)
-{
-    setAttribute(alignAttr, value);
-}
-
-String HTMLImageElement::alt() const
+const AtomicString& HTMLImageElement::alt() const
 {
     return getAttribute(altAttr);
 }
 
-void HTMLImageElement::setAlt(const String& value)
+bool HTMLImageElement::draggable() const
 {
-    setAttribute(altAttr, value);
-}
-
-String HTMLImageElement::border() const
-{
-    return getAttribute(borderAttr);
-}
-
-void HTMLImageElement::setBorder(const String& value)
-{
-    setAttribute(borderAttr, value);
+    // Image elements are draggable by default.
+    return !equalIgnoringCase(getAttribute(draggableAttr), "false");
 }
 
 void HTMLImageElement::setHeight(int value)
@@ -373,16 +370,6 @@ void HTMLImageElement::setSrc(const String& value)
     setAttribute(srcAttr, value);
 }
 
-String HTMLImageElement::useMap() const
-{
-    return getAttribute(usemapAttr);
-}
-
-void HTMLImageElement::setUseMap(const String& value)
-{
-    setAttribute(usemapAttr, value);
-}
-
 int HTMLImageElement::vspace() const
 {
     // ### return actual vspace
@@ -431,11 +418,16 @@ void HTMLImageElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) cons
     HTMLElement::addSubresourceAttributeURLs(urls);
 
     addSubresourceURL(urls, src());
-    addSubresourceURL(urls, document()->completeURL(useMap()));
+    // FIXME: What about when the usemap attribute begins with "#"?
+    addSubresourceURL(urls, document()->completeURL(getAttribute(usemapAttr)));
 }
 
 bool HTMLImageElement::willRespondToMouseClickEvents()
 {
+    if (renderer() && renderer()->style() && !renderer()->style()->touchCalloutEnabled())
+        return HTMLElement::willRespondToMouseClickEvents();
+
+    
     return true;
 }
 

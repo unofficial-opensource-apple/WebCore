@@ -27,6 +27,7 @@
 #include "HTMLElement.h"
 #include "HTMLNames.h"
 #include "HTMLObjectElement.h"
+#include "HTMLOptionElement.h"
 #include "NodeList.h"
 
 #include <utility>
@@ -35,7 +36,7 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLCollection::HTMLCollection(PassRefPtr<Node> base, Type type)
+HTMLCollection::HTMLCollection(PassRefPtr<Node> base, CollectionType type)
     : m_idsDone(false)
     , m_base(base)
     , m_type(type)
@@ -44,7 +45,7 @@ HTMLCollection::HTMLCollection(PassRefPtr<Node> base, Type type)
 {
 }
 
-HTMLCollection::HTMLCollection(PassRefPtr<Node> base, Type type, CollectionInfo* info)
+HTMLCollection::HTMLCollection(PassRefPtr<Node> base, CollectionType type, CollectionCache* info)
     : m_idsDone(false)
     , m_base(base)
     , m_type(type)
@@ -53,7 +54,7 @@ HTMLCollection::HTMLCollection(PassRefPtr<Node> base, Type type, CollectionInfo*
 {
 }
 
-PassRefPtr<HTMLCollection> HTMLCollection::create(PassRefPtr<Node> base, Type type)
+PassRefPtr<HTMLCollection> HTMLCollection::create(PassRefPtr<Node> base, CollectionType type)
 {
     return adoptRef(new HTMLCollection(base, type));
 }
@@ -64,74 +65,12 @@ HTMLCollection::~HTMLCollection()
         delete m_info;
 }
 
-HTMLCollection::CollectionInfo::CollectionInfo()
-    : version(0)
-{
-    reset();
-}
-
-inline void HTMLCollection::CollectionInfo::copyCacheMap(NodeCacheMap& dest, const NodeCacheMap& src)
-{
-    ASSERT(dest.isEmpty());
-    NodeCacheMap::const_iterator end = src.end();
-    for (NodeCacheMap::const_iterator it = src.begin(); it != end; ++it)
-        dest.add(it->first, new Vector<Element*>(*it->second));
-}
-
-HTMLCollection::CollectionInfo::CollectionInfo(const CollectionInfo& other)
-    : version(other.version)
-    , current(other.current)
-    , position(other.position)
-    , length(other.length)
-    , elementsArrayPosition(other.elementsArrayPosition)
-    , hasLength(other.hasLength)
-    , hasNameCache(other.hasNameCache)
-{
-    copyCacheMap(idCache, other.idCache);
-    copyCacheMap(nameCache, other.nameCache);
-}
-
-void HTMLCollection::CollectionInfo::swap(CollectionInfo& other)
-{
-    std::swap(version, other.version);
-    std::swap(current, other.current);
-    std::swap(position, other.position);
-    std::swap(length, other.length);
-    std::swap(elementsArrayPosition, other.elementsArrayPosition);
-
-    idCache.swap(other.idCache);
-    nameCache.swap(other.nameCache);
-    
-    std::swap(hasLength, other.hasLength);
-    std::swap(hasNameCache, other.hasNameCache);
-}
-
-HTMLCollection::CollectionInfo::~CollectionInfo()
-{
-    deleteAllValues(idCache);
-    deleteAllValues(nameCache);
-}
-
-void HTMLCollection::CollectionInfo::reset()
-{
-    current = 0;
-    position = 0;
-    length = 0;
-    hasLength = false;
-    elementsArrayPosition = 0;
-    deleteAllValues(idCache);
-    idCache.clear();
-    deleteAllValues(nameCache);
-    nameCache.clear();
-    hasNameCache = false;
-}
-
 void HTMLCollection::resetCollectionInfo() const
 {
     unsigned docversion = static_cast<HTMLDocument*>(m_base->document())->domTreeVersion();
 
     if (!m_info) {
-        m_info = new CollectionInfo;
+        m_info = new CollectionCache;
         m_ownsInfo = true;
         m_info->version = docversion;
         return;
@@ -164,8 +103,9 @@ Element* HTMLCollection::itemAfter(Element* previous) const
         case DocScripts:
         case DocumentNamedItems:
         case MapAreas:
-        case Other:
+        case OtherCollection:
         case SelectOptions:
+        case DataListOptions:
         case WindowNamedItems:
             break;
         case NodeChildren:
@@ -215,6 +155,13 @@ Element* HTMLCollection::itemAfter(Element* previous) const
                 if (e->hasLocalName(optionTag))
                     return e;
                 break;
+            case DataListOptions:
+                if (e->hasLocalName(optionTag)) {
+                    HTMLOptionElement* option = static_cast<HTMLOptionElement*>(e);
+                    if (!option->disabled() && !option->value().isEmpty())
+                        return e;
+                }
+                break;
             case MapAreas:
                 if (e->hasLocalName(areaTag))
                     return e;
@@ -245,7 +192,7 @@ Element* HTMLCollection::itemAfter(Element* previous) const
             case NodeChildren:
                 return e;
             case DocumentNamedItems:
-            case Other:
+            case OtherCollection:
             case WindowNamedItems:
                 ASSERT_NOT_REACHED();
                 break;
@@ -319,7 +266,7 @@ bool HTMLCollection::checkForNameMatch(Element* element, bool checkName, const A
     
     HTMLElement* e = static_cast<HTMLElement*>(element);
     if (!checkName)
-        return e->getAttribute(idAttr) == name;
+        return e->getAttribute(e->idAttributeName()) == name;
 
     // document.all returns only images, forms, applets, objects and embeds
     // by name (though everything by id)
@@ -330,7 +277,7 @@ bool HTMLCollection::checkForNameMatch(Element* element, bool checkName, const A
           e->hasLocalName(selectTag)))
         return false;
 
-    return e->getAttribute(nameAttr) == name && e->getAttribute(idAttr) != name;
+    return e->getAttribute(nameAttr) == name && e->getAttribute(e->idAttributeName()) != name;
 }
 
 Node* HTMLCollection::namedItem(const AtomicString& name) const
@@ -372,7 +319,7 @@ void HTMLCollection::updateNameCache() const
         if (!element->isHTMLElement())
             continue;
         HTMLElement* e = static_cast<HTMLElement*>(element);
-        const AtomicString& idAttrVal = e->getAttribute(idAttr);
+        const AtomicString& idAttrVal = e->getAttribute(e->idAttributeName());
         const AtomicString& nameAttrVal = e->getAttribute(nameAttr);
         if (!idAttrVal.isEmpty()) {
             // add to id cache
@@ -411,7 +358,8 @@ void HTMLCollection::namedItems(const AtomicString& name, Vector<RefPtr<Node> >&
 
     resetCollectionInfo();
     updateNameCache();
-    
+    m_info->checkConsistency();
+
     Vector<Element*>* idResults = m_info->idCache.get(name.impl());
     Vector<Element*>* nameResults = m_info->nameCache.get(name.impl());
     
@@ -426,6 +374,7 @@ void HTMLCollection::namedItems(const AtomicString& name, Vector<RefPtr<Node> >&
 Node* HTMLCollection::nextNamedItem(const AtomicString& name) const
 {
     resetCollectionInfo();
+    m_info->checkConsistency();
 
     for (Element* e = itemAfter(m_info->current); e; e = itemAfter(e)) {
         if (checkForNameMatch(e, m_idsDone, name)) {

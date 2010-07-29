@@ -1,5 +1,7 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2007-2009 Torch Mobile, Inc.
+ * Copyright (C) Research In Motion Limited 2009-2010. All rights reserved.
  *
  * Portions are Copyright (C) 2001 mozilla.org
  *
@@ -38,14 +40,6 @@
 #include "config.h"
 #include "PNGImageDecoder.h"
 #include "png.h"
-#include "assert.h"
-
-#if PLATFORM(CAIRO) || PLATFORM(QT) || PLATFORM(WX)
-
-#if COMPILER(MSVC)
-// Remove warnings from warning level 4.
-#pragma warning(disable : 4611) // warning C4611: interaction between '_setjmp' and C++ object destruction is non-portable
-#endif
 
 namespace WebCore {
 
@@ -55,7 +49,7 @@ const double cDefaultGamma = 2.2;
 const double cInverseGamma = 0.45455;
 
 // Protect against large PNGs. See Mozilla's bug #251381 for more info.
-const long cMaxPNGSize = 1000000L;
+const unsigned long cMaxPNGSize = 1000000UL;
 
 // Called if the decoding of the image fails.
 static void PNGAPI decodingFailed(png_structp png_ptr, png_const_charp error_msg);
@@ -78,9 +72,14 @@ class PNGImageReader
 {
 public:
     PNGImageReader(PNGImageDecoder* decoder)
-    : m_readOffset(0), m_decodingSizeOnly(false), m_interlaceBuffer(0), m_hasAlpha(0)
+        : m_readOffset(0)
+        , m_decodingSizeOnly(false)
+        , m_interlaceBuffer(0)
+        , m_hasAlpha(0)
+        , m_hasFinishedDecoding(false)
+        , m_currentBufferSize(0)
     {
-        m_png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, decodingFailed, decodingWarning);
+        m_png = png_create_read_struct(PNG_LIBPNG_VER_STRING, 0, decodingFailed, decodingWarning);
         m_info = png_create_info_struct(m_png);
         png_set_progressive_read_fn(m_png, decoder, headerAvailable, rowAvailable, pngComplete);
     }
@@ -92,12 +91,18 @@ public:
 
     void close() {
         if (m_png && m_info)
-            png_destroy_read_struct(&m_png, &m_info, 0);
+            png_destroy_read_struct(&m_png, &m_info, 0);  // Will zero the pointers.
         delete []m_interlaceBuffer;
+        m_interlaceBuffer = 0;
         m_readOffset = 0;
+        m_hasFinishedDecoding = false;
     }
 
-    void decode(const Vector<char>& data, bool sizeOnly)
+    unsigned currentBufferSize() const { return m_currentBufferSize; }
+
+    void setComplete() { m_hasFinishedDecoding = true; }
+
+    void decode(const SharedBuffer& data, bool sizeOnly)
     {
         m_decodingSizeOnly = sizeOnly;
 
@@ -107,13 +112,17 @@ public:
             return;
         }
 
-        // Go ahead and assume we consumed all the data.  If we consume less, the
-        // callback will adjust our read offset accordingly.  Do not attempt to adjust the
-        // offset after png_process_data returns.
-        unsigned offset = m_readOffset;
-        unsigned remaining = data.size() - m_readOffset;
-        m_readOffset = data.size();
-        png_process_data(m_png, m_info, (png_bytep)(data.data()) + offset, remaining);
+        PNGImageDecoder* decoder = static_cast<PNGImageDecoder*>(png_get_progressive_ptr(m_png));
+        const char* segment;
+        while (unsigned segmentLength = data.getSomeData(segment, m_readOffset)) {
+            m_readOffset += segmentLength;
+            m_currentBufferSize = m_readOffset;
+            png_process_data(m_png, m_info, reinterpret_cast<png_bytep>(const_cast<char*>(segment)), segmentLength);
+            if ((sizeOnly && decoder->isSizeAvailable()) || m_hasFinishedDecoding)
+                return;
+        }
+        if (!m_hasFinishedDecoding && decoder->isAllDataReceived())
+            decoder->pngComplete();
     }
 
     bool decodingSizeOnly() const { return m_decodingSizeOnly; }
@@ -136,17 +145,16 @@ private:
     png_infop m_info;
     png_bytep m_interlaceBuffer;
     bool m_hasAlpha;
+    bool m_hasFinishedDecoding;
+    unsigned m_currentBufferSize;
 };
 
 PNGImageDecoder::PNGImageDecoder()
-: m_reader(0)
 {
-    m_frameBufferCache.resize(1);
 }
 
 PNGImageDecoder::~PNGImageDecoder()
 {
-    delete m_reader;
 }
 
 // Take the data and store it.
@@ -160,29 +168,25 @@ void PNGImageDecoder::setData(SharedBuffer* data, bool allDataReceived)
 
     // Create the PNG reader.
     if (!m_reader && !m_failed)
-        m_reader = new PNGImageReader(this);
+        m_reader.set(new PNGImageReader(this));
 }
 
 // Whether or not the size information has been decoded yet.
-bool PNGImageDecoder::isSizeAvailable() const
+bool PNGImageDecoder::isSizeAvailable()
 {
-    // If we have pending data to decode, send it to the PNG reader now.
-    if (!m_sizeAvailable && m_reader) {
-        if (m_failed)
-            return false;
+    if (!ImageDecoder::isSizeAvailable() && !failed() && m_reader)
+         decode(true);
 
-        // The decoder will go ahead and aggressively consume everything up until the
-        // size is encountered.
-        decode(true);
-    }
-
-    return m_sizeAvailable;
+    return ImageDecoder::isSizeAvailable();
 }
 
 RGBA32Buffer* PNGImageDecoder::frameBufferAtIndex(size_t index)
 {
     if (index)
         return 0;
+
+    if (m_frameBufferCache.isEmpty())
+        m_frameBufferCache.resize(1);
 
     RGBA32Buffer& frame = m_frameBufferCache[0];
     if (frame.status() != RGBA32Buffer::FrameComplete && m_reader)
@@ -192,17 +196,15 @@ RGBA32Buffer* PNGImageDecoder::frameBufferAtIndex(size_t index)
 }
 
 // Feed data to the PNG reader.
-void PNGImageDecoder::decode(bool sizeOnly) const
+void PNGImageDecoder::decode(bool sizeOnly)
 {
     if (m_failed)
         return;
 
-    m_reader->decode(m_data->buffer(), sizeOnly);
+    m_reader->decode(*m_data, sizeOnly);
     
-    if (m_failed || (m_frameBufferCache[0].status() == RGBA32Buffer::FrameComplete)) {
-        delete m_reader;
-        m_reader = 0;
-    }
+    if (m_failed || (!m_frameBufferCache.isEmpty() && m_frameBufferCache[0].status() == RGBA32Buffer::FrameComplete))
+        m_reader.clear();
 }
 
 void decodingFailed(png_structp png, png_const_charp errorMsg)
@@ -224,10 +226,15 @@ void headerAvailable(png_structp png, png_infop info)
     static_cast<PNGImageDecoder*>(png_get_progressive_ptr(png))->headerAvailable();
 }
 
+void PNGImageDecoder::decodingFailed()
+{
+    m_failed = true;
+}
+
 void PNGImageDecoder::headerAvailable()
 {
-    png_structp png = reader()->pngPtr();
-    png_infop info = reader()->infoPtr();
+    png_structp png = m_reader->pngPtr();
+    png_infop info = m_reader->infoPtr();
     png_uint_32 width = png->width;
     png_uint_32 height = png->height;
     
@@ -239,9 +246,13 @@ void PNGImageDecoder::headerAvailable()
     }
     
     // We can fill in the size now that the header is available.
-    if (!m_sizeAvailable) {
-        m_sizeAvailable = true;
-        m_size = IntSize(width, height);
+    if (!ImageDecoder::isSizeAvailable()) {
+        if (!setSize(width, height)) {
+            // Size unreasonable, bail out.
+            longjmp(png->jmpbuf, 1);
+            return;
+        }
+        prepareScaleDataIfNecessary();
     }
 
     int bitDepth, colorType, interlaceType, compressionType, filterType, channels;
@@ -288,13 +299,13 @@ void PNGImageDecoder::headerAvailable()
     // Update our info now
     png_read_update_info(png, info);
     channels = png_get_channels(png, info);
-    assert(channels == 3 || channels == 4);
+    ASSERT(channels == 3 || channels == 4);
 
-    reader()->setHasAlpha(channels == 4);
+    m_reader->setHasAlpha(channels == 4);
 
-    if (reader()->decodingSizeOnly()) {
+    if (m_reader->decodingSizeOnly()) {
         // If we only needed the size, halt the reader.     
-        reader()->setReadOffset(m_data->size() - png->buffer_size);
+        m_reader->setReadOffset(m_reader->currentBufferSize() - png->buffer_size);
         png->buffer_size = 0;
     }
 }
@@ -307,21 +318,25 @@ void rowAvailable(png_structp png, png_bytep rowBuffer,
 
 void PNGImageDecoder::rowAvailable(unsigned char* rowBuffer, unsigned rowIndex, int interlacePass)
 {
-    // Resize to the width and height of the image.
+    if (m_frameBufferCache.isEmpty())
+        return;
+
+    // Initialize the framebuffer if needed.
     RGBA32Buffer& buffer = m_frameBufferCache[0];
     if (buffer.status() == RGBA32Buffer::FrameEmpty) {
-        // Let's resize our buffer now to the correct width/height.
-        RGBA32Array& bytes = buffer.bytes();
-        bytes.resize(m_size.width() * m_size.height());
-
-        // Update our status to be partially complete.
+        if (!buffer.setSize(scaledSize().width(), scaledSize().height())) {
+            static_cast<PNGImageDecoder*>(png_get_progressive_ptr(m_reader->pngPtr()))->decodingFailed();
+            longjmp(m_reader->pngPtr()->jmpbuf, 1);
+            return;
+        }
         buffer.setStatus(RGBA32Buffer::FramePartial);
+        buffer.setHasAlpha(false);
 
         // For PNGs, the frame always fills the entire image.
-        buffer.setRect(IntRect(0, 0, m_size.width(), m_size.height()));
+        buffer.setRect(IntRect(IntPoint(), size()));
 
-        if (reader()->pngPtr()->interlaced)
-            reader()->createInterlaceBuffer((reader()->hasAlpha() ? 4 : 3) * m_size.width() * m_size.height());
+        if (m_reader->pngPtr()->interlaced)
+            m_reader->createInterlaceBuffer((m_reader->hasAlpha() ? 4 : 3) * size().width() * size().height());
     }
 
     if (rowBuffer == 0)
@@ -354,36 +369,34 @@ void PNGImageDecoder::rowAvailable(unsigned char* rowBuffer, unsigned rowIndex, 
     * to pass the current row, and the function will combine the
     * old row and the new row.
     */
-    
-    png_structp png = reader()->pngPtr();
-    bool hasAlpha = reader()->hasAlpha();
+
+    png_structp png = m_reader->pngPtr();
+    bool hasAlpha = m_reader->hasAlpha();
     unsigned colorChannels = hasAlpha ? 4 : 3;
     png_bytep row;
-    png_bytep interlaceBuffer = reader()->interlaceBuffer();
+    png_bytep interlaceBuffer = m_reader->interlaceBuffer();
     if (interlaceBuffer) {
-        row = interlaceBuffer + (rowIndex * colorChannels * m_size.width());
+        row = interlaceBuffer + (rowIndex * colorChannels * size().width());
         png_progressive_combine_row(png, row, rowBuffer);
     }
     else
         row = rowBuffer;
 
     // Copy the data into our buffer.
-    int width = m_size.width();
-    unsigned* dst = buffer.bytes().data() + rowIndex * width;
-    bool sawAlpha = false;
-    for (int i = 0; i < width; i++) {
-        unsigned red = *row++;
-        unsigned green = *row++;
-        unsigned blue = *row++;
-        unsigned alpha = (hasAlpha ? *row++ : 255);
-        RGBA32Buffer::setRGBA(*dst++, red, green, blue, alpha);
+    int width = scaledSize().width();
+    int destY = scaledY(rowIndex);
+    if (destY < 0)
+        return;
+    bool sawAlpha = buffer.hasAlpha();
+    for (int x = 0; x < width; x++) {
+        png_bytep pixel = row + (m_scaled ? m_scaledColumns[x] : x) * colorChannels;
+        unsigned alpha = hasAlpha ? pixel[3] : 255;
+        buffer.setRGBA(x, destY, pixel[0], pixel[1], pixel[2], alpha);
         if (!sawAlpha && alpha < 255) {
             sawAlpha = true;
             buffer.setHasAlpha(true);
         }
     }
-
-    buffer.ensureHeight(rowIndex + 1);
 }
 
 void pngComplete(png_structp png, png_infop info)
@@ -393,11 +406,14 @@ void pngComplete(png_structp png, png_infop info)
 
 void PNGImageDecoder::pngComplete()
 {
+    m_reader->setComplete();
+
+    if (m_frameBufferCache.isEmpty())
+        return;
+
     // Hand back an appropriately sized buffer, even if the image ended up being empty.
     RGBA32Buffer& buffer = m_frameBufferCache[0];
     buffer.setStatus(RGBA32Buffer::FrameComplete);
 }
 
-}
-
-#endif // PLATFORM(CAIRO)
+} // namespace WebCore

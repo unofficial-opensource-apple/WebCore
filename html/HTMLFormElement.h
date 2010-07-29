@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,10 +24,10 @@
 #ifndef HTMLFormElement_h
 #define HTMLFormElement_h
 
+#include "CheckedRadioButtons.h"
 #include "FormDataBuilder.h"
-#include "HTMLCollection.h" 
+#include "FormState.h"
 #include "HTMLElement.h"
-
 #include <wtf/OwnPtr.h>
 
 namespace WebCore {
@@ -40,6 +40,8 @@ class HTMLInputElement;
 class HTMLFormCollection;
 class TextEncoding;
 
+struct CollectionCache;
+
 class HTMLFormElement : public HTMLElement { 
 public:
     HTMLFormElement(const QualifiedName&, Document*);
@@ -49,10 +51,11 @@ public:
     virtual int tagPriority() const { return 3; }
 
     virtual void attach();
+    virtual bool rendererIsNeeded(RenderStyle*);
     virtual void insertedIntoDocument();
     virtual void removedFromDocument();
  
-    virtual void handleLocalEvents(Event*, bool useCapture);
+    virtual void handleLocalEvents(Event*);
      
     PassRefPtr<HTMLCollection> elements();
     void getNamedElements(const AtomicString&, Vector<RefPtr<Node> >&);
@@ -82,12 +85,15 @@ public:
     void removeImgElement(HTMLImageElement*);
 
     bool prepareSubmit(Event*);
-    void submit(Event* = 0, bool activateSubmitButton = false, bool lockHistory = false, bool lockBackForwardList = false);
+    void submit(Frame* javaScriptActiveFrame = 0);
     void reset();
 
     // Used to indicate a malformed state to keep from applying the bottom margin of the form.
     void setMalformed(bool malformed) { m_malformed = malformed; }
     bool isMalformed() const { return m_malformed; }
+
+    void setDemoted(bool demoted) { m_demoted = demoted; }
+    bool isDemoted() const { return m_demoted; }
 
     virtual bool isURLAttribute(Attribute*) const;
     
@@ -96,6 +102,9 @@ public:
 
     String name() const;
     void setName(const String&);
+
+    bool noValidate() const;
+    void setNoValidate(bool);
 
     String acceptCharset() const { return m_formDataBuilder.acceptCharset(); }
     void setAcceptCharset(const String&);
@@ -108,24 +117,17 @@ public:
 
     virtual String target() const;
     void setTarget(const String&);
-    
+
+    HTMLFormControlElement* defaultButton() const;
+
+    bool checkValidity();
+
     PassRefPtr<HTMLFormControlElement> elementForAlias(const AtomicString&);
     void addElementAlias(HTMLFormControlElement*, const AtomicString& alias);
 
     // FIXME: Change this to be private after getting rid of all the clients.
     Vector<HTMLFormControlElement*> formElements;
 
-    class CheckedRadioButtons {
-    public:
-        void addButton(HTMLFormControlElement*);
-        void removeButton(HTMLFormControlElement*);
-        HTMLInputElement* checkedButtonForGroup(const AtomicString& name) const;
-
-    private:
-        typedef HashMap<AtomicStringImpl*, HTMLInputElement*> NameToInputMap;
-        OwnPtr<NameToInputMap> m_nameToCheckedRadioButtonMap;
-    };
-    
     CheckedRadioButtons& checkedRadioButtons() { return m_checkedRadioButtons; }
     
     virtual void documentDidBecomeActive();
@@ -135,6 +137,8 @@ protected:
     virtual void didMoveToNewOwnerDocument();
 
 private:
+    void submit(Event*, bool activateSubmitButton, bool lockHistory, FormSubmissionTrigger);
+
     bool isMailtoForm() const;
     TextEncoding dataEncoding() const;
     PassRefPtr<FormData> createFormData(const CString& boundary);
@@ -146,7 +150,7 @@ private:
 
     FormDataBuilder m_formDataBuilder;
     AliasMap* m_elementAliases;
-    HTMLCollection::CollectionInfo* collectionInfo;
+    CollectionCache* collectionInfo;
 
     CheckedRadioButtons m_checkedRadioButtons;
     
@@ -158,6 +162,7 @@ private:
     bool m_doingsubmit : 1;
     bool m_inreset : 1;
     bool m_malformed : 1;
+    bool m_demoted : 1;
     AtomicString m_name;
 };
 

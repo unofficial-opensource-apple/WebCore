@@ -30,9 +30,10 @@
 #include "ExceptionCode.h"
 #include "HTMLNames.h"
 #include "HTMLSelectElement.h"
+#include "MappedAttribute.h"
+#include "NodeRenderStyle.h"
 #include "RenderMenuList.h"
 #include "Text.h"
-#include "NodeRenderStyle.h"
 #include <wtf/StdLibExtras.h>
 #include <wtf/Vector.h>
 
@@ -42,7 +43,6 @@ using namespace HTMLNames;
 
 HTMLOptionElement::HTMLOptionElement(const QualifiedName& tagName, Document* doc, HTMLFormElement* f)
     : HTMLFormControlElement(tagName, doc, f)
-    , m_data(this)
     , m_style(0)
 {
     ASSERT(hasTagName(optionTag));
@@ -66,12 +66,18 @@ void HTMLOptionElement::detach()
     HTMLFormControlElement::detach();
 }
 
-bool HTMLOptionElement::isFocusable() const
+bool HTMLOptionElement::supportsFocus() const
 {
-    return HTMLElement::isFocusable();
+    return HTMLElement::supportsFocus();
 }
 
-const AtomicString& HTMLOptionElement::type() const
+bool HTMLOptionElement::isFocusable() const
+{
+    // Option elements do not have a renderer so we check the renderStyle instead.
+    return supportsFocus() && renderStyle() && renderStyle()->display() != NONE;
+}
+
+const AtomicString& HTMLOptionElement::formControlType() const
 {
     DEFINE_STATIC_LOCAL(const AtomicString, option, ("option"));
     return option;
@@ -79,7 +85,7 @@ const AtomicString& HTMLOptionElement::type() const
 
 String HTMLOptionElement::text() const
 {
-    return OptionElement::collectOptionText(m_data, document());
+    return OptionElement::collectOptionLabelOrText(m_data, this);
 }
 
 void HTMLOptionElement::setText(const String &text, ExceptionCode& ec)
@@ -92,7 +98,7 @@ void HTMLOptionElement::setText(const String &text, ExceptionCode& ec)
     }
 
     removeChildren();
-    appendChild(new Text(document(), text), ec);
+    appendChild(Text::create(document(), text), ec);
 }
 
 void HTMLOptionElement::accessKeyAction(bool)
@@ -104,22 +110,7 @@ void HTMLOptionElement::accessKeyAction(bool)
 
 int HTMLOptionElement::index() const
 {
-    // Let's do this dynamically. Might be a bit slow, but we're sure
-    // we won't forget to update a member variable in some cases...
-    HTMLSelectElement* select = ownerSelectElement();
-    if (select) {
-        const Vector<HTMLElement*>& items = select->listItems();
-        int l = items.size();
-        int optionIndex = 0;
-        for(int i = 0; i < l; i++) {
-            if (items[i]->hasLocalName(optionTag)) {
-                if (static_cast<HTMLOptionElement*>(items[i]) == this)
-                    return optionIndex;
-                optionIndex++;
-            }
-        }
-    }
-    return 0;
+    return OptionElement::optionIndex(ownerSelectElement(), this);
 }
 
 void HTMLOptionElement::parseMappedAttribute(MappedAttribute *attr)
@@ -136,7 +127,7 @@ void HTMLOptionElement::parseMappedAttribute(MappedAttribute *attr)
 
 String HTMLOptionElement::value() const
 {
-    return OptionElement::collectOptionValue(m_data, document());
+    return OptionElement::collectOptionValue(m_data, this);
 }
 
 void HTMLOptionElement::setValue(const String& value)
@@ -146,6 +137,8 @@ void HTMLOptionElement::setValue(const String& value)
 
 bool HTMLOptionElement::selected() const
 {
+    if (HTMLSelectElement* select = ownerSelectElement())
+        select->recalcListItemsIfNeeded();
     return m_data.selected();
 }
 
@@ -154,7 +147,7 @@ void HTMLOptionElement::setSelected(bool selected)
     if (m_data.selected() == selected)
         return;
 
-    OptionElement::setSelectedState(m_data, selected);
+    OptionElement::setSelectedState(m_data, this, selected);
 
     if (HTMLSelectElement* select = ownerSelectElement())
         select->setSelectedIndex(selected ? index() : -1, false);
@@ -162,15 +155,15 @@ void HTMLOptionElement::setSelected(bool selected)
 
 void HTMLOptionElement::setSelectedState(bool selected)
 {
-    OptionElement::setSelectedState(m_data, selected);
+    OptionElement::setSelectedState(m_data, this, selected);
 }
 
 void HTMLOptionElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
-   HTMLSelectElement* select = ownerSelectElement();
-   if (select)
-       select->childrenChanged(changedByParser);
-   HTMLFormControlElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+    HTMLSelectElement* select = ownerSelectElement();
+    if (select)
+        select->childrenChanged(changedByParser);
+    HTMLFormControlElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
 }
 
 HTMLSelectElement* HTMLOptionElement::ownerSelectElement() const
@@ -217,21 +210,25 @@ RenderStyle* HTMLOptionElement::nonRendererRenderStyle() const
 
 String HTMLOptionElement::textIndentedToRespectGroupLabel() const
 {
-    return OptionElement::collectOptionTextRespectingGroupLabel(m_data, document());
+    return OptionElement::collectOptionTextRespectingGroupLabel(m_data, this);
 }
 
 bool HTMLOptionElement::disabled() const
 { 
-    return HTMLFormControlElement::disabled() || (parentNode() && static_cast<HTMLFormControlElement*>(parentNode())->disabled()); 
+    return ownElementDisabled() || (parentNode() && static_cast<HTMLFormControlElement*>(parentNode())->disabled()); 
 }
 
-void HTMLOptionElement::insertedIntoDocument()
+void HTMLOptionElement::insertedIntoTree(bool deep)
 {
-    HTMLSelectElement* select;
-    if (selected() && (select = ownerSelectElement()))
+    if (HTMLSelectElement* select = ownerSelectElement()) {
+        select->setRecalcListItems();
+        // Avoid our selected() getter since it will recalculate list items incorrectly for us.
+        if (m_data.selected())
+            select->setSelectedIndex(index(), false);
         select->scrollToSelection();
+    }
     
-    HTMLFormControlElement::insertedIntoDocument();
+    HTMLFormControlElement::insertedIntoTree(deep);
 }
 
 } // namespace

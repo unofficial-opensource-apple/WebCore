@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2003, 2006, 2009 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,6 +38,74 @@ namespace WebCore {
     String fileButtonChooseFileLabel();
     String fileButtonNoFileSelectedLabel();
     String copyImageUnknownFileLabel();
+#if ENABLE(CONTEXT_MENUS)
+    String contextMenuItemTagOpenLinkInNewWindow();
+    String contextMenuItemTagDownloadLinkToDisk();
+    String contextMenuItemTagCopyLinkToClipboard();
+    String contextMenuItemTagOpenImageInNewWindow();
+    String contextMenuItemTagDownloadImageToDisk();
+    String contextMenuItemTagCopyImageToClipboard();
+    String contextMenuItemTagOpenFrameInNewWindow();
+    String contextMenuItemTagCopy();
+    String contextMenuItemTagGoBack();
+    String contextMenuItemTagGoForward();
+    String contextMenuItemTagStop();
+    String contextMenuItemTagReload();
+    String contextMenuItemTagCut();
+    String contextMenuItemTagPaste();
+#if PLATFORM(GTK)
+    String contextMenuItemTagDelete();
+    String contextMenuItemTagSelectAll();
+    String contextMenuItemTagInputMethods();
+    String contextMenuItemTagUnicode();
+#endif
+    String contextMenuItemTagNoGuessesFound();
+    String contextMenuItemTagIgnoreSpelling();
+    String contextMenuItemTagLearnSpelling();
+    String contextMenuItemTagSearchWeb();
+    String contextMenuItemTagLookUpInDictionary();
+    String contextMenuItemTagOpenLink();
+    String contextMenuItemTagIgnoreGrammar();
+    String contextMenuItemTagSpellingMenu();
+    String contextMenuItemTagShowSpellingPanel(bool show);
+    String contextMenuItemTagCheckSpelling();
+    String contextMenuItemTagCheckSpellingWhileTyping();
+    String contextMenuItemTagCheckGrammarWithSpelling();
+    String contextMenuItemTagFontMenu();
+    String contextMenuItemTagBold();
+    String contextMenuItemTagItalic();
+    String contextMenuItemTagUnderline();
+    String contextMenuItemTagOutline();
+    String contextMenuItemTagWritingDirectionMenu();
+    String contextMenuItemTagTextDirectionMenu();
+    String contextMenuItemTagDefaultDirection();
+    String contextMenuItemTagLeftToRight();
+    String contextMenuItemTagRightToLeft();
+#if PLATFORM(MAC)
+    String contextMenuItemTagSearchInSpotlight();
+    String contextMenuItemTagShowFonts();
+    String contextMenuItemTagStyles();
+    String contextMenuItemTagShowColors();
+    String contextMenuItemTagSpeechMenu();
+    String contextMenuItemTagStartSpeaking();
+    String contextMenuItemTagStopSpeaking();
+    String contextMenuItemTagCorrectSpellingAutomatically();
+    String contextMenuItemTagSubstitutionsMenu();
+    String contextMenuItemTagShowSubstitutions(bool show);
+    String contextMenuItemTagSmartCopyPaste();
+    String contextMenuItemTagSmartQuotes();
+    String contextMenuItemTagSmartDashes();
+    String contextMenuItemTagSmartLinks();
+    String contextMenuItemTagTextReplacement();
+    String contextMenuItemTagTransformationsMenu();
+    String contextMenuItemTagMakeUpperCase();
+    String contextMenuItemTagMakeLowerCase();
+    String contextMenuItemTagCapitalize();
+    String contextMenuItemTagChangeBack(const String& replacedString);
+#endif
+    String contextMenuItemTagInspectElement();
+#endif // ENABLE(CONTEXT_MENUS)
+
 
     String multipleFileUploadText(unsigned numberOfFiles);
     String unknownFileSizeText();
@@ -50,6 +118,21 @@ namespace WebCore {
     String htmlSelectMultipleItems(int num);
 
     String imageTitle(const String& filename, const IntSize& size);
+
+    String mediaElementLoadingStateText();
+    String mediaElementLiveBroadcastStateText();
+    String localizedMediaControlElementString(const String&);
+    String localizedMediaControlElementHelpText(const String&);
+    String localizedMediaTimeDescription(float);
+
+    String validationMessageValueMissingText();
+    String validationMessageTypeMismatchText();
+    String validationMessagePatternMismatchText();
+    String validationMessageTooLongText();
+    String validationMessageRangeUnderflowText();
+    String validationMessageRangeOverflowText();
+    String validationMessageStepMismatchText();
+
 }
 
 #endif

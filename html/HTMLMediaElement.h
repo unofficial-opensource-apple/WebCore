@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,10 +39,14 @@
 namespace WebCore {
 
 class Event;
+class HTMLSourceElement;
 class MediaError;
 class KURL;
 class TimeRanges;
-    
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+class Widget;
+#endif
+
 class HTMLMediaElement : public HTMLElement, public MediaPlayerClient {
 public:
     HTMLMediaElement(const QualifiedName&, Document*);
@@ -64,13 +68,27 @@ public:
     
     virtual bool isVideo() const { return false; }
     virtual bool hasVideo() const { return false; }
+    virtual bool hasAudio() const;
+
+    void rewind(float timeDelta);
+    void returnToRealtime();
+
+    // Eventually overloaded in HTMLVideoElement
+    virtual bool supportsFullscreen() const { return false; };
+    virtual const KURL poster() const { return KURL(); }
+
+    virtual bool supportsSave() const;
     
+    PlatformMedia platformMedia() const;
+
     void scheduleLoad();
     
     virtual void defaultEventHandler(Event*);
     
     // Pauses playback without changing any states or generating events
     void setPausedInternal(bool);
+    
+    MediaPlayer::MovieLoadType movieLoadType() const;
     
     bool inActiveDocument() const { return m_inActiveDocument; }
     
@@ -89,7 +107,7 @@ public:
     void setAutobuffer(bool);
 
     PassRefPtr<TimeRanges> buffered() const;
-    void load(ExceptionCode&);
+    void load(bool isUserGesture, ExceptionCode&);
     String canPlayType(const String& mimeType) const;
 
 // ready state
@@ -100,22 +118,30 @@ public:
 // playback state
     float currentTime() const;
     void setCurrentTime(float, ExceptionCode&);
+    float startTime() const;
     float duration() const;
     bool paused() const;
     float defaultPlaybackRate() const;
     void setDefaultPlaybackRate(float);
     float playbackRate() const;
     void setPlaybackRate(float);
-    PassRefPtr<TimeRanges> played() const;
+    bool webkitPreservesPitch() const;
+    void setWebkitPreservesPitch(bool);
+    PassRefPtr<TimeRanges> played();
     PassRefPtr<TimeRanges> seekable() const;
     bool ended() const;
     bool autoplay() const;    
     void setAutoplay(bool b);
     bool loop() const;    
     void setLoop(bool b);
-    void play();
-    void pause();
-    
+    void play(bool isUserGesture);
+    void pause(bool isUserGesture);
+
+// captions
+    bool webkitHasClosedCaptions() const;
+    bool webkitClosedCaptionsVisible() const;
+    void setWebkitClosedCaptionsVisible(bool);
+
 // controls
     bool controls() const;
     void setControls(bool);
@@ -127,15 +153,32 @@ public:
     void beginScrubbing();
     void endScrubbing();
 
+    const IntRect screenRect();
+
     bool canPlay() const;
 
+    float percentLoaded() const;
+
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    void ensureMediaPlayer();
     void setNeedWidgetUpdate(bool needWidgetUpdate) { m_needWidgetUpdate = needWidgetUpdate; }
     void deliverNotification(MediaPlayerProxyNotificationType notification);
     void setMediaPlayerProxy(WebMediaPlayerProxy* proxy);
-    String initialURL();
+    void getPluginProxyParams(KURL& url, Vector<String>& names, Vector<String>& values);
     virtual void finishParsingChildren();
+    void createMediaPlayerProxy();
 #endif
+
+    bool hasSingleSecurityOrigin() const { return !m_player || m_player->hasSingleSecurityOrigin(); }
+    
+    void enterFullscreen();
+    void exitFullscreen();
+
+    bool hasClosedCaptions() const;
+    bool closedCaptionsVisible() const;
+    void setClosedCaptionsVisible(bool);
+
+    bool processingUserGesture() const;
 
 protected:
     float getTimeOffsetAttribute(const QualifiedName&, float valueOnError) const;
@@ -147,16 +190,24 @@ protected:
     
     void setReadyState(MediaPlayer::ReadyState);
     void setNetworkState(MediaPlayer::NetworkState);
-    
-private: // MediaPlayerObserver
+
+    virtual void willMoveToNewOwnerDocument();
+    virtual void didMoveToNewOwnerDocument();
+
+private: // MediaPlayerClient
     virtual void mediaPlayerNetworkStateChanged(MediaPlayer*);
     virtual void mediaPlayerReadyStateChanged(MediaPlayer*);
     virtual void mediaPlayerTimeChanged(MediaPlayer*);
-    virtual void mediaPlayerRepaint(MediaPlayer*);
     virtual void mediaPlayerVolumeChanged(MediaPlayer*);
     virtual void mediaPlayerDurationChanged(MediaPlayer*);
     virtual void mediaPlayerRateChanged(MediaPlayer*);
+    virtual void mediaPlayerSawUnsupportedTracks(MediaPlayer*);
+    virtual void mediaPlayerRepaint(MediaPlayer*);
     virtual void mediaPlayerSizeChanged(MediaPlayer*);
+#if USE(ACCELERATED_COMPOSITING)
+    virtual bool mediaPlayerRenderingCanBeAccelerated(MediaPlayer*);
+    virtual GraphicsLayer* mediaPlayerGraphicsLayer(MediaPlayer*);
+#endif
 
 private:
     void loadTimerFired(Timer<HTMLMediaElement>*);
@@ -168,29 +219,36 @@ private:
     void stopPeriodicTimers();
 
     void seek(float time, ExceptionCode&);
+    void finishSeek();
     void checkIfSeekNeeded();
+    void addPlayedRange(float start, float end);
     
     void scheduleTimeupdateEvent(bool periodicEvent);
-    void scheduleProgressEvent(const AtomicString& eventName);
     void scheduleEvent(const AtomicString& eventName);
-    void enqueueEvent(RefPtr<Event> event);
     
     // loading
     void selectMediaResource();
-    void loadResource(String url, ContentType& contentType);
+    void loadResource(const KURL&, ContentType&);
+    void scheduleNextSourceChild();
     void loadNextSourceChild();
     void userCancelledLoad();
-    String nextSourceChild(ContentType* contentType = 0);
     bool havePotentialSourceChild();
     void noneSupported();
     void mediaEngineError(PassRefPtr<MediaError> err);
+    void cancelPendingEventsAndCallbacks();
+    void waitForSourceChange();
+
+    enum InvalidSourceAction { DoNothing, Complain };
+    bool isSafeToLoadURL(const KURL&, InvalidSourceAction);
+    KURL selectNextSourceChild(ContentType*, InvalidSourceAction);
 
     // These "internal" functions do not check user gesture restrictions.
     void loadInternal();
     void playInternal();
     void pauseInternal();
+
+    void prepareForLoad();
     
-    bool processingUserGesture() const;
     bool processingMediaPlayerCallback() const { return m_processingMediaPlayerCallback > 0; }
     void beginProcessingMediaPlayerCallback() { ++m_processingMediaPlayerCallback; }
     void endProcessingMediaPlayerCallback() { ASSERT(m_processingMediaPlayerCallback); --m_processingMediaPlayerCallback; }
@@ -201,15 +259,22 @@ private:
     bool endedPlayback() const;
     bool stoppedDueToErrors() const;
     bool pausedForUserInteraction() const;
+    bool couldPlayIfEnoughData() const;
 
-    // Restrictions to change default behaviors. This is a effectively a compile time choice at the moment
-    //  because there are no accessor methods.
-    enum BehaviorRestrictions 
-    { 
+    float minTimeSeekable() const;
+    float maxTimeSeekable() const;
+
+    void userRequestsMediaLoading();
+    bool requireUserGestureForLoad() const { return m_restrictions & RequireUserGestureForLoadRestriction; }
+    bool requireUserGestureForRateChange() const { return m_restrictions & RequireUserGestureForRateChangeRestriction; }
+
+    // Restrictions to change default behaviors.
+    enum BehaviorRestrictionFlag {
         NoRestrictions = 0,
         RequireUserGestureForLoadRestriction = 1 << 0,
         RequireUserGestureForRateChangeRestriction = 1 << 1,
     };
+    typedef unsigned BehaviorRestrictions;
 
 protected:
     Timer<HTMLMediaElement> m_loadTimer;
@@ -217,17 +282,20 @@ protected:
     Timer<HTMLMediaElement> m_progressEventTimer;
     Timer<HTMLMediaElement> m_playbackProgressTimer;
     Vector<RefPtr<Event> > m_pendingEvents;
+    RefPtr<TimeRanges> m_playedTimeRanges;
     
     float m_playbackRate;
     float m_defaultPlaybackRate;
+    bool m_webkitPreservesPitch;
     NetworkState m_networkState;
     ReadyState m_readyState;
+    ReadyState m_readyStateMaximum;
     String m_currentSrc;
     
     RefPtr<MediaError> m_error;
 
     float m_volume;
-    float m_currentTimeDuringSeek;
+    float m_lastSeekTime;
     
     unsigned m_previousProgress;
     double m_previousProgressTime;
@@ -241,11 +309,16 @@ protected:
     // loading state
     enum LoadState { WaitingForSource, LoadingFromSrcAttr, LoadingFromSourceElement };
     LoadState m_loadState;
-    Node *m_currentSourceNode;
+    HTMLSourceElement *m_currentSourceNode;
     
     OwnPtr<MediaPlayer> m_player;
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    RefPtr<Widget> m_proxyWidget;
+#endif
 
     BehaviorRestrictions m_restrictions;
+
+    bool m_playing;
 
     // counter incremented while processing a callback from the media player, so we can avoid
     //  calling the media engine recursively
@@ -272,12 +345,15 @@ protected:
     // support progress events so setting m_sendProgressEvents disables them 
     bool m_sendProgressEvents : 1;
 
+    bool m_isFullscreen : 1;
+    bool m_closedCaptionsVisible : 1;
+
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
     bool m_needWidgetUpdate : 1;
 #endif
 
-    bool m_inFullScreen : 1;
     bool m_requestingPlay : 1;
+    bool m_userStartedPlayback : 1;
 };
 
 } //namespace

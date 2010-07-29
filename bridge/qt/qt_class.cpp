@@ -66,7 +66,7 @@ const char* QtClass::name() const
 // and not get wrapped in RuntimeMethod). Also, use this for methods,
 // so we can cache the object and return the same object for the same
 // identifier.
-JSValuePtr QtClass::fallbackObject(ExecState* exec, Instance* inst, const Identifier& identifier)
+JSValue QtClass::fallbackObject(ExecState* exec, Instance* inst, const Identifier& identifier)
 {
     QtInstance* qtinst = static_cast<QtInstance*>(inst);
 
@@ -127,7 +127,7 @@ Field* QtClass::fieldNamed(const Identifier& identifier, Instance* instance) con
 
     QObject* obj = qtinst->getObject();
     UString ustring = identifier.ustring();
-    QString objName(QString::fromUtf16((const ushort*)ustring.rep()->data(),ustring.size()));
+    QString objName((const QChar*)ustring.rep()->data(), ustring.size());
     QByteArray ba = objName.toAscii();
 
     // First check for a cached field

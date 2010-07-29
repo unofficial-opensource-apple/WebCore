@@ -28,6 +28,7 @@
 
 #include <windows.h>
 
+#include "BitmapInfo.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
 #include "Settings.h"
@@ -51,11 +52,14 @@ static void drawRectIntoContext(IntRect rect, FrameView* view, GraphicsContext* 
 
 static HBITMAP imageFromRect(const Frame* frame, IntRect& ir)
 {
+    PaintBehavior oldPaintBehavior = frame->view()->paintBehavior();
+    frame->view()->setPaintBehavior(oldPaintBehavior | PaintBehaviorFlattenCompositingLayers);
+
     void* bits;
     HDC hdc = CreateCompatibleDC(0);
     int w = ir.width();
     int h = ir.height();
-    BITMAPINFO bmp = { { sizeof(BITMAPINFOHEADER), w, h, 1, 32 } };
+    BitmapInfo bmp = BitmapInfo::create(IntSize(w, h));
 
     HBITMAP hbmp = CreateDIBSection(0, &bmp, DIB_RGB_COLORS, static_cast<void**>(&bits), 0, 0);
     HBITMAP hbmpOld = static_cast<HBITMAP>(SelectObject(hdc, hbmp));
@@ -73,6 +77,8 @@ static HBITMAP imageFromRect(const Frame* frame, IntRect& ir)
     SelectObject(hdc, hbmpOld);
     DeleteDC(hdc);
 
+    frame->view()->setPaintBehavior(oldPaintBehavior);
+
     return hbmp;
 }
 
@@ -80,12 +86,12 @@ HBITMAP imageFromSelection(Frame* frame, bool forceBlackText)
 {
     frame->document()->updateLayout();
 
-    frame->view()->setPaintRestriction(forceBlackText ? PaintRestrictionSelectionOnlyBlackText : PaintRestrictionSelectionOnly);
+    frame->view()->setPaintBehavior(PaintBehaviorSelectionOnly | (forceBlackText ? PaintBehaviorForceBlackText : 0));
     FloatRect fr = frame->selectionBounds();
     IntRect ir(static_cast<int>(fr.x()), static_cast<int>(fr.y()),
                static_cast<int>(fr.width()), static_cast<int>(fr.height()));
     HBITMAP image = imageFromRect(frame, ir);
-    frame->view()->setPaintRestriction(PaintRestrictionNone);
+    frame->view()->setPaintBehavior(PaintBehaviorNormal);
     return image;
 }
 

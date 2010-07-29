@@ -29,12 +29,14 @@
 
 #include "ResourceRequestBase.h"
 
+#include <libsoup/soup.h>
+
 namespace WebCore {
 
-    struct ResourceRequest : ResourceRequestBase {
-
+    class ResourceRequest : public ResourceRequestBase {
+    public:
         ResourceRequest(const String& url)
-            : ResourceRequestBase(KURL(url), UseProtocolCachePolicy)
+            : ResourceRequestBase(KURL(ParsedURLString, url), UseProtocolCachePolicy)
         {
         }
 
@@ -54,11 +56,20 @@ namespace WebCore {
         {
         }
 
+        ResourceRequest(SoupMessage* soupMessage)
+            : ResourceRequestBase(KURL(), UseProtocolCachePolicy)
+        {
+            updateFromSoupMessage(soupMessage);
+        }
+
+        SoupMessage* toSoupMessage() const;
+        void updateFromSoupMessage(SoupMessage* soupMessage);
+
     private:
         friend class ResourceRequestBase;
 
-        void doUpdatePlatformRequest() {}
-        void doUpdateResourceRequest() {}
+        void doUpdatePlatformRequest() {};
+        void doUpdateResourceRequest() {};
     };
 
 } // namespace WebCore

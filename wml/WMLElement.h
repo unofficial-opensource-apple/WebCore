@@ -29,7 +29,7 @@ namespace WebCore {
 
 class WMLElement : public StyledElement {
 public:
-    WMLElement(const QualifiedName& tagName, Document*);
+    static PassRefPtr<WMLElement> create(const QualifiedName& tagName, Document*);
 
     virtual bool isWMLElement() const { return true; }
     virtual bool isWMLTaskElement() const { return false; }
@@ -37,13 +37,17 @@ public:
     virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
     virtual void parseMappedAttribute(MappedAttribute*);
 
+    virtual String title() const;
+
     virtual bool rendererIsNeeded(RenderStyle*);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
 protected:
+    WMLElement(const QualifiedName& tagName, Document*);
+
     // Helper function for derived classes
-    String parseValueSubstitutingVariableReferences(const AtomicString&, WMLErrorCode defaultErrorCode = WMLErrorInvalidVariableReference);
-    String parseValueForbiddingVariableReferences(const AtomicString&);
+    String parseValueSubstitutingVariableReferences(const AtomicString&, WMLErrorCode defaultErrorCode = WMLErrorInvalidVariableReference) const;
+    String parseValueForbiddingVariableReferences(const AtomicString&) const;
 };
 
 }

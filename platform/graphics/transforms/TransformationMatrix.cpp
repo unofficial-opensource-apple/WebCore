@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2009 Torch Mobile, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -514,14 +515,6 @@ TransformationMatrix& TransformationMatrix::flipY()
     return scaleNonUniform(1.0f, -1.0f);
 }
 
-TransformationMatrix makeMapBetweenRects(const FloatRect& source, const FloatRect& dest)
-{
-    TransformationMatrix transform;
-    transform.translate(dest.x() - source.x(), dest.y() - source.y());
-    transform.scaleNonUniform(dest.width() / source.width(), dest.height() / source.height());
-    return transform;
-}
-
 FloatPoint TransformationMatrix::projectPoint(const FloatPoint& p) const
 {
     // This is basically raytracing. We have a point in the destination
@@ -871,6 +864,16 @@ TransformationMatrix& TransformationMatrix::applyPerspective(double p)
 
     multLeft(mat);
     return *this;
+}
+
+TransformationMatrix TransformationMatrix::rectToRect(const FloatRect& from, const FloatRect& to)
+{
+    ASSERT(!from.isEmpty());
+    return TransformationMatrix(to.width() / from.width(),
+                                0, 0,
+                                to.height() / from.height(),
+                                to.x() - from.x(),
+                                to.y() - from.y());
 }
 
 //

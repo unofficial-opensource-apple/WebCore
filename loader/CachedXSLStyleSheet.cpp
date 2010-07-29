@@ -45,12 +45,10 @@ CachedXSLStyleSheet::CachedXSLStyleSheet(const String &url)
     setAccept("text/xml, application/xml, application/xhtml+xml, text/xsl, application/rss+xml, application/atom+xml");
 }
 
-void CachedXSLStyleSheet::addClient(CachedResourceClient *c)
-{
-    CachedResource::addClient(c);
-    
+void CachedXSLStyleSheet::didAddClient(CachedResourceClient* c)
+{  
     if (!m_loading)
-        c->setXSLStyleSheet(m_url, m_sheet);
+        c->setXSLStyleSheet(m_url, m_response.url(), m_sheet);
 }
 
 void CachedXSLStyleSheet::setEncoding(const String& chs)
@@ -85,9 +83,8 @@ void CachedXSLStyleSheet::checkNotify()
     
     CachedResourceClientWalker w(m_clients);
     while (CachedResourceClient *c = w.next())
-        c->setXSLStyleSheet(m_url, m_sheet);
+        c->setXSLStyleSheet(m_url, m_response.url(), m_sheet);
 }
-
 
 void CachedXSLStyleSheet::error()
 {

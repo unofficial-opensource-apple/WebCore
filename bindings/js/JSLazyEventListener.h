@@ -27,35 +27,26 @@ namespace WebCore {
 
     class Node;
 
-    class JSLazyEventListener : public JSProtectedEventListener {
+    class JSLazyEventListener : public JSEventListener {
     public:
-        enum LazyEventListenerType {
-            HTMLLazyEventListener
-#if ENABLE(SVG)
-            , SVGLazyEventListener
-#endif
-        };
-
-        static PassRefPtr<JSLazyEventListener> create(LazyEventListenerType type, const String& functionName, const String& code, JSDOMGlobalObject* globalObject, Node* node, int lineNumber)
+        static PassRefPtr<JSLazyEventListener> create(const String& functionName, const String& eventParameterName, const String& code, Node* node, const String& sourceURL, int lineNumber, JSC::JSObject* wrapper, DOMWrapperWorld* isolatedWorld)
         {
-            return adoptRef(new JSLazyEventListener(type, functionName, code, globalObject, node, lineNumber));
+            return adoptRef(new JSLazyEventListener(functionName, eventParameterName, code, node, sourceURL, lineNumber, wrapper, isolatedWorld));
         }
+        virtual ~JSLazyEventListener();
 
     private:
-        JSLazyEventListener(LazyEventListenerType, const String& functionName, const String& code, JSDOMGlobalObject*, Node*, int lineNumber);
+        JSLazyEventListener(const String& functionName, const String& eventParameterName, const String& code, Node*, const String& sourceURL, int lineNumber, JSC::JSObject* wrapper, DOMWrapperWorld* isolatedWorld);
 
-        virtual JSC::JSObject* function() const;
+        virtual JSC::JSObject* initializeJSFunction(ScriptExecutionContext*) const;
         virtual bool wasCreatedFromMarkup() const { return true; }
 
-        void parseCode() const;
-
         mutable String m_functionName;
+        mutable String m_eventParameterName;
         mutable String m_code;
-        mutable bool m_parsed;
+        mutable String m_sourceURL;
         int m_lineNumber;
         Node* m_originalNode;
-
-        LazyEventListenerType m_type;
     };
 
 } // namespace WebCore

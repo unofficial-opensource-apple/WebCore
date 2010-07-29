@@ -33,6 +33,7 @@
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "ResourceHandle.h"
+#include "SecurityOrigin.h"
 #include "SubresourceLoaderClient.h"
 #include <wtf/RefCountedLeakCounter.h>
 
@@ -60,25 +61,25 @@ SubresourceLoader::~SubresourceLoader()
 #endif
 }
 
-PassRefPtr<SubresourceLoader> SubresourceLoader::create(Frame* frame, SubresourceLoaderClient* client, const ResourceRequest& request, bool skipCanLoadCheck, bool sendResourceLoadCallbacks, bool shouldContentSniff)
+PassRefPtr<SubresourceLoader> SubresourceLoader::create(Frame* frame, SubresourceLoaderClient* client, const ResourceRequest& request, SecurityCheckPolicy securityCheck, bool sendResourceLoadCallbacks, bool shouldContentSniff)
 {
     if (!frame)
         return 0;
 
     FrameLoader* fl = frame->loader();
-    if (!skipCanLoadCheck && fl->state() == FrameStateProvisional)
+    if (securityCheck == DoSecurityCheck && (fl->state() == FrameStateProvisional || fl->activeDocumentLoader()->isStopping()))
         return 0;
 
     ResourceRequest newRequest = request;
 
-    if (!skipCanLoadCheck
-            && FrameLoader::restrictAccessToLocal()
-            && !FrameLoader::canLoad(request.url(), String(), frame->document())) {
+    if (securityCheck == DoSecurityCheck
+            && SecurityOrigin::restrictAccessToLocal()
+            && !SecurityOrigin::canLoad(request.url(), String(), frame->document())) {
         FrameLoader::reportLocalLoadFailed(frame, request.url().string());
         return 0;
     }
     
-    if (FrameLoader::shouldHideReferrer(request.url(), fl->outgoingReferrer()))
+    if (SecurityOrigin::shouldHideReferrer(request.url(), fl->outgoingReferrer()))
         newRequest.clearHTTPReferrer();
     else if (!request.httpReferrer())
         newRequest.setHTTPReferrer(fl->outgoingReferrer());
@@ -222,6 +223,13 @@ void SubresourceLoader::didCancel(const ResourceError& error)
     
     if (cancelled())
         return;
+    
+    // The only way the subresource loader can reach the terminal state here is if the run loop spins when calling
+    // m_client->didFail. This should in theory not happen which is why the assert is here. 
+    ASSERT(!reachedTerminalState());
+    if (reachedTerminalState())
+        return;
+    
     m_documentLoader->removeSubresourceLoader(this);
     ResourceLoader::didCancel(error);
 }

@@ -41,6 +41,7 @@ class ApplicationCacheGroup;
 class ApplicationCacheResource;
 class DocumentLoader;
 class KURL;
+
 class ResourceRequest;
 
 typedef Vector<std::pair<KURL, KURL> > FallbackURLVector;
@@ -64,12 +65,8 @@ public:
     ApplicationCacheResource* resourceForRequest(const ResourceRequest&);
     ApplicationCacheResource* resourceForURL(const String& url);
 
-    unsigned numDynamicEntries() const;
-    String dynamicEntry(unsigned index) const;
-    
-    bool addDynamicEntry(const String& url);
-    void removeDynamicEntry(const String& url);
-    
+    void setAllowsAllNetworkRequests(bool value) { m_allowAllNetworkRequests = value; }
+    bool allowsAllNetworkRequests() const { return m_allowAllNetworkRequests; }
     void setOnlineWhitelist(const Vector<KURL>& onlineWhitelist);
     const Vector<KURL>& onlineWhitelist() const { return m_onlineWhitelist; }
     bool isURLInOnlineWhitelist(const KURL&); // There is an entry in online whitelist that has the same origin as the resource's URL and that is a prefix match for the resource's URL.
@@ -92,6 +89,8 @@ public:
     
     static bool requestIsHTTPOrHTTPSGet(const ResourceRequest&);
 
+    int64_t estimatedSizeInStorage() const { return m_estimatedSizeInStorage; }
+
 private:
     ApplicationCache();
     
@@ -99,11 +98,14 @@ private:
     ResourceMap m_resources;
     ApplicationCacheResource* m_manifest;
 
+    bool m_allowAllNetworkRequests;
     Vector<KURL> m_onlineWhitelist;
     FallbackURLVector m_fallbackURLs;
 
-    // While an update is in progress, changes in dynamic entries are queued for later execution.
-    Vector<std::pair<KURL, bool> > m_pendingDynamicEntryActions;
+    // The total size of the resources belonging to this Application Cache instance.
+    // This is an estimation of the size this Application Cache occupies in the
+    // database file.
+    int64_t m_estimatedSizeInStorage;
 
     unsigned m_storageID;
 };

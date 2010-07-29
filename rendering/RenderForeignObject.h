@@ -1,7 +1,6 @@
 /*
- * This file is part of the WebKit project.
- *
  * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2009 Google, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -39,20 +38,29 @@ public:
 
     virtual void paint(PaintInfo&, int parentX, int parentY);
 
-    virtual TransformationMatrix localTransform() const { return m_localTransform; }
-    virtual bool calculateLocalTransform();
+    virtual const TransformationMatrix& localToParentTransform() const;
 
-    virtual void computeRectForRepaint(RenderBox* repaintContainer, IntRect&, bool fixed = false);
+    virtual void computeRectForRepaint(RenderBoxModelObject* repaintContainer, IntRect&, bool fixed = false);
     virtual bool requiresLayer() const { return false; }
     virtual void layout();
 
+    virtual FloatRect objectBoundingBox() const;
+    virtual FloatRect strokeBoundingBox() const { return borderBoxRect(); }
+    virtual FloatRect repaintRectInLocalCoordinates() const;
+
+    virtual bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction);
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
+    virtual bool isSVGForeignObject() const { return true; }
+
+    virtual void mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool fixed , bool useTransforms, TransformState& transformState) const;
 
  private:
-    TransformationMatrix translationForAttributes();
+    TransformationMatrix translationForAttributes() const;
+
+    virtual TransformationMatrix localTransform() const { return m_localTransform; }
 
     TransformationMatrix m_localTransform;
-    IntRect m_absoluteBounds;
+    mutable TransformationMatrix m_localToParentTransform;
 };
 
 } // namespace WebCore

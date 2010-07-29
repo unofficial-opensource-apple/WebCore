@@ -25,6 +25,7 @@
 
 #include "CSSPropertyNames.h"
 #include "HTMLNames.h"
+#include "MappedAttribute.h"
 #include "RenderObject.h"
 #include "WMLErrorHandling.h"
 #include "WMLNames.h"
@@ -37,9 +38,14 @@ namespace WebCore {
 
 using namespace WMLNames;
 
-WMLElement::WMLElement(const QualifiedName& tagName, Document* doc)
-    : StyledElement(tagName, doc)
+WMLElement::WMLElement(const QualifiedName& tagName, Document* document)
+    : StyledElement(tagName, document, CreateElementZeroRefCount)
 {
+}
+
+PassRefPtr<WMLElement> WMLElement::create(const QualifiedName& tagName, Document* document)
+{
+    return new WMLElement(tagName, document);
 }
 
 bool WMLElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
@@ -54,7 +60,7 @@ bool WMLElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry&
     
 void WMLElement::parseMappedAttribute(MappedAttribute* attr)
 {
-    if (attr->name() == HTMLNames::idAttr
+    if (attr->name() == idAttributeName()
         || attr->name() == HTMLNames::classAttr
         || attr->name() == HTMLNames::styleAttr)
         return StyledElement::parseMappedAttribute(attr);
@@ -76,6 +82,11 @@ void WMLElement::parseMappedAttribute(MappedAttribute* attr)
     }
 }
 
+String WMLElement::title() const
+{
+    return parseValueSubstitutingVariableReferences(getAttribute(HTMLNames::titleAttr));
+}
+
 bool WMLElement::rendererIsNeeded(RenderStyle* style)
 {
     return document()->documentElement() == this || style->display() != NONE;
@@ -86,7 +97,7 @@ RenderObject* WMLElement::createRenderer(RenderArena*, RenderStyle* style)
     return RenderObject::createObject(this, style);
 }
 
-String WMLElement::parseValueSubstitutingVariableReferences(const AtomicString& value, WMLErrorCode defaultErrorCode)
+String WMLElement::parseValueSubstitutingVariableReferences(const AtomicString& value, WMLErrorCode defaultErrorCode) const
 {
     bool isValid = false;
     if (!containsVariableReference(value, isValid))
@@ -100,7 +111,7 @@ String WMLElement::parseValueSubstitutingVariableReferences(const AtomicString& 
     return substituteVariableReferences(value, document());
 }
 
-String WMLElement::parseValueForbiddingVariableReferences(const AtomicString& value)
+String WMLElement::parseValueForbiddingVariableReferences(const AtomicString& value) const
 {
     bool isValid = false;
     if (containsVariableReference(value, isValid)) {

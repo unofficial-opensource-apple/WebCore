@@ -49,7 +49,7 @@ class Node;
 class RenderObject;
 class RenderStyle;
 
-class AnimationControllerPrivate {
+class AnimationControllerPrivate : public Noncopyable {
 public:
     AnimationControllerPrivate(Frame*);
     ~AnimationControllerPrivate();
@@ -60,8 +60,8 @@ public:
     void animationTimerFired(Timer<AnimationControllerPrivate>*);
     void updateAnimationTimer(bool callSetChanged = false);
 
-    void updateRenderingDispatcherFired(Timer<AnimationControllerPrivate>*);
-    void startUpdateRenderingDispatcher();
+    void updateStyleIfNeededDispatcherFired(Timer<AnimationControllerPrivate>*);
+    void startUpdateStyleIfNeededDispatcher();
     void addEventToDispatch(PassRefPtr<Element> element, const AtomicString& eventType, const String& name, double elapsedTime);
     void addNodeChangeToDispatch(PassRefPtr<Node>);
 
@@ -80,18 +80,8 @@ public:
 
     double beginAnimationUpdateTime();
     void setBeginAnimationUpdateTime(double t) { m_beginAnimationUpdateTime = t; }
-    void endAnimationUpdate()
-    {
-        styleAvailable();
-        if (!m_waitingForAResponse)
-            startTimeResponse(beginAnimationUpdateTime());
-    }
-    
-    void receivedStartTimeResponse(double t)
-    {
-        m_waitingForAResponse = false;
-        startTimeResponse(t);
-    }
+    void endAnimationUpdate();
+    void receivedStartTimeResponse(double);
     
     void addToStyleAvailableWaitList(AnimationBase*);
     void removeFromStyleAvailableWaitList(AnimationBase*);    
@@ -102,12 +92,13 @@ public:
     
 private:
     void styleAvailable();
+    void fireEventsAndUpdateStyle();
 
     typedef HashMap<RenderObject*, RefPtr<CompositeAnimation> > RenderObjectAnimationMap;
 
     RenderObjectAnimationMap m_compositeAnimations;
     Timer<AnimationControllerPrivate> m_animationTimer;
-    Timer<AnimationControllerPrivate> m_updateRenderingDispatcher;
+    Timer<AnimationControllerPrivate> m_updateStyleIfNeededDispatcher;
     Frame* m_frame;
     
     class EventToDispatch {
@@ -127,7 +118,7 @@ private:
     
     AnimationBase* m_responseWaiters;
     AnimationBase* m_lastResponseWaiter;
-    bool m_waitingForAResponse;
+    bool m_waitingForResponse;
 };
 
 } // namespace WebCore

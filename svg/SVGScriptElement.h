@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2007 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -47,6 +45,7 @@ namespace WebCore {
         virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
         virtual void svgAttributeChanged(const QualifiedName&);
+        virtual void synchronizeProperty(const QualifiedName&);
         virtual bool isURLAttribute(Attribute*) const;
         virtual void finishParsingChildren();
 
@@ -57,17 +56,26 @@ namespace WebCore {
 
         virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
+        virtual bool shouldExecuteAsJavaScript() const { return false; }
+
     protected:
-        virtual const SVGElement* contextElement() const { return this; }
         virtual bool haveLoadedRequiredResources();
 
         virtual String sourceAttributeValue() const;
         virtual String charsetAttributeValue() const;
         virtual String typeAttributeValue() const;
         virtual String languageAttributeValue() const;
+        virtual String forAttributeValue() const;
 
         virtual void dispatchLoadEvent();
         virtual void dispatchErrorEvent();
+
+    private:
+        // SVGURIReference
+        DECLARE_ANIMATED_PROPERTY(SVGScriptElement, XLinkNames::hrefAttr, String, Href, href)
+
+        // SVGExternalResourcesRequired
+        DECLARE_ANIMATED_PROPERTY(SVGScriptElement, SVGNames::externalResourcesRequiredAttr, bool, ExternalResourcesRequired, externalResourcesRequired)
 
     private:
         ScriptElementData m_data;

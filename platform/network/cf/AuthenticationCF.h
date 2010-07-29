@@ -43,7 +43,6 @@ CFURLProtectionSpaceRef createCF(const ProtectionSpace&);
 Credential core(CFURLCredentialRef);
 ProtectionSpace core(CFURLProtectionSpaceRef);
 
-
 }
 
 #endif

@@ -33,60 +33,40 @@ namespace WebCore {
     class DOMWindow;
     class Event;
     class Frame;
+    class DOMWrapperWorld;
     class JSDOMWindow;
     class JSDOMWindowShell;
-    class JSProtectedEventListener;
     class JSLocation;
     class JSEventListener;
-    class ScheduledAction;
     class SecurityOrigin;
 
     class JSDOMWindowBasePrivate;
 
-    // This is the only WebCore JS binding which does not inherit from DOMObject
     class JSDOMWindowBase : public JSDOMGlobalObject {
         typedef JSDOMGlobalObject Base;
-
-        friend class ScheduledAction;
     protected:
-        JSDOMWindowBase(PassRefPtr<JSC::Structure>, PassRefPtr<DOMWindow>, JSDOMWindowShell*);
+        JSDOMWindowBase(NonNullPassRefPtr<JSC::Structure>, PassRefPtr<DOMWindow>, JSDOMWindowShell*);
 
     public:
-        virtual ~JSDOMWindowBase();
-
         void updateDocument();
 
         DOMWindow* impl() const { return d()->impl.get(); }
         virtual ScriptExecutionContext* scriptExecutionContext() const;
 
-        void disconnectFrame();
-
-        virtual bool getOwnPropertySlot(JSC::ExecState*, const JSC::Identifier&, JSC::PropertySlot&);
-        virtual void put(JSC::ExecState*, const JSC::Identifier& propertyName, JSC::JSValuePtr, JSC::PutPropertySlot&);
-
-        int installTimeout(const JSC::UString& handler, int t, bool singleShot);
-        int installTimeout(JSC::ExecState*, JSC::JSValuePtr function, const JSC::ArgList& args, int t, bool singleShot);
-        void removeTimeout(int timeoutId);
-
-        void clear();
-
-        // Set a place to put a dialog return value when the window is cleared.
-        void setReturnValueSlot(JSC::JSValuePtr* slot);
+        // Called just before removing this window from the JSDOMWindowShell.
+        void willRemoveFromWindowShell();
 
         virtual const JSC::ClassInfo* classInfo() const { return &s_info; }
         static const JSC::ClassInfo s_info;
 
         virtual JSC::ExecState* globalExec();
-        
         virtual bool supportsProfiling() const;
-
         virtual bool shouldInterruptScript() const;
         virtual bool shouldInterruptScriptBeforeTimeout() const;
 
         bool allowsAccessFrom(JSC::ExecState*) const;
         bool allowsAccessFromNoErrorMessage(JSC::ExecState*) const;
         bool allowsAccessFrom(JSC::ExecState*, String& message) const;
-
         void printErrorMessage(const String&) const;
 
         // Don't call this version of allowsAccessFrom -- it's a slightly incorrect implementation used only by WebScriptObject
@@ -99,33 +79,29 @@ namespace WebCore {
 
     private:
         struct JSDOMWindowBaseData : public JSDOMGlobalObjectData {
-            JSDOMWindowBaseData(PassRefPtr<DOMWindow>, JSDOMWindowShell*);
+            JSDOMWindowBaseData(PassRefPtr<DOMWindow> window, JSDOMWindowShell* shell);
 
             RefPtr<DOMWindow> impl;
-
-            JSC::JSValuePtr* returnValueSlot;
             JSDOMWindowShell* shell;
         };
-
-        static JSC::JSValuePtr childFrameGetter(JSC::ExecState*, const JSC::Identifier&, const JSC::PropertySlot&);
-        static JSC::JSValuePtr indexGetter(JSC::ExecState*, const JSC::Identifier&, const JSC::PropertySlot&);
-        static JSC::JSValuePtr namedItemGetter(JSC::ExecState*, const JSC::Identifier&, const JSC::PropertySlot&);
-
-        void clearHelperObjectProperties();
-        int installTimeout(ScheduledAction*, int interval, bool singleShot);
 
         bool allowsAccessFromPrivate(const JSC::JSGlobalObject*) const;
         String crossDomainAccessErrorMessage(const JSC::JSGlobalObject*) const;
         
+        static void destroyJSDOMWindowBaseData(void*);
+
         JSDOMWindowBaseData* d() const { return static_cast<JSDOMWindowBaseData*>(JSC::JSVariableObject::d); }
     };
 
     // Returns a JSDOMWindow or jsNull()
-    JSC::JSValuePtr toJS(JSC::ExecState*, DOMWindow*);
+    // JSDOMGlobalObject* is ignored, accessing a window in any context will
+    // use that DOMWindow's prototype chain.
+    JSC::JSValue toJS(JSC::ExecState*, JSDOMGlobalObject*, DOMWindow*);
+    JSC::JSValue toJS(JSC::ExecState*, DOMWindow*);
 
     // Returns JSDOMWindow or 0
-    JSDOMWindow* toJSDOMWindow(Frame*);
-    JSDOMWindow* toJSDOMWindow(JSC::JSValuePtr);
+    JSDOMWindow* toJSDOMWindow(Frame*, DOMWrapperWorld*);
+    JSDOMWindow* toJSDOMWindow(JSC::JSValue);
 
 } // namespace WebCore
 

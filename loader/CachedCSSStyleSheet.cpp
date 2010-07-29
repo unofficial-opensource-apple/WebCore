@@ -29,6 +29,7 @@
 
 #include "CachedResourceClient.h"
 #include "CachedResourceClientWalker.h"
+#include "HTTPParsers.h"
 #include "TextResourceDecoder.h"
 #include "loader.h"
 #include <wtf/Vector.h>
@@ -48,14 +49,12 @@ CachedCSSStyleSheet::~CachedCSSStyleSheet()
 {
 }
 
-void CachedCSSStyleSheet::addClient(CachedResourceClient *c)
+void CachedCSSStyleSheet::didAddClient(CachedResourceClient *c)
 {
-    CachedResource::addClient(c);
-
     if (!m_loading)
-        c->setCSSStyleSheet(m_url, m_decoder->encoding().name(), this);
+        c->setCSSStyleSheet(m_url, m_response.url(), m_decoder->encoding().name(), this);
 }
-    
+
 void CachedCSSStyleSheet::allClientsRemoved()
 {
     if (isSafeToMakePurgeable())
@@ -72,11 +71,11 @@ String CachedCSSStyleSheet::encoding() const
     return m_decoder->encoding().name();
 }
     
-const String CachedCSSStyleSheet::sheetText(bool enforceMIMEType) const 
+const String CachedCSSStyleSheet::sheetText(bool enforceMIMEType, bool* hasValidMIMEType) const 
 { 
     ASSERT(!isPurgeable());
 
-    if (!m_data || m_data->isEmpty() || !canUseSheet(enforceMIMEType))
+    if (!m_data || m_data->isEmpty() || !canUseSheet(enforceMIMEType, hasValidMIMEType))
         return String();
     
     if (!m_decodedSheetText.isNull())
@@ -113,16 +112,7 @@ void CachedCSSStyleSheet::checkNotify()
 
     CachedResourceClientWalker w(m_clients);
     while (CachedResourceClient *c = w.next())
-        c->setCSSStyleSheet(m_response.url().string(), m_decoder->encoding().name(), this);
-
-#if USE(LOW_BANDWIDTH_DISPLAY)        
-    // if checkNotify() is called from error(), client's setCSSStyleSheet(...)
-    // can't find "this" from url, so they can't do clean up if needed.
-    // call notifyFinished() to make sure they have a chance.
-    CachedResourceClientWalker n(m_clients);
-    while (CachedResourceClient* s = n.next())
-        s->notifyFinished(this);
-#endif        
+        c->setCSSStyleSheet(m_url, m_response.url(), m_decoder->encoding().name(), this);
 }
 
 void CachedCSSStyleSheet::error()
@@ -132,17 +122,28 @@ void CachedCSSStyleSheet::error()
     checkNotify();
 }
 
-bool CachedCSSStyleSheet::canUseSheet(bool enforceMIMEType) const
+bool CachedCSSStyleSheet::canUseSheet(bool enforceMIMEType, bool* hasValidMIMEType) const
 {
     if (errorOccurred())
         return false;
         
-    if (!enforceMIMEType)
+    if (!enforceMIMEType && !hasValidMIMEType)
         return true;
 
-    // This check exactly matches Firefox.
-    String mimeType = response().mimeType();
-    return mimeType.isEmpty() || equalIgnoringCase(mimeType, "text/css") || equalIgnoringCase(mimeType, "application/x-unknown-content-type");
+    // This check exactly matches Firefox.  Note that we grab the Content-Type
+    // header directly because we want to see what the value is BEFORE content
+    // sniffing.  Firefox does this by setting a "type hint" on the channel.
+    // This implementation should be observationally equivalent.
+    //
+    // This code defaults to allowing the stylesheet for non-HTTP protocols so
+    // folks can use standards mode for local HTML documents.
+    String mimeType = extractMIMETypeFromMediaType(response().httpHeaderField("Content-Type"));
+    bool typeOK = mimeType.isEmpty() || equalIgnoringCase(mimeType, "text/css") || equalIgnoringCase(mimeType, "application/x-unknown-content-type");
+    if (hasValidMIMEType)
+        *hasValidMIMEType = typeOK;
+    if (!enforceMIMEType)
+        return true;
+    return typeOK;
 }
  
 }

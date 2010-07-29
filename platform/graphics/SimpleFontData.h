@@ -2,6 +2,7 @@
  * This file is part of the internal font implementation.
  *
  * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2008 Torch Mobile, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,15 +26,16 @@
 
 #include "FontData.h"
 #include "FontPlatformData.h"
+#include "GlyphMetricsMap.h"
 #include "GlyphPageTreeNode.h"
-#include "GlyphWidthMap.h"
+#include "TypesettingFeatures.h"
 #include <wtf/OwnPtr.h>
 
 #if USE(ATSUI)
 typedef struct OpaqueATSUStyle* ATSUStyle;
 #endif
 
-#if PLATFORM(WIN)
+#if PLATFORM(WIN) && !OS(WINCE)
 #include <usp10.h>
 #endif
 
@@ -45,13 +47,16 @@ typedef struct OpaqueATSUStyle* ATSUStyle;
 #include <QFont>
 #endif
 
+#if PLATFORM(HAIKU)
+#include <Font.h>
+#endif
+
 namespace WebCore {
 
 class FontDescription;
 class FontPlatformData;
 class SharedBuffer;
 class SVGFontData;
-class WidthMap;
 
 enum Pitch { UnknownPitch, FixedPitch, VariablePitch };
 
@@ -61,7 +66,7 @@ public:
     virtual ~SimpleFontData();
 
 public:
-    const FontPlatformData& platformData() const { return m_font; }
+    const FontPlatformData& platformData() const { return m_platformData; }
     SimpleFontData* smallCapsFontData(const FontDescription& fontDescription) const;
 
     // vertical metrics
@@ -69,11 +74,24 @@ public:
     int descent() const { return m_descent; }
     int lineSpacing() const { return m_lineSpacing; }
     int lineGap() const { return m_lineGap; }
+    float maxCharWidth() const { return m_maxCharWidth; }
+    float avgCharWidth() const { return m_avgCharWidth; }
     float xHeight() const { return m_xHeight; }
     unsigned unitsPerEm() const { return m_unitsPerEm; }
 
-    float widthForGlyph(Glyph) const;
+    FloatRect boundsForGlyph(Glyph) const;
+    float widthForGlyph(Glyph glyph) const;
+    FloatRect platformBoundsForGlyph(Glyph) const;
     float platformWidthForGlyph(Glyph) const;
+
+    float spaceWidth() const { return m_spaceWidth; }
+    float adjustedSpaceWidth() const { return m_adjustedSpaceWidth; }
+
+#if PLATFORM(CG) || PLATFORM(CAIRO)
+    float syntheticBoldOffset() const { return m_syntheticBoldOffset; }
+#endif
+
+    Glyph spaceGlyph() const { return m_spaceGlyph; }
 
     virtual const SimpleFontData* fontDataForCharacter(UChar32) const;
     virtual bool containsCharacters(const UChar*, int length) const;
@@ -94,12 +112,16 @@ public:
 
     const GlyphData& missingGlyphData() const { return m_missingGlyphData; }
 
-    GSFontRef getGSFont() const { return m_font.font(); }
-    bool isImageFont() const { return m_font.m_isImageFont; };
+#ifndef NDEBUG
+    virtual String description() const;
+#endif
+
+    GSFontRef getGSFont() const { return m_platformData.font(); }
+    bool isImageFont() const { return m_platformData.m_isImageFont; };
 
 #if USE(CORE_TEXT)
     CTFontRef getCTFont() const;
-    CFDictionaryRef getCFStringAttributes() const;
+    CFDictionaryRef getCFStringAttributes(TypesettingFeatures) const;
 #endif
 
 #if USE(ATSUI)
@@ -113,50 +135,53 @@ public:
 #endif
 
 #if PLATFORM(QT)
-    QFont getQtFont() const { return m_font.font(); }
+    QFont getQtFont() const { return m_platformData.font(); }
 #endif
 
 #if PLATFORM(WIN)
     bool isSystemFont() const { return m_isSystemFont; }
+#if !OS(WINCE) // disable unused members to save space
     SCRIPT_FONTPROPERTIES* scriptFontProperties() const;
     SCRIPT_CACHE* scriptCache() const { return &m_scriptCache; }
-
+#endif
     static void setShouldApplyMacAscentHack(bool);
     static bool shouldApplyMacAscentHack();
 #endif
 
-#if PLATFORM(CAIRO)
-    void setFont(cairo_t*) const;
-#endif
-
 #if PLATFORM(WX)
-    wxFont getWxFont() const { return m_font.font(); }
+    wxFont* getWxFont() const { return m_platformData.font(); }
 #endif
 
 private:
     void platformInit();
     void platformGlyphInit();
+    void platformCharWidthInit();
     void platformDestroy();
     
+    void initCharWidths();
+
     void commonInit();
 
-#if PLATFORM(WIN)
+#if PLATFORM(WIN) && !OS(WINCE)
     void initGDIFont();
     void platformCommonDestroy();
+    FloatRect boundsForGDIGlyph(Glyph glyph) const;
     float widthForGDIGlyph(Glyph glyph) const;
 #endif
 
-public:
     int m_ascent;
     int m_descent;
     int m_lineSpacing;
     int m_lineGap;
+    float m_maxCharWidth;
+    float m_avgCharWidth;
     float m_xHeight;
     unsigned m_unitsPerEm;
 
-    FontPlatformData m_font;
+    FontPlatformData m_platformData;
 
-    mutable GlyphWidthMap m_glyphToWidthMap;
+    mutable GlyphMetricsMap<FloatRect> m_glyphToBoundsMap;
+    mutable GlyphMetricsMap<float> m_glyphToWidthMap;
 
     bool m_treatAsFixedPitch;
 
@@ -171,34 +196,77 @@ public:
     float m_spaceWidth;
     float m_adjustedSpaceWidth;
 
+    Glyph m_zeroWidthSpaceGlyph;
+
     GlyphData m_missingGlyphData;
 
     mutable SimpleFontData* m_smallCapsFontData;
 
-#if PLATFORM(CG) || PLATFORM(WIN)
+#if PLATFORM(CG) || PLATFORM(CAIRO)
     float m_syntheticBoldOffset;
 #endif
 
+#ifdef BUILDING_ON_TIGER
+public:
+    void* m_styleGroup;
+
+private:
+#endif
 
 #if USE(ATSUI)
-    mutable ATSUStyle m_ATSUStyle;
-    mutable bool m_ATSUStyleInitialized;
+public:
+    mutable HashMap<unsigned, ATSUStyle> m_ATSUStyleMap;
     mutable bool m_ATSUMirrors;
     mutable bool m_checkedShapesArabic;
     mutable bool m_shapesArabic;
+
+private:
 #endif
 
 #if USE(CORE_TEXT)
     mutable RetainPtr<CTFontRef> m_CTFont;
-    mutable RetainPtr<CFDictionaryRef> m_CFStringAttributes;
+    mutable HashMap<unsigned, RetainPtr<CFDictionaryRef> > m_CFStringAttributes;
 #endif
 
 #if PLATFORM(WIN)
     bool m_isSystemFont;
+#if !OS(WINCE) // disable unused members to save space
     mutable SCRIPT_CACHE m_scriptCache;
     mutable SCRIPT_FONTPROPERTIES* m_scriptFontProperties;
 #endif
+#endif
 };
+    
+    
+#if !PLATFORM(QT)
+ALWAYS_INLINE FloatRect SimpleFontData::boundsForGlyph(Glyph glyph) const
+{
+    if (glyph == m_zeroWidthSpaceGlyph && glyph)
+        return FloatRect();
+
+    FloatRect bounds = m_glyphToBoundsMap.metricsForGlyph(glyph);
+    if (bounds.width() != cGlyphSizeUnknown)
+        return bounds;
+
+    bounds = platformBoundsForGlyph(glyph);
+    m_glyphToBoundsMap.setMetricsForGlyph(glyph, bounds);
+    return bounds;
+}
+
+ALWAYS_INLINE float SimpleFontData::widthForGlyph(Glyph glyph) const
+{
+    if (glyph == m_zeroWidthSpaceGlyph && glyph)
+        return 0;
+
+    float width = m_glyphToWidthMap.metricsForGlyph(glyph);
+    if (width != cGlyphSizeUnknown)
+        return width;
+
+    width = platformWidthForGlyph(glyph);
+    m_glyphToWidthMap.setMetricsForGlyph(glyph, width);
+    return width;
+}
+#endif
 
 } // namespace WebCore
 

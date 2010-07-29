@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -26,7 +24,6 @@
 #include "TransformationMatrix.h"
 #include "SVGTransform.h"
 #include "SVGSVGElement.h"
-#include "SVGTransformDistance.h"
 #include "SVGTransformList.h"
 
 using namespace WebCore;
@@ -63,23 +60,6 @@ SVGTransform SVGTransformList::concatenate() const
         matrix = getItem(i, ec).matrix() * matrix;
 
     return SVGTransform(matrix);
-}
-
-SVGTransform SVGTransformList::concatenateForType(SVGTransform::SVGTransformType type) const
-{
-    unsigned int length = numberOfItems();
-    if (!length)
-        return SVGTransform();
-    
-    ExceptionCode ec = 0;
-    SVGTransformDistance totalTransform;
-    for (unsigned int i = 0; i < length; i++) {
-        const SVGTransform& transform = getItem(i, ec);
-        if (transform.type() == type)
-            totalTransform.addSVGTransform(transform);
-    }
-    
-    return totalTransform.addToSVGTransform(SVGTransform());
 }
 
 String SVGTransformList::valueAsString() const

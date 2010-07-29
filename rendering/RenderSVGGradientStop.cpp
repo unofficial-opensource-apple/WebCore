@@ -49,7 +49,7 @@ void RenderSVGGradientStop::styleDidChange(StyleDifference diff, const RenderSty
     // <stop> elements should only be allowed to make renderers under gradient elements
     // but I can imagine a few cases we might not be catching, so let's not crash if our parent isn't a gradient.
     if (SVGGradientElement* gradient = gradientElement()) {
-        if (SVGResource* resource = gradient->canvasResource())
+        if (SVGResource* resource = gradient->canvasResource(this))
             resource->invalidate();
     }
 }
@@ -61,7 +61,7 @@ void RenderSVGGradientStop::layout()
 
 SVGGradientElement* RenderSVGGradientStop::gradientElement() const
 {
-    Node* parentNode = element()->parent();
+    Node* parentNode = node()->parent();
     if (parentNode->hasTagName(linearGradientTag) || parentNode->hasTagName(radialGradientTag))
         return static_cast<SVGGradientElement*>(parentNode);
     return 0;

@@ -26,6 +26,7 @@
 #import "config.h"
 #import "ResourceError.h"
 
+#import "BlockExceptions.h"
 #import "KURL.h"
 #import <Foundation/Foundation.h>
 
@@ -46,8 +47,12 @@ void ResourceError::platformLazyInit()
     NSString* failingURLString = [[m_platformError.get() userInfo] valueForKey:@"NSErrorFailingURLStringKey"];
     if (!failingURLString)
         failingURLString = [[[m_platformError.get() userInfo] valueForKey:@"NSErrorFailingURLKey"] absoluteString];
-        
+    
+    // Workaround for <rdar://problem/6554067>
+    m_localizedDescription = failingURLString;
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
     m_localizedDescription = [m_platformError.get() _web_localizedDescription];
+    END_BLOCK_OBJC_EXCEPTIONS;
 
     m_dataIsUpToDate = true;
 }
@@ -71,7 +76,7 @@ ResourceError::operator NSError*() const
             [userInfo.get() setValue:m_localizedDescription forKey:NSLocalizedDescriptionKey];
 
         if (!m_failingURL.isEmpty()) {
-            NSURL *cocoaURL = KURL(m_failingURL);
+            NSURL *cocoaURL = KURL(ParsedURLString, m_failingURL);
             [userInfo.get() setValue:m_failingURL forKey:@"NSErrorFailingURLStringKey"];
             [userInfo.get() setValue:cocoaURL forKey:@"NSErrorFailingURLKey"];
         }

@@ -28,12 +28,11 @@
 
 module core {
 
-    interface [
-        GenerateConstructor
-    ] Clipboard {
+    interface Clipboard {
                  attribute [ConvertNullStringTo=Undefined] DOMString dropEffect;
                  attribute [ConvertNullStringTo=Undefined] DOMString effectAllowed;
         readonly attribute [CustomGetter] Array types;
+        readonly attribute FileList files;
 
         [Custom] void clearData(in [Optional] DOMString type)
             raises(DOMException);

@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -28,18 +28,70 @@
 #include "Document.h"
 #include "Element.h"
 #include "RenderImage.h"
-#include <wtf/Platform.h>
 
 #include "Frame.h"
 #include "HTMLNames.h"
 #include "Page.h"
 #include "Settings.h"
 
+#if !ASSERT_DISABLED
+// ImageLoader objects are allocated as members of other objects, so generic pointer check would always fail.
+namespace WTF {
+
+template<> struct ValueCheck<WebCore::ImageLoader*> {
+    typedef WebCore::ImageLoader* TraitType;
+    static void checkConsistency(const WebCore::ImageLoader* p)
+    {
+        if (!p)
+            return;
+        ASSERT(p->element());
+        ValueCheck<WebCore::Element*>::checkConsistency(p->element());
+    }
+};
+
+}
+#endif
+
 namespace WebCore {
 
-ImageLoader::ImageLoader(Element* elt)
-    : m_element(elt)
+class ImageEventSender : public Noncopyable {
+public:
+    ImageEventSender(const AtomicString& eventType);
+
+    void dispatchEventSoon(ImageLoader*);
+    void cancelEvent(ImageLoader*);
+
+    void dispatchPendingEvents();
+
+#if !ASSERT_DISABLED
+    bool hasPendingEvents(ImageLoader* loader) { return m_dispatchSoonList.find(loader) != notFound; }
+#endif
+
+private:
+    void timerFired(Timer<ImageEventSender>*);
+
+    AtomicString m_eventType;
+    Timer<ImageEventSender> m_timer;
+    Vector<ImageLoader*> m_dispatchSoonList;
+    Vector<ImageLoader*> m_dispatchingList;
+};
+
+static ImageEventSender& beforeLoadEventSender()
+{
+    DEFINE_STATIC_LOCAL(ImageEventSender, sender, (eventNames().beforeloadEvent));
+    return sender;
+}
+
+static ImageEventSender& loadEventSender()
+{
+    DEFINE_STATIC_LOCAL(ImageEventSender, sender, (eventNames().loadEvent));
+    return sender;
+}
+
+ImageLoader::ImageLoader(Element* element)
+    : m_element(element)
     , m_image(0)
+    , m_firedBeforeLoad(true)
     , m_firedLoad(true)
     , m_imageComplete(true)
     , m_loadManually(false)
@@ -49,10 +101,17 @@ ImageLoader::ImageLoader(Element* elt)
 ImageLoader::~ImageLoader()
 {
     if (m_image && m_image->isLoaded())
-        m_element->document()->topDocument()->decrementTotalImageDataSize(m_image.get());
+        m_element->document()->decrementTotalImageDataSize(m_image.get());
     if (m_image)
         m_image->removeClient(this);
-    m_element->document()->removeImage(this);
+
+    ASSERT(!m_firedBeforeLoad || !beforeLoadEventSender().hasPendingEvents(this));
+    if (!m_firedBeforeLoad)
+        beforeLoadEventSender().cancelEvent(this);
+
+    ASSERT(!m_firedLoad || !loadEventSender().hasPendingEvents(this));
+    if (!m_firedLoad)
+        loadEventSender().cancelEvent(this);
 }
 
 void ImageLoader::setImage(CachedImage* newImage)
@@ -61,11 +120,18 @@ void ImageLoader::setImage(CachedImage* newImage)
     CachedImage* oldImage = m_image.get();
     if (newImage != oldImage) {
         if (oldImage && oldImage->isLoaded())
-            m_element->document()->topDocument()->decrementTotalImageDataSize(oldImage);
+            m_element->document()->decrementTotalImageDataSize(oldImage);
         if (newImage && newImage->isLoaded())
-            m_element->document()->topDocument()->incrementTotalImageDataSize(newImage);
-        setLoadingImage(newImage);
-        m_firedLoad = true;
+            m_element->document()->incrementTotalImageDataSize(newImage);
+        m_image = newImage;
+        if (!m_firedBeforeLoad) {
+            beforeLoadEventSender().cancelEvent(this);
+            m_firedBeforeLoad = true;
+        }
+        if (!m_firedLoad) {
+            loadEventSender().cancelEvent(this);
+            m_firedLoad = true;
+        }
         m_imageComplete = true;
         if (newImage)
             newImage->addClient(this);
@@ -73,42 +139,27 @@ void ImageLoader::setImage(CachedImage* newImage)
             oldImage->removeClient(this);
     }
 
-    if (RenderObject* renderer = element()->renderer()) {
+    if (RenderObject* renderer = m_element->renderer()) {
         if (!renderer->isImage())
             return;
-
-        static_cast<RenderImage*>(renderer)->resetAnimation();
+        toRenderImage(renderer)->resetAnimation();
     }
-}
-
-void ImageLoader::setLoadingImage(CachedImage* loadingImage)
-{
-    m_firedLoad = false;
-    m_imageComplete = false;
-    m_image = loadingImage;
 }
 
 void ImageLoader::updateFromElement()
 {
     // If we're not making renderers for the page, then don't load images.  We don't want to slow
     // down the raw HTML parsing case by loading images we don't intend to display.
-    Element* elem = element();
-    Document* doc = elem->document();
-    if (!doc->renderer())
+    Document* document = m_element->document();
+    if (!document->renderer())
         return;
-    bool ok;
-    unsigned width = elem->getAttribute(HTMLNames::widthAttr).toInt(&ok);
-    if (!ok)
-        width = 0;
-    unsigned height = elem->getAttribute(HTMLNames::heightAttr).toInt(&ok);
-    if (!ok)
-        height = 0;
-    if (width * height * 4 > doc->settings()->maximumDecodedImageSize()) //4 = 32 bits per pixel.
-        return;
-    if (memoryLimitReached()) // we don't have any information on the image itself at this point (m_image is null) but we can already reject the load if we're passed the memory limit.
+    // A manually loaded image is loaded through a different data source and does not use standard loading mechanisms.
+    // If don't have any information on the image itself at this point (m_image is null) we can reject the load if we've already passed the memory limit.
+    // Otherwise memory limits will be checked in CachedImage::data().
+    if (!(m_loadManually && !m_image.get()) && memoryLimitReached())
         return;
 
-    AtomicString attr = elem->getAttribute(elem->imageSourceAttributeName());
+    AtomicString attr = m_element->getAttribute(m_element->imageSourceAttributeName());
 
     if (attr == m_failedLoadURL)
         return;
@@ -118,15 +169,15 @@ void ImageLoader::updateFromElement()
     // a quirk that preserves old behavior that Dashboard widgets
     // need (<rdar://problem/5994621>).
     CachedImage* newImage = 0;
-    if (!(attr.isNull() || attr.isEmpty() && doc->baseURI().isLocalFile())) {
+    if (!(attr.isNull() || (attr.isEmpty() && document->baseURI().isLocalFile()))) {
         if (m_loadManually) {
-            doc->docLoader()->setAutoLoadImages(false);
+            document->docLoader()->setAutoLoadImages(false);
             newImage = new CachedImage(sourceURI(attr));
             newImage->setLoading(true);
-            newImage->setDocLoader(doc->docLoader());
-            doc->docLoader()->m_documentResources.set(newImage->url(), newImage);
+            newImage->setDocLoader(document->docLoader());
+            document->docLoader()->m_documentResources.set(newImage->url(), newImage);
         } else
-            newImage = doc->docLoader()->requestImage(sourceURI(attr));
+            newImage = document->docLoader()->requestImage(sourceURI(attr));
 
         // If we do not have an image here, it means that a cross-site
         // violation occurred.
@@ -136,21 +187,34 @@ void ImageLoader::updateFromElement()
     CachedImage* oldImage = m_image.get();
     if (newImage != oldImage) {
         if (oldImage && oldImage->isLoaded())
-            doc->topDocument()->decrementTotalImageDataSize(oldImage);
+            document->decrementTotalImageDataSize(oldImage);
         if (newImage && newImage->isLoaded())
-            doc->topDocument()->incrementTotalImageDataSize(newImage);
-        setLoadingImage(newImage);
-        if (newImage)
+            document->incrementTotalImageDataSize(newImage);
+        if (!m_firedBeforeLoad)
+            beforeLoadEventSender().cancelEvent(this);
+        if (!m_firedLoad)
+            loadEventSender().cancelEvent(this);
+
+        m_image = newImage;
+        m_firedBeforeLoad = !newImage;
+        m_firedLoad = !newImage;
+        m_imageComplete = !newImage;
+
+        if (newImage) {
             newImage->addClient(this);
+            if (!m_element->document()->hasListenerType(Document::BEFORELOAD_LISTENER))
+                dispatchPendingBeforeLoadEvent();
+            else
+                beforeLoadEventSender().dispatchEventSoon(this);
+        }
         if (oldImage)
             oldImage->removeClient(this);
     }
 
-    if (RenderObject* renderer = elem->renderer()) {
+    if (RenderObject* renderer = m_element->renderer()) {
         if (!renderer->isImage())
             return;
-
-        static_cast<RenderImage*>(renderer)->resetAnimation();
+        toRenderImage(renderer)->resetAnimation();
     }
 }
 
@@ -164,25 +228,143 @@ void ImageLoader::updateFromElementIgnoringPreviousError()
 void ImageLoader::notifyFinished(CachedResource*)
 {
     ASSERT(m_failedLoadURL.isEmpty());
-    m_imageComplete = true;
 
-    Element* elem = element();
-    elem->document()->dispatchImageLoadEventSoon(this);
-    Document* mainFrameDocument = elem->document()->topDocument();
-    mainFrameDocument->incrementTotalImageDataSize(m_image.get());
+    m_imageComplete = true;
+    if (haveFiredBeforeLoadEvent())
+        updateRenderer();
+
+    if (m_firedLoad)
+        return;
+
+    loadEventSender().dispatchEventSoon(this);
+    Document* document = m_element->document();
+    Document* mainFrameDocument = document->topDocument();
+    document->incrementTotalImageDataSize(m_image.get());
     unsigned animatedImageSize = m_image->animatedImageSize();
     if (animatedImageSize) {
         mainFrameDocument->incrementAnimatedImageDataCount(animatedImageSize);
         if (mainFrameDocument->animatedImageDataCount() > 2 * 1024 * 1024)
             m_image->stopAnimatedImage();
     }
+}
 
-    if (RenderObject* renderer = elem->renderer()) {
-        if (!renderer->isImage())
+void ImageLoader::updateRenderer()
+{
+    if (RenderObject* renderer = m_element->renderer()) {
+        if (!renderer->isImage() && !renderer->isVideo())
             return;
-
-        static_cast<RenderImage*>(renderer)->setCachedImage(m_image.get());
+        RenderImage* imageRenderer = toRenderImage(renderer);
+        
+        // Only update the renderer if it doesn't have an image or if what we have
+        // is a complete image.  This prevents flickering in the case where a dynamic
+        // change is happening between two images.
+        CachedImage* cachedImage = imageRenderer->cachedImage();
+        if (m_image != cachedImage && (m_imageComplete || !imageRenderer->cachedImage()))
+            imageRenderer->setCachedImage(m_image.get());
     }
+}
+
+void ImageLoader::dispatchPendingBeforeLoadEvent()
+{
+    if (m_firedBeforeLoad)
+        return;
+    if (!m_image)
+        return;
+    if (!m_element->document()->attached())
+        return;
+    m_firedBeforeLoad = true;
+    if (m_element->dispatchBeforeLoadEvent(m_image->url())) {
+        updateRenderer();
+        return;
+    }
+    if (m_image) {
+        m_image->removeClient(this);
+        m_image = 0;
+    }
+    loadEventSender().cancelEvent(this);
+}
+
+void ImageLoader::dispatchPendingLoadEvent()
+{
+    if (m_firedLoad)
+        return;
+    if (!m_image)
+        return;
+    if (!m_element->document()->attached())
+        return;
+    m_firedLoad = true;
+    dispatchLoadEvent();
+}
+
+void ImageLoader::dispatchPendingBeforeLoadEvents()
+{
+    beforeLoadEventSender().dispatchPendingEvents();
+}
+
+void ImageLoader::dispatchPendingLoadEvents()
+{
+    loadEventSender().dispatchPendingEvents();
+}
+
+ImageEventSender::ImageEventSender(const AtomicString& eventType)
+    : m_eventType(eventType)
+    , m_timer(this, &ImageEventSender::timerFired)
+{
+}
+
+void ImageEventSender::dispatchEventSoon(ImageLoader* loader)
+{
+    m_dispatchSoonList.append(loader);
+    if (!m_timer.isActive())
+        m_timer.startOneShot(0);
+}
+
+void ImageEventSender::cancelEvent(ImageLoader* loader)
+{
+    // Remove instances of this loader from both lists.
+    // Use loops because we allow multiple instances to get into the lists.
+    size_t size = m_dispatchSoonList.size();
+    for (size_t i = 0; i < size; ++i) {
+        if (m_dispatchSoonList[i] == loader)
+            m_dispatchSoonList[i] = 0;
+    }
+    size = m_dispatchingList.size();
+    for (size_t i = 0; i < size; ++i) {
+        if (m_dispatchingList[i] == loader)
+            m_dispatchingList[i] = 0;
+    }
+    if (m_dispatchSoonList.isEmpty())
+        m_timer.stop();
+}
+
+void ImageEventSender::dispatchPendingEvents()
+{
+    // Need to avoid re-entering this function; if new dispatches are
+    // scheduled before the parent finishes processing the list, they
+    // will set a timer and eventually be processed.
+    if (!m_dispatchingList.isEmpty())
+        return;
+
+    m_timer.stop();
+
+    m_dispatchSoonList.checkConsistency();
+
+    m_dispatchingList.swap(m_dispatchSoonList);
+    size_t size = m_dispatchingList.size();
+    for (size_t i = 0; i < size; ++i) {
+        if (ImageLoader* loader = m_dispatchingList[i]) {
+            if (m_eventType == eventNames().beforeloadEvent)
+                loader->dispatchPendingBeforeLoadEvent();
+            else
+                loader->dispatchPendingLoadEvent();
+        }
+    }
+    m_dispatchingList.clear();
+}
+
+void ImageEventSender::timerFired(Timer<ImageEventSender>*)
+{
+    dispatchPendingEvents();
 }
 
 bool ImageLoader::memoryLimitReached()

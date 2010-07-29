@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2006 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -25,6 +23,7 @@
 #if ENABLE(SVG)
 #include "SVGLangSpace.h"
 
+#include "MappedAttribute.h"
 #include "SVGElement.h"
 #include "XMLNames.h"
 #include <wtf/StdLibExtras.h>

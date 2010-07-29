@@ -61,14 +61,11 @@ FontCustomPlatformData::~FontCustomPlatformData()
 
 FontPlatformData FontCustomPlatformData::fontPlatformData(int size, bool bold, bool italic, FontRenderingMode renderingMode)
 {
-    ASSERT(m_cgFont);
+    ASSERT(wkCanCreateCGFontWithLOGFONT() || m_cgFont);
     ASSERT(m_fontReference);
     ASSERT(T2embedLibrary());
 
-    static bool canUsePlatformNativeGlyphs = wkCanUsePlatformNativeGlyphs();
-    LOGFONT _logFont;
-
-    LOGFONT& logFont = canUsePlatformNativeGlyphs ? *static_cast<LOGFONT*>(malloc(sizeof(LOGFONT))) : _logFont;
+    LOGFONT& logFont = *static_cast<LOGFONT*>(malloc(sizeof(LOGFONT)));
     if (m_name.isNull())
         TTGetNewFontName(&m_fontReference, logFont.lfFaceName, LF_FACESIZE, 0, 0);
     else
@@ -90,8 +87,13 @@ FontPlatformData FontCustomPlatformData::fontPlatformData(int size, bool bold, b
     logFont.lfWeight = bold ? 700 : 400;
 
     HFONT hfont = CreateFontIndirect(&logFont);
-    if (canUsePlatformNativeGlyphs)
-        wkSetFontPlatformInfo(m_cgFont, &logFont, free);
+
+    if (wkCanCreateCGFontWithLOGFONT()) {
+        RetainPtr<CGFontRef> cgFont(AdoptCF, CGFontCreateWithPlatformFont(&logFont));
+        return FontPlatformData(hfont, cgFont.get(), size, bold, italic, renderingMode == AlternateRenderingMode);
+    }
+
+    wkSetFontPlatformInfo(m_cgFont, &logFont, free);
     return FontPlatformData(hfont, m_cgFont, size, bold, italic, renderingMode == AlternateRenderingMode);
 }
 
@@ -120,7 +122,7 @@ size_t getBytesWithOffset(void *info, void* buffer, size_t offset, size_t count)
 // Streams the concatenation of a header and font data.
 class EOTStream {
 public:
-    EOTStream(const Vector<UInt8, 512>& eotHeader, const SharedBuffer* fontData, size_t overlayDst, size_t overlaySrc, size_t overlayLength)
+    EOTStream(const EOTHeader& eotHeader, const SharedBuffer* fontData, size_t overlayDst, size_t overlaySrc, size_t overlayLength)
         : m_eotHeader(eotHeader)
         , m_fontData(fontData)
         , m_overlayDst(overlayDst)
@@ -134,7 +136,7 @@ public:
     size_t read(void* buffer, size_t count);
 
 private:
-    const Vector<UInt8, 512>& m_eotHeader;
+    const EOTHeader& m_eotHeader;
     const SharedBuffer* m_fontData;
     size_t m_overlayDst;
     size_t m_overlaySrc;
@@ -194,12 +196,15 @@ FontCustomPlatformData* createFontCustomPlatformData(SharedBuffer* buffer)
     ASSERT_ARG(buffer, buffer);
     ASSERT(T2embedLibrary());
 
-    // Get CG to create the font.
-    CGDataProviderDirectAccessCallbacks callbacks = { &getData, &releaseData, &getBytesWithOffset, NULL };
-    RetainPtr<CGDataProviderRef> dataProvider(AdoptCF, CGDataProviderCreateDirectAccess(buffer, buffer->size(), &callbacks));
-    CGFontRef cgFont = CGFontCreateWithDataProvider(dataProvider.get());
-    if (!cgFont)
-        return 0;
+    RetainPtr<CGFontRef> cgFont;
+    if (!wkCanCreateCGFontWithLOGFONT()) {
+        // Get CG to create the font.
+        CGDataProviderDirectAccessCallbacks callbacks = { &getData, &releaseData, &getBytesWithOffset, NULL };
+        RetainPtr<CGDataProviderRef> dataProvider(AdoptCF, CGDataProviderCreateDirectAccess(buffer, buffer->size(), &callbacks));
+        cgFont.adoptCF(CGFontCreateWithDataProvider(dataProvider.get()));
+        if (!cgFont)
+            return 0;
+    }
 
     // Introduce the font to GDI. AddFontMemResourceEx cannot be used, because it will pollute the process's
     // font namespace (Windows has no API for creating an HFONT from data without exposing the font to the
@@ -210,14 +215,12 @@ FontCustomPlatformData* createFontCustomPlatformData(SharedBuffer* buffer)
 
     // TTLoadEmbeddedFont works only with Embedded OpenType (.eot) data, so we need to create an EOT header
     // and prepend it to the font data.
-    Vector<UInt8, 512> eotHeader;
+    EOTHeader eotHeader;
     size_t overlayDst;
     size_t overlaySrc;
     size_t overlayLength;
-    if (!getEOTHeader(buffer, eotHeader, overlayDst, overlaySrc, overlayLength)) {
-        CGFontRelease(cgFont);
+    if (!getEOTHeader(buffer, eotHeader, overlayDst, overlaySrc, overlayLength))
         return 0;
-    }
 
     HANDLE fontReference;
     ULONG privStatus;
@@ -229,13 +232,11 @@ FontCustomPlatformData* createFontCustomPlatformData(SharedBuffer* buffer)
         fontName = String();
     else {
         fontReference = renameAndActivateFont(buffer, fontName);
-        if (!fontReference) {
-            CGFontRelease(cgFont);
+        if (!fontReference)
             return 0;
-        }
     }
 
-    return new FontCustomPlatformData(cgFont, fontReference, fontName);
+    return new FontCustomPlatformData(cgFont.releaseRef(), fontReference, fontName);
 }
 
 }

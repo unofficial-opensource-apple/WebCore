@@ -39,6 +39,7 @@ typedef struct CGFont* CGFontRef;
 namespace WebCore {
 
 class FontDescription;
+class String;
 
 class FontPlatformData {
 public:
@@ -64,6 +65,9 @@ public:
     FontPlatformData(HFONT, CGFontRef, float size, bool bold, bool oblique, bool useGDI);
 #elif PLATFORM(CAIRO)
     FontPlatformData(cairo_font_face_t*, float size, bool bold, bool oblique);
+    FontPlatformData(const FontPlatformData&);
+
+    FontPlatformData& operator=(const FontPlatformData&);
 #endif
     ~FontPlatformData();
 
@@ -74,7 +78,6 @@ public:
 #if PLATFORM(CG)
     CGFontRef cgFont() const { return m_cgFont.get(); }
 #elif PLATFORM(CAIRO)
-    void setFont(cairo_t* ft) const;
     cairo_font_face_t* fontFace() const { return m_fontFace; }
     cairo_scaled_font_t* scaledFont() const { return m_scaledFont; }
 #endif
@@ -103,6 +106,10 @@ public:
                m_syntheticBold == other.m_syntheticBold && m_syntheticOblique == other.m_syntheticOblique &&
                m_useGDI == other.m_useGDI;
     }
+
+#ifndef NDEBUG
+    String description() const;
+#endif
 
 private:
     class RefCountedHFONT : public RefCounted<RefCountedHFONT> {

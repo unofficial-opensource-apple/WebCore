@@ -135,8 +135,8 @@ static NSAttributedString *stripAttachmentCharacters(NSAttributedString *string)
 
 void Pasteboard::writeSelection(NSPasteboard* pasteboard, Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
-    if (WebArchivePboardType == nil)
-        Pasteboard::generalPasteboard(); //Initialises pasteboard types
+    if (!WebArchivePboardType)
+        Pasteboard::generalPasteboard(); // Initializes pasteboard types.
     ASSERT(selectedRange);
     
     NSAttributedString *attributedString = [[[NSAttributedString alloc] _initWithDOMRange:kit(selectedRange)] autorelease];
@@ -203,12 +203,24 @@ void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete,
     Pasteboard::writeSelection(m_pasteboard.get(), selectedRange, canSmartCopyOrDelete, frame);
 }
 
+void Pasteboard::writePlainText(const String& text)
+{
+    if (!WebArchivePboardType)
+        Pasteboard::generalPasteboard(); // Initializes pasteboard types.
+
+    NSArray *types = [NSArray arrayWithObject:NSStringPboardType];
+    NSPasteboard *pasteboard = m_pasteboard.get();
+    [pasteboard declareTypes:types owner:nil];
+
+    [pasteboard setString:text forType:NSStringPboardType];
+}
+
 void Pasteboard::writeURL(NSPasteboard* pasteboard, NSArray* types, const KURL& url, const String& titleStr, Frame* frame)
 {
-    if (WebArchivePboardType == nil)
-        Pasteboard::generalPasteboard(); //Initialises pasteboard types
+    if (!WebArchivePboardType)
+        Pasteboard::generalPasteboard(); // Initializes pasteboard types.
    
-    if (types == nil) {
+    if (!types) {
         types = writableTypesForURL();
         [pasteboard declareTypes:types owner:nil];
     }
@@ -278,8 +290,8 @@ void Pasteboard::writeImage(Node* node, const KURL& url, const String& title)
     ASSERT(cocoaURL);
 
     ASSERT(node->renderer() && node->renderer()->isImage());
-    RenderImage* renderer = static_cast<RenderImage*>(node->renderer());
-    CachedImage* cachedImage = static_cast<CachedImage*>(renderer->cachedImage());
+    RenderImage* renderer = toRenderImage(node->renderer());
+    CachedImage* cachedImage = renderer->cachedImage();
     ASSERT(cachedImage);
     
     if (cachedImage->errorOccurred())
@@ -310,7 +322,7 @@ String Pasteboard::plainText(Frame* frame)
     NSArray *types = [m_pasteboard.get() types];
     
     if ([types containsObject:NSStringPboardType])
-        return [m_pasteboard.get() stringForType:NSStringPboardType];
+        return [[m_pasteboard.get() stringForType:NSStringPboardType] precomposedStringWithCanonicalMapping];
     
     NSAttributedString *attributedString = nil;
     NSString *string;
@@ -320,13 +332,13 @@ String Pasteboard::plainText(Frame* frame)
     if (attributedString == nil && [types containsObject:NSRTFPboardType])
         attributedString = [[NSAttributedString alloc] initWithRTF:[m_pasteboard.get() dataForType:NSRTFPboardType] documentAttributes:NULL];
     if (attributedString != nil) {
-        string = [[attributedString string] copy];
+        string = [[attributedString string] precomposedStringWithCanonicalMapping];
         [attributedString release];
-        return [string autorelease];
+        return string;
     }
     
     if ([types containsObject:NSFilenamesPboardType]) {
-        string = [[m_pasteboard.get() propertyListForType:NSFilenamesPboardType] componentsJoinedByString:@"\n"];
+        string = [[[m_pasteboard.get() propertyListForType:NSFilenamesPboardType] componentsJoinedByString:@"\n"] precomposedStringWithCanonicalMapping];
         if (string != nil)
             return string;
     }
@@ -338,7 +350,7 @@ String Pasteboard::plainText(Frame* frame)
         // helper code that should either be done in a separate patch or figured out in another way.
         string = frame->editor()->client()->userVisibleString(url);
         if ([string length] > 0)
-            return string;
+            return [string precomposedStringWithCanonicalMapping];
     }
 
     
@@ -360,7 +372,7 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
             }
         }
         if ([HTMLString length] != 0) {
-            RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), HTMLString, "");
+            RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), HTMLString, "", FragmentScriptingNotAllowed);
             if (fragment)
                 return fragment.release();
         }
@@ -368,7 +380,7 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
     
     if (allowPlainText && [types containsObject:NSStringPboardType]) {
         chosePlainText = true;
-        RefPtr<DocumentFragment> fragment = createFragmentFromText(context.get(), [m_pasteboard.get() stringForType:NSStringPboardType]);
+        RefPtr<DocumentFragment> fragment = createFragmentFromText(context.get(), [[m_pasteboard.get() stringForType:NSStringPboardType] precomposedStringWithCanonicalMapping]);
         if (fragment)
             return fragment.release();
     }

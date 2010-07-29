@@ -5,6 +5,8 @@
  * Copyright (C) 2007 Holger Hans Peter Freyther
  * Copyright (C) 2008 Collabora Ltd.
  * Copyright (C) 2008 Nuanti Ltd.
+ * Copyright (C) 2009 Appcelerator Inc.
+ * Copyright (C) 2009 Brent Fulgham <bfulgham@webkit.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -44,12 +46,12 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <wtf/Threading.h>
 #include <wtf/Vector.h>
 
-#if PLATFORM(GTK)
-    #if GLIB_CHECK_VERSION(2,12,0)
-        #define USE_GLIB_BASE64
-    #endif
+#if !OS(WINDOWS)
+#include <sys/param.h>
+#define MAX_PATH MAXPATHLEN
 #endif
 
 namespace WebCore {
@@ -60,16 +62,72 @@ const int maxRunningJobs = 5;
 
 static const bool ignoreSSLErrors = getenv("WEBKIT_IGNORE_SSL_ERRORS");
 
+static CString certificatePath()
+{
+#if PLATFORM(CF)
+    CFBundleRef webKitBundle = CFBundleGetBundleWithIdentifier(CFSTR("com.apple.WebKit"));
+    if (webKitBundle) {
+        RetainPtr<CFURLRef> certURLRef(AdoptCF, CFBundleCopyResourceURL(webKitBundle, CFSTR("cacert"), CFSTR("pem"), CFSTR("certificates")));
+        if (certURLRef) {
+            char path[MAX_PATH];
+            CFURLGetFileSystemRepresentation(certURLRef.get(), false, reinterpret_cast<UInt8*>(path), MAX_PATH);
+            return path;
+        }
+    }
+#endif
+    char* envPath = getenv("CURL_CA_BUNDLE_PATH");
+    if (envPath)
+       return envPath;
+
+    return CString();
+}
+
+static Mutex* sharedResourceMutex(curl_lock_data data) {
+    DEFINE_STATIC_LOCAL(Mutex, cookieMutex, ());
+    DEFINE_STATIC_LOCAL(Mutex, dnsMutex, ());
+    DEFINE_STATIC_LOCAL(Mutex, shareMutex, ());
+
+    switch (data) {
+        case CURL_LOCK_DATA_COOKIE:
+            return &cookieMutex;
+        case CURL_LOCK_DATA_DNS:
+            return &dnsMutex;
+        case CURL_LOCK_DATA_SHARE:
+            return &shareMutex;
+        default:
+            ASSERT_NOT_REACHED();
+            return NULL;
+    }
+}
+
+// libcurl does not implement its own thread synchronization primitives.
+// these two functions provide mutexes for cookies, and for the global DNS
+// cache.
+static void curl_lock_callback(CURL* handle, curl_lock_data data, curl_lock_access access, void* userPtr)
+{
+    if (Mutex* mutex = sharedResourceMutex(data))
+        mutex->lock();
+}
+
+static void curl_unlock_callback(CURL* handle, curl_lock_data data, void* userPtr)
+{
+    if (Mutex* mutex = sharedResourceMutex(data))
+        mutex->unlock();
+}
+
 ResourceHandleManager::ResourceHandleManager()
     : m_downloadTimer(this, &ResourceHandleManager::downloadTimerCallback)
     , m_cookieJarFileName(0)
     , m_runningJobs(0)
+    , m_certificatePath (certificatePath())
 {
     curl_global_init(CURL_GLOBAL_ALL);
     m_curlMultiHandle = curl_multi_init();
     m_curlShareHandle = curl_share_init();
     curl_share_setopt(m_curlShareHandle, CURLSHOPT_SHARE, CURL_LOCK_DATA_COOKIE);
     curl_share_setopt(m_curlShareHandle, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+    curl_share_setopt(m_curlShareHandle, CURLSHOPT_LOCKFUNC, curl_lock_callback);
+    curl_share_setopt(m_curlShareHandle, CURLSHOPT_UNLOCKFUNC, curl_unlock_callback);
 }
 
 ResourceHandleManager::~ResourceHandleManager()
@@ -93,6 +151,23 @@ ResourceHandleManager* ResourceHandleManager::sharedInstance()
         sharedInstance = new ResourceHandleManager();
     return sharedInstance;
 }
+
+static void handleLocalReceiveResponse (CURL* handle, ResourceHandle* job, ResourceHandleInternal* d)
+{
+    // since the code in headerCallback will not have run for local files
+    // the code to set the URL and fire didReceiveResponse is never run,
+    // which means the ResourceLoader's response does not contain the URL.
+    // Run the code here for local files to resolve the issue.
+    // TODO: See if there is a better approach for handling this.
+     const char* hdr;
+     CURLcode err = curl_easy_getinfo(handle, CURLINFO_EFFECTIVE_URL, &hdr);
+     ASSERT(CURLE_OK == err);
+     d->m_response.setURL(KURL(ParsedURLString, hdr));
+     if (d->client())
+         d->client()->didReceiveResponse(job, d->m_response);
+     d->m_response.setResponseFired(true);
+}
+
 
 // called with data after all headers have been processed via headerCallback
 static size_t writeCallback(void* ptr, size_t size, size_t nmemb, void* data)
@@ -118,18 +193,10 @@ static size_t writeCallback(void* ptr, size_t size, size_t nmemb, void* data)
     if (CURLE_OK == err && httpCode >= 300 && httpCode < 400)
         return totalSize;
 
-    // since the code in headerCallback will not have run for local files
-    // the code to set the URL and fire didReceiveResponse is never run,
-    // which means the ResourceLoader's response does not contain the URL.
-    // Run the code here for local files to resolve the issue.
-    // TODO: See if there is a better approach for handling this.
     if (!d->m_response.responseFired()) {
-        const char* hdr;
-        err = curl_easy_getinfo(h, CURLINFO_EFFECTIVE_URL, &hdr);
-        d->m_response.setUrl(KURL(hdr));
-        if (d->client())
-            d->client()->didReceiveResponse(job, d->m_response);
-        d->m_response.setResponseFired(true);
+        handleLocalReceiveResponse(h, job, d);
+        if (d->m_cancelled)
+            return 0;
     }
 
     if (d->client())
@@ -180,7 +247,7 @@ static size_t headerCallback(char* ptr, size_t size, size_t nmemb, void* data)
 
         const char* hdr;
         err = curl_easy_getinfo(h, CURLINFO_EFFECTIVE_URL, &hdr);
-        d->m_response.setUrl(KURL(hdr));
+        d->m_response.setURL(KURL(ParsedURLString, hdr));
 
         long httpCode = 0;
         err = curl_easy_getinfo(h, CURLINFO_RESPONSE_CODE, &httpCode);
@@ -228,6 +295,7 @@ size_t readCallback(void* ptr, size_t size, size_t nmemb, void* data)
 {
     ResourceHandle* job = static_cast<ResourceHandle*>(data);
     ResourceHandleInternal* d = job->getInternal();
+
     if (d->m_cancelled)
         return 0;
 
@@ -317,16 +385,24 @@ void ResourceHandleManager::downloadTimerCallback(Timer<ResourceHandleManager>* 
             continue;
 
         if (CURLE_OK == msg->data.result) {
+            if (!d->m_response.responseFired()) {
+                handleLocalReceiveResponse(d->m_handle, job, d);
+                if (d->m_cancelled) {
+                    removeFromCurl(job);
+                    continue;
+                }
+            }
+
             if (d->client())
                 d->client()->didFinishLoading(job);
         } else {
-#ifndef NDEBUG
             char* url = 0;
             curl_easy_getinfo(d->m_handle, CURLINFO_EFFECTIVE_URL, &url);
+#ifndef NDEBUG
             fprintf(stderr, "Curl ERROR for url='%s', error: '%s'\n", url, curl_easy_strerror(msg->data.result));
 #endif
             if (d->client())
-                d->client()->didFail(job, ResourceError());
+                d->client()->didFail(job, ResourceError(String(), msg->data.result, String(url), String(curl_easy_strerror(msg->data.result))));
         }
 
         removeFromCurl(job);
@@ -336,6 +412,25 @@ void ResourceHandleManager::downloadTimerCallback(Timer<ResourceHandleManager>* 
 
     if (!m_downloadTimer.isActive() && (started || (runningHandles > 0)))
         m_downloadTimer.startOneShot(pollTimeSeconds);
+}
+
+void ResourceHandleManager::setProxyInfo(const String& host,
+                                         unsigned long port,
+                                         ProxyType type,
+                                         const String& username,
+                                         const String& password)
+{
+    m_proxyType = type;
+
+    if (!host.length()) {
+        m_proxy = String("");
+    } else {
+        String userPass;
+        if (username.length() || password.length())
+            userPass = username + ":" + password + "@";
+
+        m_proxy = String("http://") + userPass + host + ":" + String::number(port);
+    }
 }
 
 void ResourceHandleManager::removeFromCurl(ResourceHandle* job)
@@ -512,20 +607,10 @@ static void parseDataUrl(ResourceHandle* handle)
         response.setTextEncodingName(charset);
         client->didReceiveResponse(handle, response);
 
-        // Use the GLib Base64 if available, since WebCore's decoder isn't
-        // general-purpose and fails on Acid3 test 97 (whitespace).
-#ifdef USE_GLIB_BASE64
-        size_t outLength = 0;
-        char* outData = 0;
-        outData = reinterpret_cast<char*>(g_base64_decode(data.utf8().data(), &outLength));
-        if (outData && outLength > 0)
-            client->didReceiveData(handle, outData, outLength, 0);
-        g_free(outData);
-#else
+        // WebCore's decoder fails on Acid3 test 97 (whitespace).
         Vector<char> out;
         if (base64Decode(data.latin1().data(), data.latin1().length(), out) && out.size() > 0)
             client->didReceiveData(handle, out.data(), out.size(), 0);
-#endif
     } else {
         // We have to convert to UTF-16 early due to limitations in KURL
         data = decodeURLEscapeSequences(data, TextEncoding(charset));
@@ -598,7 +683,7 @@ void ResourceHandleManager::initializeHandle(ResourceHandle* job)
     KURL kurl = job->request().url();
 
     // Remove any fragment part, otherwise curl will send it as part of the request.
-    kurl.removeRef();
+    kurl.removeFragmentIdentifier();
 
     ResourceHandleInternal* d = job->getInternal();
     String url = kurl.string();
@@ -606,8 +691,11 @@ void ResourceHandleManager::initializeHandle(ResourceHandle* job)
     if (kurl.isLocalFile()) {
         String query = kurl.query();
         // Remove any query part sent to a local file.
-        if (!query.isEmpty())
-            url = url.left(url.find(query));
+        if (!query.isEmpty()) {
+            int queryIndex = url.find(query);
+            if (queryIndex != -1)
+                url = url.left(queryIndex - 1);
+        }
         // Determine the MIME type based on the path.
         d->m_response.setMimeType(MIMETypeRegistry::getMIMETypeForPath(url));
     }
@@ -642,6 +730,10 @@ void ResourceHandleManager::initializeHandle(ResourceHandle* job)
     // and/or reporting SSL errors to the user.
     if (ignoreSSLErrors)
         curl_easy_setopt(d->m_handle, CURLOPT_SSL_VERIFYPEER, false);
+
+    if (!m_certificatePath.isNull())
+       curl_easy_setopt(d->m_handle, CURLOPT_CAINFO, m_certificatePath.data());
+
     // enable gzip and deflate through Accept-Encoding:
     curl_easy_setopt(d->m_handle, CURLOPT_ENCODING, "");
 
@@ -684,6 +776,17 @@ void ResourceHandleManager::initializeHandle(ResourceHandle* job)
     if (headers) {
         curl_easy_setopt(d->m_handle, CURLOPT_HTTPHEADER, headers);
         d->m_customHeaders = headers;
+    }
+    // curl CURLOPT_USERPWD expects username:password
+    if (d->m_user.length() || d->m_pass.length()) {
+        String userpass = d->m_user + ":" + d->m_pass;
+        curl_easy_setopt(d->m_handle, CURLOPT_USERPWD, userpass.utf8().data());
+    }
+
+    // Set proxy options if we have them.
+    if (m_proxy.length()) {
+        curl_easy_setopt(d->m_handle, CURLOPT_PROXY, m_proxy.utf8().data());
+        curl_easy_setopt(d->m_handle, CURLOPT_PROXYTYPE, m_proxyType);
     }
 }
 

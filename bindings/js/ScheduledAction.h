@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reseved.
+ *  Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reseved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -21,6 +21,8 @@
 #define ScheduledAction_h
 
 #include "PlatformString.h"
+#include <JSDOMBinding.h>
+#include <runtime/JSCell.h>
 #include <runtime/Protect.h>
 #include <wtf/Vector.h>
 
@@ -38,26 +40,30 @@ namespace WebCore {
     * time interval, either once or repeatedly. Used for window.setTimeout()
     * and window.setInterval()
     */
-    class ScheduledAction {
+    class ScheduledAction : public Noncopyable {
     public:
-        ScheduledAction(JSC::ExecState* exec, JSC::JSValuePtr function, const JSC::ArgList&);
-        ScheduledAction(const String& code)
-            : m_code(code)
-        {
-        }
+        static ScheduledAction* create(JSC::ExecState*, const JSC::ArgList&, DOMWrapperWorld* isolatedWorld);
 
         void execute(ScriptExecutionContext*);
 
     private:
-        void executeFunctionInContext(JSC::JSGlobalObject*, JSC::JSValuePtr thisValue);
+        ScheduledAction(JSC::JSValue function, const JSC::ArgList&, DOMWrapperWorld* isolatedWorld);
+        ScheduledAction(const String& code, DOMWrapperWorld* isolatedWorld)
+            : m_code(code)
+            , m_isolatedWorld(isolatedWorld)
+        {
+        }
+
+        void executeFunctionInContext(JSC::JSGlobalObject*, JSC::JSValue thisValue);
         void execute(Document*);
 #if ENABLE(WORKERS)        
         void execute(WorkerContext*);
 #endif
 
-        JSC::ProtectedJSValuePtr m_function;
-        Vector<JSC::ProtectedJSValuePtr> m_args;
+        JSC::ProtectedJSValue m_function;
+        Vector<JSC::ProtectedJSValue> m_args;
         String m_code;
+        RefPtr<DOMWrapperWorld> m_isolatedWorld;
     };
 
 } // namespace WebCore

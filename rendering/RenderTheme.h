@@ -23,12 +23,16 @@
 #ifndef RenderTheme_h
 #define RenderTheme_h
 
-#include "RenderObject.h"
 #if USE(NEW_THEME)
 #include "Theme.h"
 #else
 #include "ThemeTypes.h"
 #endif
+#include "RenderObject.h"
+#include "RenderTheme.h"
+#include "ScrollTypes.h"
+#include <wtf/PassRefPtr.h>
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
@@ -37,10 +41,23 @@ class PopupMenu;
 class RenderMenuList;
 class CSSStyleSheet;
 
-class RenderTheme {
-public:
+class RenderTheme : public RefCounted<RenderTheme> {
+protected:
     RenderTheme();
+
+public:
     virtual ~RenderTheme() { }
+
+    // This function is to be implemented in your platform-specific theme implementation to hand back the
+    // appropriate platform theme. When the theme is needed in non-page dependent code, a default theme is
+    // used as fallback, which is returned for a nulled page, so the platform code needs to account for this.
+    static PassRefPtr<RenderTheme> themeForPage(Page* page);
+
+    // When the theme is needed in non-page dependent code, the defaultTheme() is used as fallback.
+    static inline PassRefPtr<RenderTheme> defaultTheme()
+    {
+        return themeForPage(0);
+    };
 
     // This method is called whenever style has been computed for an element and the appearance
     // property has been set to a value other than "none".  The theme should map in all of the appropriate
@@ -61,7 +78,7 @@ public:
     // RenderThemeMac.cpp for Mac OS X.
 
     // These methods return the theme's extra style sheets rules, to let each platform
-    // adjust the default CSS rules in html4.css, quirks.css, or mediaControls.css
+    // adjust the default CSS rules in html.css, quirks.css, or mediaControls.css
     virtual String extraDefaultStyleSheet() { return String(); }
     virtual String extraQuirksStyleSheet() { return String(); }
 #if ENABLE(VIDEO)
@@ -116,7 +133,13 @@ public:
     Color inactiveListBoxSelectionBackgroundColor() const;
     Color inactiveListBoxSelectionForegroundColor() const;
 
-    virtual Color platformTextSearchHighlightColor() const;
+    // Highlighting colors for TextMatches.
+    virtual Color platformActiveTextSearchHighlightColor() const;
+    virtual Color platformInactiveTextSearchHighlightColor() const;
+
+    static Color focusRingColor();
+    virtual Color platformFocusRingColor() const { return Color(0, 0, 0); }
+    static void setCustomFocusRingColor(const Color&);
 
     virtual void platformColorsDidChange();
 
@@ -127,14 +150,21 @@ public:
 
     virtual int minimumMenuListSize(RenderStyle*) const { return 0; }
 
-    virtual void adjustButtonInnerStyle(RenderStyle*) const;
     virtual void adjustSliderThumbSize(RenderObject*) const;
 
     virtual int popupInternalPaddingLeft(RenderStyle*) const { return 0; }
     virtual int popupInternalPaddingRight(RenderStyle*) const { return 0; }
     virtual int popupInternalPaddingTop(RenderStyle*) const { return 0; }
     virtual int popupInternalPaddingBottom(RenderStyle*) const { return 0; }
-    
+    virtual bool popupOptionSupportsTextIndent() const { return false; }
+
+    virtual int buttonInternalPaddingLeft() const { return 0; }
+    virtual int buttonInternalPaddingRight() const { return 0; }
+    virtual int buttonInternalPaddingTop() const { return 0; }
+    virtual int buttonInternalPaddingBottom() const { return 0; }
+
+    virtual ScrollbarControlSize scrollbarControlSizeForPart(ControlPart) { return RegularScrollbar; }
+
     // Method for painting the caps lock indicator
     virtual bool paintCapsLockIndicator(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return 0; };
 
@@ -151,6 +181,9 @@ public:
 #if ENABLE(VIDEO)
     // Media controls
     virtual bool hitTestMediaControlPart(RenderObject*, const IntPoint& absPoint);
+    virtual bool shouldRenderMediaControlPart(ControlPart, Element*);
+    virtual double mediaControlsFadeInDuration() { return 0.1; }
+    virtual double mediaControlsFadeOutDuration() { return 0.3; }
 #endif
 
 protected:
@@ -181,6 +214,11 @@ protected:
     virtual void adjustButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
     virtual bool paintButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
     virtual void setButtonSize(RenderStyle*) const { }
+
+    virtual void adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual bool paintInnerSpinButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
+    virtual void adjustOuterSpinButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual bool paintOuterSpinButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
 #endif
 
     virtual void adjustTextFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
@@ -223,7 +261,13 @@ protected:
     virtual bool paintMediaSeekForwardButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
     virtual bool paintMediaSliderTrack(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
     virtual bool paintMediaSliderThumb(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
-    virtual bool paintMediaTimelineContainer(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
+    virtual bool paintMediaVolumeSliderContainer(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
+    virtual bool paintMediaVolumeSliderTrack(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
+    virtual bool paintMediaVolumeSliderThumb(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
+    virtual bool paintMediaRewindButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
+    virtual bool paintMediaReturnToRealtimeButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
+    virtual bool paintMediaToggleClosedCaptionsButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
+    virtual bool paintMediaControlsBackground(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
     virtual bool paintMediaCurrentTime(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
     virtual bool paintMediaTimeRemaining(RenderObject*, const RenderObject::PaintInfo&, const IntRect&) { return true; }
 
@@ -255,10 +299,6 @@ private:
     Theme* m_theme; // The platform-specific theme.
 #endif
 };
-
-// Function to obtain the theme.  This is implemented in your platform-specific theme implementation to hand
-// back the appropriate platform theme.
-RenderTheme* theme();
 
 } // namespace WebCore
 

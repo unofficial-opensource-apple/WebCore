@@ -38,6 +38,7 @@ static const unsigned NoCurrentItemIndex = UINT_MAX;
 
 BackForwardList::BackForwardList(Page* page)
     : m_page(page)
+    , m_client(0)
     , m_capacity(DefaultCapacity)
     , m_closed(true)
     , m_enabled(true)
@@ -120,6 +121,16 @@ HistoryItem* BackForwardList::itemAtIndex(int index)
     return m_client->itemAtIndex(index);
 }
 
+void BackForwardList::pushStateItem(PassRefPtr<HistoryItem> newItem)
+{
+    RefPtr<HistoryItem> current = m_client->currentItem();
+
+    addItem(newItem);
+
+    if (!current->stateObject())
+        current->setStateObject(SerializedScriptValue::create());
+}
+
 HistoryItemVector& BackForwardList::entries()
 {
     static HistoryItemVector noEntries;
@@ -128,7 +139,8 @@ HistoryItemVector& BackForwardList::entries()
 
 void BackForwardList::close()
 {
-    m_client->close();
+    if (m_client)
+        m_client->close();
     m_page = 0;
     m_closed = true;
 }

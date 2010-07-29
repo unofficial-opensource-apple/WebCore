@@ -30,17 +30,17 @@ namespace WebCore {
 
 void SimpleFontData::determinePitch()
 {
-    m_treatAsFixedPitch = m_font.font().fixedPitch();
+    m_treatAsFixedPitch = m_platformData.font().fixedPitch();
 }
 
-bool SimpleFontData::containsCharacters(const UChar*, int length) const
+bool SimpleFontData::containsCharacters(const UChar*, int) const
 {
     return true;
 }
 
 void SimpleFontData::platformInit()
 {
-    QFontMetrics fm(m_font.font());
+    QFontMetrics fm(m_platformData.font());
 
     m_ascent = fm.ascent();
     m_descent = fm.descent();
@@ -57,6 +57,13 @@ void SimpleFontData::platformGlyphInit()
     determinePitch();
     m_missingGlyphData.fontData = this;
     m_missingGlyphData.glyph = 0;
+}
+
+void SimpleFontData::platformCharWidthInit()
+{
+    QFontMetrics fm(m_platformData.font());
+    m_avgCharWidth = fm.averageCharWidth();
+    m_maxCharWidth = fm.maxWidth();
 }
 
 void SimpleFontData::platformDestroy()

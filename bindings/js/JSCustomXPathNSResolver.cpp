@@ -28,14 +28,10 @@
 
 #if ENABLE(XPATH)
 
-#include "CString.h"
-#include "Console.h"
-#include "DOMWindow.h"
 #include "Document.h"
 #include "ExceptionCode.h"
 #include "Frame.h"
 #include "JSDOMWindowCustom.h"
-#include "JSDOMBinding.h"
 #include "ScriptController.h"
 #include <runtime/JSLock.h>
 
@@ -43,7 +39,7 @@ namespace WebCore {
 
 using namespace JSC;
 
-PassRefPtr<JSCustomXPathNSResolver> JSCustomXPathNSResolver::create(JSC::ExecState* exec, JSC::JSValuePtr value)
+PassRefPtr<JSCustomXPathNSResolver> JSCustomXPathNSResolver::create(JSC::ExecState* exec, JSC::JSValue value)
 {
     if (value.isUndefinedOrNull())
         return 0;
@@ -53,13 +49,13 @@ PassRefPtr<JSCustomXPathNSResolver> JSCustomXPathNSResolver::create(JSC::ExecSta
         setDOMException(exec, TYPE_MISMATCH_ERR);
         return 0;
     }
-    
-    return adoptRef(new JSCustomXPathNSResolver(resolverObject, asJSDOMWindow(exec->dynamicGlobalObject())->impl()->frame()));
+
+    return adoptRef(new JSCustomXPathNSResolver(resolverObject, asJSDOMWindow(exec->dynamicGlobalObject())));
 }
 
-JSCustomXPathNSResolver::JSCustomXPathNSResolver(JSObject* customResolver, Frame* frame)
+JSCustomXPathNSResolver::JSCustomXPathNSResolver(JSObject* customResolver, JSDOMWindow* globalObject)
     : m_customResolver(customResolver)
-    , m_frame(frame)
+    , m_globalObject(globalObject)
 {
 }
 
@@ -71,24 +67,18 @@ String JSCustomXPathNSResolver::lookupNamespaceURI(const String& prefix)
 {
     ASSERT(m_customResolver);
 
-    if (!m_frame)
-        return String();
-    if (!m_frame->script()->isEnabled())
-        return String();
+    JSLock lock(SilenceAssertionsOnly);
 
-    JSLock lock(false);
-
-    JSGlobalObject* globalObject = m_frame->script()->globalObject();
-    ExecState* exec = globalObject->globalExec();
+    ExecState* exec = m_globalObject->globalExec();
         
-    JSValuePtr function = m_customResolver->get(exec, Identifier(exec, "lookupNamespaceURI"));
+    JSValue function = m_customResolver->get(exec, Identifier(exec, "lookupNamespaceURI"));
     CallData callData;
     CallType callType = function.getCallData(callData);
     if (callType == CallTypeNone) {
         callType = m_customResolver->getCallData(callData);
         if (callType == CallTypeNone) {
             // FIXME: Pass actual line number and source URL.
-            m_frame->domWindow()->console()->addMessage(JSMessageSource, ErrorMessageLevel, "XPathNSResolver does not have a lookupNamespaceURI method.", 0, String());
+            m_globalObject->impl()->console()->addMessage(JSMessageSource, LogMessageType, ErrorMessageLevel, "XPathNSResolver does not have a lookupNamespaceURI method.", 0, String());
             return String();
         }
         function = m_customResolver;
@@ -96,12 +86,12 @@ String JSCustomXPathNSResolver::lookupNamespaceURI(const String& prefix)
 
     RefPtr<JSCustomXPathNSResolver> selfProtector(this);
 
-    ArgList args;
+    MarkedArgumentBuffer args;
     args.append(jsString(exec, prefix));
 
-    globalObject->startTimeoutCheck();
-    JSValuePtr retval = call(exec, function, callType, callData, m_customResolver, args);
-    globalObject->stopTimeoutCheck();
+    m_globalObject->globalData()->timeoutChecker.start();
+    JSValue retval = JSC::call(exec, function, callType, callData, m_customResolver, args);
+    m_globalObject->globalData()->timeoutChecker.stop();
 
     String result;
     if (exec->hadException())
@@ -111,7 +101,7 @@ String JSCustomXPathNSResolver::lookupNamespaceURI(const String& prefix)
             result = retval.toString(exec);
     }
 
-    Document::updateDocumentsRendering();
+    Document::updateStyleForAllDocuments();
 
     return result;
 }

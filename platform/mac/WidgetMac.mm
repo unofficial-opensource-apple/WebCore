@@ -31,12 +31,14 @@
 #endif
 
 #import "BlockExceptions.h"
+#import "Chrome.h"
 #import "Cursor.h"
 #import "Document.h"
 #import "Font.h"
 #import "FoundationExtras.h"
 #import "Frame.h"
 #import "GraphicsContext.h"
+#import "NotImplemented.h"
 #import "Page.h"
 #import "PlatformMouseEvent.h"
 #import "ScrollView.h"
@@ -78,7 +80,7 @@ static void safeRemoveFromSuperview(NSView *view)
     [window _setNeedsToResetDragMargins:resetDragMargins];
 }
 
-Widget::Widget(NSView* view)
+Widget::Widget(NSView *view)
     : m_data(new WidgetPrivate)
 {
     init(view);
@@ -157,6 +159,9 @@ void Widget::setFrameRect(const IntRect& rect)
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     NSView *v = getOuterView();
+    if (!v)
+        return;
+
     NSRect f = rect;
     if (!NSEqualRects(f, [v frame])) {
         [v setFrame:f];
@@ -192,7 +197,7 @@ void Widget::paint(GraphicsContext* p, const IntRect& r)
         END_BLOCK_OBJC_EXCEPTIONS;
     } else {
         // This is the case of drawing into a bitmap context other than a window backing store. It gets hit beneath
-        // -cacheDisplayInRect:toBitmapImageRep:.
+        // -cacheDisplayInRect:toBitmapImageRep:, and when painting into compositing layers.
 
         // Transparent subframes are in fact implemented with scroll views that return YES from -drawsBackground (whenever the WebView
         // itself is in drawsBackground mode). In the normal drawing code path, the scroll views are never asked to draw the background,
@@ -283,68 +288,52 @@ void Widget::afterMouseDown(NSView *view, Widget* widget)
     }
 }
 
-IntPoint Widget::convertFromContainingWindow(const IntPoint& point) const
+// These are here to deal with flipped coords on Mac.
+IntRect Widget::convertFromRootToContainingWindow(const Widget* rootWidget, const IntRect& rect)
 {
-    if (!platformWidget() && parent()) {
-        IntPoint result = parent()->convertFromContainingWindow(point);
-        result.move(parent()->scrollX() - x(), parent()->scrollY() - y());
-        return result;
-    }
-    
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    return IntPoint([platformWidget() convertPoint:point fromView:nil]);
-    END_BLOCK_OBJC_EXCEPTIONS;
-    
-    return point;
-}
+    if (!rootWidget->platformWidget())
+        return rect;
 
-IntRect Widget::convertFromContainingWindow(const IntRect& rect) const
-{
-    if (!platformWidget() && parent()) {
-        IntRect result = parent()->convertFromContainingWindow(rect);
-        result.move(parent()->scrollX() - x(), parent()->scrollY() - y());
-        return result;
-    }
-    
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    return enclosingIntRect([platformWidget() convertRect:rect fromView:nil]);
+    return enclosingIntRect([rootWidget->platformWidget() convertRect:rect toView:nil]);
     END_BLOCK_OBJC_EXCEPTIONS;
-    
+
     return rect;
 }
 
-IntRect Widget::convertToContainingWindow(const IntRect& r) const
+IntRect Widget::convertFromContainingWindowToRoot(const Widget* rootWidget, const IntRect& rect)
 {
-    if (!platformWidget()) {
-        if (!parent())
-            return r;
-        IntRect result = r;
-        result.move(parent()->scrollX() - x(), parent()->scrollY() - y());
-        return parent()->convertToContainingWindow(result);
-    }
-    
+    if (!rootWidget->platformWidget())
+        return rect;
+
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    return IntRect([platformWidget() convertRect:r toView:nil]);
+    return enclosingIntRect([rootWidget->platformWidget() convertRect:rect fromView:nil]);
     END_BLOCK_OBJC_EXCEPTIONS;
 
-    return r;
+    return rect;
 }
- 
-IntPoint Widget::convertToContainingWindow(const IntPoint& p) const
+
+IntPoint Widget::convertFromRootToContainingWindow(const Widget* rootWidget, const IntPoint& point)
 {
-    if (!platformWidget()) {
-        if (!parent())
-            return p;
-        IntPoint result = p;
-        result.move(parent()->scrollX() - x(), parent()->scrollY() - y());
-        return parent()->convertToContainingWindow(result);
-    }
-    
+    if (!rootWidget->platformWidget())
+        return point;
+
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    return IntPoint([platformWidget() convertPoint:p toView:nil]);
+    return IntPoint([rootWidget->platformWidget() convertPoint:point toView:nil]);
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return point;
+}
+
+IntPoint Widget::convertFromContainingWindowToRoot(const Widget* rootWidget, const IntPoint& point)
+{
+    if (!rootWidget->platformWidget())
+        return point;
+
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    return IntPoint([rootWidget->platformWidget() convertPoint:point fromView:nil]);
     END_BLOCK_OBJC_EXCEPTIONS;
 
-    return p;
+    return point;
 }
 
 void Widget::releasePlatformWidget()
@@ -357,5 +346,5 @@ void Widget::retainPlatformWidget()
     HardRetain(m_widget);
 }
 
-}
+} // namespace WebCore
 

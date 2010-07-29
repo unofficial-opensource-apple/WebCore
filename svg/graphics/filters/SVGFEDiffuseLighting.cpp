@@ -21,15 +21,16 @@
 
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGLightSource.h"
 #include "SVGFEDiffuseLighting.h"
 #include "SVGRenderTreeAsText.h"
+#include "Filter.h"
 
 namespace WebCore {
 
 FEDiffuseLighting::FEDiffuseLighting(FilterEffect* in , const Color& lightingColor, const float& surfaceScale,
-    const float& diffuseConstant, const float& kernelUnitLengthX, const float& kernelUnitLengthY, LightSource* lightSource)
+    const float& diffuseConstant, const float& kernelUnitLengthX, const float& kernelUnitLengthY, PassRefPtr<LightSource> lightSource)
     : FilterEffect()
     , m_in(in)
     , m_lightingColor(lightingColor)
@@ -43,7 +44,7 @@ FEDiffuseLighting::FEDiffuseLighting(FilterEffect* in , const Color& lightingCol
 
 PassRefPtr<FEDiffuseLighting> FEDiffuseLighting::create(FilterEffect* in , const Color& lightingColor,
     const float& surfaceScale, const float& diffuseConstant, const float& kernelUnitLengthX,
-    const float& kernelUnitLengthY, LightSource* lightSource)
+    const float& kernelUnitLengthY, PassRefPtr<LightSource> lightSource)
 {
     return adoptRef(new FEDiffuseLighting(in, lightingColor, surfaceScale, diffuseConstant, kernelUnitLengthX, kernelUnitLengthY, lightSource));
 }
@@ -107,12 +108,12 @@ const LightSource* FEDiffuseLighting::lightSource() const
     return m_lightSource.get();
 }
 
-void FEDiffuseLighting::setLightSource(LightSource* lightSource)
+void FEDiffuseLighting::setLightSource(PassRefPtr<LightSource> lightSource)
 {    
     m_lightSource = lightSource;
 }
 
-void FEDiffuseLighting::apply()
+void FEDiffuseLighting::apply(Filter*)
 {
 }
 
@@ -132,4 +133,4 @@ TextStream& FEDiffuseLighting::externalRepresentation(TextStream& ts) const
 
 } // namespace WebCore
 
-#endif // ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#endif // ENABLE(SVG) && ENABLE(FILTERS)

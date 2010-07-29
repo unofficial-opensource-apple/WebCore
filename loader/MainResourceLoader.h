@@ -29,14 +29,16 @@
 #include "FrameLoaderTypes.h"
 #include "ResourceLoader.h"
 #include "SubstituteData.h"
-#include "Timer.h"
 #include <wtf/Forward.h>
+
+#if HAVE(RUNLOOP_TIMER)
+#include "RunLoopTimer.h"
+#else
+#include "Timer.h"
+#endif
 
 namespace WebCore {
 
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-    class ApplicationCache;
-#endif
     class FormState;
     class ResourceRequest;
 
@@ -56,13 +58,15 @@ namespace WebCore {
         virtual void didFinishLoading();
         virtual void didFail(const ResourceError&);
 
-        void handleDataLoadNow(Timer<MainResourceLoader>*);
+#if HAVE(RUNLOOP_TIMER)
+        typedef RunLoopTimer<MainResourceLoader> MainResourceLoaderTimer;
+#else
+        typedef Timer<MainResourceLoader> MainResourceLoaderTimer;
+#endif
+
+        void handleDataLoadNow(MainResourceLoaderTimer*);
 
         bool isLoadingMultipartContent() const { return m_loadingMultipartContent; }
-        
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-        ApplicationCache* applicationCache() const { return m_applicationCache.get(); }
-#endif
 
     private:
         MainResourceLoader(Frame*);
@@ -74,6 +78,7 @@ namespace WebCore {
         void handleEmptyLoad(const KURL&, bool forURLScheme);
         void handleDataLoadSoon(ResourceRequest& r);
 
+        void startDataLoadTimer();
         void handleDataLoad(ResourceRequest&);
 
         void receivedError(const ResourceError&);
@@ -87,15 +92,15 @@ namespace WebCore {
         static void callContinueAfterContentPolicy(void*, PolicyAction);
         void continueAfterContentPolicy(PolicyAction);
         void continueAfterContentPolicy(PolicyAction, const ResourceResponse&);
+        
+#if PLATFORM(QT)
+        void substituteMIMETypeFromPluginDatabase(const ResourceResponse&);
+#endif
 
         ResourceRequest m_initialRequest;
         SubstituteData m_substituteData;
-        Timer<MainResourceLoader> m_dataLoadTimer;
 
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-        // The application cache that the main resource was loaded from (if any).
-        RefPtr<ApplicationCache> m_applicationCache;
-#endif
+        MainResourceLoaderTimer m_dataLoadTimer;
 
         bool m_loadingMultipartContent;
         bool m_waitingForContentPolicy;

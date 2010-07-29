@@ -1,9 +1,7 @@
-/**
- * This file is part of the HTML widget for KDE.
- *
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  * Copyright (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2006, 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,16 +23,12 @@
 #include "config.h"
 #include "RenderWidget.h"
 
-#include "AnimationController.h"
 #include "AXObjectCache.h"
-#include "Document.h"
-#include "Element.h"
-#include "Event.h"
-#include "FrameView.h"
+#include "AnimationController.h"
 #include "GraphicsContext.h"
 #include "HitTestResult.h"
-#include "RenderLayer.h"
 #include "RenderView.h"
+#include "RenderWidgetProtector.h"
 
 using namespace std;
 
@@ -46,21 +40,65 @@ static HashMap<const Widget*, RenderWidget*>& widgetRendererMap()
     return *staticWidgetRendererMap;
 }
 
-RenderWidget::RenderWidget(Node* node)
-      : RenderReplaced(node)
-      , m_widget(0)
-      , m_refCount(0)
+static size_t widgetHierarchyUpdateSuspendCount;
+
+typedef HashMap<RefPtr<Widget>, FrameView*> WidgetToParentMap;
+
+static WidgetToParentMap& widgetNewParentMap()
 {
-    // a replaced element doesn't support being anonymous
-    ASSERT(node);
-    m_view = node->document()->view();
+    DEFINE_STATIC_LOCAL(WidgetToParentMap, map, ());
+    return map;
+}
 
-    view()->addWidget(this);
+void RenderWidget::suspendWidgetHierarchyUpdates()
+{
+    widgetHierarchyUpdateSuspendCount++;
+}
 
+void RenderWidget::resumeWidgetHierarchyUpdates()
+{
+    ASSERT(widgetHierarchyUpdateSuspendCount);
+    if (widgetHierarchyUpdateSuspendCount == 1) {
+        WidgetToParentMap map = widgetNewParentMap();
+        widgetNewParentMap().clear();
+        WidgetToParentMap::iterator end = map.end();
+        for (WidgetToParentMap::iterator it = map.begin(); it != end; ++it) {
+            Widget* child = it->first.get();
+            ScrollView* currentParent = child->parent();
+            FrameView* newParent = it->second;
+            if (newParent != currentParent) {
+                if (currentParent)
+                    currentParent->removeChild(child);
+                if (newParent)
+                    newParent->addChild(child);
+            }
+        }
+    }
+    widgetHierarchyUpdateSuspendCount--;
+}
+
+static void moveWidgetToParentSoon(Widget* child, FrameView* parent)
+{
+    if (!widgetHierarchyUpdateSuspendCount) {
+        if (parent)
+            parent->addChild(child);
+        else
+            child->removeFromParent();
+        return;
+    }
+    widgetNewParentMap().set(child, parent);
+}
+
+RenderWidget::RenderWidget(Node* node)
+    : RenderReplaced(node)
+    , m_widget(0)
+    , m_frameView(node->document()->view())
     // Reference counting is used to prevent the widget from being
     // destroyed while inside the Widget code, which might not be
     // able to handle that.
-    ref();
+    , m_refCount(1)
+{
+    view()->addWidget(this);
 }
 
 void RenderWidget::destroy()
@@ -70,6 +108,7 @@ void RenderWidget::destroy()
     // So the code below includes copied and pasted contents of
     // both RenderBox::destroy() and RenderObject::destroy().
     // Fix originally made for <rdar://problem/4228818>.
+
     animation()->cancelAnimations(this);
 
     if (RenderView* v = view())
@@ -81,72 +120,71 @@ void RenderWidget::destroy()
     }
     remove();
 
-    if (m_widget) {
-        if (m_view)
-            m_view->removeChild(m_widget);
-        widgetRendererMap().remove(m_widget);
-    }
-    
+    setWidget(0);
+
     // removes from override size map
     if (hasOverrideSize())
         setOverrideSize(-1);
 
-    RenderLayer* layer = m_layer;
-    RenderArena* arena = renderArena();
-
-    if (layer)
-        layer->clearClipRects();
-
     if (style() && (style()->height().isPercent() || style()->minHeight().isPercent() || style()->maxHeight().isPercent()))
         RenderBlock::removePercentHeightDescendant(this);
 
+    if (hasLayer()) {
+        layer()->clearClipRects();
+        setHasLayer(false);
+        destroyLayer();
+    }
+
+    // Grab the arena from node()->document()->renderArena() before clearing the node pointer.
+    // Clear the node before deref-ing, as this may be deleted when deref is called.
+    RenderArena* arena = renderArena();
     setNode(0);
     deref(arena);
-
-    if (layer)
-        layer->destroy(arena);
 }
 
 RenderWidget::~RenderWidget()
 {
     ASSERT(m_refCount <= 0);
-    deleteWidget();
+    clearWidget();
 }
 
-void RenderWidget::setWidgetGeometry(const IntRect& frame)
+bool RenderWidget::setWidgetGeometry(const IntRect& frame)
 {
-    if (element() && m_widget->frameRect() != frame) {
-        RenderArena* arena = ref();
-        RefPtr<Node> protectedElement(element());
-        m_widget->setFrameRect(frame);
-        deref(arena);
+    ASSERT(!widgetHierarchyUpdateSuspendCount);
+    if (!node() || m_widget->frameRect() == frame)
+        return false;
+
+    RenderWidgetProtector protector(this);
+    RefPtr<Node> protectedNode(node());
+    m_widget->setFrameRect(frame);
+    return true;
+}
+
+void RenderWidget::setWidget(PassRefPtr<Widget> widget)
+{
+    if (widget == m_widget)
+        return;
+
+    if (m_widget) {
+        moveWidgetToParentSoon(m_widget.get(), 0);
+        widgetRendererMap().remove(m_widget.get());
+        clearWidget();
     }
-}
-
-void RenderWidget::setWidget(Widget* widget)
-{
-    if (widget != m_widget) {
-        if (m_widget) {
-            m_widget->removeFromParent();
-            widgetRendererMap().remove(m_widget);
-            deleteWidget();
+    m_widget = widget;
+    if (m_widget) {
+        widgetRendererMap().add(m_widget.get(), this);
+        // If we've already received a layout, apply the calculated space to the
+        // widget immediately, but we have to have really been fully constructed (with a non-null
+        // style pointer).
+        if (style()) {
+            if (!needsLayout())
+                setWidgetGeometry(absoluteContentBox());
+            if (style()->visibility() != VISIBLE)
+                m_widget->hide();
+            else
+                m_widget->show();
         }
-        m_widget = widget;
-        if (m_widget) {
-            widgetRendererMap().add(m_widget, this);
-            // if we've already received a layout, apply the calculated space to the
-            // widget immediately, but we have to have really been full constructed (with a non-null
-            // style pointer).
-            if (style()) {
-                if (!needsLayout())
-                    setWidgetGeometry(absoluteContentBox());
-                if (style()->visibility() != VISIBLE)
-                    m_widget->hide();
-                else
-                    m_widget->show();
-            }
-            m_view->addChild(m_widget);
-        }
+        moveWidgetToParentSoon(m_widget.get(), m_frameView);
     }
 }
 
@@ -168,6 +206,12 @@ void RenderWidget::styleDidChange(StyleDifference diff, const RenderStyle* oldSt
     }
 }
 
+void RenderWidget::showSubstituteImage(PassRefPtr<Image> prpImage)
+{
+    m_substituteImage = prpImage;
+    repaint();
+}
+
 void RenderWidget::paint(PaintInfo& paintInfo, int tx, int ty)
 {
     if (!shouldPaint(paintInfo, tx, ty))
@@ -184,7 +228,7 @@ void RenderWidget::paint(PaintInfo& paintInfo, int tx, int ty)
         return;
     }
 
-    if (!m_view || paintInfo.phase != PaintPhaseForeground || style()->visibility() != VISIBLE)
+    if (!m_frameView || paintInfo.phase != PaintPhaseForeground || style()->visibility() != VISIBLE)
         return;
 
 #if PLATFORM(MAC)
@@ -192,22 +236,64 @@ void RenderWidget::paint(PaintInfo& paintInfo, int tx, int ty)
         paintCustomHighlight(tx - x(), ty - y(), style()->highlight(), true);
 #endif
 
-    if (m_widget) {
-        // Move the widget if necessary.  We normally move and resize widgets during layout, but sometimes
-        // widgets can move without layout occurring (most notably when you scroll a document that
-        // contains fixed positioned elements).
-        m_widget->move(tx + borderLeft() + paddingLeft(), ty + borderTop() + paddingTop());
+    if (style()->hasBorderRadius()) {
+        IntRect borderRect = IntRect(tx, ty, width(), height());
 
+        if (borderRect.isEmpty())
+            return;
+
+        // Push a clip if we have a border radius, since we want to round the foreground content that gets painted.
+        paintInfo.context->save();
+        
+        IntSize topLeft, topRight, bottomLeft, bottomRight;
+        style()->getBorderRadiiForRect(borderRect, topLeft, topRight, bottomLeft, bottomRight);
+
+        paintInfo.context->addRoundedRectClip(borderRect, topLeft, topRight, bottomLeft, bottomRight);
+    }
+
+    if (m_widget) {
         // Tell the widget to paint now.  This is the only time the widget is allowed
         // to paint itself.  That way it will composite properly with z-indexed layers.
-        m_widget->paint(paintInfo.context, paintInfo.rect);
+        if (m_substituteImage)
+            paintInfo.context->drawImage(m_substituteImage.get(), style()->colorSpace(), m_widget->frameRect());
+        else {
+            IntPoint widgetLocation = m_widget->frameRect().location();
+            IntPoint paintLocation(tx + borderLeft() + paddingLeft(), ty + borderTop() + paddingTop());
+            IntRect paintRect = paintInfo.rect;
+
+            IntSize paintOffset = paintLocation - widgetLocation;
+            // When painting widgets into compositing layers, tx and ty are relative to the enclosing compositing layer,
+            // not the root. In this case, shift the CTM and adjust the paintRect to be root-relative to fix plug-in drawing.
+            if (!paintOffset.isZero()) {
+                paintInfo.context->translate(paintOffset);
+                paintRect.move(-paintOffset);
+            }
+            m_widget->paint(paintInfo.context, paintRect);
+
+            if (!paintOffset.isZero())
+                paintInfo.context->translate(-paintOffset);
+        }
+        if (m_widget->isFrameView() && paintInfo.overlapTestRequests && !static_cast<FrameView*>(m_widget.get())->useSlowRepaintsIfNotOverlapped()) {
+            ASSERT(!paintInfo.overlapTestRequests->contains(this));
+            paintInfo.overlapTestRequests->set(this, m_widget->frameRect());
+        }
     }
+
+    if (style()->hasBorderRadius())
+        paintInfo.context->restore();
 
     // Paint a partially transparent wash over selected widgets.
     if (isSelected() && !document()->printing()) {
         // FIXME: selectionRect() is in absolute, not painting coordinates.
-        paintInfo.context->fillRect(selectionRect(), selectionBackgroundColor());
+        paintInfo.context->fillRect(selectionRect(), selectionBackgroundColor(), style()->colorSpace());
     }
+}
+
+void RenderWidget::setOverlapTestResult(bool isOverlapped)
+{
+    ASSERT(m_widget);
+    ASSERT(m_widget->isFrameView());
+    static_cast<FrameView*>(m_widget.get())->setIsOverlapped(isOverlapped);
 }
 
 void RenderWidget::deref(RenderArena *arena)
@@ -228,24 +314,14 @@ void RenderWidget::updateWidgetPosition()
     int w = width() - borderLeft() - borderRight() - paddingLeft() - paddingRight();
     int h = height() - borderTop() - borderBottom() - paddingTop() - paddingBottom();
 
-    IntRect newBounds(absPos.x(), absPos.y(), w, h);
-    IntRect oldBounds(m_widget->frameRect());
-    if (newBounds != oldBounds) {
-        // The widget changed positions.  Update the frame geometry.
-        if (checkForRepaintDuringLayout()) {
-            RenderView* v = view();
-            if (!v->printing()) {
-                // FIXME: do container-relative repaint
-                v->repaintRectangleInViewAndCompositedLayers(oldBounds);
-                v->repaintRectangleInViewAndCompositedLayers(newBounds);
-            }
-        }
+    bool boundsChanged = setWidgetGeometry(IntRect(absPos.x(), absPos.y(), w, h));
 
-        RenderArena* arena = ref();
-        element()->ref();
-        m_widget->setFrameRect(newBounds);
-        element()->deref();
-        deref(arena);
+    // if the frame bounds got changed, or if view needs layout (possibly indicating
+    // content size is wrong) we have to do a layout to set the right widget size
+    if (m_widget->isFrameView()) {
+        FrameView* frameView = static_cast<FrameView*>(m_widget.get());
+        if (boundsChanged || frameView->needsLayout())
+            frameView->layout();
     }
 }
 
@@ -258,9 +334,9 @@ void RenderWidget::setSelectionState(SelectionState state)
     }
 }
 
-void RenderWidget::deleteWidget()
+void RenderWidget::clearWidget()
 {
-    delete m_widget;
+    m_widget = 0;
 }
 
 RenderWidget* RenderWidget::find(const Widget* widget)
@@ -274,7 +350,7 @@ bool RenderWidget::nodeAtPoint(const HitTestRequest& request, HitTestResult& res
     bool inside = RenderReplaced::nodeAtPoint(request, result, x, y, tx, ty, action);
     
     // Check to see if we are really over the widget itself (and not just in the border/padding area).
-    if (inside && !hadResult && result.innerNode() == element())
+    if (inside && !hadResult && result.innerNode() == node())
         result.setIsOverWidget(contentBoxRect().contains(result.localPoint()));
     return inside;
 }

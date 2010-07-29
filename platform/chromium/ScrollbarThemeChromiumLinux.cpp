@@ -1,10 +1,10 @@
 /*
  * Copyright (c) 2008, 2009, Google Inc. All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -29,120 +29,209 @@
  */
 
 #include "config.h"
-#include "ScrollbarThemeChromium.h"
+#include "ScrollbarThemeChromiumLinux.h"
 
-#include "NotImplemented.h"
 #include "PlatformContextSkia.h"
 #include "PlatformMouseEvent.h"
+#include "RenderTheme.h"
+#include "RenderThemeChromiumLinux.h"
 #include "Scrollbar.h"
 #include "TransformationMatrix.h"
 
-#include "gtkdrawing.h"
-#include <gtk/gtk.h>
-#include "skia/ext/GdkSkia.h"
-
 namespace WebCore {
 
-int ScrollbarThemeChromium::scrollbarThickness(ScrollbarControlSize controlSize)
+ScrollbarTheme* ScrollbarTheme::nativeTheme()
 {
-    static int size = 0;
-    if (!size) {
-        MozGtkScrollbarMetrics metrics;
-        moz_gtk_get_scrollbar_metrics(&metrics);
-        size = metrics.slider_width;
-    }
-    return size;
+    static ScrollbarThemeChromiumLinux theme;
+    return &theme;
 }
 
-bool ScrollbarThemeChromium::invalidateOnMouseEnterExit()
+int ScrollbarThemeChromiumLinux::scrollbarThickness(ScrollbarControlSize controlSize)
 {
-    notImplemented();
-    return false;
+    return 15;
 }
 
-// Given an uninitialised widget state object, set the members such that it's
-// sane for drawing scrollbars
-static void initMozState(GtkWidgetState* mozState)
+static void drawVertLine(SkCanvas* canvas, int x, int y1, int y2, const SkPaint& paint)
 {
-    mozState->active = true;
-    mozState->focused = false;
-    mozState->inHover = false;
-    mozState->disabled = false;
-    mozState->isDefault = false;
-    mozState->canDefault = false;
-    mozState->depressed = false;
-    mozState->curpos = 0;
-    mozState->maxpos = 0;
+    SkIRect skrect;
+    skrect.set(x, y1, x + 1, y2 + 1);
+    canvas->drawIRect(skrect, paint);
 }
 
-// Paint a GTK widget
-//   gc: context to draw onto
-//   rect: the area of the widget
-//   widget_type: the type of widget to draw
-//   flags: widget dependent flags (e.g. direction of scrollbar arrows etc)
-//
-// See paintMozWiget in RenderThemeGtk.cpp for an explanation of the clipping.
-static void paintScrollbarWidget(GraphicsContext* gc, const IntRect& rect,
-                                 GtkThemeWidgetType widget_type, gint flags)
+static void drawHorizLine(SkCanvas* canvas, int x1, int x2, int y, const SkPaint& paint)
 {
-    PlatformContextSkia* pcs = gc->platformContext();
-
-    GdkRectangle gdkRect = { rect.x(), rect.y(), rect.width(), rect.height() };
-
-    const SkIRect clip_region = pcs->canvas()->getTotalClip().getBounds();
-    TransformationMatrix ctm = gc->getCTM().inverse();
-    IntPoint pos = ctm.mapPoint(
-        IntPoint(SkScalarRound(clip_region.fLeft), SkScalarRound(clip_region.fTop)));
-    GdkRectangle gdkClipRect;
-    gdkClipRect.x = pos.x();
-    gdkClipRect.y = pos.y();
-    gdkClipRect.width = clip_region.width();
-    gdkClipRect.height = clip_region.height();
-
-    gdk_rectangle_intersect(&gdkRect, &gdkClipRect, &gdkClipRect);
-
-    GtkWidgetState mozState;
-    initMozState(&mozState);
-
-    moz_gtk_widget_paint(widget_type, pcs->gdk_skia(), &gdkRect, &gdkClipRect,
-                         &mozState, flags, GTK_TEXT_DIR_LTR);
+    SkIRect skrect;
+    skrect.set(x1, y, x2 + 1, y + 1);
+    canvas->drawIRect(skrect, paint);
 }
 
-void ScrollbarThemeChromium::paintTrackPiece(GraphicsContext* gc, Scrollbar* scrollbar,
-                                             const IntRect& rect, ScrollbarPart partType)
+static void drawBox(SkCanvas* canvas, const IntRect& rect, const SkPaint& paint)
 {
-    const bool horz = scrollbar->orientation() == HorizontalScrollbar;
-    const GtkThemeWidgetType track_type =
-        horz ? MOZ_GTK_SCROLLBAR_TRACK_HORIZONTAL : MOZ_GTK_SCROLLBAR_TRACK_VERTICAL;
-    paintScrollbarWidget(gc, rect, track_type, 0);
+    const int right = rect.x() + rect.width() - 1;
+    const int bottom = rect.y() + rect.height() - 1;
+    drawHorizLine(canvas, rect.x(), right, rect.y(), paint);
+    drawVertLine(canvas, right, rect.y(), bottom, paint);
+    drawHorizLine(canvas, rect.x(), right, bottom, paint);
+    drawVertLine(canvas, rect.x(), rect.y(), bottom, paint);
 }
 
-void ScrollbarThemeChromium::paintButton(GraphicsContext* gc, Scrollbar* scrollbar,
-                                    const IntRect& rect, ScrollbarPart part)
+static SkScalar clamp(SkScalar value, SkScalar min, SkScalar max)
 {
-    // FIXME: It appears the either we're upsetting GTK by forcing WebKit sizes
-    // on it, or the buttons expect the track to be drawn under them.  Either
-    // way, we end up with unpainted pixels which are upsetting the pixel
-    // tests. Thus we paint green under the buttons to, at least, make the
-    // pixel output the same between debug and opt builds.
+    return std::min(std::max(value, min), max);
+}
+
+static SkColor saturateAndBrighten(SkScalar* hsv,
+                                   SkScalar saturateAmount,
+                                   SkScalar brightenAmount)
+{
+    SkScalar color[3];
+    color[0] = hsv[0];
+    color[1] = clamp(hsv[1] + saturateAmount, 0.0, 1.0);
+    color[2] = clamp(hsv[2] + brightenAmount, 0.0, 1.0);
+    return SkHSVToColor(color);
+}
+
+static SkColor outlineColor(SkScalar* hsv1, SkScalar* hsv2)
+{
+    // GTK Theme engines have way too much control over the layout of
+    // the scrollbar. We might be able to more closely approximate its
+    // look-and-feel, if we sent whole images instead of just colors
+    // from the browser to the renderer. But even then, some themes
+    // would just break.
+    //
+    // So, instead, we don't even try to 100% replicate the look of
+    // the native scrollbar. We render our own version, but we make
+    // sure to pick colors that blend in nicely with the system GTK
+    // theme. In most cases, we can just sample a couple of pixels
+    // from the system scrollbar and use those colors to draw our
+    // scrollbar.
+    //
+    // This works fine for the track color and the overall thumb
+    // color. But it fails spectacularly for the outline color used
+    // around the thumb piece.  Not all themes have a clearly defined
+    // outline. For some of them it is partially transparent, and for
+    // others the thickness is very unpredictable.
+    //
+    // So, instead of trying to approximate the system theme, we
+    // instead try to compute a reasonable looking choice based on the
+    // known color of the track and the thumb piece. This is difficult
+    // when trying to deal both with high- and low-contrast themes,
+    // and both with positive and inverted themes.
+    //
+    // The following code has been tested to look OK with all of the
+    // default GTK themes.
+    SkScalar minDiff = clamp((hsv1[1] + hsv2[1]) * 1.2, 0.2, 0.5);
+    SkScalar diff = clamp(fabs(hsv1[2] - hsv2[2]) / 2, minDiff, 0.5);
+
+    if (hsv1[2] + hsv2[2] > 1.0)
+        diff = -diff;
+
+    return saturateAndBrighten(hsv2, -0.2, diff);
+}
+
+IntRect ScrollbarThemeChromium::trackRect(Scrollbar* scrollbar, bool)
+{
+    IntSize bs = buttonSize(scrollbar);
+    int thickness = scrollbarThickness(scrollbar->controlSize());
+    if (scrollbar->orientation() == HorizontalScrollbar)
+        return IntRect(scrollbar->x() + bs.width(), scrollbar->y(), scrollbar->width(), thickness);
+    return IntRect(scrollbar->x(), scrollbar->y() + bs.height(), thickness, scrollbar->height());
+}
+
+void ScrollbarThemeChromiumLinux::paintTrackPiece(GraphicsContext* gc, Scrollbar* scrollbar, const IntRect& rect, ScrollbarPart partType)
+{
+    SkCanvas* const canvas = gc->platformContext()->canvas();
     SkPaint paint;
-    paint.setARGB(255, 0, 255, 128);
-    SkRect skrect;
-    skrect.set(rect.x(), rect.y(), rect.x() + rect.width() - 1, rect.y() + rect.height() - 1);
-    gc->platformContext()->canvas()->drawRect(skrect, paint);
+    SkIRect skrect;
 
-    const bool horz = scrollbar->orientation() == HorizontalScrollbar;
-    gint flags = horz ? 0 : MOZ_GTK_STEPPER_VERTICAL;
-    flags |= ForwardButtonEndPart == part ? MOZ_GTK_STEPPER_DOWN : 0;
-    paintScrollbarWidget(gc, rect, MOZ_GTK_SCROLLBAR_BUTTON, flags);
+    skrect.set(rect.x(), rect.y(), rect.x() + rect.width(), rect.y() + rect.height());
+    SkScalar track_hsv[3];
+    SkColorToHSV(RenderThemeChromiumLinux::trackColor(), track_hsv);
+    paint.setColor(saturateAndBrighten(track_hsv, 0, 0));
+    canvas->drawIRect(skrect, paint);
+
+    SkScalar thumb_hsv[3];
+    SkColorToHSV(RenderThemeChromiumLinux::thumbInactiveColor(),
+                 thumb_hsv);
+
+    paint.setColor(outlineColor(track_hsv, thumb_hsv));
+    drawBox(canvas, rect, paint);
 }
 
-void ScrollbarThemeChromium::paintThumb(GraphicsContext* gc, Scrollbar* scrollbar, const IntRect& rect)
+void ScrollbarThemeChromiumLinux::paintButton(GraphicsContext* gc, Scrollbar* scrollbar, const IntRect& rect, ScrollbarPart part)
 {
-    const bool horz = scrollbar->orientation() == HorizontalScrollbar;
-    const GtkThemeWidgetType thumb_type =
-        horz ? MOZ_GTK_SCROLLBAR_THUMB_HORIZONTAL : MOZ_GTK_SCROLLBAR_THUMB_VERTICAL;
-    paintScrollbarWidget(gc, rect, thumb_type, 0);
+    // We don't use buttons
+}
+
+void ScrollbarThemeChromiumLinux::paintThumb(GraphicsContext* gc, Scrollbar* scrollbar, const IntRect& rect)
+{
+    const bool hovered = scrollbar->hoveredPart() == ThumbPart;
+    const int midx = rect.x() + rect.width() / 2;
+    const int midy = rect.y() + rect.height() / 2;
+    const bool vertical = scrollbar->orientation() == VerticalScrollbar;
+    SkCanvas* const canvas = gc->platformContext()->canvas();
+
+    SkScalar thumb[3];
+    SkColorToHSV(hovered
+                 ? RenderThemeChromiumLinux::thumbActiveColor()
+                 : RenderThemeChromiumLinux::thumbInactiveColor(),
+                 thumb);
+
+    SkPaint paint;
+    paint.setColor(saturateAndBrighten(thumb, 0, 0.02));
+
+    SkIRect skrect;
+    if (vertical)
+        skrect.set(rect.x(), rect.y(), midx + 1, rect.y() + rect.height());
+    else
+        skrect.set(rect.x(), rect.y(), rect.x() + rect.width(), midy + 1);
+
+    canvas->drawIRect(skrect, paint);
+
+    paint.setColor(saturateAndBrighten(thumb, 0, -0.02));
+
+    if (vertical)
+        skrect.set(midx + 1, rect.y(), rect.x() + rect.width(), rect.y() + rect.height());
+    else
+        skrect.set(rect.x(), midy + 1, rect.x() + rect.width(), rect.y() + rect.height());
+
+    canvas->drawIRect(skrect, paint);
+
+    SkScalar track[3];
+    SkColorToHSV(RenderThemeChromiumLinux::trackColor(), track);
+    paint.setColor(outlineColor(track, thumb));
+    drawBox(canvas, rect, paint);
+
+    if (rect.height() > 10 && rect.width() > 10) {
+        const int grippyHalfWidth = 2;
+        const int interGrippyOffset = 3;
+        if (vertical) {
+            drawHorizLine(canvas, midx - grippyHalfWidth, midx + grippyHalfWidth, midy - interGrippyOffset, paint);
+            drawHorizLine(canvas, midx - grippyHalfWidth, midx + grippyHalfWidth, midy,                     paint);
+            drawHorizLine(canvas, midx - grippyHalfWidth, midx + grippyHalfWidth, midy + interGrippyOffset, paint);
+        } else {
+            drawVertLine(canvas, midx - interGrippyOffset, midy - grippyHalfWidth, midy + grippyHalfWidth, paint);
+            drawVertLine(canvas, midx,                     midy - grippyHalfWidth, midy + grippyHalfWidth, paint);
+            drawVertLine(canvas, midx + interGrippyOffset, midy - grippyHalfWidth, midy + grippyHalfWidth, paint);
+        }
+    }
+}
+
+bool ScrollbarThemeChromiumLinux::shouldCenterOnThumb(Scrollbar*, const PlatformMouseEvent& evt)
+{
+    return (evt.shiftKey() && evt.button() == LeftButton) || (evt.button() == MiddleButton);
+}
+
+IntSize ScrollbarThemeChromiumLinux::buttonSize(Scrollbar* scrollbar)
+{
+    // On Linux, we don't use buttons
+    return IntSize(0, 0);
+}
+
+int ScrollbarThemeChromiumLinux::minimumThumbLength(Scrollbar* scrollbar)
+{
+    // This matches Firefox on Linux.
+    return 2 * scrollbarThickness(scrollbar->controlSize());
 }
 
 } // namespace WebCore

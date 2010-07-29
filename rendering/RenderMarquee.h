@@ -44,7 +44,8 @@
 #ifndef RenderMarquee_h
 #define RenderMarquee_h
 
-#include "RenderStyle.h"
+#include "Length.h"
+#include "RenderStyleConstants.h"
 #include "Timer.h"
 
 namespace WebCore {
@@ -52,7 +53,7 @@ namespace WebCore {
 class RenderLayer;
 
 // This class handles the auto-scrolling of layers with overflow: marquee.
-class RenderMarquee {
+class RenderMarquee : public Noncopyable {
 public:
     RenderMarquee(RenderLayer*);
 

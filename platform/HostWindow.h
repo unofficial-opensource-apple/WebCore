@@ -27,18 +27,13 @@
 #define HostWindow_h
 
 #include <wtf/Noncopyable.h>
-#include "IntRect.h"
 #include "Widget.h"
 
 namespace WebCore {
 
-class IntPoint;
-class IntRect;
-
-class HostWindow : Noncopyable {
+class HostWindow : public Noncopyable {
 public:
-    HostWindow() {}
-    virtual ~HostWindow() {}
+    virtual ~HostWindow() { }
 
     // The repaint method asks the host window to repaint a rect in the window's coordinate space.  The
     // contentChanged boolean indicates whether or not the Web page content actually changed (or if a repaint
@@ -53,12 +48,15 @@ public:
     virtual IntPoint screenToWindow(const IntPoint&) const = 0;
     virtual IntRect windowToScreen(const IntRect&) const = 0;
 
-    // Method for retrieving the native window.
-    virtual PlatformWidget platformWindow() const = 0;
+    // Method for retrieving the native client of the page.
+    virtual PlatformPageClient platformPageClient() const = 0;
     
     // For scrolling a rect into view recursively.  Useful in the cases where a WebView is embedded inside some containing
     // platform-specific ScrollView.
     virtual void scrollRectIntoView(const IntRect&, const ScrollView*) const = 0;
+
+    // To notify WebKit of scrollbar mode changes.
+    virtual void scrollbarsModeDidChange() const = 0;
 };
 
 } // namespace WebCore

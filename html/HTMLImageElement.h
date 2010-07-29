@@ -45,8 +45,6 @@ public:
 
     virtual void attach();
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
 
     virtual bool canStartSelection() const { return false; }
 
@@ -67,19 +65,11 @@ public:
     CachedImage* cachedImage() const { return m_imageLoader.image(); }
     void setCachedImage(CachedImage* i) { m_imageLoader.setImage(i); };
 
-    void setLoadManually (bool loadManually) { m_imageLoader.setLoadManually(loadManually); }
+    void setLoadManually(bool loadManually) { m_imageLoader.setLoadManually(loadManually); }
 
-    String name() const;
-    void setName(const String&);
+    const AtomicString& alt() const;
 
-    String align() const;
-    void setAlign(const String&);
-
-    String alt() const;
-    void setAlt(const String&);
-
-    String border() const;
-    void setBorder(const String&);
+    virtual bool draggable() const;
 
     void setHeight(int);
 
@@ -98,9 +88,6 @@ public:
     KURL src() const;
     void setSrc(const String&);
 
-    String useMap() const;
-    void setUseMap(const String&);
-
     int vspace() const;
     void setVspace(int);
 
@@ -118,6 +105,11 @@ public:
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
 private:
+    virtual void insertedIntoDocument();
+    virtual void removedFromDocument();
+    virtual void insertedIntoTree(bool deep);
+    virtual void removedFromTree(bool deep);
+
     HTMLImageLoader m_imageLoader;
     String usemap;
     bool ismap;

@@ -20,6 +20,7 @@
 #include "config.h"
 #include "KURL.h"
 #include "CString.h"
+#include "TextEncoding.h"
 
 #include "NotImplemented.h"
 #include "qurl.h"
@@ -36,7 +37,7 @@ static inline char toHex(char c)
 
 KURL::KURL(const QUrl& url)
 {
-    *this = KURL(url.toEncoded().constData());
+    *this = KURL(KURL(), url.toEncoded().constData(), UTF8Encoding());
 }
 
 KURL::operator QUrl() const
@@ -85,7 +86,8 @@ KURL::operator QUrl() const
 #else
     // Qt 4.5 or later
     // No need for special encoding
-    QByteArray ba = m_string.utf8().data();
+    QString str = QString::fromRawData(reinterpret_cast<const QChar*>(m_string.characters()), m_string.length());
+    QByteArray ba = str.toUtf8();
 #endif
 
     QUrl url = QUrl::fromEncoded(ba);
@@ -94,8 +96,10 @@ KURL::operator QUrl() const
 
 String KURL::fileSystemPath() const
 {
-    notImplemented();
-    return String();
+    if (!isValid() || !protocolIs("file"))
+        return String();
+
+    return String(path());
 }
 
 }

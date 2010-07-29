@@ -52,27 +52,27 @@ static inline float scaleEmToUnits(float x, unsigned unitsPerEm) { return unitsP
 
 void SimpleFontData::platformInit()
 {
-    m_syntheticBoldOffset = m_font.syntheticBold() ? 1.0f : 0.f;
+    m_syntheticBoldOffset = m_platformData.syntheticBold() ? 1.0f : 0.f;
     m_scriptCache = 0;
     m_scriptFontProperties = 0;
     m_isSystemFont = false;
 
-    if (m_font.useGDI())
+    if (m_platformData.useGDI())
        return initGDIFont();
 
-    CGFontRef font = m_font.cgFont();
+    CGFontRef font = m_platformData.cgFont();
     int iAscent = CGFontGetAscent(font);
     int iDescent = CGFontGetDescent(font);
     int iLineGap = CGFontGetLeading(font);
     m_unitsPerEm = CGFontGetUnitsPerEm(font);
-    float pointSize = m_font.size();
+    float pointSize = m_platformData.size();
     float fAscent = scaleEmToUnits(iAscent, m_unitsPerEm) * pointSize;
     float fDescent = -scaleEmToUnits(iDescent, m_unitsPerEm) * pointSize;
     float fLineGap = scaleEmToUnits(iLineGap, m_unitsPerEm) * pointSize;
 
     if (!isCustomFont()) {
         HDC dc = GetDC(0);
-        HGDIOBJ oldFont = SelectObject(dc, m_font.hfont());
+        HGDIOBJ oldFont = SelectObject(dc, m_platformData.hfont());
         int faceLength = GetTextFace(dc, 0, 0);
         Vector<TCHAR> faceName(faceLength);
         GetTextFace(dc, faceLength, faceName.data());
@@ -115,19 +115,29 @@ void SimpleFontData::platformInit()
         m_xHeight = scaleEmToUnits(iXHeight, m_unitsPerEm) * pointSize;
     }
 }
-
-void SimpleFontData::platformDestroy()
+FloatRect SimpleFontData::platformBoundsForGlyph(Glyph glyph) const
 {
-    platformCommonDestroy();
+    if (m_platformData.useGDI())
+        return boundsForGDIGlyph(glyph);
+
+    CGRect box;
+    CGFontGetGlyphBBoxes(m_platformData.cgFont(), &glyph, 1, &box);
+    float pointSize = m_platformData.size();
+    CGFloat scale = pointSize / unitsPerEm();
+    FloatRect boundingBox = CGRectApplyAffineTransform(box, CGAffineTransformMakeScale(scale, -scale));
+    if (m_syntheticBoldOffset)
+        boundingBox.setWidth(boundingBox.width() + m_syntheticBoldOffset);
+
+    return boundingBox;
 }
 
 float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
 {
-    if (m_font.useGDI())
-       return widthForGDIGlyph(glyph);
+    if (m_platformData.useGDI())
+        return widthForGDIGlyph(glyph);
 
-    CGFontRef font = m_font.cgFont();
-    float pointSize = m_font.size();
+    CGFontRef font = m_platformData.cgFont();
+    float pointSize = m_platformData.size();
     CGSize advance;
     CGAffineTransform m = CGAffineTransformMakeScale(pointSize, pointSize);
  

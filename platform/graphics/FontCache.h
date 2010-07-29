@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006, 2008 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2007-2008 Torch Mobile, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,7 +50,7 @@ class FontDescription;
 class FontSelector;
 class SimpleFontData;
 
-class FontCache {
+class FontCache : public Noncopyable {
 public:
     friend FontCache* fontCache();
 
@@ -63,7 +64,15 @@ public:
     // Also implemented by the platform.
     void platformInit();
 
-#if PLATFORM(WIN)
+#if OS(WINCE) && !PLATFORM(QT)
+#if defined(IMLANG_FONT_LINK) && (IMLANG_FONT_LINK == 2)
+    IMLangFontLink2* getFontLinkInterface();
+#else
+    IMLangFontLink* getFontLinkInterface();
+#endif
+    static void comInitialize();
+    static void comUninitialize();
+#elif PLATFORM(WIN)
     IMLangFontLink2* getFontLinkInterface();
 #endif
 
@@ -85,11 +94,11 @@ public:
 
 private:
     FontCache();
+    ~FontCache();
 
     // These methods are implemented by each platform.
     FontPlatformData* getSimilarFontPlatformData(const Font&);
     FontPlatformData* getCustomFallbackFont(const UInt32 c, const Font&);
-    bool requiresCustomFallbackFont(const UInt32 c);
     FontPlatformData* createFontPlatformData(const FontDescription&, const AtomicString& family);
 
     friend class SimpleFontData;

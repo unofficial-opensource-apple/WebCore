@@ -24,6 +24,14 @@
 #include "AtomicStringImpl.h"
 #include "PlatformString.h"
 
+// Define 'NO_IMPLICIT_ATOMICSTRING' before including this header,
+// to disallow (expensive) implicit String-->AtomicString conversions.
+#ifdef NO_IMPLICIT_ATOMICSTRING
+#define ATOMICSTRING_CONVERSION explicit
+#else
+#define ATOMICSTRING_CONVERSION
+#endif
+
 namespace WebCore {
 
 struct AtomicStringHash;
@@ -40,9 +48,9 @@ public:
     AtomicString(const JSC::UString& s) : m_string(add(s)) { }
     AtomicString(const JSC::Identifier& s) : m_string(add(s)) { }
 #endif
-    AtomicString(StringImpl* imp) : m_string(add(imp)) { }
+    ATOMICSTRING_CONVERSION AtomicString(StringImpl* imp) : m_string(add(imp)) { }
     AtomicString(AtomicStringImpl* imp) : m_string(imp) { }
-    AtomicString(const String& s) : m_string(add(s.impl())) { }
+    ATOMICSTRING_CONVERSION AtomicString(const String& s) : m_string(add(s.impl())) { }
 
     // Hash table deleted values, which are only constructed and never copied or destroyed.
     AtomicString(WTF::HashTableDeletedValueType) : m_string(WTF::HashTableDeletedValue) { }
@@ -67,17 +75,24 @@ public:
     UChar operator[](unsigned int i) const { return m_string[i]; }
     
     bool contains(UChar c) const { return m_string.contains(c); }
-    bool contains(const AtomicString& s, bool caseSensitive = true) const
-        { return m_string.contains(s.string(), caseSensitive); }
+    bool contains(const char* s, bool caseSensitive = true) const
+        { return m_string.contains(s, caseSensitive); }
+    bool contains(const String& s, bool caseSensitive = true) const
+        { return m_string.contains(s, caseSensitive); }
 
     int find(UChar c, int start = 0) const { return m_string.find(c, start); }
-    int find(const AtomicString& s, int start = 0, bool caseSentitive = true) const
-        { return m_string.find(s.string(), start, caseSentitive); }
+    int find(const char* s, int start = 0, bool caseSentitive = true) const
+        { return m_string.find(s, start, caseSentitive); }
+    int find(const String& s, int start = 0, bool caseSentitive = true) const
+        { return m_string.find(s, start, caseSentitive); }
     
-    bool startsWith(const AtomicString& s, bool caseSensitive = true) const
-        { return m_string.startsWith(s.string(), caseSensitive); }
-    bool endsWith(const AtomicString& s, bool caseSensitive = true) const
-        { return m_string.endsWith(s.string(), caseSensitive); }
+    bool startsWith(const String& s, bool caseSensitive = true) const
+        { return m_string.startsWith(s, caseSensitive); }
+    bool endsWith(const String& s, bool caseSensitive = true) const
+        { return m_string.endsWith(s, caseSensitive); }
+    
+    AtomicString lower() const;
+    AtomicString upper() const { return AtomicString(impl()->upper()); }
     
     int toInt(bool* ok = 0) const { return m_string.toInt(ok); }
     double toDouble(bool* ok = 0) const { return m_string.toDouble(ok); }
@@ -89,7 +104,7 @@ public:
 
     static void remove(StringImpl*);
     
-#if PLATFORM(CF) || (PLATFORM(QT) && PLATFORM(DARWIN))
+#if PLATFORM(CF)
     AtomicString(CFStringRef s) :  m_string(add(String(s).impl())) { }
     CFStringRef createCFString() const { return m_string.createCFString(); }
 #endif    
@@ -141,6 +156,8 @@ inline bool equalIgnoringCase(const String& a, const AtomicString& b) { return e
     extern const AtomicString textAtom;
     extern const AtomicString commentAtom;
     extern const AtomicString starAtom;
+    extern const AtomicString xmlAtom;
+    extern const AtomicString xmlnsAtom;
 #endif
 
 } // namespace WebCore

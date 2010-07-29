@@ -28,6 +28,7 @@
 #if ENABLE(SVG)
 #include "RootInlineBox.h"
 #include "SVGCharacterLayoutInfo.h"
+#include "SVGRenderSupport.h"
 
 namespace WebCore {
 
@@ -43,21 +44,29 @@ struct LastGlyphInfo {
     bool isValid;
 };
 
-class SVGRootInlineBox : public RootInlineBox {
+class SVGRootInlineBox : public RootInlineBox, SVGRenderBase {
 public:
     SVGRootInlineBox(RenderObject* obj)
         : RootInlineBox(obj)
+        , m_height(0)
     {
     }
+    virtual const SVGRenderBase* toSVGRenderBase() const { return this; }
 
     virtual bool isSVGRootInlineBox() { return true; }
 
+    virtual int virtualHeight() const { return m_height; }
+    void setHeight(int h) { m_height = h; }
+    
     virtual void paint(RenderObject::PaintInfo&, int tx, int ty);
 
     virtual int placeBoxesHorizontally(int x, int& leftPosition, int& rightPosition, bool& needsWordSpacing);
     virtual int verticallyAlignBoxes(int heightOfBlock);
 
     virtual void computePerCharacterLayoutInformation();
+
+    virtual FloatRect objectBoundingBox() const { return FloatRect(); }
+    virtual FloatRect repaintRectInLocalCoordinates() const { return FloatRect(); }
 
     // Used by SVGInlineTextBox
     const Vector<SVGTextChunk>& svgTextChunks() const;
@@ -80,6 +89,7 @@ private:
     SVGTextDecorationInfo retrievePaintServersForTextDecoration(RenderObject* start);
 
 private:
+    int m_height;
     Vector<SVGChar> m_svgChars;
     Vector<SVGTextChunk> m_svgTextChunks;
 };

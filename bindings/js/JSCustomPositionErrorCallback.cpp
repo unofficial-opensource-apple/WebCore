@@ -26,10 +26,8 @@
 #include "config.h"
 #include "JSCustomPositionErrorCallback.h"
 
-#include "CString.h"
 #include "Frame.h"
 #include "JSPositionError.h"
-#include "Page.h"
 #include "ScriptController.h"
 #include <runtime/JSLock.h>
 
@@ -37,50 +35,21 @@ namespace WebCore {
     
 using namespace JSC;
 
-JSCustomPositionErrorCallback::JSCustomPositionErrorCallback(JSObject* callback, Frame* frame)
-    : m_callback(callback)
-    , m_frame(frame)
+JSCustomPositionErrorCallback::JSCustomPositionErrorCallback(JSObject* callback, JSDOMGlobalObject* globalObject)
+    : m_data(callback, globalObject)
 {
 }
 
 void JSCustomPositionErrorCallback::handleEvent(PositionError* positionError)
 {
-    ASSERT(m_callback);
-    ASSERT(m_frame);
-    
-    if (!m_frame->script()->isEnabled())
-        return;
-    
-    JSGlobalObject* globalObject = m_frame->script()->globalObject();
-    ExecState* exec = globalObject->globalExec();
-    
-    JSC::JSLock lock(false);
-    
-    JSValuePtr function = m_callback->get(exec, Identifier(exec, "handleEvent"));
-    CallData callData;
-    CallType callType = function.getCallData(callData);
-    if (callType == CallTypeNone) {
-        callType = m_callback->getCallData(callData);
-        if (callType == CallTypeNone) {
-            // FIXME: Should an exception be thrown here?
-            return;
-        }
-        function = m_callback;
-    }
-    
     RefPtr<JSCustomPositionErrorCallback> protect(this);
+
+    JSC::JSLock lock(SilenceAssertionsOnly);
+    ExecState* exec = m_data.globalObject()->globalExec();
+    MarkedArgumentBuffer args;
+    args.append(toJS(exec, deprecatedGlobalObjectForPrototype(exec), positionError));
     
-    ArgList args;
-    args.append(toJS(exec, positionError));
-    
-    globalObject->startTimeoutCheck();
-    call(exec, function, callType, callData, m_callback, args);
-    globalObject->stopTimeoutCheck();
-    
-    if (exec->hadException())
-        reportCurrentException(exec);
-    
-    Document::updateDocumentsRendering();
+    m_data.invokeCallback(args);
 }
     
 } // namespace WebCore

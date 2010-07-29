@@ -38,7 +38,6 @@ StyleInheritedData::StyleInheritedData()
     , vertical_border_spacing(RenderStyle::initialVerticalBorderSpacing())
     , widows(RenderStyle::initialWidows())
     , orphans(RenderStyle::initialOrphans())
-    , page_break_inside(RenderStyle::initialPageBreak())
 {
 }
 
@@ -60,7 +59,6 @@ StyleInheritedData::StyleInheritedData(const StyleInheritedData& o)
     , vertical_border_spacing(o.vertical_border_spacing)
     , widows(o.widows)
     , orphans(o.orphans)
-    , page_break_inside(o.page_break_inside)
 {
 }
 
@@ -68,7 +66,7 @@ static bool cursorDataEquivalent(const CursorList* c1, const CursorList* c2)
 {
     if (c1 == c2)
         return true;
-    if (!c1 && c2 || c1 && !c2)
+    if ((!c1 && c2) || (c1 && !c2))
         return false;
     return (*c1 == *c2);
 }
@@ -87,8 +85,7 @@ bool StyleInheritedData::operator==(const StyleInheritedData& o) const
         horizontal_border_spacing == o.horizontal_border_spacing &&
         vertical_border_spacing == o.vertical_border_spacing &&
         widows == o.widows &&
-        orphans == o.orphans &&
-        page_break_inside == o.page_break_inside;
+        orphans == o.orphans;
 }
 
 } // namespace WebCore

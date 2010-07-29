@@ -30,8 +30,11 @@ WebInspector.DatabaseTableView = function(database, tableName)
     this.database = database;
     this.tableName = tableName;
 
-    this.element.addStyleClass("database-view");
+    this.element.addStyleClass("storage-view");
     this.element.addStyleClass("table");
+
+    this.refreshButton = new WebInspector.StatusBarButton(WebInspector.UIString("Refresh"), "refresh-storage-status-bar-item");
+    this.refreshButton.addEventListener("click", this._refreshButtonClicked.bind(this), false);
 }
 
 WebInspector.DatabaseTableView.prototype = {
@@ -41,24 +44,24 @@ WebInspector.DatabaseTableView.prototype = {
         this.update();
     },
 
-    update: function()
+    get statusBarItems()
     {
-        function queryTransaction(tx)
-        {
-            tx.executeSql("SELECT * FROM " + this.tableName, null, InspectorController.wrapCallback(this._queryFinished.bind(this)), InspectorController.wrapCallback(this._queryError.bind(this)));
-        }
-
-        this.database.database.transaction(InspectorController.wrapCallback(queryTransaction.bind(this)), InspectorController.wrapCallback(this._queryError.bind(this)));
+        return [this.refreshButton];
     },
 
-    _queryFinished: function(tx, result)
+    update: function()
+    {
+        this.database.executeSql("SELECT * FROM " + this.tableName, this._queryFinished.bind(this), this._queryError.bind(this));
+    },
+
+    _queryFinished: function(result)
     {
         this.element.removeChildren();
 
-        var dataGrid = WebInspector.panels.databases.dataGridForResult(result);
+        var dataGrid = WebInspector.panels.storage.dataGridForResult(result);
         if (!dataGrid) {
             var emptyMsgElement = document.createElement("div");
-            emptyMsgElement.className = "database-table-empty";
+            emptyMsgElement.className = "storage-table-empty";
             emptyMsgElement.textContent = WebInspector.UIString("The “%s”\ntable is empty.", this.tableName);
             this.element.appendChild(emptyMsgElement);
             return;
@@ -67,16 +70,20 @@ WebInspector.DatabaseTableView.prototype = {
         this.element.appendChild(dataGrid.element);
     },
 
-    _queryError: function(tx, error)
+    _queryError: function(error)
     {
         this.element.removeChildren();
 
         var errorMsgElement = document.createElement("div");
-        errorMsgElement.className = "database-table-error";
+        errorMsgElement.className = "storage-table-error";
         errorMsgElement.textContent = WebInspector.UIString("An error occurred trying to\nread the “%s” table.", this.tableName);
         this.element.appendChild(errorMsgElement);
     },
 
+    _refreshButtonClicked: function(event)
+    {
+        this.update();
+    }
 }
 
 WebInspector.DatabaseTableView.prototype.__proto__ = WebInspector.View.prototype;

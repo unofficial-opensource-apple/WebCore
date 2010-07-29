@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -23,7 +21,7 @@
 #ifndef SVGFETileElement_h
 #define SVGFETileElement_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFilterPrimitiveStandardAttributes.h"
 #include "SVGFETile.h"
 
@@ -35,13 +33,11 @@ namespace WebCore {
         virtual ~SVGFETileElement();
 
         virtual void parseMappedAttribute(MappedAttribute*);
-        virtual SVGFilterEffect* filterEffect(SVGResourceFilter*) const;
-        bool build(FilterBuilder*);
+        virtual void synchronizeProperty(const QualifiedName&);
+        virtual bool build(SVGResourceFilter*);
 
     private:
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFETileElement, SVGNames::feTileTagString, SVGNames::inAttrString, String, In1, in1)
-
-        mutable RefPtr<FETile> m_filterEffect;
+        DECLARE_ANIMATED_PROPERTY(SVGFETileElement, SVGNames::inAttr, String, In1, in1)
     };
 
 } // namespace WebCore

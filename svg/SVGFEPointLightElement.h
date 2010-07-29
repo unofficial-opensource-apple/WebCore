@@ -20,18 +20,16 @@
 #ifndef SVGFEPointLightElement_h
 #define SVGFEPointLightElement_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFELightElement.h"
 
-namespace WebCore
-{
-    class SVGFEPointLightElement : public SVGFELightElement
-    {
+namespace WebCore {
+    class SVGFEPointLightElement : public SVGFELightElement {
         public:
         SVGFEPointLightElement(const QualifiedName&, Document*);
         virtual ~SVGFEPointLightElement();
 
-        virtual LightSource* lightSource() const;
+        virtual PassRefPtr<LightSource> lightSource() const;
     };
 
 } // namespace WebCore

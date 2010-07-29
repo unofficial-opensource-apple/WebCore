@@ -20,45 +20,46 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef LocalStorageTask_h
 #define LocalStorageTask_h
 
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefPtr.h>
+#if ENABLE(DOM_STORAGE)
+
+#include <wtf/PassOwnPtr.h>
 #include <wtf/Threading.h>
 
 namespace WebCore {
 
-    class LocalStorage;
-    class LocalStorageArea;
+    class StorageAreaSync;
     class LocalStorageThread;
 
-    class LocalStorageTask : public ThreadSafeShared<LocalStorageTask> {
+    // FIXME: Rename this class to StorageTask
+    class LocalStorageTask : public Noncopyable {
     public:
-        enum Type { StorageImport, StorageSync, AreaImport, AreaSync, TerminateThread };
+        enum Type { AreaImport, AreaSync, TerminateThread };
 
-        static PassRefPtr<LocalStorageTask> createImport(PassRefPtr<LocalStorage> storage) { return adoptRef(new LocalStorageTask(StorageImport, storage)); }
-        static PassRefPtr<LocalStorageTask> createImport(PassRefPtr<LocalStorageArea> area) { return adoptRef(new LocalStorageTask(AreaImport, area)); }
-        static PassRefPtr<LocalStorageTask> createSync(PassRefPtr<LocalStorage> storage) { return adoptRef(new LocalStorageTask(StorageSync, storage)); }
-        static PassRefPtr<LocalStorageTask> createSync(PassRefPtr<LocalStorageArea> area) { return adoptRef(new LocalStorageTask(AreaSync, area)); }
-        static PassRefPtr<LocalStorageTask> createTerminate(PassRefPtr<LocalStorageThread> thread) { return adoptRef(new LocalStorageTask(TerminateThread, thread)); }
+        ~LocalStorageTask();
+
+        static PassOwnPtr<LocalStorageTask> createImport(StorageAreaSync* area) { return new LocalStorageTask(AreaImport, area); }
+        static PassOwnPtr<LocalStorageTask> createSync(StorageAreaSync* area) { return new LocalStorageTask(AreaSync, area); }
+        static PassOwnPtr<LocalStorageTask> createTerminate(LocalStorageThread* thread) { return new LocalStorageTask(TerminateThread, thread); }
 
         void performTask();
 
     private:
-        LocalStorageTask(Type, PassRefPtr<LocalStorageArea>);
-        LocalStorageTask(Type, PassRefPtr<LocalStorage>);
-        LocalStorageTask(Type, PassRefPtr<LocalStorageThread>);
+        LocalStorageTask(Type, StorageAreaSync*);
+        LocalStorageTask(Type, LocalStorageThread*);
 
         Type m_type;
-        RefPtr<LocalStorageArea> m_area;
-        RefPtr<LocalStorage> m_storage;
-        RefPtr<LocalStorageThread> m_thread;
+        StorageAreaSync* m_area;
+        LocalStorageThread* m_thread;
     };
 
 } // namespace WebCore
+
+#endif // ENABLE(DOM_STORAGE)
 
 #endif // LocalStorageTask_h

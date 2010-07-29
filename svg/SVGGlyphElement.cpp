@@ -24,9 +24,10 @@
 #if ENABLE(SVG_FONTS)
 #include "SVGGlyphElement.h"
 
+#include "MappedAttribute.h"
+#include "SVGFontData.h"
 #include "SVGFontElement.h"
 #include "SVGFontFaceElement.h"
-#include "SVGFontData.h"
 #include "SVGNames.h"
 #include "SVGParserUtilities.h"
 #include "SimpleFontData.h"
@@ -48,7 +49,7 @@ SVGGlyphElement::~SVGGlyphElement()
 void SVGGlyphElement::invalidateGlyphCache()
 {
     Node* fontNode = parentNode();
-    if (fontNode && fontNode->hasTagName(fontTag)) {
+    if (fontNode && fontNode->hasTagName(SVGNames::fontTag)) {
         if (SVGFontElement* element = static_cast<SVGFontElement*>(fontNode))
             element->invalidateGlyphCache();
     }
@@ -166,7 +167,7 @@ SVGGlyphIdentifier SVGGlyphElement::buildGlyphIdentifier() const
     identifier.orientation = parseOrientation(getAttribute(orientationAttr));
     identifier.arabicForm = parseArabicForm(getAttribute(arabic_formAttr));
 
-    String language = getAttribute(langAttr);
+    String language = getAttribute(SVGNames::langAttr);
     if (!language.isEmpty())
         identifier.languages = parseDelimitedString(language, ',');
 

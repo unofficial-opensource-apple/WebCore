@@ -26,20 +26,32 @@
 #ifndef WebCoreSystemInterface_h
 #define WebCoreSystemInterface_h
 
+#include <CFNetwork/CFNetwork.h>
 #include <objc/objc.h>
 
 
 #include <GraphicsServices/GraphicsServices.h>
 
 #ifdef __OBJC__
+@class NSArray;
 @class NSButtonCell;
 @class NSData;
+@class NSDate;
 @class NSEvent;
 @class NSFont;
+@class NSImage;
+@class NSMenu;
+@class NSMutableArray;
 @class NSMutableURLRequest;
+@class NSString;
+@class NSTextFieldCell;
+@class NSURLConnection;
 @class NSURLRequest;
+@class NSURLResponse;
+@class NSView;
 @class QTMovie;
 @class QTMovieView;
+@class CALayer;
 #else
 typedef struct NSArray NSArray;
 typedef struct NSButtonCell NSButtonCell;
@@ -49,6 +61,7 @@ typedef struct NSEvent NSEvent;
 typedef struct NSFont NSFont;
 typedef struct NSImage NSImage;
 typedef struct NSMenu NSMenu;
+typedef struct NSMutableArray NSMutableArray;
 typedef struct NSMutableURLRequest NSMutableURLRequest;
 typedef struct NSURLRequest NSURLRequest;
 typedef struct NSString NSString;
@@ -59,6 +72,7 @@ typedef struct NSView NSView;
 typedef struct objc_object *id;
 typedef struct QTMovie QTMovie;
 typedef struct QTMovieView QTMovieView;
+typedef struct CALayer CALayer;
 #endif
 
 #ifdef __cplusplus
@@ -86,11 +100,17 @@ extern void (*wkSetNSURLConnectionDefersCallbacks)(NSURLConnection *, BOOL);
 extern void (*wkSetNSURLRequestShouldContentSniff)(NSMutableURLRequest *, BOOL);
 extern void (*wkSetPatternBaseCTM)(CGContextRef, CGAffineTransform);
 extern void (*wkSetPatternPhaseInUserSpace)(CGContextRef, CGPoint);
+extern CGAffineTransform (*wkGetUserToBaseCTM)(CGContextRef);
 extern void (*wkSetUpFontCache)();
 extern void (*wkSignalCFReadStreamEnd)(CFReadStreamRef stream);
 extern void (*wkSignalCFReadStreamError)(CFReadStreamRef stream, CFStreamError *error);
 extern void (*wkSignalCFReadStreamHasBytes)(CFReadStreamRef stream);
 extern unsigned (*wkInitializeMaximumHTTPConnectionCountPerHost)(unsigned preferredConnectionCount);
+extern void (*wkSetCONNECTProxyForStream)(CFReadStreamRef, CFStringRef proxyHost, CFNumberRef proxyPort);
+extern void (*wkSetCONNECTProxyAuthorizationForStream)(CFReadStreamRef, CFStringRef proxyAuthorizationString);
+extern CFHTTPMessageRef (*wkCopyCONNECTProxyResponse)(CFReadStreamRef, CFURLRef responseURL);
+extern void (*wkSupportsHttpPipelining)(NSMutableURLRequest *, int priority);
+extern BOOL (*wkIsLatchingWheelEvent)(NSEvent *);
 
 #ifndef BUILDING_ON_TIGER
 extern void (*wkGetGlyphsForCharacters)(CGFontRef, const UniChar[], CGGlyph[], size_t);
@@ -113,6 +133,16 @@ extern BOOL (*wkSupportsMultipartXMixedReplace)(NSMutableURLRequest *);
 
 extern BOOL (*wkUseSharedMediaUI)();
 
+#if !defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+extern NSMutableArray *(*wkNoteOpenPanelFiles)(NSArray *);
+#else
+extern void* wkNoteOpenPanelFiles;
+#endif
+
+extern CGSize (*wkGetViewportScreenSize)(void);
+extern void (*wkSetLayerContentsScale)(CALayer *);
+extern float (*wkGetScreenScaleFactor)(void);
+    
 #ifdef __cplusplus
 }
 #endif

@@ -27,113 +27,128 @@
 #include "MediaPlayerPrivate.h"
 #include "Timer.h"
 
-#include <gtk/gtk.h>
+#include <cairo.h>
+#include <glib.h>
+#include <gst/gst.h>
 
-typedef struct _GstElement GstElement;
+typedef struct _WebKitVideoSink WebKitVideoSink;
+typedef struct _GstBuffer GstBuffer;
 typedef struct _GstMessage GstMessage;
+typedef struct _GstElement GstElement;
 typedef struct _GstBus GstBus;
 
 namespace WebCore {
 
-    class GraphicsContext;
-    class IntSize;
-    class IntRect;
-    class String;
+class GraphicsContext;
+class IntSize;
+class IntRect;
+class String;
 
-    gboolean mediaPlayerPrivateErrorCallback(GstBus* bus, GstMessage* message, gpointer data);
-    gboolean mediaPlayerPrivateEOSCallback(GstBus* bus, GstMessage* message, gpointer data);
-    gboolean mediaPlayerPrivateStateCallback(GstBus* bus, GstMessage* message, gpointer data);
+gboolean mediaPlayerPrivateMessageCallback(GstBus* bus, GstMessage* message, gpointer data);
+void mediaPlayerPrivateVolumeChangedCallback(GObject* element, GParamSpec* pspec, gpointer data);
+void mediaPlayerPrivateSourceChangedCallback(GObject* element, GParamSpec* pspec, gpointer data);
 
-    class MediaPlayerPrivate : public MediaPlayerPrivateInterface
-    {
-    friend gboolean mediaPlayerPrivateErrorCallback(GstBus* bus, GstMessage* message, gpointer data);
-    friend gboolean mediaPlayerPrivateEOSCallback(GstBus* bus, GstMessage* message, gpointer data);
-    friend gboolean mediaPlayerPrivateStateCallback(GstBus* bus, GstMessage* message, gpointer data);
+class MediaPlayerPrivate : public MediaPlayerPrivateInterface {
+        friend gboolean mediaPlayerPrivateMessageCallback(GstBus* bus, GstMessage* message, gpointer data);
+        friend void mediaPlayerPrivateRepaintCallback(WebKitVideoSink*, GstBuffer* buffer, MediaPlayerPrivate* playerPrivate);
+        friend void mediaPlayerPrivateSourceChangedCallback(GObject* element, GParamSpec* pspec, gpointer data);
 
-    public:
+        public:
+            static void registerMediaEngine(MediaEngineRegistrar);
+            ~MediaPlayerPrivate();
 
-        static void registerMediaEngine(MediaEngineRegistrar);
-        ~MediaPlayerPrivate();
+            IntSize naturalSize() const;
+            bool hasVideo() const;
+            bool hasAudio() const;
 
-        IntSize naturalSize() const;
-        bool hasVideo() const;
+            void load(const String &url);
+            void cancelLoad();
+            bool loadNextLocation();
 
-        void load(const String &url);
-        void cancelLoad();
+            void play();
+            void pause();
 
-        void play();
-        void pause();
+            bool paused() const;
+            bool seeking() const;
 
-        bool paused() const;
-        bool seeking() const;
+            float duration() const;
+            float currentTime() const;
+            void seek(float);
 
-        float duration() const;
-        float currentTime() const;
-        void seek(float);
-        void setEndTime(float);
+            void setRate(float);
+            void setVolume(float);
+            void volumeChanged();
 
-        void setRate(float);
-        void setVolume(float);
-        void setMuted(bool);
+            MediaPlayer::NetworkState networkState() const;
+            MediaPlayer::ReadyState readyState() const;
 
-        int dataRate() const;
+            PassRefPtr<TimeRanges> buffered() const;
+            float maxTimeSeekable() const;
+            unsigned bytesLoaded() const;
+            unsigned totalBytes() const;
 
-        MediaPlayer::NetworkState networkState() const;
-        MediaPlayer::ReadyState readyState() const;
+            void setVisible(bool);
+            void setSize(const IntSize&);
 
-        float maxTimeBuffered() const;
-        float maxTimeSeekable() const;
-        unsigned bytesLoaded() const;
-        bool totalBytesKnown() const;
-        unsigned totalBytes() const;
+            void mediaLocationChanged(GstMessage*);
+            void loadStateChanged();
+            void sizeChanged();
+            void timeChanged();
+            void didEnd();
+            void durationChanged();
+            void loadingFailed(MediaPlayer::NetworkState);
 
-        void setVisible(bool);
-        void setSize(const IntSize&);
+            void repaint();
+            void paint(GraphicsContext*, const IntRect&);
 
-        void loadStateChanged();
-        void rateChanged();
-        void sizeChanged();
-        void timeChanged();
-        void volumeChanged();
-        void didEnd();
-        void loadingFailed();
+            bool hasSingleSecurityOrigin() const;
 
-        void repaint();
-        void paint(GraphicsContext*, const IntRect&);
+            bool supportsFullscreen() const;
 
-    private:
+            bool pipelineReset() const { return m_resetPipeline; }
 
-        MediaPlayerPrivate(MediaPlayer*);
-        static MediaPlayerPrivateInterface* create(MediaPlayer* player);
+        private:
+            MediaPlayerPrivate(MediaPlayer*);
+            static MediaPlayerPrivateInterface* create(MediaPlayer* player);
 
-        static void getSupportedTypes(HashSet<String>&);
-        static MediaPlayer::SupportsType supportsType(const String& type, const String& codecs);
-        static bool isAvailable() { return true; }
+            static void getSupportedTypes(HashSet<String>&);
+            static MediaPlayer::SupportsType supportsType(const String& type, const String& codecs);
+            static bool isAvailable();
 
-        void updateStates();
-        void cancelSeek();
-        void endPointTimerFired(Timer<MediaPlayerPrivate>*);
-        float maxTimeLoaded() const;
-        void startEndPointTimerIfNeeded();
+            void updateStates();
+            void cancelSeek();
+            void endPointTimerFired(Timer<MediaPlayerPrivate>*);
+            float maxTimeLoaded() const;
+            void startEndPointTimerIfNeeded();
 
-        void createGSTPlayBin(String url);
+            void createGSTPlayBin(String url);
+            bool changePipelineState(GstState state);
 
-    private:
-        MediaPlayer* m_player;
-        GstElement* m_playBin;
-        GstElement* m_videoSink;
-        GstElement* m_source;
-        float m_rate;
-        float m_endTime;
-        bool m_isEndReached;
-        double m_volume;
-        MediaPlayer::NetworkState m_networkState;
-        MediaPlayer::ReadyState m_readyState;
-        bool m_startedPlaying;
-        mutable bool m_isStreaming;
-        IntSize m_size;
-        bool m_visible;
-        cairo_surface_t* m_surface;
+        private:
+            MediaPlayer* m_player;
+            GstElement* m_playBin;
+            GstElement* m_videoSink;
+            GstElement* m_fpsSink;
+            GstElement* m_source;
+            GstClockTime m_seekTime;
+            bool m_changingRate;
+            float m_endTime;
+            bool m_isEndReached;
+            MediaPlayer::NetworkState m_networkState;
+            MediaPlayer::ReadyState m_readyState;
+            bool m_startedPlaying;
+            mutable bool m_isStreaming;
+            IntSize m_size;
+            GstBuffer* m_buffer;
+            GstStructure* m_mediaLocations;
+            gint m_mediaLocationCurrentIndex;
+            bool m_resetPipeline;
+            bool m_paused;
+            bool m_seeking;
+            float m_playbackRate;
+            bool m_errorOccured;
+            guint m_volumeIdleId;
+            gfloat m_mediaDuration;
     };
 }
 

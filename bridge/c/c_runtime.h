@@ -28,8 +28,8 @@
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
 
+#include "Bridge.h"
 #include "npruntime_internal.h"
-#include "runtime.h"
 
 namespace JSC {
 namespace Bindings {
@@ -38,8 +38,8 @@ class CField : public Field {
 public:
     CField(NPIdentifier ident) : _fieldIdentifier(ident) { }
 
-    virtual JSValuePtr valueFromInstance(ExecState*, const Instance*) const;
-    virtual void setValueToInstance(ExecState*, const Instance*, JSValuePtr) const;
+    virtual JSValue valueFromInstance(ExecState*, const Instance*) const;
+    virtual void setValueToInstance(ExecState*, const Instance*, JSValue) const;
 
     NPIdentifier identifier() const { return _fieldIdentifier; }
 

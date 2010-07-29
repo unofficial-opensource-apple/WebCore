@@ -22,11 +22,9 @@ module events {
 
     // Introduced in DOM Level 2:
     interface [
-        GenerateConstructor,
+        CustomToJS,
         NoStaticTables,
-        Polymorphic,
-        InterfaceUUID=D17495FA-ACAD-4d27-9362-E19E057B189D,
-        ImplementationUUID=CFDCDDB2-5B3F-412d-BDA4-80B23C721549
+        Polymorphic
     ] Event {
 
         // DOM PhaseType
@@ -34,7 +32,7 @@ module events {
         const unsigned short AT_TARGET           = 2;
         const unsigned short BUBBLING_PHASE      = 3;
 
-#if !defined(LANGUAGE_OBJECTIVE_C)
+#if !defined(LANGUAGE_OBJECTIVE_C) || !LANGUAGE_OBJECTIVE_C
         // Reverse-engineered from Netscape
         const unsigned short MOUSEDOWN           = 1;
         const unsigned short MOUSEUP             = 2;
@@ -60,9 +58,8 @@ module events {
         readonly attribute unsigned short   eventPhase;
         readonly attribute boolean          bubbles;
         readonly attribute boolean          cancelable;
-#if !defined(LANGUAGE_COM)
         readonly attribute DOMTimeStamp     timeStamp;
-#endif
+
         void               stopPropagation();
         void               preventDefault();
         [OldStyleObjC] void initEvent(in DOMString eventTypeArg, 
@@ -74,7 +71,7 @@ module events {
                  attribute boolean          returnValue;
                  attribute boolean          cancelBubble;
 
-#if defined(LANGUAGE_JAVASCRIPT)
+#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
         readonly attribute [Custom] Clipboard        clipboardData;
 #endif
 

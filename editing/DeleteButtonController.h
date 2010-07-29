@@ -34,9 +34,9 @@ class DeleteButton;
 class Frame;
 class HTMLElement;
 class RenderObject;
-class Selection;
+class VisibleSelection;
 
-class DeleteButtonController {
+class DeleteButtonController : public Noncopyable {
 public:
     DeleteButtonController(Frame*);
 
@@ -45,7 +45,7 @@ public:
     HTMLElement* target() const { return m_target.get(); }
     HTMLElement* containerElement() const { return m_containerElement.get(); }
 
-    void respondToChangedSelection(const Selection& oldSelection);
+    void respondToChangedSelection(const VisibleSelection& oldSelection);
 
     void show(HTMLElement*);
     void hide();

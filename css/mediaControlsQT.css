@@ -1,5 +1,8 @@
 /*
+ * QtWebKit specific overrides for HTML5 media elements.
+ *
  * Copyright (C) 2009 Apple Inc.  All rights reserved.
+ * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -22,112 +25,114 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-/* alternate media controls */
+ /* QtWebKit media controls. Extends mediaControls.css */
 
 audio {
-    width: 200px;
-    height: 25px;
+    height: 34px;
+    width: 400px;
 }
 
 audio::-webkit-media-controls-panel, video::-webkit-media-controls-panel {
+    display: -webkit-box;
+    -webkit-box-orient: horizontal;
+    -webkit-box-align: end;
     -webkit-user-select: none;
     position: absolute;
     bottom: 0;
     width: 100%;
-    height: 100%;
     z-index: 0;
+    overflow: hidden;
+    height: 100%;
+    text-align: right;
 }
 
 video:-webkit-full-page-media::-webkit-media-controls-panel {
-    bottom: -16px;
+	display: none;
 }
 
 audio::-webkit-media-controls-mute-button, video::-webkit-media-controls-mute-button {
-    -webkit-appearance: media-mute-button;
-    position: absolute;
-    top: auto;
-    bottom: 0;
-    right: 0;
     left: auto;
-    width: 30px;
-    height: 25px;
+    right: 5px;
+    width: 12px;
+    height: 12px;
+    padding: 6px;
+    margin: 5px 5px 5px 3px;
 }
 
 audio::-webkit-media-controls-play-button, video::-webkit-media-controls-play-button {
-    -webkit-appearance: media-play-button;
-    position: absolute;
-    top: auto;
-    bottom: 0;
-    left: 0px;
-    width: 30px;
-    height: 25px;
+    left: 5px;
+    width: 9px;
+    height: 12px;
+    padding: 6px 12px 6px 11px;
+    margin: 5px 3px 5px 5px;
 }
 
 audio::-webkit-media-controls-timeline-container, video::-webkit-media-controls-timeline-container {
-    -webkit-appearance: media-timeline-container;
-    -webkit-user-select: none;
-    position: absolute;
-    top: auto;
-    bottom: 0;
-    left: 30px;
-    right: 30px;
-    height: 25px;
+    height: 34px;
 }
 
 audio::-webkit-media-controls-current-time-display, video::-webkit-media-controls-current-time-display {
-    -webkit-appearance: media-current-time-display;
-    -webkit-user-select: none;
-    display: inline-block;
-    position: absolute;
-    cursor: default;
-    font: -webkit-small-control;
-    font-size: .09em;
-    text-align: center;
-    overflow: hidden;
-    line-height: 13px;
-    top: auto;
-    bottom: 6px;
-    left: 0px;
-    height: 13px;
-    width: 45px;
+    display: none;
 }
 
 audio::-webkit-media-controls-time-remaining-display, video::-webkit-media-controls-time-remaining-display {
-    -webkit-appearance: media-time-remaining-display;
-    -webkit-user-select: none;
-    display: inline-block;
-    position: absolute;
-    cursor: default;
-    font: -webkit-small-control;
-    font-size: .09em;
-    text-align: center;
-    overflow: hidden;
-    line-height: 13px;
-    top: auto;
-    bottom: 6px;
-    right: 0px;
-    height: 13px;
-    width: 45px;
+    display: none;
 }
 
 audio::-webkit-media-controls-timeline, video::-webkit-media-controls-timeline {
-    -webkit-appearance: media-slider;
-    position: absolute;
-    top: auto;
-    bottom: 6px;
-    left: 45px;
-    right: 45px;
-    height: 13px;
+    left: 42px;
+    right: 34px;
+    height: 12px;
+    padding: 6px 8px;
+    margin: 5px 0px;
+}
+
+audio::-webkit-media-controls-volume-slider-container, video::-webkit-media-controls-volume-slider-container {
+    display: none;
+}
+
+audio::-webkit-media-controls-volume-slider, video::-webkit-media-controls-volume-slider {
+    display: none;
 }
 
 audio::-webkit-media-controls-seek-back-button, video::-webkit-media-controls-seek-back-button {
+    /* Since MediaControlElements are always created with a renderer we have to hide
+       the controls we don't use, so they don't mess up activation and event handling */
+    left: 0px;
+    top: 0px;
+    width: 0px;
+    height: 0px;
+
     display: none;
 }
 
 audio::-webkit-media-controls-seek-forward-button, video::-webkit-media-controls-seek-forward-button {
+    /* Since MediaControlElements are always created with a renderer we have to hide
+       the controls we don't use, so they don't mess up activation and event handling */
+    left: 0px;
+    top: 0px;
+    width: 0px;
+    height: 0px;
+
     display: none;
 }
 
 audio::-webkit-media-controls-fullscreen-button, video::-webkit-media-controls-fullscreen-button {
+    /* Since MediaControlElements are always created with a renderer we have to hide
+       the controls we don't use, so they don't mess up activation and event handling */
+    left: 0px;
+    top: 0px;
+    width: 0px;
+    height: 0px;
+
     display: none;
 }
+
+audio::-webkit-media-controls-rewind-button, video::-webkit-media-controls-rewind-button {
+    display: none;
+}
+
+audio::-webkit-media-controls-return-to-realtime-button, video::-webkit-media-controls-return-to-realtime-button {
+    display: none;
+}
+

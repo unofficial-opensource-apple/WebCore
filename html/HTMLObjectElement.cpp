@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
  *
  * This library is free software; you can redistribute it and/or
@@ -32,20 +32,21 @@
 #include "HTMLFormElement.h"
 #include "HTMLImageLoader.h"
 #include "HTMLNames.h"
+#include "ScriptEventListener.h"
 #include "MIMETypeRegistry.h"
+#include "MappedAttribute.h"
+#include "RenderEmbeddedObject.h"
 #include "RenderImage.h"
-#include "RenderPartObject.h"
 #include "RenderWidget.h"
 #include "ScriptController.h"
 #include "Text.h"
-
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLObjectElement::HTMLObjectElement(const QualifiedName& tagName, Document* doc, bool createdByParser) 
-    : HTMLPlugInImageElement(tagName, doc)
+inline HTMLObjectElement::HTMLObjectElement(const QualifiedName& tagName, Document* document, bool createdByParser) 
+    : HTMLPlugInImageElement(tagName, document)
     , m_docNamedItem(true)
     , m_needWidgetUpdate(!createdByParser)
     , m_useFallbackContent(false)
@@ -53,16 +54,17 @@ HTMLObjectElement::HTMLObjectElement(const QualifiedName& tagName, Document* doc
     ASSERT(hasTagName(objectTag));
 }
 
-HTMLObjectElement::~HTMLObjectElement()
+PassRefPtr<HTMLObjectElement> HTMLObjectElement::create(const QualifiedName& tagName, Document* document, bool createdByParser)
 {
+    return adoptRef(new HTMLObjectElement(tagName, document, createdByParser));
 }
 
 RenderWidget* HTMLObjectElement::renderWidgetForJSBindings() const
 {
-    RenderWidget* renderWidget = (renderer() && renderer()->isWidget()) ? static_cast<RenderWidget*>(renderer()) : 0;
+    RenderWidget* renderWidget = (renderer() && renderer()->isWidget()) ? toRenderWidget(renderer()) : 0;
     if (renderWidget && !renderWidget->widget()) {
         document()->updateLayoutIgnorePendingStylesheets();
-        renderWidget = (renderer() && renderer()->isWidget()) ? static_cast<RenderWidget*>(renderer()) : 0;
+        renderWidget = (renderer() && renderer()->isWidget()) ? toRenderWidget(renderer()) : 0;
     }
     return renderWidget;
 }
@@ -81,7 +83,7 @@ void HTMLObjectElement::parseMappedAttribute(MappedAttribute *attr)
         if (!isImageType() && m_imageLoader)
           m_imageLoader.clear();
     } else if (attr->name() == dataAttr) {
-        m_url = parseURL(val);
+        m_url = deprecatedParseURL(val);
         if (renderer())
           m_needWidgetUpdate = true;
         if (renderer() && isImageType()) {
@@ -93,9 +95,11 @@ void HTMLObjectElement::parseMappedAttribute(MappedAttribute *attr)
         m_classId = val;
         if (renderer())
           m_needWidgetUpdate = true;
-    } else if (attr->name() == onloadAttr) {
-        setInlineEventListenerForTypeAndAttribute(eventNames().loadEvent, attr);
-    } else if (attr->name() == nameAttr) {
+    } else if (attr->name() == onloadAttr)
+        setAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(this, attr));
+    else if (attr->name() == onbeforeloadAttr)
+        setAttributeEventListener(eventNames().beforeloadEvent, createAttributeEventListener(this, attr));
+    else if (attr->name() == nameAttr) {
         const AtomicString& newName = attr->value();
         if (isDocNamedItem() && inDocument() && document()->isHTMLDocument()) {
             HTMLDocument* document = static_cast<HTMLDocument*>(this->document());
@@ -103,7 +107,7 @@ void HTMLObjectElement::parseMappedAttribute(MappedAttribute *attr)
             document->addNamedItem(newName);
         }
         m_name = newName;
-    } else if (attr->name() == idAttr) {
+    } else if (attr->name() == idAttributeName()) {
         const AtomicString& newId = attr->value();
         if (isDocNamedItem() && inDocument() && document()->isHTMLDocument()) {
             HTMLDocument* document = static_cast<HTMLDocument*>(this->document());
@@ -123,7 +127,11 @@ bool HTMLObjectElement::rendererIsNeeded(RenderStyle* style)
     if (!frame)
         return false;
     
-    return HTMLPlugInElement::rendererIsNeeded(style);
+    // Temporary Workaround for Gears plugin - see bug 24215 for details and bug 24346 to track removal.
+    // Gears expects the plugin to be instantiated even if display:none is set
+    // for the object element.
+    bool isGearsPlugin = equalIgnoringCase(getAttribute(typeAttr), "application/x-googlegears");
+    return isGearsPlugin || HTMLPlugInElement::rendererIsNeeded(style);
 }
 
 RenderObject *HTMLObjectElement::createRenderer(RenderArena* arena, RenderStyle* style)
@@ -132,7 +140,7 @@ RenderObject *HTMLObjectElement::createRenderer(RenderArena* arena, RenderStyle*
         return RenderObject::createObject(this, style);
     if (isImageType())
         return new (arena) RenderImage(this);
-    return new (arena) RenderPartObject(this);
+    return new (arena) RenderEmbeddedObject(this);
 }
 
 void HTMLObjectElement::attach()
@@ -153,15 +161,15 @@ void HTMLObjectElement::attach()
             return;
 
         if (renderer())
-            static_cast<RenderImage*>(renderer())->setCachedImage(m_imageLoader->image());
+            toRenderImage(renderer())->setCachedImage(m_imageLoader->image());
     }
 }
 
 void HTMLObjectElement::updateWidget()
 {
-    document()->updateRendering();
+    document()->updateStyleIfNeeded();
     if (m_needWidgetUpdate && renderer() && !m_useFallbackContent && !isImageType())
-        static_cast<RenderPartObject*>(renderer())->updateWidget(true);
+        toRenderEmbeddedObject(renderer())->updateWidget(true);
 }
 
 void HTMLObjectElement::finishParsingChildren()
@@ -170,7 +178,7 @@ void HTMLObjectElement::finishParsingChildren()
     if (!m_useFallbackContent) {
         m_needWidgetUpdate = true;
         if (inDocument())
-            setChanged();
+            setNeedsStyleRecalc();
     }
 }
 
@@ -218,7 +226,7 @@ void HTMLObjectElement::childrenChanged(bool changedByParser, Node* beforeChange
     updateDocNamedItem();
     if (inDocument() && !m_useFallbackContent) {
         m_needWidgetUpdate = true;
-        setChanged();
+        setNeedsStyleRecalc();
     }
     HTMLPlugInElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
 }
@@ -292,66 +300,6 @@ void HTMLObjectElement::updateDocNamedItem()
     m_docNamedItem = isNamedItem;
 }
 
-String HTMLObjectElement::code() const
-{
-    return getAttribute(codeAttr);
-}
-
-void HTMLObjectElement::setCode(const String& value)
-{
-    setAttribute(codeAttr, value);
-}
-
-String HTMLObjectElement::archive() const
-{
-    return getAttribute(archiveAttr);
-}
-
-void HTMLObjectElement::setArchive(const String& value)
-{
-    setAttribute(archiveAttr, value);
-}
-
-String HTMLObjectElement::border() const
-{
-    return getAttribute(borderAttr);
-}
-
-void HTMLObjectElement::setBorder(const String& value)
-{
-    setAttribute(borderAttr, value);
-}
-
-String HTMLObjectElement::codeBase() const
-{
-    return getAttribute(codebaseAttr);
-}
-
-void HTMLObjectElement::setCodeBase(const String& value)
-{
-    setAttribute(codebaseAttr, value);
-}
-
-String HTMLObjectElement::codeType() const
-{
-    return getAttribute(codetypeAttr);
-}
-
-void HTMLObjectElement::setCodeType(const String& value)
-{
-    setAttribute(codetypeAttr, value);
-}
-
-KURL HTMLObjectElement::data() const
-{
-    return document()->completeURL(getAttribute(dataAttr));
-}
-
-void HTMLObjectElement::setData(const String& value)
-{
-    setAttribute(dataAttr, value);
-}
-
 bool HTMLObjectElement::declare() const
 {
     return !getAttribute(declareAttr).isNull();
@@ -372,36 +320,6 @@ void HTMLObjectElement::setHspace(int value)
     setAttribute(hspaceAttr, String::number(value));
 }
 
-String HTMLObjectElement::standby() const
-{
-    return getAttribute(standbyAttr);
-}
-
-void HTMLObjectElement::setStandby(const String& value)
-{
-    setAttribute(standbyAttr, value);
-}
-
-String HTMLObjectElement::type() const
-{
-    return getAttribute(typeAttr);
-}
-
-void HTMLObjectElement::setType(const String& value)
-{
-    setAttribute(typeAttr, value);
-}
-
-String HTMLObjectElement::useMap() const
-{
-    return getAttribute(usemapAttr);
-}
-
-void HTMLObjectElement::setUseMap(const String& value)
-{
-    setAttribute(usemapAttr, value);
-}
-
 int HTMLObjectElement::vspace() const
 {
     return getAttribute(vspaceAttr).toInt();
@@ -414,21 +332,19 @@ void HTMLObjectElement::setVspace(int value)
 
 bool HTMLObjectElement::containsJavaApplet() const
 {
-    if (MIMETypeRegistry::isJavaAppletMIMEType(type()))
+    if (MIMETypeRegistry::isJavaAppletMIMEType(getAttribute(typeAttr)))
         return true;
         
-    Node* child = firstChild();
-    while (child) {
-        if (child->isElementNode()) {
-            Element* e = static_cast<Element*>(child);
-            if (e->hasTagName(paramTag) && equalIgnoringCase(e->getAttribute(nameAttr), "type") && MIMETypeRegistry::isJavaAppletMIMEType(e->getAttribute(valueAttr).string()))
-                return true;
-            else if (e->hasTagName(objectTag) && static_cast<HTMLObjectElement*>(e)->containsJavaApplet())
-                return true;
-            else if (e->hasTagName(appletTag))
-                return true;
-        }
-        child = child->nextSibling();
+    for (Element* child = firstElementChild(); child; child = child->nextElementSibling()) {
+        if (child->hasTagName(paramTag)
+                && equalIgnoringCase(child->getAttribute(nameAttr), "type")
+                && MIMETypeRegistry::isJavaAppletMIMEType(child->getAttribute(valueAttr).string()))
+            return true;
+        if (child->hasTagName(objectTag)
+                && static_cast<HTMLObjectElement*>(child)->containsJavaApplet())
+            return true;
+        if (child->hasTagName(appletTag))
+            return true;
     }
     
     return false;
@@ -438,9 +354,13 @@ void HTMLObjectElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) con
 {
     HTMLPlugInImageElement::addSubresourceAttributeURLs(urls);
 
-    addSubresourceURL(urls, data());
-    if (useMap().startsWith("#"))
-        addSubresourceURL(urls, document()->completeURL(useMap()));
+    addSubresourceURL(urls, document()->completeURL(getAttribute(dataAttr)));
+
+    // FIXME: Passing a string that starts with "#" to the completeURL function does
+    // not seem like it would work. The image element has similar but not identical code.
+    const AtomicString& useMap = getAttribute(usemapAttr);
+    if (useMap.startsWith("#"))
+        addSubresourceURL(urls, document()->completeURL(useMap));
 }
 
 }

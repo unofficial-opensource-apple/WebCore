@@ -30,6 +30,7 @@
 #include "CachedResourceClientWalker.h"
 #include "DocLoader.h"
 #include "Frame.h"
+#include "FrameLoaderTypes.h"
 #include "FrameView.h"
 #include "Request.h"
 #include "Settings.h"
@@ -55,6 +56,7 @@ CachedImage::CachedImage(const String& url)
     : CachedResource(url, ImageResource)
     , m_image(0)
     , m_decodedDataDeletionTimer(this, &CachedImage::decodedDataDeletionTimerFired)
+    , m_httpStatusCodeErrorOccurred(false)
 {
     m_status = Unknown;
 }
@@ -63,6 +65,7 @@ CachedImage::CachedImage(Image* image)
     : CachedResource(String(), ImageResource)
     , m_image(image)
     , m_decodedDataDeletionTimer(this, &CachedImage::decodedDataDeletionTimerFired)
+    , m_httpStatusCodeErrorOccurred(false)
 {
     m_status = Cached;
     m_loading = false;
@@ -81,15 +84,13 @@ void CachedImage::decodedDataDeletionTimerFired(Timer<CachedImage>*)
 void CachedImage::load(DocLoader* docLoader)
 {
     if (!docLoader || docLoader->autoLoadImages())
-        CachedResource::load(docLoader, true, false, true);
+        CachedResource::load(docLoader, true, DoSecurityCheck, true);
     else
         m_loading = false;
 }
 
-void CachedImage::addClient(CachedResourceClient* c)
+void CachedImage::didAddClient(CachedResourceClient* c)
 {
-    CachedResource::addClient(c);
-
     if (m_decodedDataDeletionTimer.isActive())
         m_decodedDataDeletionTimer.stop();
     

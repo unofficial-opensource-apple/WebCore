@@ -36,27 +36,20 @@ namespace WebCore {
 
 void ScrollView::platformInit()
 {
-    m_widgetsThatPreventBlitting = 0;
 }
 
 void ScrollView::platformDestroy()
 {
 }
 
-void ScrollView::platformAddChild(Widget* child)
+void ScrollView::platformAddChild(Widget*)
 {
-    root()->m_widgetsThatPreventBlitting++;
-    if (parent())
-        parent()->platformAddChild(child);
 }
 
 void ScrollView::platformRemoveChild(Widget* child)
 {
-    ASSERT(root()->m_widgetsThatPreventBlitting);
-    root()->m_widgetsThatPreventBlitting--;
     child->hide();
 }
 
 }
-
 // vim: ts=4 sw=4 et

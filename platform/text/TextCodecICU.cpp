@@ -34,10 +34,10 @@
 #include <unicode/ucnv.h>
 #include <unicode/ucnv_cb.h>
 #include <wtf/Assertions.h>
+#include <wtf/PassOwnPtr.h>
 #include <wtf/StringExtras.h>
 #include <wtf/Threading.h>
 
-using std::auto_ptr;
 using std::min;
 
 namespace WebCore {
@@ -65,9 +65,9 @@ static UConverter*& cachedConverterICU()
     return threadGlobalData().cachedConverterICU().converter;
 }
 
-static auto_ptr<TextCodec> newTextCodecICU(const TextEncoding& encoding, const void*)
+static PassOwnPtr<TextCodec> newTextCodecICU(const TextEncoding& encoding, const void*)
 {
-    return auto_ptr<TextCodec>(new TextCodecICU(encoding));
+    return new TextCodecICU(encoding);
 }
 
 void TextCodecICU::registerBaseEncodingNames(EncodingNameRegistrar registrar)
@@ -97,7 +97,7 @@ void TextCodecICU::registerExtendedEncodingNames(EncodingNameRegistrar registrar
         const char* name = ucnv_getAvailableName(i);
         UErrorCode error = U_ZERO_ERROR;
         // Try MIME before trying IANA to pick up commonly used names like
-        // 'EUC-JP' instead of horrendeously long names like 
+        // 'EUC-JP' instead of horrendously long names like 
         // 'Extended_UNIX_Code_Packed_Format_for_Japanese'. 
         const char* standardName = ucnv_getStandardName(name, "MIME", &error);
         if (!U_SUCCESS(error) || !standardName) {

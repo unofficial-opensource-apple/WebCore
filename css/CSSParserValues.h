@@ -60,7 +60,7 @@ struct CSSParserValue {
     PassRefPtr<CSSValue> createCSSValue();
 };
 
-class CSSParserValueList {
+class CSSParserValueList : public FastAllocBase {
 public:
     CSSParserValueList()
         : m_current(0)
@@ -83,12 +83,12 @@ public:
     bool containsVariables() const { return m_variablesCount; }
 
 private:
-    Vector<CSSParserValue, 16> m_values;
+    Vector<CSSParserValue, 4> m_values;
     unsigned m_current;
     unsigned m_variablesCount;
 };
 
-struct CSSParserFunction {
+struct CSSParserFunction : FastAllocBase {
     CSSParserString name;
     CSSParserValueList* args;
 

@@ -27,6 +27,7 @@
 #include "CachedResourceClient.h"
 #include "CachedResourceHandle.h"
 #include "NamedMappedAttrMap.h"
+#include "MappedAttributeEntry.h"
 #include "SegmentedString.h"
 #include "Timer.h"
 #include "Tokenizer.h"
@@ -137,17 +138,17 @@ class HTMLTokenizer : public Tokenizer, public CachedResourceClient {
 public:
     HTMLTokenizer(HTMLDocument*, bool reportErrors);
     HTMLTokenizer(HTMLViewSourceDocument*);
-    HTMLTokenizer(DocumentFragment*);
+    HTMLTokenizer(DocumentFragment*, FragmentScriptingPermission = FragmentScriptingAllowed);
     virtual ~HTMLTokenizer();
 
-    virtual bool write(const SegmentedString&, bool appendData);
+    virtual void write(const SegmentedString&, bool appendData);
     virtual void finish();
+    virtual bool forceSynchronous() const { return m_state.forceSynchronous(); }
     virtual void setForceSynchronous(bool force);
     virtual bool isWaitingForScripts() const;
     virtual void stopParsing();
     virtual bool processingData() const;
     virtual int executingScript() const { return m_executingScript; }
-    virtual void parsePending();
 
     virtual int lineNumber() const { return m_lineNumber; }
     virtual int columnNumber() const { return 1; }
@@ -157,6 +158,7 @@ public:
     virtual void executeScriptsWaitingForStylesheets();
     
     virtual bool isHTMLTokenizer() const { return true; }
+    virtual HTMLTokenizer* asHTMLTokenizer() { return this; }
     HTMLParser* htmlParser() const { return m_parser.get(); }
 
 private:
@@ -176,7 +178,7 @@ private:
     State parseDoctype(SegmentedString&, State);
     State parseServer(SegmentedString&, State);
     State parseText(SegmentedString&, State);
-    State parseSpecial(SegmentedString&, State);
+    State parseNonHTMLText(SegmentedString&, State);
     State parseTag(SegmentedString&, State);
     State parseEntity(SegmentedString&, UChar*& dest, State, unsigned& cBufferPos, bool start, bool parsingTag);
     State parseProcessingInstruction(SegmentedString&, State);
@@ -208,6 +210,10 @@ private:
     // from CachedResourceClient
     void notifyFinished(CachedResource*);
 
+    void executeExternalScriptsIfReady();
+    void executeExternalScriptsTimerFired(Timer<HTMLTokenizer>*);
+    bool continueExecutingExternalScripts(double startTime);
+
     // Internal buffers
     ///////////////////
     UChar* m_buffer;
@@ -215,6 +221,10 @@ private:
     UChar* m_dest;
 
     Token m_currentToken;
+
+    // This buffer holds the raw characters we've seen between the beginning of
+    // the attribute name and the first character of the attribute value.
+    Vector<UChar, 32> m_rawAttributeBeforeValue;
 
     // Tokenizer flags
     //////////////////
@@ -291,7 +301,7 @@ private:
         bool forceSynchronous() const { return testBit(ForceSynchronous); }
         void setForceSynchronous(bool v) { setBit(ForceSynchronous, v); }
 
-        bool inAnySpecial() const { return m_bits & (InScript | InStyle | InXmp | InTextArea | InTitle | InIFrame); }
+        bool inAnyNonHTMLText() const { return m_bits & (InScript | InStyle | InXmp | InTextArea | InTitle | InIFrame); }
         bool hasTagState() const { return m_bits & TagMask; }
         bool hasEntityState() const { return m_bits & EntityMask; }
 
@@ -400,6 +410,9 @@ private:
     // The timer for continued processing.
     Timer<HTMLTokenizer> m_timer;
 
+    // The timer for continued executing external scripts.
+    Timer<HTMLTokenizer> m_externalScriptsTimer;
+
 // This buffer can hold arbitrarily long user-defined attribute names, such as in EMBED tags.
 // So any fixed number might be too small, but rather than rewriting all usage of this buffer
 // we'll just make it large enough to handle all imaginable cases.
@@ -412,11 +425,12 @@ private:
     OwnPtr<HTMLParser> m_parser;
     bool m_inWrite;
     bool m_fragment;
+    FragmentScriptingPermission m_scriptingPermission;
 
     OwnPtr<PreloadScanner> m_preloadScanner;
 };
 
-void parseHTMLDocumentFragment(const String&, DocumentFragment*);
+void parseHTMLDocumentFragment(const String&, DocumentFragment*, FragmentScriptingPermission = FragmentScriptingAllowed);
 
 UChar decodeNamedEntity(const char*);
 

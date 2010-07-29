@@ -25,7 +25,6 @@
 #ifndef NodeIterator_h
 #define NodeIterator_h
 
-#include "JSDOMBinding.h"
 #include "NodeFilter.h"
 #include "Traversal.h"
 #include <wtf/PassRefPtr.h>
@@ -53,9 +52,10 @@ namespace WebCore {
         // This function is called before any node is removed from the document tree.
         void nodeWillBeRemoved(Node*);
 
-        // For non-JS bindings. Silently ignores the JavaScript exception if any.
-        PassRefPtr<Node> nextNode(ExceptionCode& ec) { return nextNode(scriptStateFromNode(referenceNode()), ec); }
-        PassRefPtr<Node> previousNode(ExceptionCode& ec) { return previousNode(scriptStateFromNode(referenceNode()), ec); }
+        // Do not call these functions. They are just scaffolding to support the Objective-C bindings.
+        // They operate in the main thread normal world, and they swallow JS exceptions.
+        PassRefPtr<Node> nextNode(ExceptionCode& ec) { return nextNode(scriptStateFromNode(mainThreadNormalWorld(), referenceNode()), ec); }
+        PassRefPtr<Node> previousNode(ExceptionCode& ec) { return previousNode(scriptStateFromNode(mainThreadNormalWorld(), referenceNode()), ec); }
 
     private:
         NodeIterator(PassRefPtr<Node>, unsigned whatToShow, PassRefPtr<NodeFilter>, bool expandEntityReferences);

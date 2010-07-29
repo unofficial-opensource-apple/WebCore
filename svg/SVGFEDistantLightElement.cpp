@@ -19,7 +19,7 @@
 
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEDistantLightElement.h"
 #include "SVGDistantLightSource.h"
 
@@ -34,9 +34,9 @@ SVGFEDistantLightElement::~SVGFEDistantLightElement()
 {
 }
 
-LightSource* SVGFEDistantLightElement::lightSource() const
+PassRefPtr<LightSource> SVGFEDistantLightElement::lightSource() const
 {
-    return new DistantLightSource(azimuth(), elevation());
+    return DistantLightSource::create(azimuth(), elevation());
 }
 
 }

@@ -31,6 +31,7 @@
 #include "FormData.h"
 #include "KURL.h"
 #include "HTTPHeaderMap.h"
+#include "loader.h" // for Loader::Priority
 
 #include <memory>
 #include <wtf/OwnPtr.h>
@@ -50,8 +51,21 @@ namespace WebCore {
     struct CrossThreadResourceRequestData;
 
     // Do not use this type directly.  Use ResourceRequest instead.
-    class ResourceRequestBase {
+    class ResourceRequestBase : public FastAllocBase {
     public:
+        // The type of this ResourceRequest, based on how the resource will be used.
+        enum TargetType {
+            TargetIsMainFrame,
+            TargetIsSubframe,
+            TargetIsSubresource,  // Resource is a generic subresource.  (Generally a specific type should be specified)
+            TargetIsStyleSheet,
+            TargetIsScript,
+            TargetIsFontResource,
+            TargetIsImage,
+            TargetIsObject,
+            TargetIsMedia
+        };
+
         static std::auto_ptr<ResourceRequest> adopt(std::auto_ptr<CrossThreadResourceRequestData>);
 
         // Gets a copy of the data suitable for passing to another thread.
@@ -63,21 +77,25 @@ namespace WebCore {
         const KURL& url() const;
         void setURL(const KURL& url);
 
+        void removeCredentials();
+
         ResourceRequestCachePolicy cachePolicy() const;
         void setCachePolicy(ResourceRequestCachePolicy cachePolicy);
         
         double timeoutInterval() const;
         void setTimeoutInterval(double timeoutInterval);
         
-        const KURL& mainDocumentURL() const;
-        void setMainDocumentURL(const KURL& mainDocumentURL);
+        const KURL& firstPartyForCookies() const;
+        void setFirstPartyForCookies(const KURL& firstPartyForCookies);
         
         const String& httpMethod() const;
         void setHTTPMethod(const String& httpMethod);
         
         const HTTPHeaderMap& httpHeaderFields() const;
         String httpHeaderField(const AtomicString& name) const;
+        String httpHeaderField(const char* name) const;
         void setHTTPHeaderField(const AtomicString& name, const String& value);
+        void setHTTPHeaderField(const char* name, const String& value);
         void addHTTPHeaderField(const AtomicString& name, const String& value);
         void addHTTPHeaderFields(const HTTPHeaderMap& headerFields);
         
@@ -86,11 +104,11 @@ namespace WebCore {
         
         String httpReferrer() const { return httpHeaderField("Referer"); }
         void setHTTPReferrer(const String& httpReferrer) { setHTTPHeaderField("Referer", httpReferrer); }
-        void clearHTTPReferrer() { m_httpHeaderFields.remove("Referer"); }
+        void clearHTTPReferrer();
         
         String httpOrigin() const { return httpHeaderField("Origin"); }
         void setHTTPOrigin(const String& httpOrigin) { setHTTPHeaderField("Origin", httpOrigin); }
-        void clearHTTPOrigin() { m_httpHeaderFields.remove("Origin"); }
+        void clearHTTPOrigin();
 
         String httpUserAgent() const { return httpHeaderField("User-Agent"); }
         void setHTTPUserAgent(const String& httpUserAgent) { setHTTPHeaderField("User-Agent", httpUserAgent); }
@@ -103,16 +121,31 @@ namespace WebCore {
         FormData* httpBody() const;
         void setHTTPBody(PassRefPtr<FormData> httpBody);
         
-        bool allowHTTPCookies() const;
-        void setAllowHTTPCookies(bool allowHTTPCookies);
+        bool allowCookies() const;
+        void setAllowCookies(bool allowCookies);
 
         bool isConditional() const;
+
+        // Whether the associated ResourceHandleClient needs to be notified of
+        // upload progress made for that resource.
+        bool reportUploadProgress() const { return m_reportUploadProgress; }
+        void setReportUploadProgress(bool reportUploadProgress) { m_reportUploadProgress = reportUploadProgress; }
         
+        inline void setPriority(Loader::Priority priority) { m_priority = priority; }
+        inline Loader::Priority priority() const { return m_priority; }
+
+        // What this request is for.
+        TargetType targetType() const { return m_targetType; }
+        void setTargetType(TargetType type) { m_targetType = type; }
+
     protected:
         // Used when ResourceRequest is initialized from a platform representation of the request
         ResourceRequestBase()
             : m_resourceRequestUpdated(false)
             , m_platformRequestUpdated(true)
+            , m_reportUploadProgress(false)
+            , m_priority(Loader::Low)
+            , m_targetType(TargetIsSubresource)
         {
         }
 
@@ -121,9 +154,12 @@ namespace WebCore {
             , m_cachePolicy(policy)
             , m_timeoutInterval(unspecifiedTimeoutInterval)
             , m_httpMethod("GET")
-            , m_allowHTTPCookies(true)
+            , m_allowCookies(true)
             , m_resourceRequestUpdated(true)
             , m_platformRequestUpdated(false)
+            , m_reportUploadProgress(false)
+            , m_priority(Loader::Low)
+            , m_targetType(TargetIsSubresource)
         {
         }
 
@@ -134,14 +170,17 @@ namespace WebCore {
 
         ResourceRequestCachePolicy m_cachePolicy;
         double m_timeoutInterval;
-        KURL m_mainDocumentURL;
+        KURL m_firstPartyForCookies;
         String m_httpMethod;
         HTTPHeaderMap m_httpHeaderFields;
         Vector<String> m_responseContentDispositionEncodingFallbackArray;
         RefPtr<FormData> m_httpBody;
-        bool m_allowHTTPCookies;
+        bool m_allowCookies;
         mutable bool m_resourceRequestUpdated;
         mutable bool m_platformRequestUpdated;
+        bool m_reportUploadProgress;
+        Loader::Priority m_priority;
+        TargetType m_targetType;
 
     private:
         const ResourceRequest& asResourceRequest() const;
@@ -152,18 +191,19 @@ namespace WebCore {
     bool operator==(const ResourceRequestBase&, const ResourceRequestBase&);
     inline bool operator!=(ResourceRequestBase& a, const ResourceRequestBase& b) { return !(a == b); }
 
-    struct CrossThreadResourceRequestData {
+    struct CrossThreadResourceRequestData : Noncopyable {
         KURL m_url;
 
         ResourceRequestCachePolicy m_cachePolicy;
         double m_timeoutInterval;
-        KURL m_mainDocumentURL;
+        KURL m_firstPartyForCookies;
 
         String m_httpMethod;
         OwnPtr<CrossThreadHTTPHeaderMapData> m_httpHeaders;
         Vector<String> m_responseContentDispositionEncodingFallbackArray;
         RefPtr<FormData> m_httpBody;
-        bool m_allowHTTPCookies;
+        bool m_allowCookies;
+        Loader::Priority m_priority;
     };
     
     unsigned initializeMaximumHTTPConnectionCountPerHost();

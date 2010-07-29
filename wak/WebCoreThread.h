@@ -2,14 +2,13 @@
  *  WebCoreThread.h
  *  WebCore
  *
- *  Copyright (C) 2006, 2007, Apple Inc.  All rights reserved.
- *
+ *  Copyright (C) 2006, 2007, 2008, 2009 Apple Inc.  All rights reserved.
  */
-
-#import <GraphicsServices/GSEvent.h>
 
 #ifndef WebCoreThread_h
 #define WebCoreThread_h
+
+#import <CoreGraphics/CoreGraphics.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -46,6 +45,7 @@ bool WebThreadNotCurrent(void);
 // These are for <rdar://problem/6817341> Many apps crashing calling -[UIFieldEditor text] in secondary thread
 // Don't use them to solve any random problems you might have.
 void WebThreadLockFromAnyThread();
+void WebThreadLockFromAnyThreadNoLog();
 void WebThreadUnlockFromAnyThread();
 
 static inline bool WebThreadShouldYield(void) { return webThreadShouldYield; }

@@ -49,9 +49,7 @@ namespace WebCore {
 #if ENABLE(XPATH)
     class XPathNSResolver;
 #endif
-#if ENABLE(TOUCH_EVENTS)
     class Touch;
-#endif
 }
 
 @interface DOMNodeFilter : DOMObject <DOMNodeFilter>
@@ -66,7 +64,6 @@ namespace WebCore {
 
 // Create an NSMapTable mapping from pointers to ObjC objects held with zeroing weak references.
 NSMapTable* createWrapperCache();
-NSMapTable* createWrapperCacheWithIntegerKeys(); // Same, but from integers to ObjC objects.
 
 id createDOMWrapper(JSC::JSObject*, PassRefPtr<JSC::Bindings::RootObject> origin, PassRefPtr<JSC::Bindings::RootObject> current);
 
@@ -93,3 +90,13 @@ WebCore::NodeFilter* core(DOMNodeFilter *);
 DOMNativeXPathNSResolver *kit(WebCore::XPathNSResolver*);
 WebCore::XPathNSResolver* core(DOMNativeXPathNSResolver *);
 #endif // ENABLE(XPATH)
+
+inline NSTimeInterval kit(double msSinceEpoch)
+{
+    return msSinceEpoch / 1000.0 - NSTimeIntervalSince1970;
+}
+
+inline double core(NSTimeInterval sec)
+{
+    return sec * 1000.0 + NSTimeIntervalSince1970;
+}

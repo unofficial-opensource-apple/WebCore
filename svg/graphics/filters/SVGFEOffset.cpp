@@ -2,6 +2,7 @@
     Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005 Rob Buis <buis@kde.org>
                   2005 Eric Seidel <eric@webkit.org>
+                  2009 Dirk Schulze <krit@webkit.org>
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -21,8 +22,11 @@
 
 #include "config.h"
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEOffset.h"
+
+#include "Filter.h"
+#include "GraphicsContext.h"
 #include "SVGRenderTreeAsText.h"
 
 namespace WebCore {
@@ -60,8 +64,34 @@ void FEOffset::setDy(float dy)
     m_dy = dy;
 }
 
-void FEOffset::apply()
+void FEOffset::apply(Filter* filter)
 {
+    m_in->apply(filter);
+    if (!m_in->resultImage())
+        return;
+
+    GraphicsContext* filterContext = getEffectContext();
+    if (!filterContext)
+        return;
+
+    setIsAlphaImage(m_in->isAlphaImage());
+
+    FloatRect sourceImageRect = filter->sourceImageRect();
+    sourceImageRect.scale(filter->filterResolution().width(), filter->filterResolution().height());
+
+    if (filter->effectBoundingBoxMode()) {
+        m_dx *= sourceImageRect.width();
+        m_dy *= sourceImageRect.height();
+    }
+    m_dx *= filter->filterResolution().width();
+    m_dy *= filter->filterResolution().height();
+
+    FloatRect dstRect = FloatRect(m_dx + m_in->scaledSubRegion().x() - scaledSubRegion().x(),
+                                  m_dy + m_in->scaledSubRegion().y() - scaledSubRegion().y(),
+                                  m_in->scaledSubRegion().width(),
+                                  m_in->scaledSubRegion().height());
+
+    filterContext->drawImage(m_in->resultImage()->image(), DeviceColorSpace, dstRect);
 }
 
 void FEOffset::dump()
@@ -78,4 +108,4 @@ TextStream& FEOffset::externalRepresentation(TextStream& ts) const
 
 } // namespace WebCore
 
-#endif // ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#endif // ENABLE(SVG) && ENABLE(FILTERS)

@@ -28,7 +28,9 @@
 #include "config.h"
 #include "OriginUsageRecord.h"
 
-#include "FileSystem.h"
+#if ENABLE(DATABASE)
+
+#include "SQLiteFileSystem.h"
 
 namespace WebCore {
 
@@ -42,10 +44,10 @@ void OriginUsageRecord::addDatabase(const String& identifier, const String& full
     ASSERT(!m_databaseMap.contains(identifier));
     ASSERT_ARG(identifier, identifier.impl()->refCount() == 1);
     ASSERT_ARG(fullPath, fullPath.impl()->refCount() == 1);
-    
+
     m_databaseMap.set(identifier, DatabaseEntry(fullPath));
     m_unknownSet.add(identifier);
-     
+
     m_cachedDiskUsageIsValid = false;
 }
 
@@ -79,17 +81,13 @@ unsigned long long OriginUsageRecord::diskUsage()
     for (; iUnknown != endUnknown; ++iUnknown) {
         const String& path = m_databaseMap.get(*iUnknown).filename;
         ASSERT(!path.isEmpty());
-                
-        long long size;
-        if (getFileSize(path, size))
-            m_databaseMap.set(*iUnknown, DatabaseEntry(path, size));
-        else {
-            // When we can't determine the file size, we'll just have to assume the file is missing/inaccessible.
-            m_databaseMap.set(*iUnknown, DatabaseEntry(path, 0));
-        }
+
+        // When we can't determine the file size, we'll just have to assume the file is missing/inaccessible.
+        long long size = SQLiteFileSystem::getDatabaseFileSize(path);
+        m_databaseMap.set(*iUnknown, DatabaseEntry(path, size));
     }
     m_unknownSet.clear();
-    
+
     // Recalculate the cached usage value.
     m_cachedDiskUsage = 0;
     HashMap<String, DatabaseEntry>::iterator iDatabase = m_databaseMap.begin();
@@ -100,5 +98,7 @@ unsigned long long OriginUsageRecord::diskUsage()
     m_cachedDiskUsageIsValid = true;
     return m_cachedDiskUsage;
 }
-    
+
 }
+
+#endif

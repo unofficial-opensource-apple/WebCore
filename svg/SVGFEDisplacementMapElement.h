@@ -20,7 +20,7 @@
 #ifndef SVGFEDisplacementMapElement_h
 #define SVGFEDisplacementMapElement_h
 
-#if ENABLE(SVG) && ENABLE(SVG_FILTERS)
+#if ENABLE(SVG) && ENABLE(FILTERS)
 #include "SVGFEDisplacementMap.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
 
@@ -34,17 +34,15 @@ namespace WebCore {
         static ChannelSelectorType stringToChannel(const String&);
         
         virtual void parseMappedAttribute(MappedAttribute*);
-        virtual SVGFilterEffect* filterEffect(SVGResourceFilter*) const;
-        bool build(FilterBuilder*);
+        virtual void synchronizeProperty(const QualifiedName&);
+        virtual bool build(SVGResourceFilter*);
         
     private:
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEDisplacementMapElement, SVGNames::feDisplacementMapTagString, SVGNames::inAttrString, String, In1, in1)
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEDisplacementMapElement, SVGNames::feDisplacementMapTagString, SVGNames::in2AttrString, String, In2, in2)
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEDisplacementMapElement, SVGNames::feDisplacementMapTagString, SVGNames::xChannelSelectorAttrString, int, XChannelSelector, xChannelSelector)
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEDisplacementMapElement, SVGNames::feDisplacementMapTagString, SVGNames::yChannelSelectorAttrString, int, YChannelSelector, yChannelSelector)
-        ANIMATED_PROPERTY_DECLARATIONS(SVGFEDisplacementMapElement, SVGNames::feDisplacementMapTagString, SVGNames::scaleAttrString, float, Scale, scale)
-
-        mutable RefPtr<FEDisplacementMap> m_filterEffect;
+        DECLARE_ANIMATED_PROPERTY(SVGFEDisplacementMapElement, SVGNames::inAttr, String, In1, in1)
+        DECLARE_ANIMATED_PROPERTY(SVGFEDisplacementMapElement, SVGNames::in2Attr, String, In2, in2)
+        DECLARE_ANIMATED_PROPERTY(SVGFEDisplacementMapElement, SVGNames::xChannelSelectorAttr, int, XChannelSelector, xChannelSelector)
+        DECLARE_ANIMATED_PROPERTY(SVGFEDisplacementMapElement, SVGNames::yChannelSelectorAttr, int, YChannelSelector, yChannelSelector)
+        DECLARE_ANIMATED_PROPERTY(SVGFEDisplacementMapElement, SVGNames::scaleAttr, float, Scale, scale)
     };
 
 } // namespace WebCore

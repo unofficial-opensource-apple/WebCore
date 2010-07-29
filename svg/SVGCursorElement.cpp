@@ -2,8 +2,6 @@
     Copyright (C) 2004, 2005, 2006, 2008 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
 
-    This file is part of the KDE project
-
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
     License as published by the Free Software Foundation; either
@@ -27,8 +25,9 @@
 
 #include "Attr.h"
 #include "Document.h"
-#include "SVGNames.h"
+#include "MappedAttribute.h"
 #include "SVGLength.h"
+#include "SVGNames.h"
 
 namespace WebCore {
 
@@ -37,8 +36,8 @@ SVGCursorElement::SVGCursorElement(const QualifiedName& tagName, Document* doc)
     , SVGTests()
     , SVGExternalResourcesRequired()
     , SVGURIReference()
-    , m_x(this, SVGNames::xAttr, LengthModeWidth)
-    , m_y(this, SVGNames::yAttr, LengthModeHeight)
+    , m_x(LengthModeWidth)
+    , m_y(LengthModeHeight)
 {
 }
 
@@ -91,8 +90,30 @@ void SVGCursorElement::svgAttributeChanged(const QualifiedName& attrName)
         HashSet<SVGElement*>::const_iterator end = m_clients.end();
 
         for (; it != end; ++it)
-            (*it)->setChanged();
+            (*it)->setNeedsStyleRecalc();
     }
+}
+
+void SVGCursorElement::synchronizeProperty(const QualifiedName& attrName)
+{
+    SVGElement::synchronizeProperty(attrName);
+
+    if (attrName == anyQName()) {
+        synchronizeX();
+        synchronizeY();
+        synchronizeExternalResourcesRequired();
+        synchronizeHref();
+        return;
+    }
+
+    if (attrName == SVGNames::xAttr)
+        synchronizeX();
+    else if (attrName == SVGNames::yAttr)
+        synchronizeY();
+    else if (SVGExternalResourcesRequired::isKnownAttribute(attrName))
+        synchronizeExternalResourcesRequired();
+    else if (SVGURIReference::isKnownAttribute(attrName))
+        synchronizeHref();
 }
 
 void SVGCursorElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) const

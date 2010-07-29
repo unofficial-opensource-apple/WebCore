@@ -1,7 +1,7 @@
 /*
  * This file is part of the theme implementation for form controls in WebCore.
  *
- * Copyright (C) 2007 Trolltech
+ * Copyright (C) 2009 Nokia Corporation and/or its subsidiary(-ies).
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,8 +19,8 @@
  * Boston, MA 02110-1301, USA.
  *
  */
-#ifndef RenderThemeQt_H
-#define RenderThemeQt_H
+#ifndef RenderThemeQt_h
+#define RenderThemeQt_h
 
 #include "RenderTheme.h"
 
@@ -35,12 +35,15 @@ namespace WebCore {
 
 class RenderStyle;
 class HTMLMediaElement;
+class ScrollbarThemeQt;
 
-class RenderThemeQt : public RenderTheme
-{
-public:
-    RenderThemeQt();
+class RenderThemeQt : public RenderTheme {
+private:
+    RenderThemeQt(Page* page);
     virtual ~RenderThemeQt();
+
+public:
+    static PassRefPtr<RenderTheme> create(Page*);
 
     virtual bool supportsHover(const RenderStyle*) const;
     virtual bool supportsFocusRing(const RenderStyle* style) const;
@@ -54,9 +57,6 @@ public:
     virtual bool supportsControlTints() const;
 
     virtual void adjustRepaintRect(const RenderObject* o, IntRect& r);
-
-    virtual bool isControlStyled(const RenderStyle*, const BorderData&,
-                                 const FillLayer&, const Color&) const;
 
     // The platform selection color.
     virtual Color platformActiveSelectionBackgroundColor() const;
@@ -75,6 +75,8 @@ public:
 #if ENABLE(VIDEO)
     virtual String extraMediaControlsStyleSheet();
 #endif
+
+    QStyle* qStyle() const;
 
 protected:
     virtual bool paintCheckbox(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r);
@@ -100,7 +102,10 @@ protected:
     virtual void adjustMenuListButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
 
     virtual bool paintSliderTrack(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+    virtual void adjustSliderTrackStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+
     virtual bool paintSliderThumb(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+    virtual void adjustSliderThumbStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
 
     virtual bool paintSearchField(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
     virtual void adjustSearchFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
@@ -128,14 +133,21 @@ private:
     void paintMediaBackground(QPainter* painter, const IntRect& r) const;
     QColor getMediaControlForegroundColor(RenderObject* o = 0) const;
 #endif
+    void computeSizeBasedOnStyle(RenderStyle* renderStyle) const;
 
 private:
     bool supportsFocus(ControlPart) const;
 
-    ControlPart applyTheme(QStyleOption&, RenderObject*) const;
+    ControlPart initializeCommonQStyleOptions(QStyleOption&, RenderObject*) const;
 
     void setButtonPadding(RenderStyle*) const;
     void setPopupPadding(RenderStyle*) const;
+
+    void setPaletteFromPageClientIfExists(QPalette&) const;
+
+    QStyle* fallbackStyle();
+
+    Page* m_page;
 
 #ifdef Q_WS_MAC
     int m_buttonFontPixelSize;
@@ -143,14 +155,12 @@ private:
     QString m_buttonFontFamily;
 
     QStyle* m_fallbackStyle;
-    QStyle* fallbackStyle();
 };
 
-class StylePainter
-{
+class StylePainter {
 public:
-    explicit StylePainter(const RenderObject::PaintInfo& paintInfo);
-    explicit StylePainter(GraphicsContext* context);
+    explicit StylePainter(RenderThemeQt*, const RenderObject::PaintInfo&);
+    explicit StylePainter(ScrollbarThemeQt*, GraphicsContext*);
     ~StylePainter();
 
     bool isValid() const { return painter && style; }
@@ -167,7 +177,7 @@ public:
     { style->drawComplexControl(cc, &opt, painter, widget); }
 
 private:
-    void init(GraphicsContext* context);
+    void init(GraphicsContext* context, QStyle*);
 
     QBrush oldBrush;
     bool oldAntialiasing;
@@ -177,4 +187,4 @@ private:
 
 }
 
-#endif
+#endif // RenderThemeQt_h
