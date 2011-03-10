@@ -28,6 +28,7 @@ extern "C" {
 
 // Register a class for deallocation on the WebThread
 void WebCoreObjCDeallocOnWebThread(Class cls);
+void WebCoreObjCDeallocWithWebThreadLock(Class cls);
 
 // Asynchronous from main thread to web thread.
 void WebThreadCallAPI(NSInvocation *invocation);
@@ -43,16 +44,6 @@ void WebThreadPostNotificationAsync(NSString *name, id object, id userInfo);
 
 // Convenience method for making an NSInvocation object
 NSInvocation *WebThreadMakeNSInvocation(id target, SEL selector);
-
-// Deprecated since the method name doesn't match Cocoa memory management rules.  See <rdar://problem/6794574>.
-#if defined(__cplusplus)
-inline NSInvocation *WebThreadCreateNSInvocation(id target, SEL selector)
-{
-    return WebThreadMakeNSInvocation(target, selector);
-}
-#else
-#define WebThreadCreateNSInvocation WebThreadMakeNSInvocation
-#endif
 
 #if defined(__cplusplus)
 }

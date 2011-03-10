@@ -7,7 +7,6 @@
 #ifndef WKWindow_h
 #define WKWindow_h
 
-#import "WebCoreThread.h"
 #import "WKTypes.h"
 #import "WKUtilities.h"
 #import <CoreGraphics/CoreGraphics.h>
@@ -30,8 +29,10 @@ struct WKWindow {
     CGRect frame;
     WKViewRef contentView;
     WKViewRef responderView;
+    WKViewRef _nextResponder;
     CGSize screenSize;
     CGSize availableScreenSize;
+    CGFloat screenScale;
     unsigned int useOrientationDependentFontAntialiasing:1;
 };
 
@@ -44,7 +45,10 @@ CGSize WKWindowGetScreenSize(WKWindowRef window);
 
 void WKWindowSetAvailableScreenSize(WKWindowRef window, CGSize size);
 CGSize WKWindowGetAvailableScreenSize(WKWindowRef window);
-    
+
+void WKWindowSetScreenScale(WKWindowRef window, CGFloat scale);
+CGFloat WKWindowGetScreenScale(WKWindowRef window);
+
 void WKWindowSetContentView (WKWindowRef window, WKViewRef aView);
 WKViewRef WKWindowGetContentView (WKWindowRef window);
 
@@ -55,6 +59,7 @@ void WKWindowClose (WKWindowRef window);
 
 bool WKWindowMakeFirstResponder (WKWindowRef window, WKViewRef view);
 WKViewRef WKWindowFirstResponder (WKWindowRef window);
+WKViewRef WKWindowNewFirstResponderAfterResigning(WKWindowRef window); // Only valid to call while resigning.
 void WKWindowSendEvent (WKWindowRef window, WebEvent *event);
 
 CGPoint WKWindowConvertBaseToScreen (WKWindowRef window, CGPoint point);

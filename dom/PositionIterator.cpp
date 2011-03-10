@@ -38,7 +38,7 @@ PositionIterator::operator Position() const
 {
     if (m_nodeAfterPositionInAnchor) {
         ASSERT(m_nodeAfterPositionInAnchor->parentNode() == m_anchorNode);
-        return positionBeforeNode(m_nodeAfterPositionInAnchor);
+        return positionInParentBeforeNode(m_nodeAfterPositionInAnchor);
     }
     if (m_anchorNode->hasChildNodes())
         return lastDeepEditingPositionForNode(m_anchorNode);
@@ -84,15 +84,14 @@ void PositionIterator::decrement()
         }
         return;
     }
-
-    if (m_offsetInAnchor) {
-        m_offsetInAnchor = Position::uncheckedPreviousOffset(m_anchorNode, m_offsetInAnchor);
+    
+    if (m_anchorNode->hasChildNodes()) {
+        m_anchorNode = m_anchorNode->lastChild();
+        m_offsetInAnchor = m_anchorNode->hasChildNodes()? 0: lastOffsetForEditing(m_anchorNode);
     } else {
-        if (m_anchorNode->hasChildNodes()) {
-            m_anchorNode = m_anchorNode->lastChild();
-            if (!m_anchorNode->hasChildNodes())
-                m_offsetInAnchor = lastOffsetForEditing(m_anchorNode);
-        } else {
+        if (m_offsetInAnchor)
+            m_offsetInAnchor = Position::uncheckedPreviousOffset(m_anchorNode, m_offsetInAnchor);
+        else {
             m_nodeAfterPositionInAnchor = m_anchorNode;
             m_anchorNode = m_anchorNode->parentNode();
         }
@@ -156,10 +155,14 @@ bool PositionIterator::isCandidate() const
     if (isTableElement(m_anchorNode) || editingIgnoresContent(m_anchorNode))
         return (atStartOfNode() || atEndOfNode()) && !Position::nodeIsUserSelectNone(m_anchorNode->parent());
 
-    if (!m_anchorNode->hasTagName(htmlTag) && renderer->isBlockFlow() && !Position::hasRenderedNonAnonymousDescendantsWithHeight(renderer) &&
-       (toRenderBlock(renderer)->height() || m_anchorNode->hasTagName(bodyTag)))
-        return atStartOfNode() && !Position::nodeIsUserSelectNone(m_anchorNode);
-    
+    if (!m_anchorNode->hasTagName(htmlTag) && renderer->isBlockFlow()) {
+        if (toRenderBlock(renderer)->height() || m_anchorNode->hasTagName(bodyTag)) {
+            if (!Position::hasRenderedNonAnonymousDescendantsWithHeight(renderer))
+                return atStartOfNode() && !Position::nodeIsUserSelectNone(m_anchorNode);
+            return m_anchorNode->isContentEditable() && !Position::nodeIsUserSelectNone(m_anchorNode) && Position(*this).atEditingBoundary();
+        }
+    }
+
     return false;
 }
 

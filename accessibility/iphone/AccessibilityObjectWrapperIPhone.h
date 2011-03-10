@@ -37,6 +37,9 @@
 - (WebCore::AccessibilityObject*)accessibilityObject;
 
 - (id)accessibilityHitTest:(CGPoint)point;
+- (AccessibilityObjectWrapper *)accessibilityPostProcessHitTest:(CGPoint)point;
+- (BOOL)accessibilityCanFuzzyHitTest;
+
 - (BOOL)isAccessibilityElement;
 - (NSString *)accessibilityLabel;
 - (CGRect)accessibilityFrame;
@@ -48,6 +51,13 @@
 
 - (BOOL)isAttachment;
 - (WAKView *)attachmentView;
+
+- (void)postFocusChangeNotification;
+- (void)postSelectedTextChangeNotification;
+- (void)postLayoutChangeNotification;
+
+// Used to inform an element when a notification is posted for it. Used by DRT.
+- (void)accessibilityPostedNotification:(WebCore::AXObjectCache::AXNotification)notification;
 
 @end
 

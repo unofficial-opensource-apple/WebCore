@@ -25,11 +25,13 @@
 #ifndef Font_h
 #define Font_h
 
-#include "TextRun.h"
+#include "CharacterNames.h"
 #include "FontDescription.h"
 #include "SimpleFontData.h"
+#include "TextRun.h"
 #include "TypesettingFeatures.h"
 #include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
 #include <wtf/MathExtras.h>
 
 #if PLATFORM(QT)
@@ -54,6 +56,21 @@ struct GlyphData;
 
 const unsigned defaultUnitsPerEm = 1000;
 
+struct GlyphOverflow {
+    GlyphOverflow()
+        : left(0)
+        , right(0)
+        , top(0)
+        , bottom(0)
+    {
+    }
+
+    int left;
+    int right;
+    int top;
+    int bottom;
+};
+
 class Font {
 public:
     Font();
@@ -66,9 +83,7 @@ public:
     Font& operator=(const Font&);
 
     bool operator==(const Font& other) const;
-    bool operator!=(const Font& other) const {
-        return !(*this == other);
-    }
+    bool operator!=(const Font& other) const { return !(*this == other); }
 
     const FontDescription& fontDescription() const { return m_fontDescription; }
 
@@ -79,8 +94,8 @@ public:
 
     float drawText(GraphicsContext*, const TextRun&, const FloatPoint&, int from = 0, int to = -1) const;
 
-    int width(const TextRun& run, HashSet<const SimpleFontData*>* fallbackFonts = 0) const { return lroundf(floatWidth(run, fallbackFonts)); }
-    float floatWidth(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0) const;
+    int width(const TextRun& run, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* glyphOverflow = 0) const { return lroundf(floatWidth(run, fallbackFonts, glyphOverflow)); }
+    float floatWidth(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* glyphOverflow = 0) const;
     float floatWidth(const TextRun& run, int extraCharsAvailable, int& charsConsumed, String& glyphName) const;
 
     int offsetForPosition(const TextRun&, int position, bool includePartialGlyphs) const;
@@ -120,7 +135,7 @@ public:
     float xHeight() const { return primaryFont()->xHeight(); }
     unsigned unitsPerEm() const { return primaryFont()->unitsPerEm(); }
     int spaceWidth() const { return (int)ceilf(primaryFont()->adjustedSpaceWidth() + m_letterSpacing); }
-    int tabWidth() const { return 8 * spaceWidth(); }
+    float tabWidth(const SimpleFontData& fontData) const { return 8 * ceilf(fontData.adjustedSpaceWidth() + letterSpacing()); }
 
     const SimpleFontData* primaryFont() const;
     const FontData* fontDataAt(unsigned) const;
@@ -135,11 +150,9 @@ public:
     static void setShouldUseSmoothing(bool);
     static bool shouldUseSmoothing();
 
-    static void setSmoothingStyle(CGFontSmoothingStyle);
-    static CGFontSmoothingStyle smoothingStyle();
-
-    static void setAntialiasingStyle(CGFontAntialiasingStyle);
-    static CGFontAntialiasingStyle antialiasingStyle();
+#if USE(FONT_FAST_PATH)
+    enum CodePath { Auto, Simple, Complex, SimpleWithGlyphOverflow };
+#endif
 
 private:
 #if ENABLE(SVG_FONTS)
@@ -151,11 +164,11 @@ private:
 #endif
 
 #if USE(FONT_FAST_PATH)
-    bool canUseGlyphCache(const TextRun&) const;
+    CodePath codePath(const TextRun&) const;
     float drawSimpleText(GraphicsContext*, const TextRun&, const FloatPoint&, int from, int to) const;
     void drawGlyphs(GraphicsContext*, const SimpleFontData*, const GlyphBuffer&, int from, int to, const FloatPoint&, bool setColor = true) const;
     void drawGlyphBuffer(GraphicsContext*, const GlyphBuffer&, const TextRun&, FloatPoint&) const;
-    float floatWidthForSimpleText(const TextRun&, GlyphBuffer*, HashSet<const SimpleFontData*>* fallbackFonts = 0) const;
+    float floatWidthForSimpleText(const TextRun&, GlyphBuffer*, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* = 0) const;
     int offsetForPositionForSimpleText(const TextRun&, int position, bool includePartialGlyphs) const;
     FloatRect selectionRectForSimpleText(const TextRun&, const IntPoint&, int h, int from, int to) const;
 
@@ -163,7 +176,7 @@ private:
 #endif
 
     float drawComplexText(GraphicsContext*, const TextRun&, const FloatPoint&, int from, int to) const;
-    float floatWidthForComplexText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0) const;
+    float floatWidthForComplexText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* = 0) const;
     int offsetForPositionForComplexText(const TextRun&, int position, bool includePartialGlyphs) const;
     FloatRect selectionRectForComplexText(const TextRun&, const IntPoint&, int h, int from, int to) const;
 
@@ -178,7 +191,6 @@ public:
 
     // Useful for debugging the different font rendering code paths.
 #if USE(FONT_FAST_PATH)
-    enum CodePath { Auto, Simple, Complex };
     static void setCodePath(CodePath);
     static CodePath codePath();
     static CodePath s_codePath;
@@ -192,7 +204,20 @@ public:
 
     FontSelector* fontSelector() const;
     static bool treatAsSpace(UChar c) { return c == ' ' || c == '\t' || c == '\n' || c == 0x00A0; }
-    static bool treatAsZeroWidthSpace(UChar c) { return c < 0x20 || (c >= 0x7F && c < 0xA0) || c == 0x200e || c == 0x200f || (c >= 0x202a && c <= 0x202e) || c == 0xFFFC; }
+    static bool treatAsZeroWidthSpace(UChar c) { return c < 0x20 || (c >= 0x7F && c < 0xA0) || (c >= 0x200c && c <= 0x200f) || (c >= 0x202a && c <= 0x202e) || c == 0xFFFC; }
+
+    static inline UChar normalizeSpaces(UChar character)
+    {
+        if (treatAsSpace(character))
+            return space;
+
+        if (treatAsZeroWidthSpace(character))
+            return zeroWidthSpace;
+
+        return character;
+    }
+
+    static String normalizeSpaces(const String&);
 
 #if ENABLE(SVG_FONTS)
     bool isSVGFont() const;

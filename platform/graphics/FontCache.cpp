@@ -81,7 +81,7 @@ FontCache::FontCache()
 {
 }
 
-struct FontPlatformDataCacheKey {
+struct FontPlatformDataCacheKey : FastAllocBase {
     FontPlatformDataCacheKey(const AtomicString& family = AtomicString(), unsigned size = 0, unsigned weight = 0, bool italic = false,
                              bool isPrinterFont = false, FontRenderingMode renderingMode = NormalRenderingMode)
         : m_family(family)
@@ -167,7 +167,7 @@ static const AtomicString& alternateFamilyName(const AtomicString& familyName)
     DEFINE_STATIC_LOCAL(AtomicString, courierNew, ("Courier New"));
     if (equalIgnoringCase(familyName, courier))
         return courierNew;
-#if !PLATFORM(WIN_OS)
+#if !OS(WINDOWS)
     // On Windows, Courier New (truetype font) is always present and
     // Courier is a bitmap font. So, we don't want to map Courier New to
     // Courier.
@@ -196,7 +196,7 @@ static const AtomicString& alternateFamilyName(const AtomicString& familyName)
     if (equalIgnoringCase(familyName, helveticaNeue))
         return helvetica;
     
-#if PLATFORM(WIN_OS)
+#if OS(WINDOWS)
     // On Windows, bitmap fonts are blocked altogether so that we have to 
     // alias MS Sans Serif (bitmap font) -> Microsoft Sans Serif (truetype font)
     DEFINE_STATIC_LOCAL(AtomicString, msSans, ("MS Sans Serif"));
@@ -308,6 +308,7 @@ SimpleFontData* FontCache::getCachedFontData(const FontPlatformData* platformDat
     if (result == gFontDataCache->end()) {
         pair<SimpleFontData*, unsigned> newValue(new SimpleFontData(*platformData), 1);
         gFontDataCache->set(*platformData, newValue);
+        ASSERT_WITH_MESSAGE(newValue.first, "<rdar://problem/7963319>, a null font should never be added to the fontCache");
         return newValue.first;
     }
     if (!result.get()->second.second++) {
@@ -315,6 +316,7 @@ SimpleFontData* FontCache::getCachedFontData(const FontPlatformData* platformDat
         gInactiveFontData->remove(result.get()->second.first);
     }
 
+    ASSERT_WITH_MESSAGE(result.get()->second.first, "<rdar://problem/7963319>, there should never be a null font in the fontCache.");
     return result.get()->second.first;
 }
 

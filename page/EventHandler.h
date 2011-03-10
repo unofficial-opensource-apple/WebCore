@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,7 +39,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 
-#if PLATFORM(MAC) && !defined(__OBJC__)
+#if PLATFORM(MAC) && !defined(__OBJC__) && !ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
 class NSView;
 #endif
 
@@ -62,6 +62,7 @@ class KeyboardEvent;
 class MouseEventWithHitTestResults;
 class Node;
 class PlatformKeyboardEvent;
+class PlatformTouchEvent;
 class PlatformWheelEvent;
 class RenderLayer;
 class RenderObject;
@@ -70,8 +71,9 @@ class Scrollbar;
 class String;
 class SVGElementInstance;
 class TextEvent;
+class TouchEvent;
+class WheelEvent;
 class Widget;
-class PlatformTouchEvent;
 class Touch;
 class EventTarget;
     
@@ -85,7 +87,7 @@ extern const float GestureUnknown;
 
 enum HitTestScrollbars { ShouldHitTestScrollbars, DontHitTestScrollbars };
 
-class EventHandler : Noncopyable {
+class EventHandler : public Noncopyable {
 public:
     EventHandler(Frame*);
     ~EventHandler();
@@ -99,6 +101,7 @@ public:
     Node* mousePressNode() const;
     void setMousePressNode(PassRefPtr<Node>);
 
+    void startPanScrolling(RenderObject*);
     bool panScrollInProgress() { return m_panScrollInProgress; }
     void setPanScrollInProgress(bool inProgress) { m_panScrollInProgress = inProgress; }
 
@@ -129,6 +132,8 @@ public:
 
     void setIgnoreWheelEvents(bool);
 
+    static Frame* subframeForTargetNode(Node*);
+
     bool scrollOverflow(ScrollDirection, ScrollGranularity);
 
     bool scrollRecursively(ScrollDirection, ScrollGranularity);
@@ -136,6 +141,8 @@ public:
 #if ENABLE(DRAG_SUPPORT)
     bool shouldDragAutoNode(Node*, const IntPoint&) const; // -webkit-user-drag == auto
 #endif
+
+    bool shouldTurnVerticalTicksIntoHorizontal(const HitTestResult&) const;
 
     bool tabsToLinks(KeyboardEvent*) const;
     bool tabsToAllControls(KeyboardEvent*) const;
@@ -148,6 +155,7 @@ public:
     bool handleMouseMoveEvent(const PlatformMouseEvent&, HitTestResult* hoveredNode = 0);
     bool handleMouseReleaseEvent(const PlatformMouseEvent&);
     bool handleWheelEvent(PlatformWheelEvent&);
+    void defaultWheelEventHandler(Node*, WheelEvent*);
 
     typedef HashSet< RefPtr<Touch> > TouchSet;
     typedef HashMap< EventTarget*, TouchSet* > EventTargetTouchMap;
@@ -177,7 +185,6 @@ public:
 #if ENABLE(DRAG_SUPPORT)
     bool eventMayStartDrag(const PlatformMouseEvent&) const;
     
-    void dragSourceMovedTo(const PlatformMouseEvent&);
     void dragSourceEndedAt(const PlatformMouseEvent&, DragOperation);
 #endif
 
@@ -188,7 +195,7 @@ public:
     void sendResizeEvent();
     void sendScrollEvent();
     
-#if PLATFORM(MAC) && defined(__OBJC__)
+#if PLATFORM(MAC) && defined(__OBJC__) && !ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
     PassRefPtr<KeyboardEvent> currentKeyboardEvent() const;
 
     void mouseDown(WebEvent *);
@@ -208,9 +215,16 @@ public:
 
     void invalidateClick();
 
+
 private:
 #if ENABLE(DRAG_SUPPORT)
-    struct EventHandlerDragState {
+    enum DragAndDropHandleType {
+        UpdateDragAndDrop,
+        CancelDragAndDrop,
+        PerformDragAndDrop
+    };
+
+    struct EventHandlerDragState : Noncopyable {
         RefPtr<Node> m_dragSrc; // element that may be a drag source, for the current mouse gesture
         bool m_dragSrcIsLink;
         bool m_dragSrcIsImage;
@@ -222,6 +236,8 @@ private:
     };
     static EventHandlerDragState& dragState();
     static const double TextDragDelay;
+
+    bool canHandleDragAndDropForTarget(DragAndDropHandleType, Node* target, const PlatformMouseEvent&, Clipboard*, bool* accepted = 0);
     
     PassRefPtr<Clipboard> createDraggingClipboard() const;
 #endif // ENABLE(DRAG_SUPPORT)
@@ -245,7 +261,7 @@ private:
     
     Cursor selectCursor(const MouseEventWithHitTestResults&, Scrollbar*);
 #if ENABLE(PAN_SCROLLING)
-    void setPanScrollCursor();
+    void updatePanScrollState();
 #endif
 
     void hoverTimerFired(Timer<EventHandler>*);
@@ -320,9 +336,13 @@ private:
     void updateSelectionForMouseDrag(Node* targetNode, const IntPoint& localPoint);
 #endif
 
+    void updateLastScrollbarUnderMouse(Scrollbar*, bool);
+    
+    void setFrameWasScrolledByUser();
+
     bool capturesDragging() const { return m_capturesDragging; }
 
-#if PLATFORM(MAC) && defined(__OBJC__)
+#if PLATFORM(MAC) && defined(__OBJC__) && !ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
     NSView *mouseDownViewIfStillGood();
 
     PlatformMouseEvent currentPlatformMouseEvent() const;
@@ -347,6 +367,9 @@ private:
 
     IntPoint m_panScrollStartPos;
     bool m_panScrollInProgress;
+
+    bool m_panScrollButtonPressed;
+    bool m_springLoadedPanScrollInProgress;
 
     Timer<EventHandler> m_hoverTimer;
     
@@ -380,9 +403,10 @@ private:
     unsigned m_firstTouchID;
     HashMap< unsigned, RefPtr<Touch> > m_touchesByID;
     EventTargetSet m_gestureTargets;
-    
+
 #if ENABLE(DRAG_SUPPORT)
     RefPtr<Node> m_dragTarget;
+    bool m_shouldOnlyFireDragOverEvent;
 #endif
     
     RefPtr<HTMLFrameSetElement> m_frameSetBeingResized;
@@ -400,7 +424,7 @@ private:
 
     RefPtr<Node> m_previousWheelScrolledNode;
 
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) && !ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
     NSView *m_mouseDownView;
     bool m_sendingEventToSubview;
 #endif
