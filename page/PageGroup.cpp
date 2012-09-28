@@ -30,15 +30,15 @@
 #include "ChromeClient.h"
 #include "Document.h"
 #include "Frame.h"
+#include "GroupSettings.h"
 #include "Page.h"
+#include "PageCache.h"
+#include "SecurityOrigin.h"
 #include "Settings.h"
-
-#if ENABLE(DOM_STORAGE)
 #include "StorageNamespace.h"
-#endif
 
 #if PLATFORM(CHROMIUM)
-#include "ChromiumBridge.h"
+#include "PlatformSupport.h"
 #endif
 
 namespace WebCore {
@@ -51,18 +51,20 @@ static unsigned getUniqueIdentifier()
 
 // --------
 
-static bool shouldTrackVisitedLinks;
+static bool shouldTrackVisitedLinks = false;
 
 PageGroup::PageGroup(const String& name)
     : m_name(name)
     , m_visitedLinksPopulated(false)
     , m_identifier(getUniqueIdentifier())
+    , m_groupSettings(GroupSettings::create())
 {
 }
 
 PageGroup::PageGroup(Page* page)
     : m_visitedLinksPopulated(false)
     , m_identifier(getUniqueIdentifier())
+    , m_groupSettings(GroupSettings::create())
 {
     ASSERT(page);
     addPage(page);
@@ -71,6 +73,11 @@ PageGroup::PageGroup(Page* page)
 PageGroup::~PageGroup()
 {
     removeAllUserContent();
+}
+
+PassOwnPtr<PageGroup> PageGroup::create(Page* page)
+{
+    return adoptPtr(new PageGroup(page));
 }
 
 typedef HashMap<String, PageGroup*> PageGroupMap;
@@ -83,20 +90,19 @@ PageGroup* PageGroup::pageGroup(const String& groupName)
     if (!pageGroups)
         pageGroups = new PageGroupMap;
 
-    pair<PageGroupMap::iterator, bool> result = pageGroups->add(groupName, 0);
+    PageGroupMap::AddResult result = pageGroups->add(groupName, 0);
 
-    if (result.second) {
-        ASSERT(!result.first->second);
-        result.first->second = new PageGroup(groupName);
+    if (result.isNewEntry) {
+        ASSERT(!result.iterator->second);
+        result.iterator->second = new PageGroup(groupName);
     }
 
-    ASSERT(result.first->second);
-    return result.first->second;
+    ASSERT(result.iterator->second);
+    return result.iterator->second;
 }
 
 void PageGroup::closeLocalStorage()
 {
-#if ENABLE(DOM_STORAGE)
     if (!pageGroups)
         return;
 
@@ -106,7 +112,50 @@ void PageGroup::closeLocalStorage()
         if (it->second->hasLocalStorage())
             it->second->localStorage()->close();
     }
-#endif
+}
+
+void PageGroup::clearLocalStorageForAllOrigins()
+{
+    if (!pageGroups)
+        return;
+
+    PageGroupMap::iterator end = pageGroups->end();
+    for (PageGroupMap::iterator it = pageGroups->begin(); it != end; ++it) {
+        if (it->second->hasLocalStorage())
+            it->second->localStorage()->clearAllOriginsForDeletion();
+    }
+}
+
+void PageGroup::clearLocalStorageForOrigin(SecurityOrigin* origin)
+{
+    if (!pageGroups)
+        return;
+
+    PageGroupMap::iterator end = pageGroups->end();
+    for (PageGroupMap::iterator it = pageGroups->begin(); it != end; ++it) {
+        if (it->second->hasLocalStorage())
+            it->second->localStorage()->clearOriginForDeletion(origin);
+    }    
+}
+    
+void PageGroup::syncLocalStorage()
+{
+    if (!pageGroups)
+        return;
+
+    PageGroupMap::iterator end = pageGroups->end();
+    for (PageGroupMap::iterator it = pageGroups->begin(); it != end; ++it) {
+        if (it->second->hasLocalStorage())
+            it->second->localStorage()->sync();
+    }
+}
+
+unsigned PageGroup::numberOfPageGroups()
+{
+    if (!pageGroups)
+        return 0;
+
+    return pageGroups->size();
 }
 
 void PageGroup::addPage(Page* page)
@@ -127,7 +176,7 @@ bool PageGroup::isLinkVisited(LinkHash visitedLinkHash)
 {
 #if PLATFORM(CHROMIUM)
     // Use Chromium's built-in visited link database.
-    return ChromiumBridge::isLinkVisited(visitedLinkHash);
+    return PlatformSupport::isLinkVisited(visitedLinkHash);
 #else
     if (!m_visitedLinksPopulated) {
         m_visitedLinksPopulated = true;
@@ -138,14 +187,21 @@ bool PageGroup::isLinkVisited(LinkHash visitedLinkHash)
 #endif
 }
 
+void PageGroup::addVisitedLinkHash(LinkHash hash)
+{
+    if (shouldTrackVisitedLinks)
+        addVisitedLink(hash);
+}
+
 inline void PageGroup::addVisitedLink(LinkHash hash)
 {
     ASSERT(shouldTrackVisitedLinks);
 #if !PLATFORM(CHROMIUM)
-    if (!m_visitedLinkHashes.add(hash).second)
+    if (!m_visitedLinkHashes.add(hash).isNewEntry)
         return;
 #endif
     Page::visitedStateChanged(this, hash);
+    pageCache()->markPagesForVistedLinkStyleRecalc();
 }
 
 void PageGroup::addVisitedLink(const KURL& url)
@@ -163,6 +219,16 @@ void PageGroup::addVisitedLink(const UChar* characters, size_t length)
     addVisitedLink(visitedLinkHash(characters, length));
 }
 
+void PageGroup::removeVisitedLink(const KURL& url)
+{
+    LinkHash linkHash = visitedLinkHash(url.string().characters(), url.string().length());
+    ASSERT(m_visitedLinkHashes.contains(linkHash));
+    m_visitedLinkHashes.remove(linkHash);
+
+    Page::allVisitedStateChanged(this);
+    pageCache()->markPagesForVistedLinkStyleRecalc();
+}
+
 void PageGroup::removeVisitedLinks()
 {
     m_visitedLinksPopulated = false;
@@ -170,11 +236,13 @@ void PageGroup::removeVisitedLinks()
         return;
     m_visitedLinkHashes.clear();
     Page::allVisitedStateChanged(this);
+    pageCache()->markPagesForVistedLinkStyleRecalc();
 }
 
 void PageGroup::removeAllVisitedLinks()
 {
     Page::removeAllVisitedLinks();
+    pageCache()->markPagesForVistedLinkStyleRecalc();
 }
 
 void PageGroup::setShouldTrackVisitedLinks(bool shouldTrack)
@@ -186,54 +254,55 @@ void PageGroup::setShouldTrackVisitedLinks(bool shouldTrack)
         removeAllVisitedLinks();
 }
 
-#if ENABLE(DOM_STORAGE)
 StorageNamespace* PageGroup::localStorage()
 {
     if (!m_localStorage) {
         // Need a page in this page group to query the settings for the local storage database path.
+        // Having these parameters attached to the page settings is unfortunate since these settings are
+        // not per-page (and, in fact, we simply grab the settings from some page at random), but
+        // at this point we're stuck with it.
         Page* page = *m_pages.begin();
         const String& path = page->settings()->localStorageDatabasePath();
-        unsigned quota = page->settings()->localStorageQuota();
+        unsigned quota = m_groupSettings->localStorageQuotaBytes();
         m_localStorage = StorageNamespace::localStorageNamespace(path, quota);
     }
 
     return m_localStorage.get();
 }
-#endif
 
-void PageGroup::addUserScriptToWorld(DOMWrapperWorld* world, const String& source, const KURL& url,  PassOwnPtr<Vector<String> > whitelist,
-                                     PassOwnPtr<Vector<String> > blacklist, UserScriptInjectionTime injectionTime)
+void PageGroup::addUserScriptToWorld(DOMWrapperWorld* world, const String& source, const KURL& url,
+                                     PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
+                                     UserScriptInjectionTime injectionTime, UserContentInjectedFrames injectedFrames)
 {
     ASSERT_ARG(world, world);
 
-    OwnPtr<UserScript> userScript(new UserScript(source, url, whitelist, blacklist, injectionTime));
+    OwnPtr<UserScript> userScript = adoptPtr(new UserScript(source, url, whitelist, blacklist, injectionTime, injectedFrames));
     if (!m_userScripts)
-        m_userScripts.set(new UserScriptMap);
-    UserScriptVector*& scriptsInWorld = m_userScripts->add(world, 0).first->second;
+        m_userScripts = adoptPtr(new UserScriptMap);
+    OwnPtr<UserScriptVector>& scriptsInWorld = m_userScripts->add(world, nullptr).iterator->second;
     if (!scriptsInWorld)
-        scriptsInWorld = new UserScriptVector;
+        scriptsInWorld = adoptPtr(new UserScriptVector);
     scriptsInWorld->append(userScript.release());
 }
 
-void PageGroup::addUserStyleSheetToWorld(DOMWrapperWorld* world, const String& source, const KURL& url, PassOwnPtr<Vector<String> > whitelist,
-                                         PassOwnPtr<Vector<String> > blacklist)
+void PageGroup::addUserStyleSheetToWorld(DOMWrapperWorld* world, const String& source, const KURL& url,
+                                         PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
+                                         UserContentInjectedFrames injectedFrames,
+                                         UserStyleLevel level,
+                                         UserStyleInjectionTime injectionTime)
 {
     ASSERT_ARG(world, world);
 
-    OwnPtr<UserStyleSheet> userStyleSheet(new UserStyleSheet(source, url, whitelist, blacklist));
+    OwnPtr<UserStyleSheet> userStyleSheet = adoptPtr(new UserStyleSheet(source, url, whitelist, blacklist, injectedFrames, level));
     if (!m_userStyleSheets)
-        m_userStyleSheets.set(new UserStyleSheetMap);
-    UserStyleSheetVector*& styleSheetsInWorld = m_userStyleSheets->add(world, 0).first->second;
+        m_userStyleSheets = adoptPtr(new UserStyleSheetMap);
+    OwnPtr<UserStyleSheetVector>& styleSheetsInWorld = m_userStyleSheets->add(world, nullptr).iterator->second;
     if (!styleSheetsInWorld)
-        styleSheetsInWorld = new UserStyleSheetVector;
+        styleSheetsInWorld = adoptPtr(new UserStyleSheetVector);
     styleSheetsInWorld->append(userStyleSheet.release());
-    
-    // Clear our cached sheets and have them just reparse.
-    HashSet<Page*>::const_iterator end = m_pages.end();
-    for (HashSet<Page*>::const_iterator it = m_pages.begin(); it != end; ++it) {
-        for (Frame* frame = (*it)->mainFrame(); frame; frame = frame->tree()->traverseNext())
-            frame->document()->clearPageGroupUserSheets();
-    }
+
+    if (injectionTime == InjectInExistingDocuments)
+        resetUserStyleCacheInAllFrames();
 }
 
 void PageGroup::removeUserScriptFromWorld(DOMWrapperWorld* world, const KURL& url)
@@ -247,17 +316,14 @@ void PageGroup::removeUserScriptFromWorld(DOMWrapperWorld* world, const KURL& ur
     if (it == m_userScripts->end())
         return;
     
-    UserScriptVector* scripts = it->second;
+    UserScriptVector* scripts = it->second.get();
     for (int i = scripts->size() - 1; i >= 0; --i) {
         if (scripts->at(i)->url() == url)
             scripts->remove(i);
     }
     
-    if (!scripts->isEmpty())
-        return;
-    
-    delete it->second;
-    m_userScripts->remove(it);
+    if (scripts->isEmpty())
+        m_userScripts->remove(it);
 }
 
 void PageGroup::removeUserStyleSheetFromWorld(DOMWrapperWorld* world, const KURL& url)
@@ -272,7 +338,7 @@ void PageGroup::removeUserStyleSheetFromWorld(DOMWrapperWorld* world, const KURL
     if (it == m_userStyleSheets->end())
         return;
     
-    UserStyleSheetVector* stylesheets = it->second;
+    UserStyleSheetVector* stylesheets = it->second.get();
     for (int i = stylesheets->size() - 1; i >= 0; --i) {
         if (stylesheets->at(i)->url() == url) {
             stylesheets->remove(i);
@@ -283,17 +349,10 @@ void PageGroup::removeUserStyleSheetFromWorld(DOMWrapperWorld* world, const KURL
     if (!sheetsChanged)
         return;
 
-    if (!stylesheets->isEmpty()) {
-        delete it->second;
+    if (stylesheets->isEmpty())
         m_userStyleSheets->remove(it);
-    }
-    
-    // Clear our cached sheets and have them just reparse.
-    HashSet<Page*>::const_iterator end = m_pages.end();
-    for (HashSet<Page*>::const_iterator it = m_pages.begin(); it != end; ++it) {
-        for (Frame* frame = (*it)->mainFrame(); frame; frame = frame->tree()->traverseNext())
-            frame->document()->clearPageGroupUserSheets();
-    }
+
+    resetUserStyleCacheInAllFrames();
 }
 
 void PageGroup::removeUserScriptsFromWorld(DOMWrapperWorld* world)
@@ -307,7 +366,6 @@ void PageGroup::removeUserScriptsFromWorld(DOMWrapperWorld* world)
     if (it == m_userScripts->end())
         return;
        
-    delete it->second;
     m_userScripts->remove(it);
 }
 
@@ -322,28 +380,28 @@ void PageGroup::removeUserStyleSheetsFromWorld(DOMWrapperWorld* world)
     if (it == m_userStyleSheets->end())
         return;
     
-    delete it->second;
     m_userStyleSheets->remove(it);
 
-    // Clear our cached sheets and have them just reparse.
-    HashSet<Page*>::const_iterator end = m_pages.end();
-    for (HashSet<Page*>::const_iterator it = m_pages.begin(); it != end; ++it) {
-        for (Frame* frame = (*it)->mainFrame(); frame; frame = frame->tree()->traverseNext())
-            frame->document()->clearPageGroupUserSheets();
-    }
+    resetUserStyleCacheInAllFrames();
 }
 
 void PageGroup::removeAllUserContent()
 {
-    if (m_userScripts) {
-        deleteAllValues(*m_userScripts);
-        m_userScripts.clear();
-    }
-    
-    
+    m_userScripts.clear();
+
     if (m_userStyleSheets) {
-        deleteAllValues(*m_userStyleSheets);
         m_userStyleSheets.clear();
+        resetUserStyleCacheInAllFrames();
+    }
+}
+
+void PageGroup::resetUserStyleCacheInAllFrames()
+{
+    // Clear our cached sheets and have them just reparse.
+    HashSet<Page*>::const_iterator end = m_pages.end();
+    for (HashSet<Page*>::const_iterator it = m_pages.begin(); it != end; ++it) {
+        for (Frame* frame = (*it)->mainFrame(); frame; frame = frame->tree()->traverseNext())
+            frame->document()->updatePageGroupUserSheets();
     }
 }
 

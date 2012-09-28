@@ -24,7 +24,7 @@
  */
 #include "config.h"
 
-#include "Bridge.h"
+#include "BridgeJSC.h"
 #include "JSObject.h"
 #include "JSValue.h"
 #include "interpreter.h"
@@ -74,9 +74,11 @@ public slots:
 using namespace JSC;
 using namespace JSC::Bindings;
 
-class Global : public JSObject {
+class Global : public JSNonFinalObject {
 public:
-  virtual UString className() const { return "global"; }
+    typedef JSNonFinalObject Base;
+
+    static UString className(const JSObject*) { return "global"; }
 };
 
 static char code[] =
@@ -102,7 +104,7 @@ int main(int argc, char** argv)
         
         MyObject* myObject = new MyObject;
         
-        global->put(exec, Identifier("myInterface"), Instance::createRuntimeObject(Instance::QtLanguage, (void*)myObject));
+        global->methodTable()->put(global, exec, Identifier("myInterface"), Instance::createRuntimeObject(Instance::QtLanguage, (void*)myObject));
         
         
         if (code) {
@@ -112,7 +114,7 @@ int main(int argc, char** argv)
             if (comp.complType() == Throw) {
                 qDebug() << "exception thrown";
                 JSValue* exVal = comp.value();
-                char* msg = exVal->toString(exec).ascii();
+                char* msg = exVal->toString(exec)->value(exec).ascii();
                 int lineno = -1;
                 if (exVal->type() == ObjectType) {
                     JSValue* lineVal = exVal->getObject()->get(exec, Identifier("line"));

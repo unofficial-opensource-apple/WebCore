@@ -1,10 +1,10 @@
-/**
+/*
  * Copyright (C) 1997 Martin Jones (mjones@kde.org)
  *           (C) 1997 Torben Weis (weis@kde.org)
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,10 +25,10 @@
 #include "config.h"
 #include "HTMLTableColElement.h"
 
+#include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "HTMLNames.h"
 #include "HTMLTableElement.h"
-#include "MappedAttribute.h"
 #include "RenderTableCol.h"
 #include "Text.h"
 
@@ -36,51 +36,40 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLTableColElement::HTMLTableColElement(const QualifiedName& tagName, Document *doc)
-    : HTMLTablePartElement(tagName, doc)
+inline HTMLTableColElement::HTMLTableColElement(const QualifiedName& tagName, Document* document)
+    : HTMLTablePartElement(tagName, document)
+    , m_span(1)
 {
-    _span = 1;
 }
 
-HTMLTagStatus HTMLTableColElement::endTagRequirement() const
+PassRefPtr<HTMLTableColElement> HTMLTableColElement::create(const QualifiedName& tagName, Document* document)
 {
-    return hasLocalName(colTag) ? TagStatusForbidden : TagStatusOptional;
+    return adoptRef(new HTMLTableColElement(tagName, document));
 }
 
-int HTMLTableColElement::tagPriority() const
+bool HTMLTableColElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    return hasLocalName(colTag) ? 0 : 1;
+    if (name == widthAttr)
+        return true;
+    return HTMLTablePartElement::isPresentationAttribute(name);
 }
 
-bool HTMLTableColElement::checkDTD(const Node* newChild)
+void HTMLTableColElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
 {
-    if (hasLocalName(colTag))
-        return false;
-    
-    if (newChild->isTextNode())
-        return static_cast<const Text*>(newChild)->containsOnlyWhitespace();
-    return newChild->hasTagName(colTag);
+    if (attr->name() == widthAttr)
+        addHTMLLengthToStyle(style, CSSPropertyWidth, attr->value());
+    else
+        HTMLTablePartElement::collectStyleForAttribute(attr, style);
 }
 
-bool HTMLTableColElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
-{
-    if (attrName == widthAttr) {
-        result = eUniversal;
-        return false;
-    }
-
-    return HTMLTablePartElement::mapToEntry(attrName, result);
-}
-
-void HTMLTableColElement::parseMappedAttribute(MappedAttribute *attr)
+void HTMLTableColElement::parseAttribute(Attribute* attr)
 {
     if (attr->name() == spanAttr) {
-        _span = !attr->isNull() ? attr->value().toInt() : 1;
+        m_span = !attr->isNull() ? attr->value().toInt() : 1;
         if (renderer() && renderer()->isTableCol())
             renderer()->updateFromElement();
     } else if (attr->name() == widthAttr) {
         if (!attr->value().isEmpty()) {
-            addCSSLength(attr, CSSPropertyWidth, attr->value());
             if (renderer() && renderer()->isTableCol()) {
                 RenderTableCol* col = toRenderTableCol(renderer());
                 int newWidth = width().toInt();
@@ -89,50 +78,16 @@ void HTMLTableColElement::parseMappedAttribute(MappedAttribute *attr)
             }
         }
     } else
-        HTMLTablePartElement::parseMappedAttribute(attr);
+        HTMLTablePartElement::parseAttribute(attr);
 }
 
-// used by table columns and column groups to share style decls created by the enclosing table.
-void HTMLTableColElement::additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>& results)
+StylePropertySet* HTMLTableColElement::additionalAttributeStyle()
 {
     if (!hasLocalName(colgroupTag))
-        return;
-    Node* p = parentNode();
-    while (p && !p->hasTagName(tableTag))
-        p = p->parentNode();
-    if (!p)
-        return;
-    static_cast<HTMLTableElement*>(p)->addSharedGroupDecls(false, results);
-}
-
-String HTMLTableColElement::align() const
-{
-    return getAttribute(alignAttr);
-}
-
-void HTMLTableColElement::setAlign(const String &value)
-{
-    setAttribute(alignAttr, value);
-}
-
-String HTMLTableColElement::ch() const
-{
-    return getAttribute(charAttr);
-}
-
-void HTMLTableColElement::setCh(const String &value)
-{
-    setAttribute(charAttr, value);
-}
-
-String HTMLTableColElement::chOff() const
-{
-    return getAttribute(charoffAttr);
-}
-
-void HTMLTableColElement::setChOff(const String &value)
-{
-    setAttribute(charoffAttr, value);
+        return 0;
+    if (HTMLTableElement* table = findParentTable())
+        return table->additionalGroupStyle(false);
+    return 0;
 }
 
 void HTMLTableColElement::setSpan(int n)
@@ -140,24 +95,9 @@ void HTMLTableColElement::setSpan(int n)
     setAttribute(spanAttr, String::number(n));
 }
 
-String HTMLTableColElement::vAlign() const
-{
-    return getAttribute(valignAttr);
-}
-
-void HTMLTableColElement::setVAlign(const String &value)
-{
-    setAttribute(valignAttr, value);
-}
-
 String HTMLTableColElement::width() const
 {
     return getAttribute(widthAttr);
-}
-
-void HTMLTableColElement::setWidth(const String &value)
-{
-    setAttribute(widthAttr, value);
 }
 
 }

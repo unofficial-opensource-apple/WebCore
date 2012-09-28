@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2008 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2008, 2010 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Alexey Proskuryakov
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,13 +33,6 @@
 #include "Font.h"
 #include "FontCache.h"
 
-#if ENABLE(SVG_FONTS)
-#include "SVGFontData.h"
-#include "SVGFontElement.h"
-#include "SVGFontFaceElement.h"
-#include "SVGGlyphElement.h"
-#endif
-
 #include <wtf/MathExtras.h>
 #include <wtf/UnusedParam.h>
 
@@ -47,86 +40,36 @@ using namespace std;
 
 namespace WebCore {
 
-SimpleFontData::SimpleFontData(const FontPlatformData& f, bool customFont, bool loading, SVGFontData* svgFontData)
+SimpleFontData::SimpleFontData(const FontPlatformData& platformData, bool isCustomFont, bool isLoading, bool isTextOrientationFallback)
     : m_maxCharWidth(-1)
     , m_avgCharWidth(-1)
-    , m_unitsPerEm(defaultUnitsPerEm)
-    , m_platformData(f)
+    , m_platformData(platformData)
     , m_treatAsFixedPitch(false)
-#if ENABLE(SVG_FONTS)
-    , m_svgFontData(svgFontData)
-#endif
-    , m_isCustomFont(customFont)
-    , m_isLoading(loading)
-    , m_smallCapsFontData(0)
+    , m_isCustomFont(isCustomFont)
+    , m_isLoading(isLoading)
+    , m_isTextOrientationFallback(isTextOrientationFallback)
+    , m_isBrokenIdeographFallback(false)
+    , m_hasVerticalGlyphs(false)
 {
-#if !ENABLE(SVG_FONTS)
-    UNUSED_PARAM(svgFontData);
-#else
-    if (SVGFontFaceElement* svgFontFaceElement = svgFontData ? svgFontData->svgFontFaceElement() : 0) {
-        m_unitsPerEm = svgFontFaceElement->unitsPerEm();
-
-        double scale = f.size();
-        if (m_unitsPerEm)
-            scale /= m_unitsPerEm;
-
-        m_ascent = static_cast<int>(svgFontFaceElement->ascent() * scale);
-        m_descent = static_cast<int>(svgFontFaceElement->descent() * scale);
-        m_xHeight = static_cast<int>(svgFontFaceElement->xHeight() * scale);
-        m_lineGap = 0.1f * f.size();
-        m_lineSpacing = m_ascent + m_descent + m_lineGap;
-
-        SVGFontElement* associatedFontElement = svgFontFaceElement->associatedFontElement();
-
-        Vector<SVGGlyphIdentifier> spaceGlyphs;
-        associatedFontElement->getGlyphIdentifiersForString(String(" ", 1), spaceGlyphs);
-        m_spaceWidth = spaceGlyphs.isEmpty() ? m_xHeight : static_cast<float>(spaceGlyphs.first().horizontalAdvanceX * scale);
-
-        Vector<SVGGlyphIdentifier> numeralZeroGlyphs;
-        associatedFontElement->getGlyphIdentifiersForString(String("0", 1), numeralZeroGlyphs);
-        m_avgCharWidth = numeralZeroGlyphs.isEmpty() ? m_spaceWidth : static_cast<float>(numeralZeroGlyphs.first().horizontalAdvanceX * scale);
-
-        Vector<SVGGlyphIdentifier> letterWGlyphs;
-        associatedFontElement->getGlyphIdentifiersForString(String("W", 1), letterWGlyphs);
-        m_maxCharWidth = letterWGlyphs.isEmpty() ? m_ascent : static_cast<float>(letterWGlyphs.first().horizontalAdvanceX * scale);
-
-        // FIXME: is there a way we can get the space glyph from the SVGGlyphIdentifier above?
-        m_spaceGlyph = 0;
-        m_zeroWidthSpaceGlyph = 0;
-        determinePitch();
-        m_adjustedSpaceWidth = roundf(m_spaceWidth);
-        m_missingGlyphData.fontData = this;
-        m_missingGlyphData.glyph = 0;
-        return;
-    }
-#endif
-
-    if (f.m_isImageFont) {
-        m_unitsPerEm = 1;
-        
-        double scale = f.size();
-        if (m_unitsPerEm)
-            scale /= m_unitsPerEm;
-        
-        m_ascent = static_cast<int>(scale / 3);  // should not be used for image glyphs
-        m_descent = static_cast<int>(scale / 3); // should not be used for image glyphs
-        m_xHeight = static_cast<int>(scale / 3); // should not be used for image glyphs
-        m_lineGap = static_cast<int>(scale / 3); // should not be used for image glyphs
-        m_lineSpacing = 0; // should not be used for image glyphs
-        
-        m_spaceGlyph = 0;
-        m_spaceWidth = 0;
-        m_adjustedSpaceWidth = 0;
-        m_missingGlyphData.fontData = this;
-        m_missingGlyphData.glyph = 0;
-        return;
-    }
-
     platformInit();
     platformGlyphInit();
     platformCharWidthInit();
 }
 
+SimpleFontData::SimpleFontData(PassOwnPtr<AdditionalFontData> fontData, float fontSize, bool syntheticBold, bool syntheticItalic)
+    : m_platformData(FontPlatformData(fontSize, syntheticBold, syntheticItalic))
+    , m_fontData(fontData)
+    , m_treatAsFixedPitch(false)
+    , m_isCustomFont(true)
+    , m_isLoading(false)
+    , m_isTextOrientationFallback(false)
+    , m_isBrokenIdeographFallback(false)
+    , m_hasVerticalGlyphs(false)
+{
+    m_fontData->initializeFontData(this, fontSize);
+}
+
+#if !(PLATFORM(QT) && !HAVE(QRAWFONT))
 // Estimates of avgCharWidth and maxCharWidth for platforms that don't support accessing these values from the font.
 void SimpleFontData::initCharWidths()
 {
@@ -142,14 +85,12 @@ void SimpleFontData::initCharWidths()
 
     // If we can't retrieve the width of a '0', fall back to the x height.
     if (m_avgCharWidth <= 0.f)
-        m_avgCharWidth = m_xHeight;
+        m_avgCharWidth = m_fontMetrics.xHeight();
 
     if (m_maxCharWidth <= 0.f)
-        m_maxCharWidth = max<float>(m_avgCharWidth, m_ascent);
+        m_maxCharWidth = max(m_avgCharWidth, m_fontMetrics.floatAscent());
 }
 
-#if !PLATFORM(QT)
-// Estimates of avgCharWidth and maxCharWidth for platforms that don't support accessing these values from the font.
 void SimpleFontData::platformGlyphInit()
 {
     GlyphPage* glyphPageZero = GlyphPageTreeNode::getRootChild(this, 0)->page();
@@ -194,15 +135,12 @@ void SimpleFontData::platformGlyphInit()
 SimpleFontData::~SimpleFontData()
 {
 #if ENABLE(SVG_FONTS)
-    if (!m_svgFontData || !m_svgFontData->svgFontFaceElement())
+    if (!m_fontData)
 #endif
         platformDestroy();
 
-    if (!isCustomFont()) {
-        if (m_smallCapsFontData)
-            fontCache()->releaseFontData(m_smallCapsFontData);
+    if (!isCustomFont())
         GlyphPageTreeNode::pruneTreeFontData(this);
-    }
 }
 
 const SimpleFontData* SimpleFontData::fontDataForCharacter(UChar32) const
@@ -213,6 +151,38 @@ const SimpleFontData* SimpleFontData::fontDataForCharacter(UChar32) const
 bool SimpleFontData::isSegmented() const
 {
     return false;
+}
+
+SimpleFontData* SimpleFontData::verticalRightOrientationFontData() const
+{
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->verticalRightOrientation) {
+        FontPlatformData verticalRightPlatformData(m_platformData);
+        verticalRightPlatformData.setOrientation(Horizontal);
+        m_derivedFontData->verticalRightOrientation = adoptPtr(new SimpleFontData(verticalRightPlatformData, isCustomFont(), false, true));
+    }
+    return m_derivedFontData->verticalRightOrientation.get();
+}
+
+SimpleFontData* SimpleFontData::uprightOrientationFontData() const
+{
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->uprightOrientation)
+        m_derivedFontData->uprightOrientation = adoptPtr(new SimpleFontData(m_platformData, isCustomFont(), false, true));
+    return m_derivedFontData->uprightOrientation.get();
+}
+
+SimpleFontData* SimpleFontData::brokenIdeographFontData() const
+{
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->brokenIdeograph) {
+        m_derivedFontData->brokenIdeograph = adoptPtr(new SimpleFontData(m_platformData, isCustomFont(), false));
+        m_derivedFontData->brokenIdeograph->m_isBrokenIdeographFallback = true;
+    }
+    return m_derivedFontData->brokenIdeograph.get();
 }
 
 #ifndef NDEBUG
@@ -226,5 +196,42 @@ String SimpleFontData::description() const
     return platformData().description();
 }
 #endif
+
+PassOwnPtr<SimpleFontData::DerivedFontData> SimpleFontData::DerivedFontData::create(bool forCustomFont)
+{
+    return adoptPtr(new DerivedFontData(forCustomFont));
+}
+
+SimpleFontData::DerivedFontData::~DerivedFontData()
+{
+    if (!forCustomFont)
+        return;
+
+    if (smallCaps)
+        GlyphPageTreeNode::pruneTreeCustomFontData(smallCaps.get());
+    if (emphasisMark)
+        GlyphPageTreeNode::pruneTreeCustomFontData(emphasisMark.get());
+    if (brokenIdeograph)
+        GlyphPageTreeNode::pruneTreeCustomFontData(brokenIdeograph.get());
+    if (verticalRightOrientation)
+        GlyphPageTreeNode::pruneTreeCustomFontData(verticalRightOrientation.get());
+    if (uprightOrientation)
+        GlyphPageTreeNode::pruneTreeCustomFontData(uprightOrientation.get());
+#if PLATFORM(MAC)
+    if (compositeFontReferences) {
+        CFDictionaryRef dictionary = CFDictionaryRef(compositeFontReferences.get());
+        CFIndex count = CFDictionaryGetCount(dictionary);
+        if (count > 0) {
+            Vector<SimpleFontData*, 2> stash(count);
+            SimpleFontData** fonts = stash.data();
+            CFDictionaryGetKeysAndValues(dictionary, 0, (const void **)fonts);
+            while (count-- > 0 && *fonts) {
+                OwnPtr<SimpleFontData> afont = adoptPtr(*fonts++);
+                GlyphPageTreeNode::pruneTreeCustomFontData(afont.get());
+            }
+        }
+    }
+#endif
+}
 
 } // namespace WebCore

@@ -26,6 +26,7 @@
 #include "config.h"
 #include "JSNodeFilter.h"
 
+#include "JSDOMWindowBase.h"
 #include "JSNode.h"
 #include "JSNodeFilterCondition.h"
 #include "NodeFilter.h"
@@ -35,23 +36,24 @@ using namespace JSC;
 
 namespace WebCore {
 
-void JSNodeFilter::markChildren(MarkStack& markStack)
+void JSNodeFilter::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
-    Base::markChildren(markStack);
-    impl()->markAggregate(markStack);
+    JSNodeFilter* thisObject = jsCast<JSNodeFilter*>(cell);
+    ASSERT_GC_OBJECT_INHERITS(thisObject, &s_info);
+    COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
+    ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
+    Base::visitChildren(thisObject, visitor);
+    visitor.addOpaqueRoot(thisObject->impl());
 }
 
-JSValue JSNodeFilter::acceptNode(ExecState* exec, const ArgList& args)
-{
-    return jsNumber(exec, impl()->acceptNode(exec, toNode(args.at(0))));
-}
-
-PassRefPtr<NodeFilter> toNodeFilter(JSValue value)
+PassRefPtr<NodeFilter> toNodeFilter(JSGlobalData& globalData, JSValue value)
 {
     if (value.inherits(&JSNodeFilter::s_info))
-        return static_cast<JSNodeFilter*>(asObject(value))->impl();
+        return jsCast<JSNodeFilter*>(asObject(value))->impl();
 
-    return NodeFilter::create(JSNodeFilterCondition::create(value));
+    RefPtr<NodeFilter> result = NodeFilter::create();
+    result->setCondition(JSNodeFilterCondition::create(globalData, result.get(), value));
+    return result.release();
 }
 
 } // namespace WebCore

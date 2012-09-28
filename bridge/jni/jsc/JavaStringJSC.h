@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2010 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2007, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright 2010, The Android Open Source Project
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,53 +28,65 @@
 #define JavaStringJSC_h
 
 #include "JNIUtility.h"
+#include "JSDOMWindowBase.h"
 #include "JavaInstanceJSC.h"
+
 #include <runtime/JSLock.h>
+#include <runtime/ScopeChain.h>
 
 
 namespace JSC {
 
 namespace Bindings {
 
-class JavaStringImpl {
+class JavaString {
 public:
-    ~JavaStringImpl()
+    JavaString(JNIEnv* e, jstring s)
     {
-        JSLock lock(SilenceAssertionsOnly);
-        m_rep = 0;
+        init(e, s);
     }
 
-    void init()
+    JavaString(jstring s)
     {
-        JSLock lock(SilenceAssertionsOnly);
-        m_rep = UString().rep();
+        init(getJNIEnv(), s);
     }
 
+    JavaString()
+    {
+        JSLockHolder lock(WebCore::JSDOMWindowBase::commonJSGlobalData());
+        m_impl = UString().impl();
+    }
+
+    ~JavaString()
+    {
+        JSLockHolder lock(WebCore::JSDOMWindowBase::commonJSGlobalData());
+        m_impl = 0;
+    }
+
+    const char* utf8() const
+    {
+        if (!m_utf8String.data()) {
+            JSLockHolder lock(WebCore::JSDOMWindowBase::commonJSGlobalData());
+            m_utf8String = UString(m_impl).utf8();
+        }
+        return m_utf8String.data();
+    }
+    int length() const { return m_impl->length(); }
+    StringImpl* impl() const { return m_impl.get(); }
+
+private:
     void init(JNIEnv* e, jstring s)
     {
         int size = e->GetStringLength(s);
         const jchar* uc = getUCharactersFromJStringInEnv(e, s);
         {
-            JSLock lock(SilenceAssertionsOnly);
-            m_rep = UString(reinterpret_cast<const UChar*>(uc), size).rep();
+            JSLockHolder lock(WebCore::JSDOMWindowBase::commonJSGlobalData());
+            m_impl = UString(reinterpret_cast<const UChar*>(uc), size).impl();
         }
         releaseUCharactersForJStringInEnv(e, s, uc);
     }
 
-    const char* UTF8String() const
-    {
-        if (!m_utf8String.c_str()) {
-            JSLock lock(SilenceAssertionsOnly);
-            m_utf8String = UString(m_rep).UTF8String();
-        }
-        return m_utf8String.c_str();
-    }
-    const jchar* uchars() const { return (const jchar*)m_rep->data(); }
-    int length() const { return m_rep->size(); }
-    UString uString() const { return UString(m_rep); }
-
-private:
-    RefPtr<UString::Rep> m_rep;
+    RefPtr<StringImpl> m_impl;
     mutable CString m_utf8String;
 };
 

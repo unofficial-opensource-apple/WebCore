@@ -31,6 +31,7 @@
 
 #include "Document.h"
 #include "JSDOMBinding.h"
+#include "JSMainThreadExecState.h"
 
 using namespace JSC;
     
@@ -44,25 +45,44 @@ void JSCallbackData::deleteData(void* context)
 JSValue JSCallbackData::invokeCallback(MarkedArgumentBuffer& args, bool* raisedException)
 {
     ASSERT(callback());
+    return invokeCallback(callback(), args, raisedException);
+}
+
+JSValue JSCallbackData::invokeCallback(JSValue thisValue, MarkedArgumentBuffer& args, bool* raisedException)
+{
+    ASSERT(callback());
     ASSERT(globalObject());
 
     ExecState* exec = globalObject()->globalExec();
-    JSValue function = callback()->get(exec, Identifier(exec, "handleEvent"));
+    JSValue function = callback();
 
     CallData callData;
-    CallType callType = function.getCallData(callData);
+    CallType callType = callback()->methodTable()->getCallData(callback(), callData);
     if (callType == CallTypeNone) {
-        callType = callback()->getCallData(callData);
+        function = callback()->get(exec, Identifier(exec, "handleEvent"));
+        callType = getCallData(function, callData);
         if (callType == CallTypeNone)
             return JSValue();
-        function = callback();
     }
-    
-    globalObject()->globalData()->timeoutChecker.start();
-    JSValue result = JSC::call(exec, function, callType, callData, callback(), args);
-    globalObject()->globalData()->timeoutChecker.stop();
 
-    Document::updateStyleForAllDocuments();
+    ScriptExecutionContext* context = globalObject()->scriptExecutionContext();
+    // We will fail to get the context if the frame has been detached.
+    if (!context)
+        return JSValue();
+
+    globalObject()->globalData().timeoutChecker.start();
+    InspectorInstrumentationCookie cookie = JSMainThreadExecState::instrumentFunctionCall(context, callType, callData);
+
+    bool contextIsDocument = context->isDocument();
+    JSValue result = contextIsDocument
+        ? JSMainThreadExecState::call(exec, function, callType, callData, thisValue, args)
+        : JSC::call(exec, function, callType, callData, thisValue, args);
+
+    InspectorInstrumentation::didCallFunction(cookie);
+    globalObject()->globalData().timeoutChecker.stop();
+
+    if (contextIsDocument)
+        Document::updateStyleForAllDocuments();
 
     if (exec->hadException()) {
         reportCurrentException(exec);
@@ -70,8 +90,8 @@ JSValue JSCallbackData::invokeCallback(MarkedArgumentBuffer& args, bool* raisedE
             *raisedException = true;
         return result;
     }
-    
+
     return result;
 }
-    
+
 } // namespace WebCore

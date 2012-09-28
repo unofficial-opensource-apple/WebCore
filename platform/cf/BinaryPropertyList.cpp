@@ -26,9 +26,9 @@
 #include "config.h"
 #include "BinaryPropertyList.h"
 
-#include "StringHash.h"
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
+#include <wtf/text/StringHash.h>
 #include <limits>
 
 using namespace std;
@@ -92,7 +92,7 @@ struct IntegerArrayHash {
 
 unsigned IntegerArrayHash::hash(const IntegerArray& array)
 {
-    return StringImpl::computeHash(reinterpret_cast<const UChar*>(array.integers()), array.size() / (sizeof(int) / sizeof(UChar)));
+    return StringHasher::hashMemory(array.integers(), array.size() * sizeof(int));
 }
 
 bool IntegerArrayHash::equal(const IntegerArray& a, const IntegerArray& b)
@@ -204,7 +204,7 @@ void BinaryPropertyListPlan::writeInteger(int integer)
             return;
         m_integerZeroObjectReference = m_currentObjectReference;
     } else {
-        if (!m_integers.add(integer, m_currentObjectReference).second)
+        if (!m_integers.add(integer, m_currentObjectReference).isNewEntry)
             return;
     }
     ++m_currentObjectReference;
@@ -214,7 +214,7 @@ void BinaryPropertyListPlan::writeInteger(int integer)
 void BinaryPropertyListPlan::writeString(const String& string)
 {
     ++m_currentAggregateSize;
-    if (!m_strings.add(string, m_currentObjectReference).second)
+    if (!m_strings.add(string, m_currentObjectReference).isNewEntry)
         return;
     ++m_currentObjectReference;
     writeStringObject(string);
@@ -224,12 +224,12 @@ void BinaryPropertyListPlan::writeIntegerArray(const int* integers, size_t size)
 {
     size_t savedAggregateSize = ++m_currentAggregateSize;
     ASSERT(size);
-    pair<IntegerArrayMap::iterator, bool> addResult = m_integerArrays.add(IntegerArray(integers, size), 0);
-    if (!addResult.second)
+    IntegerArrayMap::AddResult addResult = m_integerArrays.add(IntegerArray(integers, size), 0);
+    if (!addResult.isNewEntry)
         return;
     for (size_t i = 0; i < size; ++i)
         writeInteger(integers[i]);
-    addResult.first->second = m_currentObjectReference++;
+    addResult.iterator->second = m_currentObjectReference++;
     writeArrayObject(size);
     m_currentAggregateSize = savedAggregateSize;
 }
@@ -285,10 +285,9 @@ static size_t markerPlusLengthByteCount(size_t length)
 
 void BinaryPropertyListPlan::writeStringObject(const String& string)
 {
-    const UChar* characters = string.characters();
     unsigned length = string.length();
     m_byteCount += markerPlusLengthByteCount(length) + length;
-    if (!charactersAreAllASCII(characters, length))
+    if (!string.containsOnlyASCII())
         m_byteCount += length;
 }
 

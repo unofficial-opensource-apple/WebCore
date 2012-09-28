@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,18 +26,16 @@
 #ifndef KURL_h
 #define KURL_h
 
+#include "KURLWTFURLImpl.h"
 #include "PlatformString.h"
+#include <wtf/HashMap.h>
 
-#if PLATFORM(CF)
+#if USE(CF)
 typedef const struct __CFURL* CFURLRef;
 #endif
 
-#if PLATFORM(MAC)
-#ifdef __OBJC__
-@class NSURL;
-#else
-class NSURL;
-#endif
+#if PLATFORM(MAC) || (PLATFORM(QT) && USE(QTKIT))
+OBJC_CLASS NSURL;
 #endif
 
 #if PLATFORM(QT)
@@ -69,8 +67,19 @@ public:
     // The argument is an absolute URL string. The string is assumed to be output of KURL::string() called on a valid
     // KURL object, or indiscernible from such.
     // It is usually best to avoid repeatedly parsing a string, unless memory saving outweigh the possible slow-downs.
-    KURL(ParsedURLStringTag, const char*);
     KURL(ParsedURLStringTag, const String&);
+#if USE(GOOGLEURL)
+    KURL(WTF::HashTableDeletedValueType) : m_url(WTF::HashTableDeletedValue) { }
+#elif USE(WTFURL)
+    KURL(WTF::HashTableDeletedValueType) : m_urlImpl(WTF::HashTableDeletedValue) { }
+#else
+    KURL(WTF::HashTableDeletedValueType) : m_string(WTF::HashTableDeletedValue) { }
+#endif
+#if !USE(WTFURL)
+    bool isHashTableDeletedValue() const { return string().isHashTableDeletedValue(); }
+#else
+    bool isHashTableDeletedValue() const { return m_urlImpl.isHashTableDeletedValue(); }
+#endif
 
     // Resolves the relative URL with the given base URL. If provided, the
     // TextEncoding is used to encode non-ASCII characers. The base URL can be
@@ -82,14 +91,14 @@ public:
     KURL(const KURL& base, const String& relative);
     KURL(const KURL& base, const String& relative, const TextEncoding&);
 
-
 #if USE(GOOGLEURL)
-    // For conversions for other structures that have already parsed and
+    // For conversions from other structures that have already parsed and
     // canonicalized the URL. The input must be exactly what KURL would have
     // done with the same input.
-    KURL(const CString& canonicalSpec,
-         const url_parse::Parsed& parsed, bool isValid);
+    KURL(const CString& canonicalSpec, const url_parse::Parsed&, bool isValid);
 #endif
+
+    String strippedForUseAsReferrer() const;
 
     // FIXME: The above functions should be harmonized so that passing a
     // base of null or the empty string gives the same result as the
@@ -114,9 +123,12 @@ public:
     bool canSetHostOrPort() const { return isHierarchical(); }
 
     bool canSetPathname() const { return isHierarchical(); }
-    
+
 #if USE(GOOGLEURL)
     const String& string() const { return m_url.string(); }
+#elif USE(WTFURL)
+    // FIXME: Split this in URLString and InvalidURLString, get rid of the implicit conversions.
+    const String& string() const;
 #else
     const String& string() const { return m_string; }
 #endif
@@ -135,13 +147,13 @@ public:
 
     String baseAsString() const;
 
-    String prettyURL() const;
     String fileSystemPath() const;
 
     // Returns true if the current URL's protocol is the same as the null-
     // terminated ASCII argument. The argument must be lower-case.
     bool protocolIs(const char*) const;
-    bool protocolInHTTPFamily() const;
+    bool protocolIsData() const { return protocolIs("data"); }
+    bool protocolIsInHTTPFamily() const;
     bool isLocalFile() const;
 
     bool setProtocol(const String&);
@@ -178,17 +190,15 @@ public:
     unsigned pathStart() const;
     unsigned pathEnd() const;
     unsigned pathAfterLastSlash() const;
-    operator const String&() const { return string(); }
-#if USE(JSC)
-    operator JSC::UString() const { return string(); }
-#endif
 
-#if PLATFORM(CF)
+    operator const String&() const { return string(); }
+
+#if USE(CF)
     KURL(CFURLRef);
     CFURLRef createCFURL() const;
 #endif
 
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || (PLATFORM(QT) && USE(QTKIT))
     KURL(NSURL*);
     operator NSURL*() const;
 #endif
@@ -207,6 +217,13 @@ public:
     const CString& utf8String() const { return m_url.utf8String(); }
 #endif
 
+
+#if USE(GOOGLEURL)
+    const KURL* innerURL() const { return m_url.innerURL(); }
+#else
+    const KURL* innerURL() const { return 0; }
+#endif
+
 #ifndef NDEBUG
     void print() const;
 #endif
@@ -217,9 +234,9 @@ private:
     static bool protocolIs(const String&, const char*);
 #if USE(GOOGLEURL)
     friend class KURLGooglePrivate;
-    void parse(const char* url, const String* originalString);  // KURLMac calls this.
-    void copyToBuffer(Vector<char, 512>& buffer) const;  // KURLCFNet uses this.
     KURLGooglePrivate m_url;
+#elif USE(WTFURL)
+    RefPtr<KURLWTFURLImpl> m_urlImpl;
 #else  // !USE(GOOGLEURL)
     void init(const KURL&, const String&, const TextEncoding&);
     void copyToBuffer(Vector<char, 512>& buffer) const;
@@ -228,11 +245,11 @@ private:
     // optimization: When the source is the same as the fixed-up string,
     // it will use the passed-in string instead of allocating a new one.
     void parse(const String&);
-    void parse(const char* url, const String* originalString);
+    void parse(const char* url, const String* originalString = 0);
 
     String m_string;
     bool m_isValid : 1;
-    bool m_protocolInHTTPFamily : 1;
+    bool m_protocolIsInHTTPFamily : 1;
 
     int m_schemeEnd;
     int m_userStart;
@@ -269,6 +286,8 @@ bool protocolIsJavaScript(const String& url);
 
 bool isDefaultPortForProtocol(unsigned short port, const String& protocol);
 bool portAllowed(const KURL&); // Blacklist ports that should never be used for Web resources.
+
+bool isValidProtocol(const String&);
 
 String mimeTypeFromDataURL(const String& url);
 
@@ -312,7 +331,7 @@ inline bool operator!=(const String& a, const KURL& b)
     return a != b.string();
 }
 
-#if !USE(GOOGLEURL)
+#if !USE(GOOGLEURL) && !USE(WTFURL)
 
 // Inline versions of some non-GoogleURL functions so we can get inlining
 // without having to have a lot of ugly ifdefs in the class definition.
@@ -337,9 +356,9 @@ inline bool KURL::hasPort() const
     return m_hostEnd < m_portEnd;
 }
 
-inline bool KURL::protocolInHTTPFamily() const
+inline bool KURL::protocolIsInHTTPFamily() const
 {
-    return m_protocolInHTTPFamily;
+    return m_protocolIsInHTTPFamily;
 }
 
 inline unsigned KURL::hostStart() const
@@ -367,7 +386,9 @@ inline unsigned KURL::pathAfterLastSlash() const
     return m_pathAfterLastSlash;
 }
 
-#endif  // !USE(GOOGLEURL)
+#endif // !USE(GOOGLEURL) && !USE(WTFURL)
+
+void enableKURLSchemeCanonicalization(bool linkedOnOrAfterIOS5);
 
 } // namespace WebCore
 

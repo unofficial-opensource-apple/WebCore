@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Google Inc. All rights reserved.
+ * Copyright (c) 2010, Google Inc. All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -32,34 +32,54 @@
 #include "CookieJar.h"
 
 #include "Cookie.h"
-#include "ChromiumBridge.h"
 #include "Document.h"
+#include "PlatformSupport.h"
 
 namespace WebCore {
 
 void setCookies(Document* document, const KURL& url, const String& value)
 {
-    ChromiumBridge::setCookies(url, document->firstPartyForCookies(), value);
+    PlatformSupport::setCookies(document, url, value);
 }
 
 String cookies(const Document* document, const KURL& url)
 {
-    return ChromiumBridge::cookies(url, document->firstPartyForCookies());
+    return PlatformSupport::cookies(document, url);
+}
+
+String cookieRequestHeaderFieldValue(const Document* document, const KURL& url)
+{
+    return PlatformSupport::cookieRequestHeaderFieldValue(document, url);
 }
 
 bool cookiesEnabled(const Document* document)
 {
-    return ChromiumBridge::cookiesEnabled(document->cookieURL(), document->firstPartyForCookies());
+    return PlatformSupport::cookiesEnabled(document);
 }
 
 bool getRawCookies(const Document* document, const KURL& url, Vector<Cookie>& rawCookies)
 {
-    return ChromiumBridge::rawCookies(url, document->firstPartyForCookies(), &rawCookies);
+    return PlatformSupport::rawCookies(document, url, rawCookies);
 }
 
-void deleteCookie(const Document*, const KURL& url, const String& cookieName)
+void deleteCookie(const Document* document, const KURL& url, const String& cookieName)
 {
-    return ChromiumBridge::deleteCookie(url, cookieName);
+    return PlatformSupport::deleteCookie(document, url, cookieName);
+}
+
+void getHostnamesWithCookies(HashSet<String>& hostnames)
+{
+    // FIXME: Not yet implemented
+}
+
+void deleteCookiesForHostname(const String& hostname)
+{
+    // FIXME: Not yet implemented
+}
+
+void deleteAllCookies()
+{
+    // FIXME: Not yet implemented
 }
 
 } // namespace WebCore

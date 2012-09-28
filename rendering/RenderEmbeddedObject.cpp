@@ -24,35 +24,54 @@
 #include "config.h"
 #include "RenderEmbeddedObject.h"
 
+#include "Chrome.h"
+#include "ChromeClient.h"
+#include "Cursor.h"
+#include "CSSValueKeywords.h"
+#include "Font.h"
+#include "FontSelector.h"
 #include "Frame.h"
 #include "FrameLoaderClient.h"
+#include "GraphicsContext.h"
 #include "HTMLEmbedElement.h"
 #include "HTMLIFrameElement.h"
 #include "HTMLNames.h"
 #include "HTMLObjectElement.h"
 #include "HTMLParamElement.h"
+#include "HitTestResult.h"
+#include "LocalizedStrings.h"
 #include "MIMETypeRegistry.h"
+#include "MouseEvent.h"
 #include "Page.h"
-#include "PluginWidget.h"
+#include "PaintInfo.h"
+#include "Path.h"
+#include "PluginViewBase.h"
+#include "RenderTheme.h"
 #include "RenderView.h"
 #include "RenderWidgetProtector.h"
+#include "Settings.h"
 #include "Text.h"
-
-#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
-#include "HTMLVideoElement.h"
-#endif
-
-#if USE(ACCELERATED_COMPOSITING)
-#include "PluginWidget.h"
-#endif
+#include "TextRun.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
+    
+static const float replacementTextRoundedRectHeight = 18;
+static const float replacementTextRoundedRectLeftRightTextMargin = 6;
+static const float replacementTextRoundedRectOpacity = 0.20f;
+static const float replacementTextPressedRoundedRectOpacity = 0.65f;
+static const float replacementTextRoundedRectRadius = 5;
+static const float replacementTextTextOpacity = 0.55f;
+static const float replacementTextPressedTextOpacity = 0.65f;
 
+    
 RenderEmbeddedObject::RenderEmbeddedObject(Element* element)
-    : RenderPartObject(element)
-    , m_updatingWidget(false)
+    : RenderPart(element)
+    , m_hasFallbackContent(false)
+    , m_showsUnavailablePluginIndicator(false)
+    , m_unavailablePluginIndicatorIsPressed(false)
+    , m_mouseDownWasInUnavailablePluginIndicator(false)
 {
     view()->frameView()->setIsVisuallyNonEmpty();
 }
@@ -66,7 +85,7 @@ RenderEmbeddedObject::~RenderEmbeddedObject()
 #if USE(ACCELERATED_COMPOSITING)
 bool RenderEmbeddedObject::requiresLayer() const
 {
-    if (RenderPartObject::requiresLayer())
+    if (RenderPart::requiresLayer())
         return true;
     
     return allowsAcceleratedCompositing();
@@ -75,298 +94,239 @@ bool RenderEmbeddedObject::requiresLayer() const
 bool RenderEmbeddedObject::allowsAcceleratedCompositing() const
 {
     // The timing of layer creation is different on the phone, since the plugin can only be manipulated from the main thread.
-    return widget() && widget()->isPluginWidget() && static_cast<PluginWidget*>(widget())->willProvidePluginLayer();
+    return widget() && widget()->isPluginViewBase() && static_cast<PluginViewBase*>(widget())->willProvidePluginLayer();
 }
 #endif
 
-static bool isURLAllowed(Document* doc, const String& url)
-{
-    if (doc->frame()->page()->frameCount() >= 200)
-        return false;
 
-    // We allow one level of self-reference because some sites depend on that.
-    // But we don't allow more than one.
-    KURL completeURL = doc->completeURL(url);
-    bool foundSelfReference = false;
-    for (Frame* frame = doc->frame(); frame; frame = frame->tree()->parent()) {
-        if (equalIgnoringFragmentIdentifier(frame->loader()->url(), completeURL)) {
-            if (foundSelfReference)
-                return false;
-            foundSelfReference = true;
-        }
-    }
-    return true;
+void RenderEmbeddedObject::setPluginUnavailabilityReason(PluginUnavailabilityReason pluginUnavailabilityReason)
+{
+    UNUSED_PARAM(pluginUnavailabilityReason);
 }
 
-typedef HashMap<String, String, CaseFoldingHash> ClassIdToTypeMap;
-
-static ClassIdToTypeMap* createClassIdToTypeMap()
+bool RenderEmbeddedObject::showsUnavailablePluginIndicator() const
 {
-    ClassIdToTypeMap* map = new ClassIdToTypeMap;
-    map->add("clsid:D27CDB6E-AE6D-11CF-96B8-444553540000", "application/x-shockwave-flash");
-    map->add("clsid:CFCDAA03-8BE4-11CF-B84B-0020AFBBCCFA", "audio/x-pn-realaudio-plugin");
-    map->add("clsid:02BF25D5-8C17-4B23-BC80-D3488ABDDC6B", "video/quicktime");
-    map->add("clsid:166B1BCA-3F9C-11CF-8075-444553540000", "application/x-director");
-    map->add("clsid:6BF52A52-394A-11D3-B153-00C04F79FAA6", "application/x-mplayer2");
-    map->add("clsid:22D6F312-B0F6-11D0-94AB-0080C74C7E95", "application/x-mplayer2");
-    return map;
+    return false;
 }
 
-static String serviceTypeForClassId(const String& classId)
+void RenderEmbeddedObject::setUnavailablePluginIndicatorIsPressed(bool pressed)
 {
-    // Return early if classId is empty (since we won't do anything below).
-    // Furthermore, if classId is null, calling get() below will crash.
-    if (classId.isEmpty())
-        return String();
-
-    static ClassIdToTypeMap* map = createClassIdToTypeMap();
-    return map->get(classId);
-}
-
-static void mapDataParamToSrc(Vector<String>* paramNames, Vector<String>* paramValues)
-{
-    // Some plugins don't understand the "data" attribute of the OBJECT tag (i.e. Real and WMP
-    // require "src" attribute).
-    int srcIndex = -1, dataIndex = -1;
-    for (unsigned int i = 0; i < paramNames->size(); ++i) {
-        if (equalIgnoringCase((*paramNames)[i], "src"))
-            srcIndex = i;
-        else if (equalIgnoringCase((*paramNames)[i], "data"))
-            dataIndex = i;
-    }
-
-    if (srcIndex == -1 && dataIndex != -1) {
-        paramNames->append("src");
-        paramValues->append((*paramValues)[dataIndex]);
-    }
-}
-
-class UpdateWidgetReentryHelper {
-public:
-    inline UpdateWidgetReentryHelper(RenderEmbeddedObject *renderer)
-        : m_renderer(renderer)
-        , m_isRenderEmbeddedObjectDestroyedBeforeExitingUpdateWidget(false)
-    {
-        m_renderer->setUpdatingWidget(true);
-    }
-
-    inline ~UpdateWidgetReentryHelper()
-    {
-        if (!m_isRenderEmbeddedObjectDestroyedBeforeExitingUpdateWidget)
-            m_renderer->setUpdatingWidget(false);
-    }
-
-    inline void setIsRenderEmbeddedObjectDestroyedBeforeExitingUpdateWidget(bool flag)
-    {
-        m_isRenderEmbeddedObjectDestroyedBeforeExitingUpdateWidget = flag;
-    }
-
-private:
-    RenderEmbeddedObject *m_renderer;
-    bool m_isRenderEmbeddedObjectDestroyedBeforeExitingUpdateWidget;
-};
-
-void RenderEmbeddedObject::updateWidget(bool onlyCreateNonNetscapePlugins)
-{
-    // Disallow reentry into this method.  Creating a plug-in makes WebKit delegate callbacks happen, which can call back into
-    // WebCore to update layout.  If that happens we can create orphan plug-in views that remain in the view hierarchy forever.
-    if (m_updatingWidget)
+    if (m_unavailablePluginIndicatorIsPressed == pressed)
         return;
+    
+    m_unavailablePluginIndicatorIsPressed = pressed;
+    repaint();
+}
 
-    UpdateWidgetReentryHelper reentryHelper(this);
+void RenderEmbeddedObject::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+{
+    Page* page = 0;
+    if (Frame* frame = this->frame())
+        page = frame->page();
 
-    String url;
-    String serviceType;
-    Vector<String> paramNames;
-    Vector<String> paramValues;
-    Frame* frame = frameView()->frame();
-
-    // The calls to FrameLoader::requestObject within this function can result in a plug-in being initialized.
-    // This can run cause arbitrary JavaScript to run and may result in this RenderObject being detached from
-    // the render tree and destroyed, causing a crash like <rdar://problem/6954546>.  By extending our lifetime
-    // artifically to ensure that we remain alive for the duration of plug-in initialization.
-    RenderWidgetProtector protector(this);
-
-    if (node()->hasTagName(objectTag)) {
-        HTMLObjectElement* objectElement = static_cast<HTMLObjectElement*>(node());
-
-        objectElement->setNeedWidgetUpdate(false);
-        if (!objectElement->isFinishedParsingChildren())
-          return;
-
-        // Check for a child EMBED tag.
-        HTMLEmbedElement* embed = 0;
-        for (Node* child = objectElement->firstChild(); child; ) {
-            if (child->hasTagName(embedTag)) {
-                embed = static_cast<HTMLEmbedElement*>(child);
-                break;
-            }
-            
-            if (child->hasTagName(objectTag))
-                child = child->nextSibling(); // Don't descend into nested OBJECT tags
-            else
-                child = child->traverseNextNode(objectElement); // Otherwise descend (EMBEDs may be inside COMMENT tags)
-        }
-
-        // Use the attributes from the EMBED tag instead of the OBJECT tag including WIDTH and HEIGHT.
-        HTMLElement* embedOrObject;
-        if (embed) {
-            embedOrObject = embed;
-            url = embed->url();
-            serviceType = embed->serviceType();
-        } else
-            embedOrObject = objectElement;
-
-        // If there was no URL or type defined in EMBED, try the OBJECT tag.
-        if (url.isEmpty())
-            url = objectElement->url();
-        if (serviceType.isEmpty())
-            serviceType = objectElement->serviceType();
-
-        HashSet<StringImpl*, CaseFoldingHash> uniqueParamNames;
-
-        // Scan the PARAM children.
-        // Get the URL and type from the params if we don't already have them.
-        // Get the attributes from the params if there is no EMBED tag.
-        Node* child = objectElement->firstChild();
-        while (child && (url.isEmpty() || serviceType.isEmpty() || !embed)) {
-            if (child->hasTagName(paramTag)) {
-                HTMLParamElement* p = static_cast<HTMLParamElement*>(child);
-                String name = p->name();
-                if (url.isEmpty() && (equalIgnoringCase(name, "src") || equalIgnoringCase(name, "movie") || equalIgnoringCase(name, "code") || equalIgnoringCase(name, "url")))
-                    url = p->value();
-                if (serviceType.isEmpty() && equalIgnoringCase(name, "type")) {
-                    serviceType = p->value();
-                    int pos = serviceType.find(";");
-                    if (pos != -1)
-                        serviceType = serviceType.left(pos);
-                }
-                if (!embed && !name.isEmpty()) {
-                    uniqueParamNames.add(name.impl());
-                    paramNames.append(p->name());
-                    paramValues.append(p->value());
-                }
-            }
-            child = child->nextSibling();
-        }
-
-        // When OBJECT is used for an applet via Sun's Java plugin, the CODEBASE attribute in the tag
-        // points to the Java plugin itself (an ActiveX component) while the actual applet CODEBASE is
-        // in a PARAM tag. See <http://java.sun.com/products/plugin/1.2/docs/tags.html>. This means
-        // we have to explicitly suppress the tag's CODEBASE attribute if there is none in a PARAM,
-        // else our Java plugin will misinterpret it. [4004531]
-        String codebase;
-        if (!embed && MIMETypeRegistry::isJavaAppletMIMEType(serviceType)) {
-            codebase = "codebase";
-            uniqueParamNames.add(codebase.impl()); // pretend we found it in a PARAM already
-        }
-        
-        // Turn the attributes of either the EMBED tag or OBJECT tag into arrays, but don't override PARAM values.
-        NamedNodeMap* attributes = embedOrObject->attributes();
-        if (attributes) {
-            for (unsigned i = 0; i < attributes->length(); ++i) {
-                Attribute* it = attributes->attributeItem(i);
-                const AtomicString& name = it->name().localName();
-                if (embed || !uniqueParamNames.contains(name.impl())) {
-                    paramNames.append(name.string());
-                    paramValues.append(it->value().string());
-                }
-            }
-        }
-
-        mapDataParamToSrc(&paramNames, &paramValues);
-
-        // If we still don't have a type, try to map from a specific CLASSID to a type.
-        if (serviceType.isEmpty())
-            serviceType = serviceTypeForClassId(objectElement->classId());
-
-        if (!isURLAllowed(document(), url))
-            return;
-
-        // Find out if we support fallback content.
-        m_hasFallbackContent = false;
-        for (Node* child = objectElement->firstChild(); child && !m_hasFallbackContent; child = child->nextSibling()) {
-            if ((!child->isTextNode() && !child->hasTagName(embedTag) && !child->hasTagName(paramTag))  // Discount <embed> and <param>
-                || (child->isTextNode() && !static_cast<Text*>(child)->containsOnlyWhitespace()))
-                m_hasFallbackContent = true;
-        }
-
-        if (onlyCreateNonNetscapePlugins) {
-            KURL completedURL;
-            if (!url.isEmpty())
-                completedURL = frame->loader()->completeURL(url);
-
-            if (frame->loader()->client()->objectContentType(completedURL, serviceType) == ObjectContentNetscapePlugin)
-                return;
-        }
-
-        bool success = objectElement->dispatchBeforeLoadEvent(url) && frame->loader()->requestObject(this, url, objectElement->getAttribute(nameAttr), serviceType, paramNames, paramValues);
-        if (!success && m_hasFallbackContent) {
-            reentryHelper.setIsRenderEmbeddedObjectDestroyedBeforeExitingUpdateWidget(true);
-            objectElement->renderFallbackContent();
-        }
-
-    } else if (node()->hasTagName(embedTag)) {
-        HTMLEmbedElement* embedElement = static_cast<HTMLEmbedElement*>(node());
-        embedElement->setNeedWidgetUpdate(false);
-        url = embedElement->url();
-        serviceType = embedElement->serviceType();
-
-        if (url.isEmpty() && serviceType.isEmpty())
-            return;
-        if (!isURLAllowed(document(), url))
-            return;
-
-        // add all attributes set on the embed object
-        NamedNodeMap* attributes = embedElement->attributes();
-        if (attributes) {
-            for (unsigned i = 0; i < attributes->length(); ++i) {
-                Attribute* it = attributes->attributeItem(i);
-                paramNames.append(it->name().localName().string());
-                paramValues.append(it->value().string());
-            }
-        }
-
-        if (onlyCreateNonNetscapePlugins) {
-            KURL completedURL;
-            if (!url.isEmpty())
-                completedURL = frame->loader()->completeURL(url);
-
-            if (frame->loader()->client()->objectContentType(completedURL, serviceType) == ObjectContentNetscapePlugin)
-                return;
-        }
-
-        if (embedElement->dispatchBeforeLoadEvent(url))
-            frame->loader()->requestObject(this, url, embedElement->getAttribute(nameAttr), serviceType, paramNames, paramValues);
+    if (showsUnavailablePluginIndicator()) {
+        if (page && paintInfo.phase == PaintPhaseForeground)
+            page->addRelevantUnpaintedObject(this, visualOverflowRect());
+        RenderReplaced::paint(paintInfo, paintOffset);
+        return;
     }
-#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)        
-    else if (node()->hasTagName(videoTag) || node()->hasTagName(audioTag)) {
-        HTMLMediaElement* mediaElement = static_cast<HTMLMediaElement*>(node());
-        KURL kurl;
 
-        mediaElement->getPluginProxyParams(kurl, paramNames, paramValues);
-        mediaElement->setNeedWidgetUpdate(false);
-        frame->loader()->loadMediaPlayerProxyPlugin(node(), kurl, paramNames, paramValues);
-    }
-#endif
+    if (page && paintInfo.phase == PaintPhaseForeground)
+        page->addRelevantRepaintedObject(this, visualOverflowRect());
+
+    RenderPart::paint(paintInfo, paintOffset);
+}
+
+void RenderEmbeddedObject::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+{
+    UNUSED_PARAM(paintInfo);
+    UNUSED_PARAM(paintOffset);
+    return;
+}
+
+bool RenderEmbeddedObject::getReplacementTextGeometry(const LayoutPoint& accumulatedOffset, FloatRect& contentRect, Path& path, FloatRect& replacementTextRect, Font& font, TextRun& run, float& textWidth) const
+{
+    contentRect = contentBoxRect();
+    contentRect.moveBy(roundedIntPoint(accumulatedOffset));
+    
+    FontDescription fontDescription;
+    fontDescription.setWeight(FontWeightBold);
+    Settings* settings = document()->settings();
+    ASSERT(settings);
+    if (!settings)
+        return false;
+    fontDescription.setRenderingMode(settings->fontRenderingMode());
+    fontDescription.setComputedSize(fontDescription.specifiedSize());
+    font = Font(fontDescription, 0, 0);
+    font.update(0);
+
+    run = TextRun(m_unavailablePluginReplacementText);
+    textWidth = font.width(run);
+    
+    replacementTextRect.setSize(FloatSize(textWidth + replacementTextRoundedRectLeftRightTextMargin * 2, replacementTextRoundedRectHeight));
+    float x = (contentRect.size().width() / 2 - replacementTextRect.size().width() / 2) + contentRect.location().x();
+    float y = (contentRect.size().height() / 2 - replacementTextRect.size().height() / 2) + contentRect.location().y();
+    replacementTextRect.setLocation(FloatPoint(x, y));
+    
+    path.addRoundedRect(replacementTextRect, FloatSize(replacementTextRoundedRectRadius, replacementTextRoundedRectRadius));
+
+    return true;
 }
 
 void RenderEmbeddedObject::layout()
 {
     ASSERT(needsLayout());
 
-    calcWidth();
-    calcHeight();
+    computeLogicalWidth();
+    computeLogicalHeight();
 
     RenderPart::layout();
 
     m_overflow.clear();
-    addShadowOverflow();
+    addVisualEffectOverflow();
+
+    updateLayerTransform();
 
     if (!widget() && frameView())
         frameView()->addWidgetToUpdate(this);
 
     setNeedsLayout(false);
+}
+
+void RenderEmbeddedObject::viewCleared()
+{
+    // This is required for <object> elements whose contents are rendered by WebCore (e.g. src="foo.html").
+    if (node() && widget() && widget()->isFrameView()) {
+        FrameView* view = static_cast<FrameView*>(widget());
+        int marginWidth = -1;
+        int marginHeight = -1;
+        if (node()->hasTagName(iframeTag)) {
+            HTMLIFrameElement* frame = static_cast<HTMLIFrameElement*>(node());
+            marginWidth = frame->marginWidth();
+            marginHeight = frame->marginHeight();
+        }
+        if (marginWidth != -1)
+            view->setMarginWidth(marginWidth);
+        if (marginHeight != -1)
+            view->setMarginHeight(marginHeight);
+    }
+}
+
+bool RenderEmbeddedObject::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
+{
+    if (!RenderPart::nodeAtPoint(request, result, pointInContainer, accumulatedOffset, hitTestAction))
+        return false;
+
+    if (!widget() || !widget()->isPluginViewBase())
+        return true;
+
+    PluginViewBase* view = static_cast<PluginViewBase*>(widget());
+    IntPoint roundedPoint = roundedIntPoint(pointInContainer);
+
+    if (Scrollbar* horizontalScrollbar = view->horizontalScrollbar()) {
+        if (horizontalScrollbar->shouldParticipateInHitTesting() && horizontalScrollbar->frameRect().contains(roundedPoint)) {
+            result.setScrollbar(horizontalScrollbar);
+            return true;
+        }
+    }
+
+    if (Scrollbar* verticalScrollbar = view->verticalScrollbar()) {
+        if (verticalScrollbar->shouldParticipateInHitTesting() && verticalScrollbar->frameRect().contains(roundedPoint)) {
+            result.setScrollbar(verticalScrollbar);
+            return true;
+        }
+    }
+
+    return true;
+}
+
+bool RenderEmbeddedObject::scroll(ScrollDirection direction, ScrollGranularity granularity, float, Node**)
+{
+    if (!widget() || !widget()->isPluginViewBase())
+        return false;
+
+    return static_cast<PluginViewBase*>(widget())->scroll(direction, granularity);
+}
+
+bool RenderEmbeddedObject::logicalScroll(ScrollLogicalDirection direction, ScrollGranularity granularity, float multiplier, Node** stopNode)
+{
+    // Plugins don't expose a writing direction, so assuming horizontal LTR.
+    return scroll(logicalToPhysical(direction, true, false), granularity, multiplier, stopNode);
+}
+
+
+bool RenderEmbeddedObject::isInUnavailablePluginIndicator(const LayoutPoint& point) const
+{
+    FloatRect contentRect;
+    Path path;
+    FloatRect replacementTextRect;
+    Font font;
+    TextRun run("");
+    float textWidth;
+    return getReplacementTextGeometry(IntPoint(), contentRect, path, replacementTextRect, font, run, textWidth)
+        && path.contains(point);
+}
+
+bool RenderEmbeddedObject::isInUnavailablePluginIndicator(MouseEvent* event) const
+{
+    return isInUnavailablePluginIndicator(roundedLayoutPoint(absoluteToLocal(event->absoluteLocation(), false, true)));
+}
+
+static bool shouldUnavailablePluginMessageBeButton(Document* document, RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason)
+{
+    Page* page = document->page();
+    return page && page->chrome()->client()->shouldUnavailablePluginMessageBeButton(pluginUnavailabilityReason);
+}
+
+void RenderEmbeddedObject::handleUnavailablePluginIndicatorEvent(Event* event)
+{
+    if (!shouldUnavailablePluginMessageBeButton(document(), m_pluginUnavailabilityReason))
+        return;
+    
+    if (!event->isMouseEvent())
+        return;
+    
+    MouseEvent* mouseEvent = static_cast<MouseEvent*>(event);
+    HTMLPlugInElement* element = static_cast<HTMLPlugInElement*>(node());
+    if (event->type() == eventNames().mousedownEvent && static_cast<MouseEvent*>(event)->button() == LeftButton) {
+        m_mouseDownWasInUnavailablePluginIndicator = isInUnavailablePluginIndicator(mouseEvent);
+        if (m_mouseDownWasInUnavailablePluginIndicator) {
+            if (Frame* frame = document()->frame()) {
+                frame->eventHandler()->setCapturingMouseEventsNode(element);
+                element->setIsCapturingMouseEvents(true);
+            }
+            setUnavailablePluginIndicatorIsPressed(true);
+        }
+        event->setDefaultHandled();
+    }        
+    if (event->type() == eventNames().mouseupEvent && static_cast<MouseEvent*>(event)->button() == LeftButton) {
+        if (m_unavailablePluginIndicatorIsPressed) {
+            if (Frame* frame = document()->frame()) {
+                frame->eventHandler()->setCapturingMouseEventsNode(0);
+                element->setIsCapturingMouseEvents(false);
+            }
+            setUnavailablePluginIndicatorIsPressed(false);
+        }
+        if (m_mouseDownWasInUnavailablePluginIndicator && isInUnavailablePluginIndicator(mouseEvent)) {
+            if (Page* page = document()->page())
+                page->chrome()->client()->unavailablePluginButtonClicked(element, m_pluginUnavailabilityReason);
+        }
+        m_mouseDownWasInUnavailablePluginIndicator = false;
+        event->setDefaultHandled();
+    }
+    if (event->type() == eventNames().mousemoveEvent) {
+        setUnavailablePluginIndicatorIsPressed(m_mouseDownWasInUnavailablePluginIndicator && isInUnavailablePluginIndicator(mouseEvent));
+        event->setDefaultHandled();
+    }
+}
+
+CursorDirective RenderEmbeddedObject::getCursor(const LayoutPoint& point, Cursor& cursor) const
+{
+    if (showsUnavailablePluginIndicator() && shouldUnavailablePluginMessageBeButton(document(), m_pluginUnavailabilityReason) && isInUnavailablePluginIndicator(point)) {
+        cursor = handCursor();
+        return SetCursor;
+    }
+    return RenderPart::getCursor(point, cursor);
 }
 
 }

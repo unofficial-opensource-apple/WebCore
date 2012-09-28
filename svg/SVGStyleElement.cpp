@@ -1,46 +1,68 @@
 /*
-    Copyright (C) 2004, 2005 Nikolas Zimmermann <wildfox@kde.org>
-                  2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
-    Copyright (C) 2006 Apple Computer, Inc.
-    Copyright (C) 2009 Cameron McCormack <cam@mcc.id.au>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
+ * Copyright (C) 2006 Apple Inc. All rights reserved.
+ * Copyright (C) 2009 Cameron McCormack <cam@mcc.id.au>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
 
 #if ENABLE(SVG)
 #include "SVGStyleElement.h"
 
+#include "Attribute.h"
 #include "CSSStyleSheet.h"
 #include "Document.h"
 #include "ExceptionCode.h"
-#include "MappedAttribute.h"
 #include "SVGNames.h"
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
-using namespace SVGNames;
-
-SVGStyleElement::SVGStyleElement(const QualifiedName& tagName, Document* doc, bool createdByParser)
-     : SVGElement(tagName, doc)
-     , SVGLangSpace()
-     , m_createdByParser(createdByParser)
+inline SVGStyleElement::SVGStyleElement(const QualifiedName& tagName, Document* document, bool createdByParser)
+    : SVGElement(tagName, document)
+    , StyleElement(document, createdByParser)
 {
+    ASSERT(hasTagName(SVGNames::styleTag));
+}
+
+SVGStyleElement::~SVGStyleElement()
+{
+    StyleElement::clearDocumentData(document(), this);
+}
+
+PassRefPtr<SVGStyleElement> SVGStyleElement::create(const QualifiedName& tagName, Document* document, bool createdByParser)
+{
+    return adoptRef(new SVGStyleElement(tagName, document, createdByParser));
+}
+
+bool SVGStyleElement::disabled() const
+{
+    if (!m_sheet)
+        return false;
+    
+    return m_sheet->disabled();
+}
+
+void SVGStyleElement::setDisabled(bool setDisabled)
+{
+    if (CSSStyleSheet* styleSheet = sheet())
+        styleSheet->setDisabled(setDisabled);
 }
 
 const AtomicString& SVGStyleElement::type() const
@@ -50,85 +72,89 @@ const AtomicString& SVGStyleElement::type() const
     return n.isNull() ? defaultValue : n;
 }
 
-void SVGStyleElement::setType(const AtomicString& type, ExceptionCode& ec)
+void SVGStyleElement::setType(const AtomicString& type, ExceptionCode&)
 {
-    setAttribute(SVGNames::typeAttr, type, ec);
+    setAttribute(SVGNames::typeAttr, type);
 }
 
 const AtomicString& SVGStyleElement::media() const
 {
     DEFINE_STATIC_LOCAL(const AtomicString, defaultValue, ("all"));
-    const AtomicString& n = getAttribute(SVGNames::mediaAttr);
+    const AtomicString& n = fastGetAttribute(SVGNames::mediaAttr);
     return n.isNull() ? defaultValue : n;
 }
 
-void SVGStyleElement::setMedia(const AtomicString& media, ExceptionCode& ec)
+void SVGStyleElement::setMedia(const AtomicString& media, ExceptionCode&)
 {
-    setAttribute(SVGNames::mediaAttr, media, ec);
+    setAttribute(SVGNames::mediaAttr, media);
 }
 
 String SVGStyleElement::title() const
 {
-    return getAttribute(SVGNames::titleAttr);
+    return fastGetAttribute(SVGNames::titleAttr);
 }
 
-void SVGStyleElement::setTitle(const AtomicString& title, ExceptionCode& ec)
+void SVGStyleElement::setTitle(const AtomicString& title, ExceptionCode&)
 {
-    setAttribute(SVGNames::titleAttr, title, ec);
+    setAttribute(SVGNames::titleAttr, title);
 }
 
-void SVGStyleElement::parseMappedAttribute(MappedAttribute* attr)
+bool SVGStyleElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    if (attr->name() == SVGNames::titleAttr && m_sheet)
-        m_sheet->setTitle(attr->value());
-    else {
-        if (SVGLangSpace::parseMappedAttribute(attr))
-            return;
-        SVGElement::parseMappedAttribute(attr);
+    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
+    if (supportedAttributes.isEmpty()) {
+        SVGLangSpace::addSupportedAttributes(supportedAttributes);
+        supportedAttributes.add(SVGNames::titleAttr);
     }
+    return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
+}
+
+void SVGStyleElement::parseAttribute(Attribute* attr)
+{
+    if (!isSupportedAttribute(attr->name())) {
+        SVGElement::parseAttribute(attr);
+        return;
+    }
+
+    if (attr->name() == SVGNames::titleAttr) {
+        if (m_sheet)
+            m_sheet->setTitle(attr->value());
+        return;
+    }
+
+    if (SVGLangSpace::parseAttribute(attr))
+        return;
+
+    ASSERT_NOT_REACHED();
 }
 
 void SVGStyleElement::finishParsingChildren()
 {
-    StyleElement::sheet(this);
-    m_createdByParser = false;
+    StyleElement::finishParsingChildren(this);
     SVGElement::finishParsingChildren();
 }
 
-void SVGStyleElement::insertedIntoDocument()
+Node::InsertionNotificationRequest SVGStyleElement::insertedInto(Node* rootParent)
 {
-    SVGElement::insertedIntoDocument();
-    document()->addStyleSheetCandidateNode(this, m_createdByParser);
-    if (!m_createdByParser)
+    SVGElement::insertedInto(rootParent);
+    if (rootParent->inDocument())
         StyleElement::insertedIntoDocument(document(), this);
+    return InsertionDone;
 }
 
-void SVGStyleElement::removedFromDocument()
+void SVGStyleElement::removedFrom(Node* rootParent)
 {
-    SVGElement::removedFromDocument();
-    if (document()->renderer())
-        document()->removeStyleSheetCandidateNode(this);
-    StyleElement::removedFromDocument(document());
+    SVGElement::removedFrom(rootParent);
+    if (rootParent->inDocument())
+        StyleElement::removedFromDocument(document(), this);
 }
 
 void SVGStyleElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
     SVGElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
-    StyleElement::process(this);
-}
-
-StyleSheet* SVGStyleElement::sheet()
-{
-    return StyleElement::sheet(this);
-}
-
-bool SVGStyleElement::sheetLoaded()
-{
-    document()->removePendingSheet();
-    return true;
+    StyleElement::childrenChanged(this);
 }
 
 }
 
-// vim:ts=4:noet
 #endif // ENABLE(SVG)

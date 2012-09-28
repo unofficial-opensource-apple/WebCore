@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Alex Milowski (alex@milowski.com). All rights reserved.
+ * Copyright (C) 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,22 +29,31 @@
 #if ENABLE(MATHML)
 
 #include "MathMLMathElement.h"
-
-#include "MathMLNames.h"
-#include "RenderObject.h"
+#include "RenderMathMLMath.h"
 
 namespace WebCore {
-    
-using namespace MathMLNames;
 
-MathMLMathElement::MathMLMathElement(const QualifiedName& tagName, Document* document)
+inline MathMLMathElement::MathMLMathElement(const QualifiedName& tagName, Document* document)
     : MathMLInlineContainerElement(tagName, document)
 {
 }
 
 PassRefPtr<MathMLMathElement> MathMLMathElement::create(const QualifiedName& tagName, Document* document)
 {
-    return new MathMLMathElement(tagName, document);
+    return adoptRef(new MathMLMathElement(tagName, document));
+}
+
+Node::InsertionNotificationRequest MathMLMathElement::insertedInto(Node* insertionPoint)
+{
+    // There are sibling rules in the MathML default style.
+    if (insertionPoint->inDocument())
+        document()->setUsesSiblingRules(true);
+    return MathMLInlineContainerElement::insertedInto(insertionPoint);
+}
+
+RenderObject* MathMLMathElement::createRenderer(RenderArena* arena, RenderStyle*)
+{
+    return new (arena) RenderMathMLMath(this);
 }
 
 }

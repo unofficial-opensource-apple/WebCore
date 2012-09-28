@@ -31,7 +31,7 @@ class RenderListMarker;
 
 class RenderListItem : public RenderBlock {
 public:
-    RenderListItem(Node*);
+    explicit RenderListItem(Node*);
 
     int value() const { if (!m_isValueUpToDate) updateValueNow(); return m_value; }
     void updateValue();
@@ -45,31 +45,40 @@ public:
     bool notInList() const { return m_notInList; }
 
     const String& markerText() const;
+    String markerTextWithSuffix() const;
+
+    void updateListMarkerNumbers();
+
+    static RenderListItem* nextListItem(RenderObject* listRenderer, const RenderListItem* = 0);
 
 private:
     virtual const char* renderName() const { return "RenderListItem"; }
 
     virtual bool isListItem() const { return true; }
     
-    virtual void destroy();
+    virtual void willBeDestroyed();
 
     virtual bool isEmpty() const;
-    virtual void paint(PaintInfo&, int tx, int ty);
+    virtual void paint(PaintInfo&, const LayoutPoint&);
 
     virtual void layout();
-    virtual void calcPrefWidths();
+    virtual void computePreferredLogicalWidths();
 
-    virtual void positionListMarker();
+    void positionListMarker();
 
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
+
+    virtual bool requiresForcedStyleRecalcPropagation() const { return true; }
+
+    virtual void addOverflowFromChildren();
 
     void updateMarkerLocation();
     inline int calcValue() const;
     void updateValueNow() const;
     void explicitValueChanged();
 
-    RenderListMarker* m_marker;
     int m_explicitValue;
+    RenderListMarker* m_marker;
     mutable int m_value;
 
     bool m_hasExplicitValue : 1;

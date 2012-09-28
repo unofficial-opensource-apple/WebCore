@@ -26,20 +26,55 @@
 #ifndef ScrollbarThemeGtk_h
 #define ScrollbarThemeGtk_h
 
-#include "ScrollbarTheme.h"
-
-typedef struct _GtkWidget GtkWidget;
-typedef struct _GtkStyle GtkStyle;
-typedef struct _GtkContainer GtkContainer;
-typedef struct _GtkBorder GtkBorder;
+#include "ScrollbarThemeComposite.h"
 
 namespace WebCore {
 
-class ScrollbarThemeGtk : public ScrollbarTheme {
+class Scrollbar;
+
+class ScrollbarThemeGtk : public ScrollbarThemeComposite {
 public:
+    ScrollbarThemeGtk();
     virtual ~ScrollbarThemeGtk();
 
-    virtual int scrollbarThickness(ScrollbarControlSize = RegularScrollbar);
+    virtual bool hasButtons(ScrollbarThemeClient*) { return true; }
+    virtual bool hasThumb(ScrollbarThemeClient*);
+    virtual IntRect backButtonRect(ScrollbarThemeClient*, ScrollbarPart, bool);
+    virtual IntRect forwardButtonRect(ScrollbarThemeClient*, ScrollbarPart, bool);
+    virtual IntRect trackRect(ScrollbarThemeClient*, bool);
+    IntRect thumbRect(ScrollbarThemeClient*, const IntRect& unconstrainedTrackRect);
+    bool paint(ScrollbarThemeClient*, GraphicsContext*, const IntRect& damageRect);
+    void paintScrollbarBackground(GraphicsContext*, ScrollbarThemeClient*);
+    void paintTrackBackground(GraphicsContext*, ScrollbarThemeClient*, const IntRect&);
+    void paintThumb(GraphicsContext*, ScrollbarThemeClient*, const IntRect&);
+    virtual void paintButton(GraphicsContext*, ScrollbarThemeClient*, const IntRect&, ScrollbarPart);
+    virtual bool shouldCenterOnThumb(ScrollbarThemeClient*, const PlatformMouseEvent&);
+    virtual int scrollbarThickness(ScrollbarControlSize);
+    virtual IntSize buttonSize(ScrollbarThemeClient*);
+    virtual int minimumThumbLength(ScrollbarThemeClient*);
+
+    // TODO: These are the default GTK+ values. At some point we should pull these from the theme itself.
+    virtual double initialAutoscrollTimerDelay() { return 0.20; }
+    virtual double autoscrollTimerDelay() { return 0.02; }
+    void updateThemeProperties();
+    void updateScrollbarsFrameThickness();
+    void registerScrollbar(ScrollbarThemeClient*);
+    void unregisterScrollbar(ScrollbarThemeClient*);
+
+protected:
+#ifndef GTK_API_VERSION_2
+    GtkStyleContext* m_context;
+#endif
+    int m_thumbFatness;
+    int m_troughBorderWidth;
+    int m_stepperSize;
+    int m_stepperSpacing;
+    int m_minThumbLength;
+    gboolean m_troughUnderSteppers;
+    gboolean m_hasForwardButtonStartPart;
+    gboolean m_hasForwardButtonEndPart;
+    gboolean m_hasBackButtonStartPart;
+    gboolean m_hasBackButtonEndPart;
 };
 
 }

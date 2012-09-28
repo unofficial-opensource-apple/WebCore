@@ -26,14 +26,18 @@
 #include "config.h"
 #include "ResourceLoader.h"
 
+#if USE(CFNETWORK)
+
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 
 namespace WebCore {
 
+#if PLATFORM(WIN)
+
 bool ResourceLoader::shouldCacheResponse(ResourceHandle*, CFCachedURLResponseRef cachedResponse)
 {
-    if (!m_sendResourceLoadCallbacks)
+    if (m_options.sendLoadCallbacks == DoNotSendCallbacks)
         return 0;
 
     CFURLResponseRef response = CFCachedURLResponseGetWrappedResponse(cachedResponse);
@@ -41,4 +45,8 @@ bool ResourceLoader::shouldCacheResponse(ResourceHandle*, CFCachedURLResponseRef
     return frameLoader()->client()->shouldCacheResponse(documentLoader(), identifier(), response, CFDataGetBytePtr(data), CFDataGetLength(data));
 }
 
+#endif
+
 } // namespace WebCore
+
+#endif // USE(CFNETWORK)

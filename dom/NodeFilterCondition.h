@@ -29,7 +29,9 @@
 #include <wtf/RefCounted.h>
 
 namespace JSC {
-    class MarkStack;
+
+class SlotVisitor;
+
 }
 
 namespace WebCore {
@@ -40,7 +42,7 @@ namespace WebCore {
     public:
         virtual ~NodeFilterCondition() { }
         virtual short acceptNode(ScriptState*, Node*) const = 0;
-        virtual void markAggregate(JSC::MarkStack&) { }
+        virtual void visitAggregate(JSC::SlotVisitor&) { }
     };
 
 } // namespace WebCore

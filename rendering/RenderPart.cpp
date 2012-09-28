@@ -3,6 +3,7 @@
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
  *           (C) 2000 Stefan Schimanski (1Stein@gmx.de)
  * Copyright (C) 2004, 2005, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) Research In Motion Limited 2011. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,18 +25,20 @@
 #include "config.h"
 #include "RenderPart.h"
 
-#include "RenderView.h"
 #include "Frame.h"
 #include "FrameView.h"
 #include "HTMLFrameElementBase.h"
+#include "PluginViewBase.h"
+#include "RenderSVGRoot.h"
+#include "RenderView.h"
+
+using namespace std;
 
 namespace WebCore {
 
 RenderPart::RenderPart(Element* node)
     : RenderWidget(node)
-    , m_hasFallbackContent(false)
 {
-    // init RenderObject attributes
     setInline(false);
 }
 
@@ -56,62 +59,53 @@ void RenderPart::setWidget(PassRefPtr<Widget> widget)
     viewCleared();
 }
 
-void RenderPart::layoutWithFlattening(bool fixedWidth, bool fixedHeight)
-{
-    FrameView* childFrameView = static_cast<FrameView*>(widget());
-    RenderView* childRoot = childFrameView ? static_cast<RenderView*>(childFrameView->frame()->contentRenderer()) : 0;
-
-    // Do not expand frames which has zero width or height
-    if (!width() || !height() || !childRoot) {
-        updateWidgetPosition();
-        if (childFrameView)
-            childFrameView->layout();
-        setNeedsLayout(false);
-        return;
-    }
-
-    // need to update to calculate min/max correctly
-    updateWidgetPosition();
-    if (childRoot->prefWidthsDirty())
-        childRoot->calcPrefWidths();
-
-    // if scrollbars are off, and the width or height are fixed
-    // we obey them and do not expand. With frame flattening
-    // no subframe much ever become scrollable.
-
-    HTMLFrameElementBase* element = static_cast<HTMLFrameElementBase*>(node());
-    bool isScrollable = element->scrollingMode() != ScrollbarAlwaysOff;
-
-    // consider iframe inset border
-    int hBorder = borderLeft() + borderRight();
-    int vBorder = borderTop() + borderBottom();
-
-    // make sure minimum preferred width is enforced
-    if (isScrollable || !fixedWidth) {
-        setWidth(max(width(), childRoot->minPrefWidth() + hBorder));
-        // update again to pass the new width to the child frame
-        updateWidgetPosition();
-        childFrameView->layout();
-    }
-
-    // expand the frame by setting frame height = content height
-    if (isScrollable || !fixedHeight || childRoot->isFrameSet())
-        setHeight(max(height(), childFrameView->contentsHeight() + vBorder));
-    if (isScrollable || !fixedWidth || childRoot->isFrameSet())
-        setWidth(max(width(), childFrameView->contentsWidth() + hBorder));
-
-    updateWidgetPosition();
-
-    ASSERT(!childFrameView->layoutPending());
-    ASSERT(!childRoot->needsLayout());
-    ASSERT(!childRoot->firstChild() || !childRoot->firstChild()->firstChild() || !childRoot->firstChild()->firstChild()->needsLayout());
-
-    setNeedsLayout(false);
-}
-
-
 void RenderPart::viewCleared()
 {
+}
+
+#if USE(ACCELERATED_COMPOSITING)
+bool RenderPart::requiresLayer() const
+{
+    if (RenderWidget::requiresLayer())
+        return true;
+    
+    return requiresAcceleratedCompositing();
+}
+
+bool RenderPart::requiresAcceleratedCompositing() const
+{
+    // There are two general cases in which we can return true. First, if this is a plugin 
+    // renderer and the plugin has a layer, then we need a layer. Second, if this is 
+    // a renderer with a contentDocument and that document needs a layer, then we need
+    // a layer.
+    if (widget() && widget()->isPluginViewBase() && static_cast<PluginViewBase*>(widget())->platformLayer())
+        return true;
+
+    if (!node() || !node()->isFrameOwnerElement())
+        return false;
+
+    HTMLFrameOwnerElement* element = static_cast<HTMLFrameOwnerElement*>(node());
+    if (Document* contentDocument = element->contentDocument()) {
+        if (RenderView* view = contentDocument->renderView())
+            return view->usesCompositing();
+    }
+
+    return false;
+}
+#endif
+
+bool RenderPart::needsPreferredWidthsRecalculation() const
+{
+    if (RenderWidget::needsPreferredWidthsRecalculation())
+        return true;
+    return embeddedContentBox();
+}
+
+RenderBox* RenderPart::embeddedContentBox() const
+{
+    if (!node() || !widget() || !widget()->isFrameView())
+        return 0;
+    return static_cast<FrameView*>(widget())->embeddedContentBox();
 }
 
 }

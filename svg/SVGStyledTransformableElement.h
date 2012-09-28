@@ -1,69 +1,73 @@
 /*
-    Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
-                  2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #ifndef SVGStyledTransformableElement_h
 #define SVGStyledTransformableElement_h
 
 #if ENABLE(SVG)
-#include "Path.h"
+#include "SVGAnimatedTransformList.h"
 #include "SVGStyledLocatableElement.h"
 #include "SVGTransformable.h"
 
 namespace WebCore {
 
-    class TransformationMatrix;
+class AffineTransform;
+class Path;
 
-    class SVGStyledTransformableElement : public SVGStyledLocatableElement,
-                                          public SVGTransformable {
-    public:
-        SVGStyledTransformableElement(const QualifiedName&, Document*);
-        virtual ~SVGStyledTransformableElement();
-        
-        virtual bool isStyledTransformable() const { return true; }
+class SVGStyledTransformableElement : public SVGStyledLocatableElement,
+                                      public SVGTransformable {
+public:
+    virtual ~SVGStyledTransformableElement();
 
-        virtual TransformationMatrix getCTM() const;
-        virtual TransformationMatrix getScreenCTM() const;
-        virtual SVGElement* nearestViewportElement() const;
-        virtual SVGElement* farthestViewportElement() const;
-        
-        virtual TransformationMatrix animatedLocalTransform() const;
-        virtual TransformationMatrix* supplementalTransform();
+    virtual AffineTransform getCTM(StyleUpdateStrategy = AllowStyleUpdate);
+    virtual AffineTransform getScreenCTM(StyleUpdateStrategy = AllowStyleUpdate);
+    virtual SVGElement* nearestViewportElement() const;
+    virtual SVGElement* farthestViewportElement() const;
 
-        virtual FloatRect getBBox() const;
+    virtual AffineTransform localCoordinateSpaceTransform(SVGLocatable::CTMScope mode) const { return SVGTransformable::localCoordinateSpaceTransform(mode); }
+    virtual AffineTransform animatedLocalTransform() const;
+    virtual AffineTransform* supplementalTransform();
 
-        virtual void parseMappedAttribute(MappedAttribute*);
-        virtual void synchronizeProperty(const QualifiedName&);
-        bool isKnownAttribute(const QualifiedName&);
+    virtual FloatRect getBBox(StyleUpdateStrategy = AllowStyleUpdate);
 
-        // "base class" methods for all the elements which render as paths
-        virtual Path toPathData() const { return Path(); }
-        virtual Path toClipPath() const;
-        virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
+    // "base class" methods for all the elements which render as paths
+    virtual void toClipPath(Path&);
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
-    protected:
-        DECLARE_ANIMATED_PROPERTY(SVGStyledTransformableElement, SVGNames::transformAttr, SVGTransformList*, Transform, transform)
+protected:
+    SVGStyledTransformableElement(const QualifiedName&, Document*, ConstructionType = CreateSVGElement);
 
-    private:
-        // Used by <animateMotion>
-        OwnPtr<TransformationMatrix> m_supplementalTransform;
-    };
+    bool isSupportedAttribute(const QualifiedName&);
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual void svgAttributeChanged(const QualifiedName&);
+
+    BEGIN_DECLARE_ANIMATED_PROPERTIES(SVGStyledTransformableElement)
+        DECLARE_ANIMATED_TRANSFORM_LIST(Transform, transform)
+    END_DECLARE_ANIMATED_PROPERTIES
+
+private:
+    virtual bool isStyledTransformable() const { return true; }
+
+    // Used by <animateMotion>
+    OwnPtr<AffineTransform> m_supplementalTransform;
+};
 
 } // namespace WebCore
 

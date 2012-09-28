@@ -59,7 +59,8 @@ struct FillSize {
     LengthSize size;
 };
 
-struct FillLayer : FastAllocBase {
+class FillLayer {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     FillLayer(EFillLayerType);
     ~FillLayer();
@@ -74,6 +75,7 @@ public:
     EFillRepeat repeatY() const { return static_cast<EFillRepeat>(m_repeatY); }
     CompositeOperator composite() const { return static_cast<CompositeOperator>(m_composite); }
     LengthSize sizeLength() const { return m_sizeLength; }
+    EFillSizeType sizeType() const { return static_cast<EFillSizeType>(m_sizeType); }
     FillSize size() const { return FillSize(static_cast<EFillSizeType>(m_sizeType), m_sizeLength); }
 
     const FillLayer* next() const { return m_next; }
@@ -90,7 +92,7 @@ public:
     bool isCompositeSet() const { return m_compositeSet; }
     bool isSizeSet() const { return m_sizeType != SizeNone; }
     
-    void setImage(StyleImage* i) { m_image = i; m_imageSet = true; }
+    void setImage(PassRefPtr<StyleImage> i) { m_image = i; m_imageSet = true; }
     void setXPosition(Length l) { m_xPosition = l; m_xPosSet = true; }
     void setYPosition(Length l) { m_yPosition = l; m_yPosSet = true; }
     void setAttachment(EFillAttachment attachment) { m_attachment = attachment; m_attachmentSet = true; }
@@ -103,7 +105,7 @@ public:
     void setSizeLength(LengthSize l) { m_sizeLength = l; }
     void setSize(FillSize f) { m_sizeType = f.type; m_sizeLength = f.size; }
     
-    void clearImage() { m_imageSet = false; }
+    void clearImage() { m_image.clear(); m_imageSet = false; }
     void clearXPosition() { m_xPosSet = false; }
     void clearYPosition() { m_yPosSet = false; }
     void clearAttachment() { m_attachmentSet = false; }
@@ -161,13 +163,18 @@ public:
     static StyleImage* initialFillImage(EFillLayerType) { return 0; }
 
 private:
+    friend class RenderStyle;
+
     FillLayer() { }
 
-public:
+    FillLayer* m_next;
+
     RefPtr<StyleImage> m_image;
 
     Length m_xPosition;
     Length m_yPosition;
+
+    LengthSize m_sizeLength;
 
     unsigned m_attachment : 2; // EFillAttachment
     unsigned m_clip : 2; // EFillBox
@@ -177,21 +184,17 @@ public:
     unsigned m_composite : 4; // CompositeOperator
     unsigned m_sizeType : 2; // EFillSizeType
     
-    LengthSize m_sizeLength;
-
-    bool m_imageSet : 1;
-    bool m_attachmentSet : 1;
-    bool m_clipSet : 1;
-    bool m_originSet : 1;
-    bool m_repeatXSet : 1;
-    bool m_repeatYSet : 1;
-    bool m_xPosSet : 1;
-    bool m_yPosSet : 1;
-    bool m_compositeSet : 1;
+    unsigned m_imageSet : 1;
+    unsigned m_attachmentSet : 1;
+    unsigned m_clipSet : 1;
+    unsigned m_originSet : 1;
+    unsigned m_repeatXSet : 1;
+    unsigned m_repeatYSet : 1;
+    unsigned m_xPosSet : 1;
+    unsigned m_yPosSet : 1;
+    unsigned m_compositeSet : 1;
     
     unsigned m_type : 1; // EFillLayerType
-
-    FillLayer* m_next;
 };
 
 } // namespace WebCore

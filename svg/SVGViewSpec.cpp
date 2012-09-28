@@ -1,66 +1,71 @@
 /*
-    Copyright (C) 2007 Rob Buis <buis@kde.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2007, 2010 Rob Buis <buis@kde.org>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
+
 #if ENABLE(SVG)
 #include "SVGViewSpec.h"
 
 #include "Document.h"
-#include "PlatformString.h"
+#include "SVGNames.h"
 #include "SVGParserUtilities.h"
-#include "SVGPreserveAspectRatio.h"
 #include "SVGSVGElement.h"
-#include "SVGTransformList.h"
 #include "SVGTransformable.h"
 
 namespace WebCore {
 
-SVGViewSpec::SVGViewSpec(const SVGSVGElement* contextElement)
-    : SVGFitToViewBox()
-    , SVGZoomAndPan()
-    , m_contextElement(contextElement)
-    , m_transform(SVGTransformList::create(SVGNames::transformAttr))
-{
-}
+// Animated property definitions
+DEFINE_ANIMATED_RECT(SVGViewSpec, SVGNames::viewBoxAttr, ViewBox, viewBox)
+DEFINE_ANIMATED_PRESERVEASPECTRATIO(SVGViewSpec, SVGNames::preserveAspectRatioAttr, PreserveAspectRatio, preserveAspectRatio)
 
-SVGViewSpec::~SVGViewSpec()
+BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGViewSpec)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(viewBox)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(preserveAspectRatio)
+END_REGISTER_ANIMATED_PROPERTIES
+
+SVGViewSpec::SVGViewSpec(SVGElement* contextElement)
+    : m_contextElement(contextElement)
 {
+    ASSERT(m_contextElement);
+    registerAnimatedPropertiesForSVGViewSpec();
 }
 
 void SVGViewSpec::setTransform(const String& transform)
 {
-    SVGTransformable::parseTransformAttribute(m_transform.get(), transform);
+    m_transform.parse(transform);
 }
 
-void SVGViewSpec::setViewBoxString(const String& viewBox)
+void SVGViewSpec::setViewBoxString(const String& viewBoxStr)
 {
-    float x, y, w, h;
-    const UChar* c = viewBox.characters();
-    const UChar* end = c + viewBox.length();
-    if (!parseViewBox(m_contextElement->document(), c, end, x, y, w, h, false))
-        return;
-    setViewBoxBaseValue(FloatRect(x, y, w, h));
+    FloatRect viewBox;
+    const UChar* c = viewBoxStr.characters();
+    const UChar* end = c + viewBoxStr.length();
+    if (!parseViewBox(m_contextElement->document(), c, end, viewBox, false))
+         return;
+    setViewBoxBaseValue(viewBox);
 }
 
 void SVGViewSpec::setPreserveAspectRatioString(const String& preserve)
 {
-    SVGPreserveAspectRatio::parsePreserveAspectRatio(this, preserve);
+    SVGPreserveAspectRatio preserveAspectRatio;
+    preserveAspectRatio.parse(preserve);
+    setPreserveAspectRatioBaseValue(preserveAspectRatio);
 }
 
 void SVGViewSpec::setViewTargetString(const String& viewTargetString)
@@ -70,7 +75,7 @@ void SVGViewSpec::setViewTargetString(const String& viewTargetString)
 
 SVGElement* SVGViewSpec::viewTarget() const
 {
-    return static_cast<SVGElement*>(m_contextElement->document()->getElementById(m_viewTargetString));
+    return static_cast<SVGElement*>(m_contextElement->treeScope()->getElementById(m_viewTargetString));
 }
 
 static const UChar svgViewSpec[] = {'s', 'v', 'g', 'V', 'i', 'e', 'w'};
@@ -88,27 +93,27 @@ bool SVGViewSpec::parseViewSpec(const String& viewSpec)
     if (currViewSpec >= end)
         return false;
 
-    if (!skipString(currViewSpec, end, svgViewSpec, sizeof(svgViewSpec) / sizeof(UChar)))
+    if (!skipString(currViewSpec, end, svgViewSpec, WTF_ARRAY_LENGTH(svgViewSpec)))
         return false;
 
-    if (currViewSpec >= end || *currViewSpec != '(' )
+    if (currViewSpec >= end || *currViewSpec != '(')
         return false;
     currViewSpec++;
 
     while (currViewSpec < end && *currViewSpec != ')') {
         if (*currViewSpec == 'v') {
-            if (skipString(currViewSpec, end, viewBoxSpec, sizeof(viewBoxSpec) / sizeof(UChar))) {
+            if (skipString(currViewSpec, end, viewBoxSpec, WTF_ARRAY_LENGTH(viewBoxSpec))) {
                 if (currViewSpec >= end || *currViewSpec != '(')
                     return false;
                 currViewSpec++;
-                float x, y, w, h;
-                if (!parseViewBox(m_contextElement->document(), currViewSpec, end, x, y, w, h, false))
+                FloatRect viewBox;
+                if (!parseViewBox(m_contextElement->document(), currViewSpec, end, viewBox, false))
                     return false;
-                setViewBoxBaseValue(FloatRect(x, y, w, h));
+                setViewBoxBaseValue(viewBox);
                 if (currViewSpec >= end || *currViewSpec != ')')
                     return false;
                 currViewSpec++;
-            } else if (skipString(currViewSpec, end, viewTargetSpec, sizeof(viewTargetSpec) / sizeof(UChar))) {
+            } else if (skipString(currViewSpec, end, viewTargetSpec, WTF_ARRAY_LENGTH(viewTargetSpec))) {
                 if (currViewSpec >= end || *currViewSpec != '(')
                     return false;
                 const UChar* viewTargetStart = ++currViewSpec;
@@ -121,7 +126,7 @@ bool SVGViewSpec::parseViewSpec(const String& viewSpec)
             } else
                 return false;
         } else if (*currViewSpec == 'z') {
-            if (!skipString(currViewSpec, end, zoomAndPanSpec, sizeof(zoomAndPanSpec) / sizeof(UChar)))
+            if (!skipString(currViewSpec, end, zoomAndPanSpec, WTF_ARRAY_LENGTH(zoomAndPanSpec)))
                 return false;
             if (currViewSpec >= end || *currViewSpec != '(')
                 return false;
@@ -132,25 +137,25 @@ bool SVGViewSpec::parseViewSpec(const String& viewSpec)
                 return false;
             currViewSpec++;
         } else if (*currViewSpec == 'p') {
-            if (!skipString(currViewSpec, end, preserveAspectRatioSpec, sizeof(preserveAspectRatioSpec) / sizeof(UChar)))
+            if (!skipString(currViewSpec, end, preserveAspectRatioSpec, WTF_ARRAY_LENGTH(preserveAspectRatioSpec)))
                 return false;
             if (currViewSpec >= end || *currViewSpec != '(')
                 return false;
             currViewSpec++;
-            bool result = false; 
-            setPreserveAspectRatioBaseValue(SVGPreserveAspectRatio::parsePreserveAspectRatio(currViewSpec, end, false, result));
-            if (!result)
+            SVGPreserveAspectRatio preserveAspectRatio;
+            if (!preserveAspectRatio.parse(currViewSpec, end, false))
                 return false;
+            setPreserveAspectRatioBaseValue(preserveAspectRatio);
             if (currViewSpec >= end || *currViewSpec != ')')
                 return false;
             currViewSpec++;
         } else if (*currViewSpec == 't') {
-            if (!skipString(currViewSpec, end, transformSpec, sizeof(transformSpec) / sizeof(UChar)))
+            if (!skipString(currViewSpec, end, transformSpec, WTF_ARRAY_LENGTH(transformSpec)))
                 return false;
             if (currViewSpec >= end || *currViewSpec != '(')
                 return false;
             currViewSpec++;
-            SVGTransformable::parseTransformAttribute(m_transform.get(), currViewSpec, end, SVGTransformable::DoNotClearList);
+            SVGTransformable::parseTransformAttribute(m_transform, currViewSpec, end, SVGTransformable::DoNotClearList);
             if (currViewSpec >= end || *currViewSpec != ')')
                 return false;
             currViewSpec++;

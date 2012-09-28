@@ -22,81 +22,174 @@
 #include "CookieJarSoup.h"
 
 #include "Cookie.h"
-#include "CString.h"
 #include "Document.h"
+#include "Frame.h"
+#include "FrameLoader.h"
+#include "GOwnPtrSoup.h"
 #include "KURL.h"
+#include "NetworkingContext.h"
+#include "ResourceHandle.h"
+#include <wtf/gobject/GRefPtr.h>
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
-static bool cookiesInitialized;
-static SoupCookieJar* cookieJar;
-
-SoupCookieJar* defaultCookieJar()
+static SoupCookieJar* cookieJarForDocument(const Document* document)
 {
-    if (!cookiesInitialized) {
-        cookiesInitialized = true;
-        setDefaultCookieJar(soup_cookie_jar_new());
-    }
+    if (!document)
+        return 0;
+    const Frame* frame = document->frame();
+    if (!frame)
+        return 0;
+    const FrameLoader* loader = frame->loader();
+    if (!loader)
+        return 0;
+    const NetworkingContext* context = loader->networkingContext();
+    if (!context)
+        return 0;
+    return SOUP_COOKIE_JAR(soup_session_get_feature(context->soupSession(), SOUP_TYPE_COOKIE_JAR));
+}
 
+static GRefPtr<SoupCookieJar>& defaultCookieJar()
+{
+    DEFINE_STATIC_LOCAL(GRefPtr<SoupCookieJar>, cookieJar, ());
     return cookieJar;
 }
 
-void setDefaultCookieJar(SoupCookieJar* jar)
+SoupCookieJar* soupCookieJar()
 {
-    cookiesInitialized = true;
+    if (GRefPtr<SoupCookieJar>& jar = defaultCookieJar())
+        return jar.get();
 
-    if (cookieJar)
-        g_object_unref(cookieJar);
-
-    cookieJar = jar;
-
-    if (cookieJar)
-        g_object_ref(cookieJar);
+    SoupCookieJar* jar = soup_cookie_jar_new();
+    soup_cookie_jar_set_accept_policy(jar, SOUP_COOKIE_JAR_ACCEPT_NO_THIRD_PARTY);
+    setSoupCookieJar(jar);
+    return jar;
 }
 
-void setCookies(Document* /*document*/, const KURL& url, const String& value)
+void setSoupCookieJar(SoupCookieJar* jar)
 {
-    SoupCookieJar* jar = defaultCookieJar();
+    defaultCookieJar() = jar;
+}
+
+void setCookies(Document* document, const KURL& url, const String& value)
+{
+    SoupCookieJar* jar = cookieJarForDocument(document);
     if (!jar)
         return;
 
-    SoupURI* origin = soup_uri_new(url.string().utf8().data());
-
-    soup_cookie_jar_set_cookie(jar, origin, value.utf8().data());
-    soup_uri_free(origin);
+    GOwnPtr<SoupURI> origin(soup_uri_new(url.string().utf8().data()));
+    GOwnPtr<SoupURI> firstParty(soup_uri_new(document->firstPartyForCookies().string().utf8().data()));
+    soup_cookie_jar_set_cookie_with_first_party(jar, origin.get(), firstParty.get(), value.utf8().data());
 }
 
-String cookies(const Document* /*document*/, const KURL& url)
+static String cookiesForDocument(const Document* document, const KURL& url, bool forHTTPHeader)
 {
-    SoupCookieJar* jar = defaultCookieJar();
+    SoupCookieJar* jar = cookieJarForDocument(document);
     if (!jar)
         return String();
 
-    SoupURI* uri = soup_uri_new(url.string().utf8().data());
-    char* cookies = soup_cookie_jar_get_cookies(jar, uri, FALSE);
-    soup_uri_free(uri);
-
-    String result(String::fromUTF8(cookies));
-    g_free(cookies);
-
-    return result;
+    GOwnPtr<SoupURI> uri(soup_uri_new(url.string().utf8().data()));
+    GOwnPtr<char> cookies(soup_cookie_jar_get_cookies(jar, uri.get(), forHTTPHeader));
+    return String::fromUTF8(cookies.get());
 }
 
-bool cookiesEnabled(const Document* /*document*/)
+String cookies(const Document* document, const KURL& url)
 {
-    return defaultCookieJar();
+    return cookiesForDocument(document, url, false);
 }
 
-bool getRawCookies(const Document*, const KURL&, Vector<Cookie>& rawCookies)
+String cookieRequestHeaderFieldValue(const Document* document, const KURL& url)
 {
-    // FIXME: Not yet implemented
+    return cookiesForDocument(document, url, true);
+}
+
+bool cookiesEnabled(const Document* document)
+{
+    return !!cookieJarForDocument(document);
+}
+
+bool getRawCookies(const Document* document, const KURL& url, Vector<Cookie>& rawCookies)
+{
     rawCookies.clear();
-    return false; // return true when implemented
+    SoupCookieJar* jar = cookieJarForDocument(document);
+    if (!jar)
+        return false;
+
+    GOwnPtr<GSList> cookies(soup_cookie_jar_all_cookies(jar));
+    if (!cookies)
+        return false;
+
+    GOwnPtr<SoupURI> uri(soup_uri_new(url.string().utf8().data()));
+    for (GSList* iter = cookies.get(); iter; iter = g_slist_next(iter)) {
+        GOwnPtr<SoupCookie> cookie(static_cast<SoupCookie*>(iter->data));
+        if (!soup_cookie_applies_to_uri(cookie.get(), uri.get()))
+            continue;
+        // FIXME: we are currently passing false always for session because there's no API to know
+        // whether SoupCookieJar is persistent or not. We could probably add soup_cookie_jar_is_persistent().
+        rawCookies.append(Cookie(String::fromUTF8(cookie->name), String::fromUTF8(cookie->value), String::fromUTF8(cookie->domain),
+                                 String::fromUTF8(cookie->path), static_cast<double>(soup_date_to_time_t(cookie->expires)) * 1000,
+                                 cookie->http_only, cookie->secure, false));
+    }
+
+    return true;
 }
 
-void deleteCookie(const Document*, const KURL&, const String&)
+void deleteCookie(const Document* document, const KURL& url, const String& name)
 {
-    // FIXME: Not yet implemented
+    SoupCookieJar* jar = cookieJarForDocument(document);
+    if (!jar)
+        return;
+
+    GOwnPtr<GSList> cookies(soup_cookie_jar_all_cookies(jar));
+    if (!cookies)
+        return;
+
+    CString cookieName = name.utf8();
+    GOwnPtr<SoupURI> uri(soup_uri_new(url.string().utf8().data()));
+    for (GSList* iter = cookies.get(); iter; iter = g_slist_next(iter)) {
+        GOwnPtr<SoupCookie> cookie(static_cast<SoupCookie*>(iter->data));
+        if (!soup_cookie_applies_to_uri(cookie.get(), uri.get()))
+            continue;
+        if (cookieName == cookie->name)
+            soup_cookie_jar_delete_cookie(jar, cookie.get());
+    }
+}
+
+void getHostnamesWithCookies(HashSet<String>& hostnames)
+{
+    SoupCookieJar* cookieJar = soupCookieJar();
+    GOwnPtr<GSList> cookies(soup_cookie_jar_all_cookies(cookieJar));
+    for (GSList* item = cookies.get(); item; item = g_slist_next(item)) {
+        GOwnPtr<SoupCookie> cookie(static_cast<SoupCookie*>(item->data));
+        if (!cookie->domain)
+            continue;
+        hostnames.add(String::fromUTF8(cookie->domain));
+    }
+}
+
+void deleteCookiesForHostname(const String& hostname)
+{
+    CString hostNameString = hostname.utf8();
+    SoupCookieJar* cookieJar = soupCookieJar();
+    GOwnPtr<GSList> cookies(soup_cookie_jar_all_cookies(cookieJar));
+    for (GSList* item = cookies.get(); item; item = g_slist_next(item)) {
+        SoupCookie* cookie = static_cast<SoupCookie*>(item->data);
+        if (soup_cookie_domain_matches(cookie, hostNameString.data()))
+            soup_cookie_jar_delete_cookie(cookieJar, cookie);
+        soup_cookie_free(cookie);
+    }
+}
+
+void deleteAllCookies()
+{
+    SoupCookieJar* cookieJar = soupCookieJar();
+    GOwnPtr<GSList> cookies(soup_cookie_jar_all_cookies(cookieJar));
+    for (GSList* item = cookies.get(); item; item = g_slist_next(item)) {
+        SoupCookie* cookie = static_cast<SoupCookie*>(item->data);
+        soup_cookie_jar_delete_cookie(cookieJar, cookie);
+        soup_cookie_free(cookie);
+    }
 }
 
 }

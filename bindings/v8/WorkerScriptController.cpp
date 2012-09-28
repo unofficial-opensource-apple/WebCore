@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2009, 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -34,67 +34,122 @@
 
 #include "WorkerScriptController.h"
 
-#include <v8.h>
-
+#include "DOMTimer.h"
+#include "ScriptCallStack.h"
 #include "ScriptSourceCode.h"
 #include "ScriptValue.h"
-#include "DOMTimer.h"
 #include "V8DOMMap.h"
 #include "V8Proxy.h"
+#include "V8WorkerContext.h"
 #include "WorkerContext.h"
 #include "WorkerContextExecutionProxy.h"
 #include "WorkerObjectProxy.h"
 #include "WorkerThread.h"
+#include <v8.h>
 
 namespace WebCore {
 
 WorkerScriptController::WorkerScriptController(WorkerContext* workerContext)
     : m_workerContext(workerContext)
-    , m_proxy(new WorkerContextExecutionProxy(workerContext))
+    , m_isolate(v8::Isolate::New())
     , m_executionForbidden(false)
+    , m_executionScheduledToTerminate(false)
 {
+    V8BindingPerIsolateData* data = V8BindingPerIsolateData::create(m_isolate);
+    data->allStores().append(&m_DOMDataStore);
+    data->setDOMDataStore(&m_DOMDataStore);
+    m_isolate->Enter();
+    m_proxy = adoptPtr(new WorkerContextExecutionProxy(workerContext));
 }
 
 WorkerScriptController::~WorkerScriptController()
 {
-    removeAllDOMObjectsInCurrentThread();
+    removeAllDOMObjects();
+#if PLATFORM(CHROMIUM)
+    // The corresponding call to didStartWorkerRunLoop is in
+    // WorkerThread::workerThread().
+    // See http://webkit.org/b/83104#c14 for why this is here.
+    PlatformSupport::didStopWorkerRunLoop(&m_workerContext->thread()->runLoop());
+#endif
+    m_proxy.clear();
+    m_isolate->Exit();
+    V8BindingPerIsolateData::dispose(m_isolate);
+    m_isolate->Dispose();
 }
 
-ScriptValue WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode)
+void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode)
 {
-    return evaluate(sourceCode, 0);
+    evaluate(sourceCode, 0);
 }
 
-ScriptValue WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, ScriptValue* exception)
+void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, ScriptValue* exception)
 {
-    {
-        MutexLocker lock(m_sharedDataMutex);
-        if (m_executionForbidden)
-            return ScriptValue();
-    }
+    if (isExecutionForbidden())
+        return;
 
     WorkerContextExecutionState state;
-    ScriptValue result = m_proxy->evaluate(sourceCode.source(), sourceCode.url().string(), sourceCode.startLine() - 1, &state);
+    m_proxy->evaluate(sourceCode.source(), sourceCode.url().string(), sourceCode.startPosition(), &state);
     if (state.hadException) {
         if (exception)
             *exception = state.exception;
         else
-            m_workerContext->reportException(state.errorMessage, state.lineNumber, state.sourceURL);
+            m_workerContext->reportException(state.errorMessage, state.lineNumber, state.sourceURL, 0);
     }
+}
 
-    return result;
+void WorkerScriptController::scheduleExecutionTermination()
+{
+    // The mutex provides a memory barrier to ensure that once
+    // termination is scheduled, isExecutionTerminating will
+    // accurately reflect that state when called from another thread.
+    {
+        MutexLocker locker(m_scheduledTerminationMutex);
+        m_executionScheduledToTerminate = true;
+    }
+    v8::V8::TerminateExecution(m_isolate);
+}
+
+bool WorkerScriptController::isExecutionTerminating() const
+{
+    // See comments in scheduleExecutionTermination regarding mutex usage.
+    MutexLocker locker(m_scheduledTerminationMutex);
+    return m_executionScheduledToTerminate;
 }
 
 void WorkerScriptController::forbidExecution()
 {
-    // This function is called from another thread.
-    MutexLocker lock(m_sharedDataMutex);
+    ASSERT(m_workerContext->isContextThread());
     m_executionForbidden = true;
+}
+
+bool WorkerScriptController::isExecutionForbidden() const
+{
+    ASSERT(m_workerContext->isContextThread());
+    return m_executionForbidden;
+}
+
+void WorkerScriptController::disableEval()
+{
 }
 
 void WorkerScriptController::setException(ScriptValue exception)
 {
     throwError(*exception.v8Value());
+}
+
+WorkerScriptController* WorkerScriptController::controllerForContext()
+{
+    // Happens on frame destruction, check otherwise GetCurrent() will crash.
+    if (!v8::Context::InContext())
+        return 0;
+    v8::Handle<v8::Context> context = v8::Context::GetCurrent();
+    v8::Handle<v8::Object> global = context->Global();
+    global = V8DOMWrapper::lookupDOMWrapper(V8WorkerContext::GetTemplate(), global);
+    // Return 0 if the current executing context is not the worker context.
+    if (global.IsEmpty())
+        return 0;
+    WorkerContext* workerContext = V8WorkerContext::toNative(global);
+    return workerContext->script();
 }
 
 } // namespace WebCore

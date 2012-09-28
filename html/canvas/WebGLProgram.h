@@ -26,25 +26,67 @@
 #ifndef WebGLProgram_h
 #define WebGLProgram_h
 
-#include "CanvasObject.h"
+#include "WebGLSharedObject.h"
+
+#include "WebGLShader.h"
 
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/Vector.h>
 
 namespace WebCore {
-    
-    class WebGLProgram : public CanvasObject {
-    public:
-        virtual ~WebGLProgram() { deleteObject(); }
-        
-        static PassRefPtr<WebGLProgram> create(WebGLRenderingContext*);
-        
-    protected:
-        WebGLProgram(WebGLRenderingContext*);
-        
-        virtual void _deleteObject(Platform3DObject);
-    };
-    
+
+class WebGLProgram : public WebGLSharedObject {
+public:
+    virtual ~WebGLProgram();
+
+    static PassRefPtr<WebGLProgram> create(WebGLRenderingContext*);
+
+    unsigned numActiveAttribLocations();
+    GC3Dint getActiveAttribLocation(GC3Duint index);
+
+    bool isUsingVertexAttrib0();
+
+    bool getLinkStatus();
+    void setLinkStatus(bool);
+
+    unsigned getLinkCount() const { return m_linkCount; }
+
+    // This is to be called everytime after the program is successfully linked.
+    // We don't deal with integer overflow here, assuming in reality a program
+    // will never be linked so many times.
+    // Also, we invalidate the cached program info.
+    void increaseLinkCount();
+
+    WebGLShader* getAttachedShader(GC3Denum);
+    bool attachShader(WebGLShader*);
+    bool detachShader(WebGLShader*);
+
+protected:
+    WebGLProgram(WebGLRenderingContext*);
+
+    virtual void deleteObjectImpl(GraphicsContext3D*, Platform3DObject);
+
+private:
+    virtual bool isProgram() const { return true; }
+
+    void cacheActiveAttribLocations(GraphicsContext3D*);
+    void cacheInfoIfNeeded();
+
+    Vector<GC3Dint> m_activeAttribLocations;
+
+    GC3Dint m_linkStatus;
+
+    // This is used to track whether a WebGLUniformLocation belongs to this
+    // program or not.
+    unsigned m_linkCount;
+
+    RefPtr<WebGLShader> m_vertexShader;
+    RefPtr<WebGLShader> m_fragmentShader;
+
+    bool m_infoValid;
+};
+
 } // namespace WebCore
 
 #endif // WebGLProgram_h

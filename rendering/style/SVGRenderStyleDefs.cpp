@@ -1,6 +1,7 @@
 /*
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
                   2004, 2005, 2007 Rob Buis <buis@kde.org>
+    Copyright (C) Research In Motion Limited 2010. All rights reserved.
 
     Based on khtml code by:
     Copyright (C) 1999 Antti Koivisto (koivisto@kde.org)
@@ -25,106 +26,123 @@
 */
 
 #include "config.h"
+
 #if ENABLE(SVG)
 #include "SVGRenderStyleDefs.h"
 
 #include "RenderStyle.h"
 #include "SVGRenderStyle.h"
 
-using namespace WebCore;
+namespace WebCore {
 
 StyleFillData::StyleFillData()
+    : opacity(SVGRenderStyle::initialFillOpacity())
+    , paintType(SVGRenderStyle::initialFillPaintType())
+    , paintColor(SVGRenderStyle::initialFillPaintColor())
+    , paintUri(SVGRenderStyle::initialFillPaintUri())
+    , visitedLinkPaintType(SVGRenderStyle::initialStrokePaintType())
+    , visitedLinkPaintColor(SVGRenderStyle::initialFillPaintColor())
+    , visitedLinkPaintUri(SVGRenderStyle::initialFillPaintUri())
 {
-    paint = SVGRenderStyle::initialFillPaint();
-    opacity = SVGRenderStyle::initialFillOpacity();
 }
 
 StyleFillData::StyleFillData(const StyleFillData& other)
     : RefCounted<StyleFillData>()
+    , opacity(other.opacity)
+    , paintType(other.paintType)
+    , paintColor(other.paintColor)
+    , paintUri(other.paintUri)
+    , visitedLinkPaintType(other.visitedLinkPaintType)
+    , visitedLinkPaintColor(other.visitedLinkPaintColor)
+    , visitedLinkPaintUri(other.visitedLinkPaintUri)
 {
-    paint = other.paint;
-    opacity = other.opacity;
 }
 
-bool StyleFillData::operator==(const StyleFillData &other) const
+bool StyleFillData::operator==(const StyleFillData& other) const
 {
-    if (opacity != other.opacity)
-        return false;
-
-    if (!paint || !other.paint)
-        return paint == other.paint;
-
-    if (paint->paintType() != other.paint->paintType())
-        return false;
-
-    if (paint->paintType() == SVGPaint::SVG_PAINTTYPE_URI)
-        return paint->uri() == other.paint->uri();
-
-    if (paint->paintType() == SVGPaint::SVG_PAINTTYPE_RGBCOLOR)
-        return paint->color() == other.paint->color();
-
-    return paint == other.paint;
+    return opacity == other.opacity 
+        && paintType == other.paintType
+        && paintColor == other.paintColor
+        && paintUri == other.paintUri
+        && visitedLinkPaintType == other.visitedLinkPaintType
+        && visitedLinkPaintColor == other.visitedLinkPaintColor
+        && visitedLinkPaintUri == other.visitedLinkPaintUri;
 }
 
 StyleStrokeData::StyleStrokeData()
+    : opacity(SVGRenderStyle::initialStrokeOpacity())
+    , miterLimit(SVGRenderStyle::initialStrokeMiterLimit())
+    , width(SVGRenderStyle::initialStrokeWidth())
+    , dashOffset(SVGRenderStyle::initialStrokeDashOffset())
+    , dashArray(SVGRenderStyle::initialStrokeDashArray())
+    , paintType(SVGRenderStyle::initialStrokePaintType())
+    , paintColor(SVGRenderStyle::initialStrokePaintColor())
+    , paintUri(SVGRenderStyle::initialStrokePaintUri())
+    , visitedLinkPaintType(SVGRenderStyle::initialStrokePaintType())
+    , visitedLinkPaintColor(SVGRenderStyle::initialStrokePaintColor())
+    , visitedLinkPaintUri(SVGRenderStyle::initialStrokePaintUri())
 {
-    width = SVGRenderStyle::initialStrokeWidth();
-    paint = SVGRenderStyle::initialStrokePaint();
-    opacity = SVGRenderStyle::initialStrokeOpacity();
-    miterLimit = SVGRenderStyle::initialStrokeMiterLimit();
-    dashOffset = SVGRenderStyle::initialStrokeDashOffset();
-    dashArray = SVGRenderStyle::initialStrokeDashArray();
 }
 
 StyleStrokeData::StyleStrokeData(const StyleStrokeData& other)
     : RefCounted<StyleStrokeData>()
+    , opacity(other.opacity)
+    , miterLimit(other.miterLimit)
+    , width(other.width)
+    , dashOffset(other.dashOffset)
+    , dashArray(other.dashArray)
+    , paintType(other.paintType)
+    , paintColor(other.paintColor)
+    , paintUri(other.paintUri)
+    , visitedLinkPaintType(other.visitedLinkPaintType)
+    , visitedLinkPaintColor(other.visitedLinkPaintColor)
+    , visitedLinkPaintUri(other.visitedLinkPaintUri)
 {
-    width = other.width;
-    paint = other.paint;
-    opacity = other.opacity;
-    miterLimit = other.miterLimit;
-    dashOffset = other.dashOffset;
-    dashArray = other.dashArray;
 }
 
-bool StyleStrokeData::operator==(const StyleStrokeData &other) const
+bool StyleStrokeData::operator==(const StyleStrokeData& other) const
 {
-    return (paint == other.paint) &&
-           (width == other.width) &&
-           (opacity == other.opacity) &&
-           (miterLimit == other.miterLimit) &&
-           (dashOffset == other.dashOffset) &&
-           (dashArray == other.dashArray);
+    return width == other.width
+        && opacity == other.opacity
+        && miterLimit == other.miterLimit
+        && dashOffset == other.dashOffset
+        && dashArray == other.dashArray
+        && paintType == other.paintType
+        && paintColor == other.paintColor
+        && paintUri == other.paintUri
+        && visitedLinkPaintType == other.visitedLinkPaintType
+        && visitedLinkPaintColor == other.visitedLinkPaintColor
+        && visitedLinkPaintUri == other.visitedLinkPaintUri;
 }
 
 StyleStopData::StyleStopData()
+    : opacity(SVGRenderStyle::initialStopOpacity())
+    , color(SVGRenderStyle::initialStopColor())
 {
-    color = SVGRenderStyle::initialStopColor();
-    opacity = SVGRenderStyle::initialStopOpacity();
 }
 
 StyleStopData::StyleStopData(const StyleStopData& other)
     : RefCounted<StyleStopData>()
+    , opacity(other.opacity)
+    , color(other.color)
 {
-    color = other.color;
-    opacity = other.opacity;
 }
 
-bool StyleStopData::operator==(const StyleStopData &other) const
+bool StyleStopData::operator==(const StyleStopData& other) const
 {
-    return (color == other.color) &&
-           (opacity == other.opacity);
+    return color == other.color
+        && opacity == other.opacity;
 }
 
 StyleTextData::StyleTextData()
+    : kerning(SVGRenderStyle::initialKerning())
 {
-    kerning = SVGRenderStyle::initialKerning();
 }
 
 StyleTextData::StyleTextData(const StyleTextData& other)
     : RefCounted<StyleTextData>()
+    , kerning(other.kerning)
 {
-    kerning = other.kerning;
 }
 
 bool StyleTextData::operator==(const StyleTextData& other) const
@@ -132,83 +150,29 @@ bool StyleTextData::operator==(const StyleTextData& other) const
     return kerning == other.kerning;
 }
 
-StyleClipData::StyleClipData()
-{
-    clipPath = SVGRenderStyle::initialClipPath();
-}
-
-StyleClipData::StyleClipData(const StyleClipData& other)
-    : RefCounted<StyleClipData>()
-{
-    clipPath = other.clipPath;
-}
-
-bool StyleClipData::operator==(const StyleClipData &other) const
-{
-    return (clipPath == other.clipPath);
-}
-
-StyleMaskData::StyleMaskData()
-{
-    maskElement = SVGRenderStyle::initialMaskElement();
-}
-
-StyleMaskData::StyleMaskData(const StyleMaskData& other)
-    : RefCounted<StyleMaskData>()
-{
-    maskElement = other.maskElement;
-}
-
-bool StyleMaskData::operator==(const StyleMaskData &other) const
-{
-    return (maskElement == other.maskElement);
-}
-
-StyleMarkerData::StyleMarkerData()
-{
-    startMarker = SVGRenderStyle::initialStartMarker();
-    midMarker = SVGRenderStyle::initialMidMarker();
-    endMarker = SVGRenderStyle::initialEndMarker();
-}
-
-StyleMarkerData::StyleMarkerData(const StyleMarkerData& other)
-    : RefCounted<StyleMarkerData>()
-{
-    startMarker = other.startMarker;
-    midMarker = other.midMarker;
-    endMarker = other.endMarker;
-}
-
-bool StyleMarkerData::operator==(const StyleMarkerData &other) const
-{
-    return (startMarker == other.startMarker && midMarker == other.midMarker && endMarker == other.endMarker);
-}
-
 StyleMiscData::StyleMiscData()
+    : floodColor(SVGRenderStyle::initialFloodColor())
+    , floodOpacity(SVGRenderStyle::initialFloodOpacity())
+    , lightingColor(SVGRenderStyle::initialLightingColor())
+    , baselineShiftValue(SVGRenderStyle::initialBaselineShiftValue())
 {
-    floodColor = SVGRenderStyle::initialFloodColor();
-    floodOpacity = SVGRenderStyle::initialFloodOpacity();
-    lightingColor = SVGRenderStyle::initialLightingColor();
-    baselineShiftValue = SVGRenderStyle::initialBaselineShiftValue();
 }
 
 StyleMiscData::StyleMiscData(const StyleMiscData& other)
     : RefCounted<StyleMiscData>()
+    , floodColor(other.floodColor)
+    , floodOpacity(other.floodOpacity)
+    , lightingColor(other.lightingColor)
+    , baselineShiftValue(other.baselineShiftValue)
 {
-    filter = other.filter;
-    floodColor = other.floodColor;
-    floodOpacity = other.floodOpacity;
-    lightingColor = other.lightingColor;
-    baselineShiftValue = other.baselineShiftValue;
 }
 
-bool StyleMiscData::operator==(const StyleMiscData &other) const
+bool StyleMiscData::operator==(const StyleMiscData& other) const
 {
-    return filter == other.filter
-           && floodOpacity == other.floodOpacity
-           && floodColor == other.floodColor
-           && lightingColor == other.lightingColor
-           && baselineShiftValue == other.baselineShiftValue;
+    return floodOpacity == other.floodOpacity
+        && floodColor == other.floodColor
+        && lightingColor == other.lightingColor
+        && baselineShiftValue == other.baselineShiftValue;
 }
 
 StyleShadowSVGData::StyleShadowSVGData()
@@ -217,7 +181,7 @@ StyleShadowSVGData::StyleShadowSVGData()
 
 StyleShadowSVGData::StyleShadowSVGData(const StyleShadowSVGData& other)
     : RefCounted<StyleShadowSVGData>()
-    , shadow(other.shadow ? new ShadowData(*other.shadow) : 0)
+    , shadow(other.shadow ? adoptPtr(new ShadowData(*other.shadow)) : nullptr)
 {
 }
 
@@ -230,6 +194,50 @@ bool StyleShadowSVGData::operator==(const StyleShadowSVGData& other) const
     return true;
 }
 
-#endif // ENABLE(SVG)
+StyleResourceData::StyleResourceData()
+    : clipper(SVGRenderStyle::initialClipperResource())
+    , filter(SVGRenderStyle::initialFilterResource())
+    , masker(SVGRenderStyle::initialMaskerResource())
+{
+}
 
-// vim:ts=4:noet
+StyleResourceData::StyleResourceData(const StyleResourceData& other)
+    : RefCounted<StyleResourceData>()
+    , clipper(other.clipper)
+    , filter(other.filter)
+    , masker(other.masker)
+{
+}
+
+bool StyleResourceData::operator==(const StyleResourceData& other) const
+{
+    return clipper == other.clipper
+        && filter == other.filter
+        && masker == other.masker;
+}
+
+StyleInheritedResourceData::StyleInheritedResourceData()
+    : markerStart(SVGRenderStyle::initialMarkerStartResource())
+    , markerMid(SVGRenderStyle::initialMarkerMidResource())
+    , markerEnd(SVGRenderStyle::initialMarkerEndResource())
+{
+}
+
+StyleInheritedResourceData::StyleInheritedResourceData(const StyleInheritedResourceData& other)
+    : RefCounted<StyleInheritedResourceData>()
+    , markerStart(other.markerStart)
+    , markerMid(other.markerMid)
+    , markerEnd(other.markerEnd)
+{
+}
+
+bool StyleInheritedResourceData::operator==(const StyleInheritedResourceData& other) const
+{
+    return markerStart == other.markerStart
+        && markerMid == other.markerMid
+        && markerEnd == other.markerEnd;
+}
+
+}
+
+#endif // ENABLE(SVG)

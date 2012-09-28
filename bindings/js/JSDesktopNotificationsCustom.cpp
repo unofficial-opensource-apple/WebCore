@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -30,14 +31,12 @@
 
 #include "config.h"
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(LEGACY_NOTIFICATIONS)
 
 #include "Document.h"
 #include "JSCustomVoidCallback.h"
 #include "JSEventListener.h"
-#include "JSNotification.h"
 #include "JSNotificationCenter.h"
-#include "Notification.h"
 #include "NotificationCenter.h"
 #include <runtime/Error.h>
 
@@ -45,43 +44,29 @@ using namespace JSC;
 
 namespace WebCore {
 
-JSValue JSNotificationCenter::requestPermission(ExecState* exec, const ArgList& args)
+JSValue JSNotificationCenter::requestPermission(ExecState* exec)
 {
+    ScriptExecutionContext* context = impl()->scriptExecutionContext();
+
+    // Make sure that script execution context is valid.
+    if (!context) {
+        setDOMException(exec, INVALID_STATE_ERR);
+        return jsUndefined();
+    }
+
     // Permission request is only valid from page context.
-    ScriptExecutionContext* context = impl()->context();
     if (context->isWorkerContext())
-        return throwError(exec, SyntaxError);
+        return throwSyntaxError(exec);
 
-    if (!args.at(0).isObject())
-        return throwError(exec, TypeError);
+    if (!exec->argument(0).isObject())
+        return throwTypeError(exec);
 
-    PassRefPtr<JSCustomVoidCallback> callback = JSCustomVoidCallback::create(args.at(0).getObject(), static_cast<Document*>(context)->frame());
+    PassRefPtr<JSCustomVoidCallback> callback = JSCustomVoidCallback::create(exec->argument(0).getObject(), toJSDOMGlobalObject(static_cast<Document*>(context), exec));
 
     impl()->requestPermission(callback);
     return jsUndefined();
 }
 
-JSValue JSNotification::addEventListener(ExecState* exec, const ArgList& args)
-{
-    JSValue listener = args.at(1);
-    if (!listener.isObject())
-        return jsUndefined();
+} // namespace WebCore
 
-    impl()->addEventListener(args.at(0).toString(exec), JSEventListener::create(asObject(listener)), false, currentWorld(exec)), args.at(2).toBoolean(exec));
-    return jsUndefined();
-}
-
-JSValue JSNotification::removeEventListener(ExecState* exec, const ArgList& args)
-{
-    JSValue listener = args.at(1);
-    if (!listener.isObject())
-        return jsUndefined();
-
-    impl()->removeEventListener(args.at(0).toString(exec), JSEventListener::create(asObject(listener), false, currentWorld(exec)).get(), args.at(2).toBoolean(exec));
-    return jsUndefined();
-}
-
-
-} // namespace
-
-#endif // ENABLE(NOTIFICATIONS)
+#endif // ENABLE(LEGACY_NOTIFICATIONS)

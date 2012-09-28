@@ -41,32 +41,22 @@
 #include "MouseEventWithHitTestResults.h"
 #include "NotImplemented.h"
 #include "Page.h"
-#include "PlatformKeyboardEvent.h"
-#include "PlatformWheelEvent.h"
+#include "Pasteboard.h"
+#include "PlatformEventFactoryMac.h"
 #include "RenderWidget.h"
 #include "RuntimeApplicationChecks.h"
 #include "Scrollbar.h"
 #include "Settings.h"
 #include "WebCoreSystemInterface.h"
 #include <objc/objc-runtime.h>
+#include <wtf/MainThread.h>
 #include <wtf/StdLibExtras.h>
-
-#if !(defined(OBJC_API_VERSION) && OBJC_API_VERSION > 0)
-static inline IMP method_setImplementation(Method m, IMP i)
-{
-    IMP oi = m->method_imp;
-    m->method_imp = i;
-    return oi;
-}
-#endif
 
 namespace WebCore {
 
 #if ENABLE(DRAG_SUPPORT)
 const double EventHandler::TextDragDelay = 0.15;
 #endif
-
-#if !ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
 
 static RetainPtr<NSEvent>& currentNSEventSlot()
 {
@@ -79,7 +69,8 @@ NSEvent *EventHandler::currentNSEvent()
     return currentNSEventSlot().get();
 }
 
-class CurrentEventScope : public Noncopyable {
+class CurrentEventScope {
+     WTF_MAKE_NONCOPYABLE(CurrentEventScope);
 public:
     CurrentEventScope(NSEvent *);
     ~CurrentEventScope();
@@ -113,31 +104,7 @@ bool EventHandler::wheelEvent(NSEvent *event)
         return false;
 
     CurrentEventScope scope(event);
-
-    m_useLatchedWheelEventNode = wkIsLatchingWheelEvent(event);
-    
-    PlatformWheelEvent wheelEvent(event, page->chrome()->platformPageClient());
-    handleWheelEvent(wheelEvent);
-
-    return wheelEvent.isAccepted();
-}
-
-PassRefPtr<KeyboardEvent> EventHandler::currentKeyboardEvent() const
-{
-    NSEvent *event = [NSApp currentEvent];
-    if (!event)
-        return 0;
-    switch ([event type]) {
-        case NSKeyDown: {
-            PlatformKeyboardEvent platformEvent(event);
-            platformEvent.disambiguateKeyDownEvent(PlatformKeyboardEvent::RawKeyDown);
-            return KeyboardEvent::create(platformEvent, m_frame->document()->defaultView());
-        }
-        case NSKeyUp:
-            return KeyboardEvent::create(event, m_frame->document()->defaultView());
-        default:
-            return 0;
-    }
+    return handleWheelEvent(PlatformEventFactory::createPlatformWheelEvent(event, page->chrome()->platformPageClient()));
 }
 
 bool EventHandler::keyEvent(NSEvent *event)
@@ -147,7 +114,7 @@ bool EventHandler::keyEvent(NSEvent *event)
     ASSERT([event type] == NSKeyDown || [event type] == NSKeyUp);
 
     CurrentEventScope scope(event);
-    return keyEvent(PlatformKeyboardEvent(event));
+    return keyEvent(PlatformEventFactory::createPlatformKeyboardEvent(event));
 
     END_BLOCK_OBJC_EXCEPTIONS;
 
@@ -171,7 +138,7 @@ void EventHandler::focusDocumentView()
 bool EventHandler::passWidgetMouseDownEventToWidget(const MouseEventWithHitTestResults& event)
 {
     // Figure out which view to send the event to.
-    RenderObject* target = event.targetNode() ? event.targetNode()->renderer() : 0;
+    RenderObject* target = targetNode(event) ? targetNode(event)->renderer() : 0;
     if (!target || !target->isWidget())
         return false;
     
@@ -217,10 +184,14 @@ bool EventHandler::passMouseDownEventToWidget(Widget* pWidget)
         return true;
     }
 
+    // In WebKit2 we will never have an NSView. Just return early and let the regular event handler machinery take care of
+    // dispatching the event.
+    if (!widget->platformWidget())
+        return false;
+
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     
     NSView *nodeView = widget->platformWidget();
-    ASSERT(nodeView);
     ASSERT([nodeView superview]);
     NSView *view = [nodeView hitTest:[[nodeView superview] convertPoint:[currentNSEvent() locationInWindow] fromView:nil]];
     if (!view) {
@@ -252,10 +223,11 @@ bool EventHandler::passMouseDownEventToWidget(Widget* pWidget)
 
     ASSERT(!m_sendingEventToSubview);
     m_sendingEventToSubview = true;
-    NSView *outerView = widget->getOuterView();
-    widget->beforeMouseDown(outerView, widget.get());
+
+    RenderWidget::suspendWidgetHierarchyUpdates();
     [view mouseDown:currentNSEvent()];
-    widget->afterMouseDown(outerView, widget.get());
+    RenderWidget::resumeWidgetHierarchyUpdates();
+
     m_sendingEventToSubview = false;
     
     if (!wasDeferringLoading)
@@ -380,7 +352,7 @@ bool EventHandler::passSubframeEventToSubframe(MouseEventWithHitTestResults& eve
             return true;
         
         case NSLeftMouseDown: {
-            Node* node = event.targetNode();
+            Node* node = targetNode(event);
             if (!node)
                 return false;
             RenderObject* renderer = node->renderer();
@@ -445,14 +417,25 @@ static void selfRetainingNSScrollViewScrollWheel(NSScrollView *self, SEL selecto
         [self release];
 }
 
-bool EventHandler::passWheelEventToWidget(PlatformWheelEvent&, Widget* widget)
+bool EventHandler::passWheelEventToWidget(const PlatformWheelEvent& wheelEvent, Widget* widget)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-        
-    if ([currentNSEvent() type] != NSScrollWheel || m_sendingEventToSubview || !widget) 
+
+    if (!widget)
         return false;
 
     NSView* nodeView = widget->platformWidget();
+    if (!nodeView) {
+        // WebKit2 code path.
+        if (!widget->isFrameView())
+            return false;
+
+        return static_cast<FrameView*>(widget)->frame()->eventHandler()->handleWheelEvent(wheelEvent);
+    }
+
+    if ([currentNSEvent() type] != NSScrollWheel || m_sendingEventToSubview) 
+        return false;
+
     ASSERT(nodeView);
     ASSERT([nodeView superview]);
     NSView *view = [nodeView hitTest:[[nodeView superview] convertPoint:[currentNSEvent() locationInWindow] fromView:nil]];
@@ -483,8 +466,6 @@ void EventHandler::mouseDown(NSEvent *event)
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     
-    m_frame->loader()->resetMultipleFormSubmissionProtection();
-
     m_mouseDownView = nil;
     
     CurrentEventScope scope(event);
@@ -613,19 +594,65 @@ void EventHandler::mouseMoved(NSEvent *event)
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
+void EventHandler::passMouseMovedEventToScrollbars(NSEvent *event)
+{
+    // Reject a mouse moved if the button is down - screws up tracking during autoscroll
+    // These happen because WebKit sometimes has to fake up moved events.
+    if (!m_frame->view() || m_mousePressed || m_sendingEventToSubview)
+        return;
+
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    CurrentEventScope scope(event);
+    passMouseMovedEventToScrollbars(currentPlatformMouseEvent());
+    END_BLOCK_OBJC_EXCEPTIONS;
+}
+
+static bool frameHasPlatformWidget(Frame* frame)
+{
+    if (FrameView* frameView = frame->view()) {
+        if (frameView->platformWidget())
+            return true;
+    }
+
+    return false;
+}
+
 bool EventHandler::passMousePressEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe)
 {
-    return passSubframeEventToSubframe(mev, subframe);
+    // WebKit1 code path.
+    if (frameHasPlatformWidget(m_frame))
+        return passSubframeEventToSubframe(mev, subframe);
+
+    // WebKit2 code path.
+    subframe->eventHandler()->handleMousePressEvent(mev.event());
+    return true;
 }
 
 bool EventHandler::passMouseMoveEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe, HitTestResult* hoveredNode)
 {
-    return passSubframeEventToSubframe(mev, subframe, hoveredNode);
+    // WebKit1 code path.
+    if (frameHasPlatformWidget(m_frame))
+        return passSubframeEventToSubframe(mev, subframe, hoveredNode);
+
+#if ENABLE(DRAG_SUPPORT)
+    // WebKit2 code path.
+    if (m_mouseDownMayStartDrag && !m_mouseDownWasInSubframe)
+        return false;
+#endif
+
+    subframe->eventHandler()->handleMouseMoveEvent(mev.event(), hoveredNode);
+    return true;
 }
 
 bool EventHandler::passMouseReleaseEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe)
 {
-    return passSubframeEventToSubframe(mev, subframe);
+    // WebKit1 code path.
+    if (frameHasPlatformWidget(m_frame))
+        return passSubframeEventToSubframe(mev, subframe);
+
+    // WebKit2 code path.
+    subframe->eventHandler()->handleMouseReleaseEvent(mev.event());
+    return true;
 }
 
 PlatformMouseEvent EventHandler::currentPlatformMouseEvent() const
@@ -633,113 +660,28 @@ PlatformMouseEvent EventHandler::currentPlatformMouseEvent() const
     NSView *windowView = nil;
     if (Page* page = m_frame->page())
         windowView = page->chrome()->platformPageClient();
-    return PlatformMouseEvent(currentNSEvent(), windowView);
+    return PlatformEventFactory::createPlatformMouseEvent(currentNSEvent(), windowView);
 }
-
-#if ENABLE(CONTEXT_MENUS)
-bool EventHandler::sendContextMenuEvent(NSEvent *event)
-{
-    Page* page = m_frame->page();
-    if (!page)
-        return false;
-    return sendContextMenuEvent(PlatformMouseEvent(event, page->chrome()->platformPageClient()));
-}
-#endif // ENABLE(CONTEXT_MENUS)
-
-#if ENABLE(DRAG_SUPPORT)
-bool EventHandler::eventMayStartDrag(NSEvent *event)
-{
-    Page* page = m_frame->page();
-    if (!page)
-        return false;
-    return eventMayStartDrag(PlatformMouseEvent(event, page->chrome()->platformPageClient()));
-}
-#endif // ENABLE(DRAG_SUPPORT)
 
 bool EventHandler::eventActivatedView(const PlatformMouseEvent& event) const
 {
     return m_activationEventNumber == event.eventNumber();
 }
 
-#else // ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
-
-bool EventHandler::passMousePressEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe)
-{
-    subframe->eventHandler()->handleMousePressEvent(mev.event());
-    return true;
-}
-
-bool EventHandler::passMouseMoveEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe, HitTestResult* hoveredNode)
-{
-    if (m_mouseDownMayStartDrag && !m_mouseDownWasInSubframe)
-        return false;
-    subframe->eventHandler()->handleMouseMoveEvent(mev.event(), hoveredNode);
-    return true;
-}
-
-bool EventHandler::passMouseReleaseEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe)
-{
-    subframe->eventHandler()->handleMouseReleaseEvent(mev.event());
-    return true;
-}
-
-bool EventHandler::passWheelEventToWidget(PlatformWheelEvent& wheelEvent, Widget* widget)
-{
-    if (!widget->isFrameView())
-        return false;
-
-    return static_cast<FrameView*>(widget)->frame()->eventHandler()->handleWheelEvent(wheelEvent);
-}
-
-void EventHandler::focusDocumentView()
-{
-    Page* page = m_frame->page();
-    if (!page)
-        return;
-    page->focusController()->setFocusedFrame(m_frame);
-}
-
-bool EventHandler::passWidgetMouseDownEventToWidget(const MouseEventWithHitTestResults&)
-{
-    notImplemented();
-    return false;
-}
-
-bool EventHandler::eventActivatedView(const PlatformMouseEvent&) const
-{
-    notImplemented();
-    return false;
-}
-
-#endif
-
 #if ENABLE(DRAG_SUPPORT)
 
 PassRefPtr<Clipboard> EventHandler::createDraggingClipboard() const
 {
-    NSPasteboard *pasteboard = [NSPasteboard pasteboardWithName:NSDragPboard];
     // Must be done before ondragstart adds types and data to the pboard,
     // also done for security, as it erases data from the last drag
-    [pasteboard declareTypes:[NSArray array] owner:nil];
-    return ClipboardMac::create(true, pasteboard, ClipboardWritable, m_frame);
+    Pasteboard pasteboard(NSDragPboard);
+    pasteboard.clear();
+    return ClipboardMac::create(Clipboard::DragAndDrop, String(NSDragPboard), ClipboardWritable, ClipboardMac::DragAndDropData, m_frame);
 }
 
 #endif
 
-static inline bool isKeyboardOptionTab(KeyboardEvent* event)
-{
-    return event
-        && (event->type() == eventNames().keydownEvent || event->type() == eventNames().keypressEvent)
-        && event->altKey()
-        && event->keyIdentifier() == "U+0009";    
-}
-
-bool EventHandler::invertSenseOfTabsToLinks(KeyboardEvent* event) const
-{
-    return isKeyboardOptionTab(event);
-}
-
-bool EventHandler::tabsToAllControls(KeyboardEvent* event) const
+bool EventHandler::tabsToAllFormControls(KeyboardEvent* event) const
 {
     Page* page = m_frame->page();
     if (!page)
@@ -768,7 +710,7 @@ bool EventHandler::needsKeyboardEventDisambiguationQuirks() const
     Document* document = m_frame->document();
 
     // RSS view needs arrow key keypress events.
-    if (applicationIsSafari() && document->url().protocolIs("feed") || document->url().protocolIs("feeds"))
+    if (applicationIsSafari() && (document->url().protocolIs("feed") || document->url().protocolIs("feeds")))
         return true;
     Settings* settings = m_frame->settings();
     if (!settings)
@@ -791,9 +733,9 @@ unsigned EventHandler::accessKeyModifiers()
     // So, we use Control in this case, even though it conflicts with Emacs-style key bindings.
     // See <https://bugs.webkit.org/show_bug.cgi?id=21107> for more detail.
     if (AXObjectCache::accessibilityEnhancedUserInterfaceEnabled())
-        return PlatformKeyboardEvent::CtrlKey;
+        return PlatformEvent::CtrlKey;
 
-    return PlatformKeyboardEvent::CtrlKey | PlatformKeyboardEvent::AltKey;
+    return PlatformEvent::CtrlKey | PlatformEvent::AltKey;
 }
 
 }

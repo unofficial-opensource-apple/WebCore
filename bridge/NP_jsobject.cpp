@@ -30,6 +30,7 @@
 #include "NP_jsobject.h"
 
 #include "PlatformString.h"
+#include "PluginView.h"
 #include "StringSourceProvider.h"
 #include "c_utility.h"
 #include "c_instance.h"
@@ -50,6 +51,64 @@ using namespace JSC;
 using namespace JSC::Bindings;
 using namespace WebCore;
 
+class ObjectMap {
+public:
+    NPObject* get(RootObject* rootObject, JSObject* jsObject)
+    {
+        return m_map.get(rootObject).get(jsObject);
+    }
+
+    void add(RootObject* rootObject, JSObject* jsObject, NPObject* npObject)
+    {
+        HashMap<RootObject*, JSToNPObjectMap>::iterator iter = m_map.find(rootObject);
+        if (iter == m_map.end()) {
+            rootObject->addInvalidationCallback(&m_invalidationCallback);
+            iter = m_map.add(rootObject, JSToNPObjectMap()).iterator;
+        }
+
+        ASSERT(iter->second.find(jsObject) == iter->second.end());
+        iter->second.add(jsObject, npObject);
+    }
+
+    void remove(RootObject* rootObject)
+    {
+        HashMap<RootObject*, JSToNPObjectMap>::iterator iter = m_map.find(rootObject);
+        ASSERT(iter != m_map.end());
+        m_map.remove(iter);
+    }
+
+    void remove(RootObject* rootObject, JSObject* jsObject)
+    {
+        HashMap<RootObject*, JSToNPObjectMap>::iterator iter = m_map.find(rootObject);
+        ASSERT(iter != m_map.end());
+        ASSERT(iter->second.find(jsObject) != iter->second.end());
+
+        iter->second.remove(jsObject);
+    }
+
+private:
+    struct RootObjectInvalidationCallback : public RootObject::InvalidationCallback {
+        virtual void operator()(RootObject*);
+    };
+    RootObjectInvalidationCallback m_invalidationCallback;
+
+    // JSObjects are protected by RootObject.
+    typedef HashMap<JSObject*, NPObject*> JSToNPObjectMap;
+    HashMap<RootObject*, JSToNPObjectMap> m_map;
+};
+
+
+static ObjectMap& objectMap()
+{
+    DEFINE_STATIC_LOCAL(ObjectMap, map, ());
+    return map;
+}
+
+void ObjectMap::RootObjectInvalidationCallback::operator()(RootObject* rootObject)
+{
+    objectMap().remove(rootObject);
+}
+
 static void getListFromVariantArgs(ExecState* exec, const NPVariant* args, unsigned argCount, RootObject* rootObject, MarkedArgumentBuffer& aList)
 {
     for (unsigned i = 0; i < argCount; ++i)
@@ -65,8 +124,10 @@ static void jsDeallocate(NPObject* npObj)
 {
     JavaScriptObject* obj = reinterpret_cast<JavaScriptObject*>(npObj);
 
-    if (obj->rootObject && obj->rootObject->isValid())
+    if (obj->rootObject && obj->rootObject->isValid()) {
+        objectMap().remove(obj->rootObject, obj->imp);
         obj->rootObject->gcUnprotect(obj->imp);
+    }
 
     if (obj->rootObject)
         obj->rootObject->deref();
@@ -82,12 +143,18 @@ static NPClass* NPNoScriptObjectClass = &noScriptClass;
 
 NPObject* _NPN_CreateScriptObject(NPP npp, JSObject* imp, PassRefPtr<RootObject> rootObject)
 {
+    if (NPObject* object = objectMap().get(rootObject.get(), imp))
+        return _NPN_RetainObject(object);
+
     JavaScriptObject* obj = reinterpret_cast<JavaScriptObject*>(_NPN_CreateObject(npp, NPScriptObjectClass));
 
-    obj->rootObject = rootObject.releaseRef();
+    obj->rootObject = rootObject.leakRef();
 
-    if (obj->rootObject)
+    if (obj->rootObject) {
         obj->rootObject->gcProtect(imp);
+        objectMap().add(obj->rootObject, imp, reinterpret_cast<NPObject*>(obj));
+    }
+
     obj->imp = imp;
 
     return reinterpret_cast<NPObject*>(obj);
@@ -111,21 +178,18 @@ bool _NPN_InvokeDefault(NPP, NPObject* o, const NPVariant* args, uint32_t argCou
             return false;
         
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         
         // Call the function object.
         JSValue function = obj->imp;
         CallData callData;
-        CallType callType = function.getCallData(callData);
+        CallType callType = getCallData(function, callData);
         if (callType == CallTypeNone)
             return false;
         
         MarkedArgumentBuffer argList;
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
-        ProtectedPtr<JSGlobalObject> globalObject = rootObject->globalObject();
-        globalObject->globalData()->timeoutChecker.start();
         JSValue resultV = JSC::call(exec, function, callType, callData, function, argList);
-        globalObject->globalData()->timeoutChecker.stop();
 
         // Convert and return the result of the function call.
         convertValueToNPVariant(exec, resultV, result);
@@ -162,20 +226,17 @@ bool _NPN_Invoke(NPP npp, NPObject* o, NPIdentifier methodName, const NPVariant*
         if (!rootObject || !rootObject->isValid())
             return false;
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
-        JSValue function = obj->imp->get(exec, identifierFromNPIdentifier(i->string()));
+        JSLockHolder lock(exec);
+        JSValue function = obj->imp->get(exec, identifierFromNPIdentifier(exec, i->string()));
         CallData callData;
-        CallType callType = function.getCallData(callData);
+        CallType callType = getCallData(function, callData);
         if (callType == CallTypeNone)
             return false;
 
         // Call the function object.
         MarkedArgumentBuffer argList;
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
-        ProtectedPtr<JSGlobalObject> globalObject = rootObject->globalObject();
-        globalObject->globalData()->timeoutChecker.start();
-        JSValue resultV = JSC::call(exec, function, callType, callData, obj->imp, argList);
-        globalObject->globalData()->timeoutChecker.stop();
+        JSValue resultV = JSC::call(exec, function, callType, callData, obj->imp->methodTable()->toThisObject(obj->imp, exec), argList);
 
         // Convert and return the result of the function call.
         convertValueToNPVariant(exec, resultV, result);
@@ -190,7 +251,7 @@ bool _NPN_Invoke(NPP npp, NPObject* o, NPIdentifier methodName, const NPVariant*
     return true;
 }
 
-bool _NPN_Evaluate(NPP, NPObject* o, NPString* s, NPVariant* variant)
+bool _NPN_Evaluate(NPP instance, NPObject* o, NPString* s, NPVariant* variant)
 {
     if (o->_class == NPScriptObjectClass) {
         JavaScriptObject* obj = reinterpret_cast<JavaScriptObject*>(o); 
@@ -199,24 +260,17 @@ bool _NPN_Evaluate(NPP, NPObject* o, NPString* s, NPVariant* variant)
         if (!rootObject || !rootObject->isValid())
             return false;
 
-        ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
-        String scriptString = convertNPStringToUTF16(s);
-        ProtectedPtr<JSGlobalObject> globalObject = rootObject->globalObject();
-        globalObject->globalData()->timeoutChecker.start();
-        Completion completion = JSC::evaluate(globalObject->globalExec(), globalObject->globalScopeChain(), makeSource(scriptString), JSC::JSValue());
-        globalObject->globalData()->timeoutChecker.stop();
-        ComplType type = completion.complType();
-        
-        JSValue result;
-        if (type == Normal) {
-            result = completion.value();
-            if (!result)
-                result = jsUndefined();
-        } else
-            result = jsUndefined();
+        // There is a crash in Flash when evaluating a script that destroys the
+        // PluginView, so we destroy it asynchronously.
+        PluginView::keepAlive(instance);
 
-        convertValueToNPVariant(exec, result, variant);
+        ExecState* exec = rootObject->globalObject()->globalExec();
+        JSLockHolder lock(exec);
+        String scriptString = convertNPStringToUTF16(s);
+        
+        JSValue returnValue = JSC::evaluate(rootObject->globalObject()->globalExec(), rootObject->globalObject()->globalScopeChain(), makeSource(scriptString), JSC::JSValue());
+
+        convertValueToNPVariant(exec, returnValue, variant);
         exec->clearException();
         return true;
     }
@@ -237,10 +291,10 @@ bool _NPN_GetProperty(NPP, NPObject* o, NPIdentifier propertyName, NPVariant* va
         ExecState* exec = rootObject->globalObject()->globalExec();
         IdentifierRep* i = static_cast<IdentifierRep*>(propertyName);
         
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         JSValue result;
         if (i->isString())
-            result = obj->imp->get(exec, identifierFromNPIdentifier(i->string()));
+            result = obj->imp->get(exec, identifierFromNPIdentifier(exec, i->string()));
         else
             result = obj->imp->get(exec, i->number());
 
@@ -269,14 +323,14 @@ bool _NPN_SetProperty(NPP, NPObject* o, NPIdentifier propertyName, const NPVaria
             return false;
 
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         IdentifierRep* i = static_cast<IdentifierRep*>(propertyName);
 
         if (i->isString()) {
             PutPropertySlot slot;
-            obj->imp->put(exec, identifierFromNPIdentifier(i->string()), convertNPVariantToValue(exec, variant, rootObject), slot);
+            obj->imp->methodTable()->put(obj->imp, exec, identifierFromNPIdentifier(exec, i->string()), convertNPVariantToValue(exec, variant, rootObject), slot);
         } else
-            obj->imp->put(exec, i->number(), convertNPVariantToValue(exec, variant, rootObject));
+            obj->imp->methodTable()->putByIndex(obj->imp, exec, i->number(), convertNPVariantToValue(exec, variant, rootObject), false);
         exec->clearException();
         return true;
     }
@@ -299,7 +353,7 @@ bool _NPN_RemoveProperty(NPP, NPObject* o, NPIdentifier propertyName)
         ExecState* exec = rootObject->globalObject()->globalExec();
         IdentifierRep* i = static_cast<IdentifierRep*>(propertyName);
         if (i->isString()) {
-            if (!obj->imp->hasProperty(exec, identifierFromNPIdentifier(i->string()))) {
+            if (!obj->imp->hasProperty(exec, identifierFromNPIdentifier(exec, i->string()))) {
                 exec->clearException();
                 return false;
             }
@@ -310,11 +364,11 @@ bool _NPN_RemoveProperty(NPP, NPObject* o, NPIdentifier propertyName)
             }
         }
 
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         if (i->isString())
-            obj->imp->deleteProperty(exec, identifierFromNPIdentifier(i->string()));
+            obj->imp->methodTable()->deleteProperty(obj->imp, exec, identifierFromNPIdentifier(exec, i->string()));
         else
-            obj->imp->deleteProperty(exec, i->number());
+            obj->imp->methodTable()->deletePropertyByIndex(obj->imp, exec, i->number());
 
         exec->clearException();
         return true;
@@ -333,9 +387,9 @@ bool _NPN_HasProperty(NPP, NPObject* o, NPIdentifier propertyName)
 
         ExecState* exec = rootObject->globalObject()->globalExec();
         IdentifierRep* i = static_cast<IdentifierRep*>(propertyName);
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         if (i->isString()) {
-            bool result = obj->imp->hasProperty(exec, identifierFromNPIdentifier(i->string()));
+            bool result = obj->imp->hasProperty(exec, identifierFromNPIdentifier(exec, i->string()));
             exec->clearException();
             return result;
         }
@@ -365,8 +419,8 @@ bool _NPN_HasMethod(NPP, NPObject* o, NPIdentifier methodName)
             return false;
 
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
-        JSValue func = obj->imp->get(exec, identifierFromNPIdentifier(i->string()));
+        JSLockHolder lock(exec);
+        JSValue func = obj->imp->get(exec, identifierFromNPIdentifier(exec, i->string()));
         exec->clearException();
         return !func.isUndefined();
     }
@@ -394,16 +448,16 @@ bool _NPN_Enumerate(NPP, NPObject* o, NPIdentifier** identifier, uint32_t* count
             return false;
         
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         PropertyNameArray propertyNames(exec);
 
-        obj->imp->getPropertyNames(exec, propertyNames);
+        obj->imp->methodTable()->getPropertyNames(obj->imp, exec, propertyNames, ExcludeDontEnumProperties);
         unsigned size = static_cast<unsigned>(propertyNames.size());
         // FIXME: This should really call NPN_MemAlloc but that's in WebKit
         NPIdentifier* identifiers = static_cast<NPIdentifier*>(malloc(sizeof(NPIdentifier) * size));
         
         for (unsigned i = 0; i < size; ++i)
-            identifiers[i] = _NPN_GetStringIdentifier(propertyNames[i].ustring().UTF8String().c_str());
+            identifiers[i] = _NPN_GetStringIdentifier(propertyNames[i].ustring().utf8().data());
 
         *identifier = identifiers;
         *count = size;
@@ -431,21 +485,18 @@ bool _NPN_Construct(NPP, NPObject* o, const NPVariant* args, uint32_t argCount, 
             return false;
         
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         
         // Call the constructor object.
         JSValue constructor = obj->imp;
         ConstructData constructData;
-        ConstructType constructType = constructor.getConstructData(constructData);
+        ConstructType constructType = getConstructData(constructor, constructData);
         if (constructType == ConstructTypeNone)
             return false;
         
         MarkedArgumentBuffer argList;
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
-        ProtectedPtr<JSGlobalObject> globalObject = rootObject->globalObject();
-        globalObject->globalData()->timeoutChecker.start();
         JSValue resultV = JSC::construct(exec, constructor, constructType, constructData, argList);
-        globalObject->globalData()->timeoutChecker.stop();
         
         // Convert and return the result.
         convertValueToNPVariant(exec, resultV, result);

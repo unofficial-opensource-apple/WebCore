@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,6 +69,42 @@ void Widget::removeFromParent()
         parent()->removeChild(this);
 }
 
+IntRect Widget::convertFromRootView(const IntRect& rootRect) const
+{
+    if (const ScrollView* parentScrollView = parent()) {
+        IntRect parentRect = parentScrollView->convertFromRootView(rootRect);
+        return convertFromContainingView(parentRect);
+    }
+    return rootRect;
+}
+
+IntRect Widget::convertToRootView(const IntRect& localRect) const
+{
+    if (const ScrollView* parentScrollView = parent()) {
+        IntRect parentRect = convertToContainingView(localRect);
+        return parentScrollView->convertToRootView(parentRect);
+    }
+    return localRect;
+}
+
+IntPoint Widget::convertFromRootView(const IntPoint& rootPoint) const
+{
+    if (const ScrollView* parentScrollView = parent()) {
+        IntPoint parentPoint = parentScrollView->convertFromRootView(rootPoint);
+        return convertFromContainingView(parentPoint);
+    }
+    return rootPoint;
+}
+
+IntPoint Widget::convertToRootView(const IntPoint& localPoint) const
+{
+    if (const ScrollView* parentScrollView = parent()) {
+        IntPoint parentPoint = convertToContainingView(localPoint);
+        return parentScrollView->convertToRootView(parentPoint);
+    }
+    return localPoint;
+}
+
 IntRect Widget::convertFromContainingWindow(const IntRect& windowRect) const
 {
     if (const ScrollView* parentScrollView = parent()) {
@@ -127,16 +163,6 @@ IntPoint Widget::convertFromContainingWindowToRoot(const Widget*, const IntPoint
 }
 #endif
 
-#if !PLATFORM(MAC) && !PLATFORM(GTK)
-void Widget::releasePlatformWidget()
-{
-}
-
-void Widget::retainPlatformWidget()
-{
-}
-#endif
-
 IntRect Widget::convertToContainingView(const IntRect& localRect) const
 {
     if (const ScrollView* parentScrollView = parent()) {
@@ -173,5 +199,11 @@ IntPoint Widget::convertFromContainingView(const IntPoint& parentPoint) const
 
     return parentPoint;
 }
+
+#if !PLATFORM(EFL)
+void Widget::frameRectsChanged()
+{
+}
+#endif
 
 } // namespace WebCore

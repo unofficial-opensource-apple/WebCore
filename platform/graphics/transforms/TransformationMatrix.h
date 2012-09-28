@@ -28,25 +28,30 @@
 
 #include "FloatPoint.h"
 #include "IntPoint.h"
+#include "LayoutTypes.h"
 #include <string.h> //for memcpy
 #include <wtf/FastAllocBase.h>
 
-#if PLATFORM(CG)
-#include <CoreGraphics/CGAffineTransform.h>
-#elif PLATFORM(CAIRO)
+#if USE(CA)
+typedef struct CATransform3D CATransform3D;
+#endif
+#if USE(CG)
+typedef struct CGAffineTransform CGAffineTransform;
+#elif USE(CAIRO)
 #include <cairo.h>
 #elif PLATFORM(OPENVG)
 #include "VGUtils.h"
 #elif PLATFORM(QT)
+#include <QMatrix4x4>
 #include <QTransform>
-#elif PLATFORM(SKIA)
+#elif USE(SKIA)
 #include <SkMatrix.h>
 #elif PLATFORM(WX) && USE(WXGC)
 #include <wx/graphics.h>
 #endif
 
 #if PLATFORM(WIN) || (PLATFORM(QT) && OS(WINDOWS)) || (PLATFORM(WX) && OS(WINDOWS))
-#if COMPILER(MINGW)
+#if COMPILER(MINGW) && !COMPILER(MINGW64)
 typedef struct _XFORM XFORM;
 #else
 typedef struct tagXFORM XFORM;
@@ -55,16 +60,20 @@ typedef struct tagXFORM XFORM;
 
 namespace WebCore {
 
+class AffineTransform;
 class IntRect;
+class FractionalLayoutRect;
 class FloatPoint3D;
 class FloatRect;
 class FloatQuad;
 
-class TransformationMatrix : public FastAllocBase {
+class TransformationMatrix {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     typedef double Matrix4[4][4];
 
     TransformationMatrix() { makeIdentity(); }
+    TransformationMatrix(const AffineTransform& t);
     TransformationMatrix(const TransformationMatrix& t) { *this = t; }
     TransformationMatrix(double a, double b, double c, double d, double e, double f) { setMatrix(a, b, c, d, e, f); }
     TransformationMatrix(double m11, double m12, double m13, double m14,
@@ -74,6 +83,11 @@ public:
     {
         setMatrix(m11, m12, m13, m14, m21, m22, m23, m24, m31, m32, m33, m34, m41, m42, m43, m44);
     }
+
+#if PLATFORM(QT)
+    TransformationMatrix(const QTransform&);
+    TransformationMatrix(const QMatrix4x4&);
+#endif
 
     void setMatrix(double a, double b, double c, double d, double e, double f)
     {
@@ -137,6 +151,7 @@ public:
     // Rounds the resulting mapped rectangle out. This is helpful for bounding
     // box computations but may not be what is wanted in other contexts.
     IntRect mapRect(const IntRect&) const;
+    FractionalLayoutRect mapRect(const FractionalLayoutRect&) const;
 
     // If the matrix has 3D components, the z component of the result is
     // dropped, effectively projecting the quad into the z=0 plane
@@ -147,9 +162,12 @@ public:
     // a ray perpendicular to the source plane and computing
     // the local x,y position of the point where that ray intersects
     // with the destination plane.
-    FloatPoint projectPoint(const FloatPoint&) const;
+    FloatPoint projectPoint(const FloatPoint&, bool* clamped = 0) const;
     // Projects the four corners of the quad
     FloatQuad projectQuad(const FloatQuad&) const;
+    // Projects the four corners of the quad and takes a bounding box,
+    // while sanitizing values created when the w component is negative.
+    LayoutRect clampedBoundsOfProjectedQuad(const FloatQuad&) const;
 
     double m11() const { return m_matrix[0][0]; }
     void setM11(double f) { m_matrix[0][0] = f; }
@@ -203,11 +221,8 @@ public:
     void setF(double f) { m_matrix[3][1] = f; }
 
     // this = this * mat
-    TransformationMatrix& multiply(const TransformationMatrix& t) { return *this *= t; }
+    TransformationMatrix& multiply(const TransformationMatrix&);
 
-    // this = mat * this
-    TransformationMatrix& multLeft(const TransformationMatrix& mat);
-    
     TransformationMatrix& scale(double);
     TransformationMatrix& scaleNonUniform(double sx, double sy);
     TransformationMatrix& scale3d(double sx, double sy, double sz);
@@ -268,6 +283,8 @@ public:
     // Throw away the non-affine parts of the matrix (lossy!)
     void makeAffine();
 
+    AffineTransform toAffineTransform() const;
+
     bool operator==(const TransformationMatrix& m2) const
     {
         return (m_matrix[0][0] == m2.m_matrix[0][0] &&
@@ -289,31 +306,36 @@ public:
     }
 
     bool operator!=(const TransformationMatrix& other) const { return !(*this == other); }
-    
-    // *this = *this * t (i.e., a multRight)
+
+    // *this = *this * t
     TransformationMatrix& operator*=(const TransformationMatrix& t)
     {
-        *this = *this * t;
-        return *this;
+        return multiply(t);
     }
     
-    // result = *this * t (i.e., a multRight)
+    // result = *this * t
     TransformationMatrix operator*(const TransformationMatrix& t) const
     {
-        TransformationMatrix result = t;
-        result.multLeft(*this);
+        TransformationMatrix result = *this;
+        result.multiply(t);
         return result;
     }
 
-#if PLATFORM(CG)
+#if USE(CA)
+    TransformationMatrix(const CATransform3D&);
+    operator CATransform3D() const;
+#endif
+#if USE(CG)
+    TransformationMatrix(const CGAffineTransform&);
     operator CGAffineTransform() const;
-#elif PLATFORM(CAIRO)
+#elif USE(CAIRO)
     operator cairo_matrix_t() const;
 #elif PLATFORM(OPENVG)
     operator VGMatrix() const;
 #elif PLATFORM(QT)
     operator QTransform() const;
-#elif PLATFORM(SKIA)
+    operator QMatrix4x4() const;
+#elif USE(SKIA)
     operator SkMatrix() const;
 #elif PLATFORM(WX) && USE(WXGC)
     operator wxGraphicsMatrix() const;
@@ -331,14 +353,19 @@ public:
             && m_matrix[3][3] == 1;
     }
 
-    // This can be removed after Merging up to WebKit ToT r55266 since it will no longer be needed.
-    bool isIdentityOrTranslationOrFlipped() const
-    {
-        return m_matrix[0][0] == 1 && m_matrix[0][1] == 0 && m_matrix[0][2] == 0 && m_matrix[0][3] == 0
-            && m_matrix[1][0] == 0 && m_matrix[1][1] == 1 && m_matrix[1][2] == 0 && m_matrix[1][3] == 0
-            && m_matrix[2][0] == 0 && m_matrix[2][1] == 0 && m_matrix[2][2] == 1 && m_matrix[2][3] == 0
-            && (m_matrix[3][3] == 1 || m_matrix[3][3] == -1);
-    }
+    bool isIntegerTranslation() const;
+
+    // This method returns the matrix without 3D components.
+    TransformationMatrix to2dTransform() const;
+    
+    typedef float FloatMatrix4[16];
+    void toColumnMajorFloatArray(FloatMatrix4& result) const;
+
+    // A local-space layer is implicitly defined at the z = 0 plane, with its front side
+    // facing the positive z-axis (i.e. a camera looking along the negative z-axis sees
+    // the front side of the layer). This function checks if the transformed layer's back
+    // face would be visible to a camera looking along the negative z-axis in the target space.
+    bool isBackFaceVisible() const;
 
 private:
     // multiply passed 2D point by matrix (assume z=0)

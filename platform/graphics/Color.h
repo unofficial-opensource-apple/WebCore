@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-6 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,10 +26,13 @@
 #ifndef Color_h
 #define Color_h
 
+#include "AnimationUtilities.h"
 #include <wtf/FastAllocBase.h>
-#include <wtf/Platform.h>
+#include <wtf/Forward.h>
+#include <wtf/unicode/Unicode.h>
 
-#if PLATFORM(CG)
+#if USE(CG)
+#include "ColorSpace.h"
 typedef struct CGColor* CGColorRef;
 typedef struct CGColorSpace* CGColorSpaceRef;
 #endif
@@ -43,19 +46,17 @@ QT_END_NAMESPACE
 
 #if PLATFORM(GTK)
 typedef struct _GdkColor GdkColor;
+#ifndef GTK_API_VERSION_2
+typedef struct _GdkRGBA GdkRGBA;
+#endif
 #endif
 
 #if PLATFORM(WX)
 class wxColour;
 #endif
 
-#if PLATFORM(HAIKU)
-struct rgb_color;
-#endif
-
 namespace WebCore {
 
-class String;
 class Color;
 
 typedef unsigned RGBA32;        // RGBA quadruplet
@@ -70,10 +71,16 @@ RGBA32 makeRGBAFromCMYKA(float c, float m, float y, float k, float a);
 
 int differenceSquared(const Color&, const Color&);
 
-class Color : public FastAllocBase {
+inline int redChannel(RGBA32 color) { return (color >> 16) & 0xFF; }
+inline int greenChannel(RGBA32 color) { return (color >> 8) & 0xFF; }
+inline int blueChannel(RGBA32 color) { return color & 0xFF; }
+inline int alphaChannel(RGBA32 color) { return (color >> 24) & 0xFF; }
+
+class Color {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     Color() : m_color(0), m_valid(false) { }
-    Color(RGBA32 col) : m_color(col), m_valid(true) { }
+    Color(RGBA32 color, bool valid = true) : m_color(color), m_valid(valid) { ASSERT(!m_color || m_valid); }
     Color(int r, int g, int b) : m_color(makeRGB(r, g, b)), m_valid(true) { }
     Color(int r, int g, int b, int a) : m_color(makeRGBA(r, g, b, a)), m_valid(true) { }
     // Color is currently limited to 32bit RGBA, perhaps some day we'll support better colors
@@ -82,18 +89,25 @@ public:
     Color(float c, float m, float y, float k, float a) : m_color(makeRGBAFromCMYKA(c, m, y, k, a)), m_valid(true) { }
     explicit Color(const String&);
     explicit Color(const char*);
-    
-    String name() const;
+
+    // Returns the color serialized according to HTML5
+    // - http://www.whatwg.org/specs/web-apps/current-work/#serialization-of-a-color
+    String serialized() const;
+
+    // Returns the color serialized as either #RRGGBB or #RRGGBBAA
+    // The latter format is not a valid CSS color, and should only be seen in DRT dumps.
+    String nameForRenderTreeAsText() const;
+
     void setNamedColor(const String&);
 
     bool isValid() const { return m_valid; }
 
     bool hasAlpha() const { return alpha() < 255; }
 
-    int red() const { return (m_color >> 16) & 0xFF; }
-    int green() const { return (m_color >> 8) & 0xFF; }
-    int blue() const { return m_color & 0xFF; }
-    int alpha() const { return (m_color >> 24) & 0xFF; }
+    int red() const { return redChannel(m_color); }
+    int green() const { return greenChannel(m_color); }
+    int blue() const { return blueChannel(m_color); }
+    int alpha() const { return alphaChannel(m_color); }
     
     RGBA32 rgb() const { return m_color; } // Preserve the alpha.
     void setRGB(int r, int g, int b) { m_color = makeRGB(r, g, b); m_valid = true; }
@@ -107,6 +121,7 @@ public:
 
     bool isDark() const;
 
+    // This is an implementation of Porter-Duff's "source-over" equation
     Color blend(const Color&) const;
     Color blendWithWhite() const;
 
@@ -118,6 +133,10 @@ public:
 #if PLATFORM(GTK)
     Color(const GdkColor&);
     // We can't sensibly go back to GdkColor without losing the alpha value
+#ifndef GTK_API_VERSION_2
+    Color(const GdkRGBA&);
+    operator GdkRGBA() const;
+#endif
 #endif
 
 #if PLATFORM(WX)
@@ -125,16 +144,12 @@ public:
     operator wxColour() const;
 #endif
 
-#if PLATFORM(CG)
+#if USE(CG)
     Color(CGColorRef);
 #endif
 
-#if PLATFORM(HAIKU)
-    Color(const rgb_color&);
-    operator rgb_color() const;
-#endif
-
     static bool parseHexColor(const String& name, RGBA32& rgb);
+    static bool parseHexColor(const UChar* name, unsigned length, RGBA32& rgb);
 
     static const RGBA32 black = 0xFF000000;
     static const RGBA32 white = 0xFFFFFFFF;
@@ -165,10 +180,35 @@ inline bool operator!=(const Color& a, const Color& b)
 Color colorFromPremultipliedARGB(unsigned);
 unsigned premultipliedARGBFromColor(const Color&);
 
-#if PLATFORM(CG)
-CGColorRef createCGColor(const Color&);
+inline Color blend(const Color& from, const Color& to, double progress, bool blendPremultiplied = true)
+{
+    // We need to preserve the state of the valid flag at the end of the animation
+    if (progress == 1 && !to.isValid())
+        return Color();
+    
+    if (blendPremultiplied) {
+        // Contrary to the name, RGBA32 actually stores ARGB, so we can initialize Color directly from premultipliedARGBFromColor().
+        // Also, premultipliedARGBFromColor() bails on zero alpha, so special-case that.
+        Color premultFrom = from.alpha() ? premultipliedARGBFromColor(from) : 0;
+        Color premultTo = to.alpha() ? premultipliedARGBFromColor(to) : 0;
+
+        Color premultBlended(blend(premultFrom.red(), premultTo.red(), progress),
+                     blend(premultFrom.green(), premultTo.green(), progress),
+                     blend(premultFrom.blue(), premultTo.blue(), progress),
+                     blend(premultFrom.alpha(), premultTo.alpha(), progress));
+
+        return Color(colorFromPremultipliedARGB(premultBlended.rgb()));
+    }
+
+    return Color(blend(from.red(), to.red(), progress),
+                 blend(from.green(), to.green(), progress),
+                 blend(from.blue(), to.blue(), progress),
+                 blend(from.alpha(), to.alpha(), progress));
+}
+
+#if USE(CG)
+CGColorRef cachedCGColor(const Color&, ColorSpace);
 CGColorRef createCGColorWithDeviceWhite(CGFloat w, CGFloat a);
-CGColorSpaceRef deviceRGBColorSpace();
 #endif
 
 } // namespace WebCore

@@ -37,6 +37,7 @@
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 #include "HTMLFormElement.h"
+#include "SecurityOrigin.h"
 
 #include "QuickLook.h"
 
@@ -60,7 +61,7 @@ void PolicyChecker::checkNavigationPolicy(const ResourceRequest& request, Docume
 {
     NavigationAction action = loader->triggeringAction();
     if (action.isEmpty()) {
-        action = NavigationAction(request.url(), NavigationTypeOther);
+        action = NavigationAction(request, NavigationTypeOther);
         loader->setTriggeringAction(action);
     }
 
@@ -100,16 +101,19 @@ void PolicyChecker::checkNavigationPolicy(const ResourceRequest& request, Docume
 void PolicyChecker::checkNewWindowPolicy(const NavigationAction& action, NewWindowPolicyDecisionFunction function,
     const ResourceRequest& request, PassRefPtr<FormState> formState, const String& frameName, void* argument)
 {
-    m_callback.set(request, formState, frameName, function, argument);
+    if (m_frame->document() && m_frame->document()->isSandboxed(SandboxPopups))
+        return continueAfterNavigationPolicy(PolicyIgnore);
+
+    m_callback.set(request, formState, frameName, action, function, argument);
     m_frame->loader()->client()->dispatchDecidePolicyForNewWindowAction(&PolicyChecker::continueAfterNewWindowPolicy,
         action, request, formState, frameName);
 }
 
-void PolicyChecker::checkContentPolicy(const String& MIMEType, ContentPolicyDecisionFunction function, void* argument)
+void PolicyChecker::checkContentPolicy(const ResourceResponse& response, ContentPolicyDecisionFunction function, void* argument)
 {
     m_callback.set(function, argument);
-    m_frame->loader()->client()->dispatchDecidePolicyForMIMEType(&PolicyChecker::continueAfterContentPolicy,
-        MIMEType, m_frame->loader()->activeDocumentLoader()->request());
+    m_frame->loader()->client()->dispatchDecidePolicyForResponse(&PolicyChecker::continueAfterContentPolicy,
+        response, m_frame->loader()->activeDocumentLoader()->request());
 }
 
 void PolicyChecker::cancelCheck()
@@ -149,15 +153,18 @@ void PolicyChecker::continueAfterNavigationPolicy(PolicyAction policy)
         case PolicyIgnore:
             callback.clearRequest();
             break;
-        case PolicyDownload:
-            m_frame->loader()->client()->startDownload(callback.request());
+        case PolicyDownload: {
+            ResourceRequest request = callback.request();
+            m_frame->loader()->setOriginalURLForDownloadRequest(request);
+            m_frame->loader()->client()->startDownload(request);
             callback.clearRequest();
             break;
+        }
         case PolicyUse: {
             ResourceRequest request(callback.request());
 
             if (!m_frame->loader()->client()->canHandleRequest(request)) {
-                handleUnimplementablePolicy(m_frame->loader()->cannotShowURLError(callback.request()));
+                handleUnimplementablePolicy(m_frame->loader()->client()->cannotShowURLError(callback.request()));
                 callback.clearRequest();
                 shouldContinue = false;
             }

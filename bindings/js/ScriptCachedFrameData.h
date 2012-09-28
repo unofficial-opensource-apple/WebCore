@@ -32,16 +32,17 @@
 #ifndef ScriptCachedFrameData_h
 #define ScriptCachedFrameData_h
 
-#include <runtime/Protect.h>
+#include <heap/Strong.h>
+#include <wtf/HashMap.h>
 
 namespace WebCore {
     class Frame;
     class JSDOMWindow;
-    class DOMWindow;
     class DOMWrapperWorld;
 
-    class ScriptCachedFrameData  : public Noncopyable {
-        typedef HashMap< RefPtr<DOMWrapperWorld>, JSC::ProtectedPtr<JSDOMWindow> > JSDOMWindowSet;
+    class ScriptCachedFrameData {
+        WTF_MAKE_NONCOPYABLE(ScriptCachedFrameData); WTF_MAKE_FAST_ALLOCATED;
+        typedef HashMap< RefPtr<DOMWrapperWorld>, JSC::Strong<JSDOMWindow> > JSDOMWindowSet;
 
     public:
         ScriptCachedFrameData(Frame*);
@@ -49,11 +50,9 @@ namespace WebCore {
 
         void restore(Frame*);
         void clear();
-        DOMWindow* domWindow() const;
 
     private:
         JSDOMWindowSet m_windows;
-        DOMWindow* m_domWindow;
     };
 
 } // namespace WebCore

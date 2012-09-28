@@ -1,23 +1,23 @@
 /*
-   Copyright (C) 2007 Eric Seidel <eric@webkit.org>
-   Copyright (C) 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
-   Copyright (C) 2008 Eric Seidel <eric@webkit.org>
-
-   This library is free software; you can redistribute it and/or
-   modify it under the terms of the GNU Library General Public
-   License as published by the Free Software Foundation; either
-   version 2 of the License, or (at your option) any later version.
-
-   This library is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-   Library General Public License for more details.
-
-   You should have received a copy of the GNU Library General Public License
-   along with this library; see the file COPYING.LIB.  If not, write to
-   the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2007 Eric Seidel <eric@webkit.org>
+ * Copyright (C) 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2008 Eric Seidel <eric@webkit.org>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
 
@@ -26,54 +26,60 @@
 
 #include "SVGFontElement.h"
 #include "SVGFontFaceElement.h"
-#include "SVGFontData.h"
 #include "SVGNames.h"
-#include "SVGParserUtilities.h"
-#include "SimpleFontData.h"
-#include "XMLNames.h"
 
 namespace WebCore {
 
-using namespace SVGNames;
-
-SVGHKernElement::SVGHKernElement(const QualifiedName& tagName, Document* doc)
-    : SVGElement(tagName, doc)
+inline SVGHKernElement::SVGHKernElement(const QualifiedName& tagName, Document* document)
+    : SVGElement(tagName, document)
 {
+    ASSERT(hasTagName(SVGNames::hkernTag));
 }
 
-SVGHKernElement::~SVGHKernElement()
+PassRefPtr<SVGHKernElement> SVGHKernElement::create(const QualifiedName& tagName, Document* document)
 {
+    return adoptRef(new SVGHKernElement(tagName, document));
 }
 
-void SVGHKernElement::insertedIntoDocument()
+Node::InsertionNotificationRequest SVGHKernElement::insertedInto(Node* rootParent)
 {
-    Node* fontNode = parentNode();
+    ContainerNode* fontNode = parentNode();
     if (fontNode && fontNode->hasTagName(SVGNames::fontTag)) {
         if (SVGFontElement* element = static_cast<SVGFontElement*>(fontNode))
             element->invalidateGlyphCache();
     }
+
+    return SVGElement::insertedInto(rootParent);
 }
 
-void SVGHKernElement::removedFromDocument()
+void SVGHKernElement::removedFrom(Node* rootParent)
 {
-    Node* fontNode = parentNode();
+    ContainerNode* fontNode = parentNode();
     if (fontNode && fontNode->hasTagName(SVGNames::fontTag)) {
         if (SVGFontElement* element = static_cast<SVGFontElement*>(fontNode))
             element->invalidateGlyphCache();
     }
+
+    SVGElement::removedFrom(rootParent);
 }
 
-SVGHorizontalKerningPair SVGHKernElement::buildHorizontalKerningPair() const
+void SVGHKernElement::buildHorizontalKerningPair(KerningPairVector& kerningPairs)
 {
-    SVGHorizontalKerningPair kerningPair;
+    String u1 = fastGetAttribute(SVGNames::u1Attr);
+    String g1 = fastGetAttribute(SVGNames::g1Attr);
+    String u2 = fastGetAttribute(SVGNames::u2Attr);
+    String g2 = fastGetAttribute(SVGNames::g2Attr);
+    if ((u1.isEmpty() && g1.isEmpty()) || (u2.isEmpty() && g2.isEmpty()))
+        return;
 
-    kerningPair.unicode1 = getAttribute(u1Attr);
-    kerningPair.glyphName1 = getAttribute(g1Attr);
-    kerningPair.unicode2 = getAttribute(u2Attr);
-    kerningPair.glyphName2 = getAttribute(g2Attr);
-    kerningPair.kerning = getAttribute(kAttr).string().toDouble();
-
-    return kerningPair;
+    SVGKerningPair kerningPair;
+    if (parseGlyphName(g1, kerningPair.glyphName1)
+        && parseGlyphName(g2, kerningPair.glyphName2)
+        && parseKerningUnicodeString(u1, kerningPair.unicodeRange1, kerningPair.unicodeName1)
+        && parseKerningUnicodeString(u2, kerningPair.unicodeRange2, kerningPair.unicodeName2)) {
+        kerningPair.kerning = fastGetAttribute(SVGNames::kAttr).string().toFloat();
+        kerningPairs.append(kerningPair);
+    }
 }
 
 }

@@ -28,12 +28,14 @@
 #include "config.h"
 #include "ResourceHandle.h"
 
-#include "DocLoader.h"
+#include "CachedResourceLoader.h"
 #include "NotImplemented.h"
 #include "ResourceHandleInternal.h"
 #include "ResourceHandleManager.h"
+#include "SharedBuffer.h"
 
-#if PLATFORM(WIN) && PLATFORM(CF)
+#if PLATFORM(WIN) && USE(CF)
+#include <wtf/PassRefPtr.h>
 #include <wtf/RetainPtr.h>
 #endif
 
@@ -44,8 +46,8 @@ public:
     WebCoreSynchronousLoader();
 
     virtual void didReceiveResponse(ResourceHandle*, const ResourceResponse&);
-    virtual void didReceiveData(ResourceHandle*, const char*, int, int lengthReceived);
-    virtual void didFinishLoading(ResourceHandle*);
+    virtual void didReceiveData(ResourceHandle*, const char*, int, int encodedDataLength);
+    virtual void didFinishLoading(ResourceHandle*, double /*finishTime*/);
     virtual void didFail(ResourceHandle*, const ResourceError&);
 
     ResourceResponse resourceResponse() const { return m_response; }
@@ -72,7 +74,7 @@ void WebCoreSynchronousLoader::didReceiveData(ResourceHandle*, const char* data,
     m_data.append(data, length);
 }
 
-void WebCoreSynchronousLoader::didFinishLoading(ResourceHandle*)
+void WebCoreSynchronousLoader::didFinishLoading(ResourceHandle*, double)
 {
 }
 
@@ -81,17 +83,9 @@ void WebCoreSynchronousLoader::didFail(ResourceHandle*, const ResourceError& err
     m_error = error;
 }
 
-
-static HashSet<String>& allowsAnyHTTPSCertificateHosts()
-{
-    static HashSet<String> hosts;
-
-    return hosts;
-}
-
 ResourceHandleInternal::~ResourceHandleInternal()
 {
-    free(m_url);
+    fastFree(m_url);
     if (m_customHeaders)
         curl_slist_free_all(m_customHeaders);
 }
@@ -101,13 +95,14 @@ ResourceHandle::~ResourceHandle()
     cancel();
 }
 
-bool ResourceHandle::start(Frame* frame)
+bool ResourceHandle::start(NetworkingContext* context)
 {
     // The frame could be null if the ResourceHandle is not associated to any
     // Frame, e.g. if we are downloading a file.
     // If the frame is not null but the page is null this must be an attempted
-    // load from an onUnload handler, so let's just block it.
-    if (frame && !frame->page())
+    // load from an unload handler, so let's just block it.
+    // If both the frame and the page are not null the context is valid.
+    if (context && !context->isValid())
         return false;
 
     ResourceHandleManager::sharedInstance()->add(this);
@@ -119,24 +114,21 @@ void ResourceHandle::cancel()
     ResourceHandleManager::sharedInstance()->cancel(this);
 }
 
-PassRefPtr<SharedBuffer> ResourceHandle::bufferedData()
+#if PLATFORM(WIN) && USE(CF)
+static HashSet<String>& allowsAnyHTTPSCertificateHosts()
 {
-    return 0;
+    static HashSet<String> hosts;
+
+    return hosts;
 }
 
-bool ResourceHandle::supportsBufferedData()
-{
-    return false;
-}
-
-#if PLATFORM(WIN) && PLATFORM(CF)
 void ResourceHandle::setHostAllowsAnyHTTPSCertificate(const String& host)
 {
     allowsAnyHTTPSCertificateHosts().add(host.lower());
 }
 #endif
 
-#if PLATFORM(WIN) && PLATFORM(CF)
+#if PLATFORM(WIN) && USE(CF)
 // FIXME:  The CFDataRef will need to be something else when
 // building without 
 static HashMap<String, RetainPtr<CFDataRef> >& clientCerts()
@@ -151,34 +143,24 @@ void ResourceHandle::setClientCertificate(const String& host, CFDataRef cert)
 }
 #endif
 
-void ResourceHandle::setDefersLoading(bool defers)
+void ResourceHandle::platformSetDefersLoading(bool defers)
 {
-    if (d->m_defersLoading == defers)
-        return;
-
 #if LIBCURL_VERSION_NUM > 0x071200
     if (!d->m_handle)
-        d->m_defersLoading = defers;
-    else if (defers) {
+        return;
+
+    if (defers) {
         CURLcode error = curl_easy_pause(d->m_handle, CURLPAUSE_ALL);
         // If we could not defer the handle, so don't do it.
         if (error != CURLE_OK)
             return;
-
-        d->m_defersLoading = defers;
     } else {
-        // We need to set defersLoading before restarting a connection
-        // or libcURL will call the callbacks in curl_easy_pause and
-        // we would ASSERT.
-        d->m_defersLoading = defers;
-
         CURLcode error = curl_easy_pause(d->m_handle, CURLPAUSE_CONT);
         if (error != CURLE_OK)
             // Restarting the handle has failed so just cancel it.
             cancel();
     }
 #else
-    d->m_defersLoading = defers;
     LOG_ERROR("Deferred loading is implemented if libcURL version is above 7.18.0");
 #endif
 }
@@ -195,14 +177,14 @@ bool ResourceHandle::loadsBlocked()
     return false;
 }
 
-void ResourceHandle::loadResourceSynchronously(const ResourceRequest& request, StoredCredentials storedCredentials, ResourceError& error, ResourceResponse& response, Vector<char>& data, Frame*)
+void ResourceHandle::loadResourceSynchronously(NetworkingContext*, const ResourceRequest& request, StoredCredentials storedCredentials, ResourceError& error, ResourceResponse& response, Vector<char>& data)
 {
     WebCoreSynchronousLoader syncLoader;
-    ResourceHandle handle(request, &syncLoader, true, false, true);
+    RefPtr<ResourceHandle> handle = adoptRef(new ResourceHandle(request, &syncLoader, true, false));
 
     ResourceHandleManager* manager = ResourceHandleManager::sharedInstance();
 
-    manager->dispatchSynchronousJob(&handle);
+    manager->dispatchSynchronousJob(handle.get());
 
     error = syncLoader.resourceError();
     data = syncLoader.data();

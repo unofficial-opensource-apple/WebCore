@@ -22,8 +22,10 @@
 #ifndef EventNames_h
 #define EventNames_h
 
-#include "AtomicString.h"
+#include "EventInterfaces.h"
+#include "EventTargetInterfaces.h"
 #include "ThreadGlobalData.h"
+#include <wtf/text/AtomicString.h>
 
 namespace WebCore {
 
@@ -35,12 +37,16 @@ namespace WebCore {
     macro(beforeload) \
     macro(beforepaste) \
     macro(beforeunload) \
+    macro(blocked) \
     macro(blur) \
     macro(cached) \
     macro(change) \
+    macro(chargingchange) \
+    macro(chargingtimechange) \
     macro(checking) \
     macro(click) \
     macro(close) \
+    macro(complete) \
     macro(compositionend) \
     macro(compositionstart) \
     macro(compositionupdate) \
@@ -49,6 +55,9 @@ namespace WebCore {
     macro(copy) \
     macro(cut) \
     macro(dblclick) \
+    macro(devicemotion) \
+    macro(deviceorientation) \
+    macro(dischargingtimechange) \
     macro(display) \
     macro(downloading) \
     macro(drag) \
@@ -60,12 +69,15 @@ namespace WebCore {
     macro(drop) \
     macro(error) \
     macro(focus) \
+    macro(focusin) \
+    macro(focusout) \
     macro(hashchange) \
     macro(input) \
     macro(invalid) \
     macro(keydown) \
     macro(keypress) \
     macro(keyup) \
+    macro(levelchange) \
     macro(load) \
     macro(loadstart) \
     macro(message) \
@@ -92,18 +104,24 @@ namespace WebCore {
     macro(search) \
     macro(select) \
     macro(selectstart) \
+    macro(selectionchange) \
     macro(storage) \
     macro(submit) \
     macro(textInput) \
     macro(unload) \
     macro(updateready) \
+    macro(versionchange) \
+    macro(webkitvisibilitychange) \
+    macro(write) \
+    macro(writeend) \
+    macro(writestart) \
     macro(zoom) \
     \
     macro(DOMActivate) \
-    macro(DOMAttrModified) \
-    macro(DOMCharacterDataModified) \
     macro(DOMFocusIn) \
     macro(DOMFocusOut) \
+    macro(DOMAttrModified) \
+    macro(DOMCharacterDataModified) \
     macro(DOMNodeInserted) \
     macro(DOMNodeInsertedIntoDocument) \
     macro(DOMNodeRemoved) \
@@ -131,8 +149,22 @@ namespace WebCore {
     macro(volumechange) \
     macro(waiting) \
     \
+    macro(addtrack) \
+    macro(cuechange) \
+    macro(enter) \
+    macro(exit) \
+    \
     macro(webkitbeginfullscreen) \
     macro(webkitendfullscreen) \
+    \
+    macro(webkitsourceopen) \
+    macro(webkitsourceended) \
+    macro(webkitsourceclose) \
+    \
+    macro(webkitkeyadded) \
+    macro(webkitkeyerror) \
+    macro(webkitkeymessage) \
+    macro(webkitneedkey) \
     \
     macro(progress) \
     macro(stalled) \
@@ -146,6 +178,8 @@ namespace WebCore {
     \
     macro(orientationchange) \
     \
+    macro(timeout) \
+    \
     macro(touchstart) \
     macro(touchmove) \
     macro(touchend) \
@@ -155,9 +189,51 @@ namespace WebCore {
     macro(gesturechange) \
     macro(gestureend) \
     \
+    macro(success) \
+    \
+    macro(loadend) \
+    \
+    macro(webkitfullscreenchange) \
+    macro(webkitfullscreenerror) \
+    \
+    macro(webkitspeechchange) \
+    \
+    macro(audiostart) \
+    macro(soundstart) \
+    macro(speechstart) \
+    macro(speechend) \
+    macro(soundend) \
+    macro(audioend) \
+    macro(result) \
+    macro(nomatch) \
+    macro(resultdeleted) \
+    macro(start) \
+    macro(end) \
+    \
+    macro(webglcontextlost) \
+    macro(webglcontextrestored) \
+    macro(webglcontextcreationerror) \
+    \
+    macro(audioprocess) \
+    \
+    macro(connecting) \
+    macro(addstream) \
+    macro(removestream) \
+    macro(statechange) \
+    \
+    macro(show) \
+    \
+    macro(webkitpointerlocklost) \
+    \
+    macro(webkitRegionLayoutUpdate) \
+    \
+    macro(webkitnetworkinfochange) \
+    \
+
 // end of DOM_EVENT_NAMES_FOR_EACH
 
-    class EventNames : public Noncopyable {
+    class EventNames {
+        WTF_MAKE_NONCOPYABLE(EventNames); WTF_MAKE_FAST_ALLOCATED;
         int dummy; // Needed to make initialization macro work.
         // Private to prevent accidental call to EventNames() instead of eventNames()
         EventNames();
@@ -167,6 +243,16 @@ namespace WebCore {
         #define DOM_EVENT_NAMES_DECLARE(name) AtomicString name##Event;
         DOM_EVENT_NAMES_FOR_EACH(DOM_EVENT_NAMES_DECLARE)
         #undef DOM_EVENT_NAMES_DECLARE
+
+        #define DOM_EVENT_INTERFACE_DECLARE(name) AtomicString interfaceFor##name;
+        DOM_EVENT_INTERFACES_FOR_EACH(DOM_EVENT_INTERFACE_DECLARE)
+        DOM_EVENT_TARGET_INTERFACES_FOR_EACH(DOM_EVENT_INTERFACE_DECLARE)
+        #undef DOM_EVENT_INTERFACE_DECLARE
+
+        inline bool isTouchEventType(const AtomicString& eventType) const
+        {
+            return eventType == touchstartEvent || eventType == touchmoveEvent || eventType == touchendEvent || eventType == touchcancelEvent;
+        }
     };
 
     inline EventNames& eventNames()

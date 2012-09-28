@@ -88,6 +88,10 @@ void AXObjectCache::postPlatformNotification(AccessibilityObject* obj, AXNotific
             msaaEvent = EVENT_OBJECT_VALUECHANGE;
             break;
 
+        case AXMenuListItemSelected:
+            msaaEvent = EVENT_OBJECT_SELECTION;
+            break;
+
         default:
             return;
     }
@@ -101,6 +105,14 @@ void AXObjectCache::postPlatformNotification(AccessibilityObject* obj, AXNotific
     ASSERT(obj->axObjectID() <= numeric_limits<LONG>::max());
 
     NotifyWinEvent(msaaEvent, page->chrome()->platformPageClient(), OBJID_CLIENT, -static_cast<LONG>(obj->axObjectID()));
+}
+
+void AXObjectCache::nodeTextChangePlatformNotification(AccessibilityObject*, AXTextChange, unsigned, const String&)
+{
+}
+
+void AXObjectCache::frameLoadingEventPlatformNotification(AccessibilityObject*, AXLoadingEvent)
+{
 }
 
 AXID AXObjectCache::platformGenerateAXID() const

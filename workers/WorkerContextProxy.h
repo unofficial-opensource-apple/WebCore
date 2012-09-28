@@ -34,12 +34,13 @@
 #if ENABLE(WORKERS)
 
 #include "MessagePort.h"
+#include "WorkerThread.h"
+#include <wtf/Forward.h>
 #include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
     class KURL;
-    class String;
     class Worker;
 
     // A proxy to talk to the worker context.
@@ -49,7 +50,7 @@ namespace WebCore {
 
         virtual ~WorkerContextProxy() {}
 
-        virtual void startWorkerContext(const KURL& scriptURL, const String& userAgent, const String& sourceCode) = 0;
+        virtual void startWorkerContext(const KURL& scriptURL, const String& userAgent, const String& sourceCode, WorkerThreadStartMode) = 0;
 
         virtual void terminateWorkerContext() = 0;
 
@@ -58,6 +59,17 @@ namespace WebCore {
         virtual bool hasPendingActivity() const = 0;
 
         virtual void workerObjectDestroyed() = 0;
+
+#if ENABLE(INSPECTOR)
+        class PageInspector {
+        public:
+            virtual ~PageInspector() { }
+            virtual void dispatchMessageFromWorker(const String&) = 0;
+        };
+        virtual void connectToInspector(PageInspector*) { }
+        virtual void disconnectFromInspector() { }
+        virtual void sendMessageToInspector(const String&) { }
+#endif
     };
 
 } // namespace WebCore

@@ -21,6 +21,8 @@
 #include "config.h"
 #include "AccessibilityObject.h"
 
+#include "RenderObject.h"
+#include "RenderText.h"
 #include <glib-object.h>
 
 #if HAVE(ACCESSIBILITY)
@@ -32,13 +34,18 @@ bool AccessibilityObject::accessibilityIgnoreAttachment() const
     return false;
 }
 
-AccessibilityObjectPlatformInclusion AccessibilityObject::accessibilityPlatformIncludesObject() const
+AccessibilityObjectInclusion AccessibilityObject::accessibilityPlatformIncludesObject() const
 {
     AccessibilityObject* parent = parentObject();
     if (!parent)
         return DefaultBehavior;
 
-    if (isMenuListPopup() || isMenuListOption())
+    AccessibilityRole role = roleValue();
+    if (role == SplitterRole)
+        return IncludeObject;
+
+    // We expose the slider as a whole but not its value indicator.
+    if (role == SliderThumbRole)
         return IgnoreObject;
 
     // When a list item is made up entirely of children (e.g. paragraphs)
@@ -50,8 +57,25 @@ AccessibilityObjectPlatformInclusion AccessibilityObject::accessibilityPlatformI
     if (parent->isPasswordField() || parent->isTextControl())
         return IgnoreObject;
 
+    // Include all tables, even layout tables. The AT can decide what to do with each.
+    if (role == CellRole || role == TableRole)
+        return IncludeObject;
+
     // The object containing the text should implement AtkText itself.
-    if (roleValue() == StaticTextRole)
+    if (role == StaticTextRole)
+        return IgnoreObject;
+
+    // Include all list items, regardless they have or not inline children
+    if (role == ListItemRole)
+        return IncludeObject;
+
+    // Bullets/numbers for list items shouldn't be exposed as AtkObjects.
+    if (role == ListMarkerRole)
+        return IgnoreObject;
+
+    // Never expose an unknown object, since AT's won't know what to
+    // do with them. This is what is done on the Mac as well.
+    if (role == UnknownRole)
         return IgnoreObject;
 
     return DefaultBehavior;
@@ -74,6 +98,40 @@ void AccessibilityObject::setWrapper(AccessibilityObjectWrapper* wrapper)
 
     if (m_wrapper)
         g_object_ref(m_wrapper);
+}
+
+bool AccessibilityObject::allowsTextRanges() const
+{
+    // Check type for the AccessibilityObject.
+    if (isTextControl() || isWebArea() || isGroup() || isLink() || isHeading() || isListItem())
+        return true;
+
+    // Check roles as the last fallback mechanism.
+    AccessibilityRole role = roleValue();
+    return role == ParagraphRole || role == LabelRole || role == DivRole || role == FormRole;
+}
+
+unsigned AccessibilityObject::getLengthForTextRange() const
+{
+    unsigned textLength = text().length();
+
+    if (textLength)
+        return textLength;
+
+    // Gtk ATs need this for all text objects; not just text controls.
+    Node* node = this->node();
+    RenderObject* renderer = node ? node->renderer() : 0;
+    if (renderer && renderer->isText()) {
+        RenderText* renderText = toRenderText(renderer);
+        textLength = renderText ? renderText->textLength() : 0;
+    }
+
+    // Get the text length from the elements under the
+    // accessibility object if the value is still zero.
+    if (!textLength && allowsTextRanges())
+        textLength = textUnderElement().length();
+
+    return textLength;
 }
 
 } // namespace WebCore

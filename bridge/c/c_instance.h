@@ -28,7 +28,7 @@
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
 
-#include "Bridge.h"
+#include "BridgeJSC.h"
 #include "runtime_root.h"
 #include <wtf/PassRefPtr.h>
 
@@ -50,6 +50,7 @@ public:
     }
 
     static void setGlobalException(JSC::UString exception);
+    static void moveGlobalExceptionToExecState(ExecState*);
 
     ~CInstance ();
 
@@ -58,9 +59,10 @@ public:
     virtual JSValue valueOf(ExecState*) const;
     virtual JSValue defaultValue(ExecState*, PreferredPrimitiveType) const;
 
-    virtual JSValue invokeMethod(ExecState*, const MethodList&, const ArgList&);
+    virtual JSValue getMethod(ExecState* exec, const Identifier& propertyName);
+    virtual JSValue invokeMethod(ExecState*, RuntimeMethod* method);
     virtual bool supportsInvokeDefaultMethod() const;
-    virtual JSValue invokeDefaultMethod(ExecState*, const ArgList&);
+    virtual JSValue invokeDefaultMethod(ExecState*);
 
     virtual bool supportsConstruct() const;
     virtual JSValue invokeConstruct(ExecState*, const ArgList&);
@@ -74,8 +76,9 @@ public:
     NPObject *getObject() const { return _object; }
 
 private:
-    static void moveGlobalExceptionToExecState(ExecState* exec);
     CInstance(NPObject*, PassRefPtr<RootObject>);
+
+    virtual RuntimeObject* newRuntimeObject(ExecState*);
 
     mutable CClass *_class;
     NPObject *_object;

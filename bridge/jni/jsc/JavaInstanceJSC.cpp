@@ -26,44 +26,44 @@
 #include "config.h"
 #include "JavaInstanceJSC.h"
 
-#if ENABLE(MAC_JAVA_BRIDGE)
+#if ENABLE(JAVA_BRIDGE)
 
-#include "JNIBridgeJSC.h"
-#include "JNIUtility.h"
+#include "JavaRuntimeObject.h"
 #include "JNIUtilityPrivate.h"
+#include "JSDOMBinding.h"
+#include "JavaArrayJSC.h"
 #include "JavaClassJSC.h"
+#include "JavaMethodJSC.h"
+#include "JavaStringJSC.h"
+#include "Logging.h"
+#include "jni_jsobject.h"
+#include "runtime_method.h"
 #include "runtime_object.h"
 #include "runtime_root.h"
 #include <runtime/ArgList.h>
 #include <runtime/Error.h>
+#include <runtime/FunctionPrototype.h>
 #include <runtime/JSLock.h>
-
-#if PLATFORM(ANDROID)
-#include <assert.h>
-#endif
-
-#ifdef NDEBUG
-#define JS_LOG(formatAndArgs...) ((void)0)
-#else
-#define JS_LOG(formatAndArgs...) { \
-    fprintf(stderr, "%s:%d -- %s:  ", __FILE__, __LINE__, __FUNCTION__); \
-    fprintf(stderr, formatAndArgs); \
-}
-#endif
 
 using namespace JSC::Bindings;
 using namespace JSC;
+using namespace WebCore;
 
 JavaInstance::JavaInstance(jobject instance, PassRefPtr<RootObject> rootObject)
     : Instance(rootObject)
 {
-    m_instance = new JObjectWrapper(instance);
+    m_instance = JobjectWrapper::create(instance);
     m_class = 0;
 }
 
 JavaInstance::~JavaInstance()
 {
     delete m_class;
+}
+
+RuntimeObject* JavaInstance::newRuntimeObject(ExecState* exec)
+{
+    return JavaRuntimeObject::create(exec, exec->lexicalGlobalObject(), this);
 }
 
 #define NUM_LOCAL_REFS 64
@@ -81,15 +81,15 @@ void JavaInstance::virtualEnd()
 Class* JavaInstance::getClass() const
 {
     if (!m_class)
-        m_class = new JavaClass (m_instance->m_instance);
+        m_class = new JavaClass (m_instance->instance());
     return m_class;
 }
 
 JSValue JavaInstance::stringValue(ExecState* exec) const
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
 
-    jstring stringValue = (jstring)callJNIMethod<jobject>(m_instance->m_instance, "toString", "()Ljava/lang/String;");
+    jstring stringValue = (jstring)callJNIMethod<jobject>(m_instance->instance(), "toString", "()Ljava/lang/String;");
 
     // Should throw a JS exception, rather than returning ""? - but better than a null dereference.
     if (!stringValue)
@@ -102,56 +102,99 @@ JSValue JavaInstance::stringValue(ExecState* exec) const
     return jsString(exec, u);
 }
 
-JSValue JavaInstance::numberValue(ExecState* exec) const
+JSValue JavaInstance::numberValue(ExecState*) const
 {
-    jdouble doubleValue = callJNIMethod<jdouble>(m_instance->m_instance, "doubleValue", "()D");
-    return jsNumber(exec, doubleValue);
+    jdouble doubleValue = callJNIMethod<jdouble>(m_instance->instance(), "doubleValue", "()D");
+    return jsNumber(doubleValue);
 }
 
 JSValue JavaInstance::booleanValue() const
 {
-    jboolean booleanValue = callJNIMethod<jboolean>(m_instance->m_instance, "booleanValue", "()Z");
+    jboolean booleanValue = callJNIMethod<jboolean>(m_instance->instance(), "booleanValue", "()Z");
     return jsBoolean(booleanValue);
 }
 
-JSValue JavaInstance::invokeMethod(ExecState* exec, const MethodList& methodList, const ArgList &args)
+class JavaRuntimeMethod : public RuntimeMethod {
+public:
+    typedef RuntimeMethod Base;
+
+    static JavaRuntimeMethod* create(ExecState* exec, JSGlobalObject* globalObject, const Identifier& name, Bindings::MethodList& list)
+    {
+        // FIXME: deprecatedGetDOMStructure uses the prototype off of the wrong global object
+        // We need to pass in the right global object for "i".
+        Structure* domStructure = WebCore::deprecatedGetDOMStructure<JavaRuntimeMethod>(exec);
+        JavaRuntimeMethod* method = new (NotNull, allocateCell<JavaRuntimeMethod>(*exec->heap())) JavaRuntimeMethod(globalObject, domStructure, list);
+        method->finishCreation(exec->globalData(), name);
+        return method;
+    }
+
+    static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype)
+    {
+        return Structure::create(globalData, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), &s_info);
+    }
+
+    static const ClassInfo s_info;
+
+private:
+    JavaRuntimeMethod(JSGlobalObject* globalObject, Structure* structure, Bindings::MethodList& list)
+        : RuntimeMethod(globalObject, structure, list)
+    {
+    }
+
+    void finishCreation(JSGlobalData& globalData, const Identifier& name)
+    {
+        Base::finishCreation(globalData, name);
+        ASSERT(inherits(&s_info));
+    }
+};
+
+const ClassInfo JavaRuntimeMethod::s_info = { "JavaRuntimeMethod", &RuntimeMethod::s_info, 0, 0, CREATE_METHOD_TABLE(JavaRuntimeMethod) };
+
+JSValue JavaInstance::getMethod(ExecState* exec, const Identifier& propertyName)
 {
-    int i, count = args.size();
-    jvalue* jArgs;
+    MethodList methodList = getClass()->methodsNamed(propertyName, this);
+    return JavaRuntimeMethod::create(exec, exec->lexicalGlobalObject(), propertyName, methodList);
+}
+
+JSValue JavaInstance::invokeMethod(ExecState* exec, RuntimeMethod* runtimeMethod)
+{
+    if (!asObject(runtimeMethod)->inherits(&JavaRuntimeMethod::s_info))
+        return throwError(exec, createTypeError(exec, "Attempt to invoke non-Java method on Java object."));
+
+    const MethodList& methodList = *runtimeMethod->methods();
+
+    int i;
+    int count = exec->argumentCount();
     JSValue resultValue;
     Method* method = 0;
     size_t numMethods = methodList.size();
 
     // Try to find a good match for the overloaded method.  The
-    // fundamental problem is that JavaScript doesn have the
+    // fundamental problem is that JavaScript doesn't have the
     // notion of method overloading and Java does.  We could
     // get a bit more sophisticated and attempt to does some
     // type checking as we as checking the number of parameters.
-    Method* aMethod;
     for (size_t methodIndex = 0; methodIndex < numMethods; methodIndex++) {
-        aMethod = methodList[methodIndex];
+        Method* aMethod = methodList[methodIndex];
         if (aMethod->numParameters() == count) {
             method = aMethod;
             break;
         }
     }
     if (!method) {
-        JS_LOG("unable to find an appropiate method\n");
+        LOG(LiveConnect, "JavaInstance::invokeMethod unable to find an appropiate method");
         return jsUndefined();
     }
 
     const JavaMethod* jMethod = static_cast<const JavaMethod*>(method);
-    JS_LOG("call %s %s on %p\n", UString(jMethod->name()).UTF8String().c_str(), jMethod->signature(), m_instance->m_instance);
+    LOG(LiveConnect, "JavaInstance::invokeMethod call %s %s on %p", UString(jMethod->name().impl()).utf8().data(), jMethod->signature(), m_instance->instance());
 
-    if (count > 0)
-        jArgs = (jvalue*)malloc(count * sizeof(jvalue));
-    else
-        jArgs = 0;
+    Vector<jvalue> jArgs(count);
 
     for (i = 0; i < count; i++) {
-        JavaParameter* aParameter = jMethod->parameterAt(i);
-        jArgs[i] = convertValueToJValue(exec, args.at(i), aParameter->getJNIType(), aParameter->type());
-        JS_LOG("arg[%d] = %s\n", i, args.at(i).toString(exec).ascii());
+        CString javaClassName = jMethod->parameterAt(i).utf8();
+        jArgs[i] = convertValueToJValue(exec, m_rootObject.get(), exec->argument(i), javaTypeFromClassName(javaClassName.data()), javaClassName.data());
+        LOG(LiveConnect, "JavaInstance::invokeMethod arg[%d] = %s", i, exec->argument(i).toString(exec)->value(exec).ascii().data());
     }
 
     jvalue result;
@@ -165,136 +208,114 @@ JSValue JavaInstance::invokeMethod(ExecState* exec, const MethodList& methodList
 
     bool handled = false;
     if (rootObject->nativeHandle()) {
-        jobject obj = m_instance->m_instance;
+        jobject obj = m_instance->instance();
         JSValue exceptionDescription;
         const char *callingURL = 0; // FIXME, need to propagate calling URL to Java
-        handled = dispatchJNICall(exec, rootObject->nativeHandle(), obj, jMethod->isStatic(), jMethod->JNIReturnType(), jMethod->methodID(obj), jArgs, result, callingURL, exceptionDescription);
+        jmethodID methodId = getMethodID(obj, jMethod->name().utf8().data(), jMethod->signature());
+        handled = dispatchJNICall(exec, rootObject->nativeHandle(), obj, jMethod->isStatic(), jMethod->returnType(), methodId, jArgs.data(), result, callingURL, exceptionDescription);
         if (exceptionDescription) {
-            throwError(exec, GeneralError, exceptionDescription.toString(exec));
-            free(jArgs);
+            throwError(exec, createError(exec, exceptionDescription.toString(exec)->value(exec)));
             return jsUndefined();
         }
     }
 
-    // The following code can be conditionally removed once we have a Tiger update that
-    // contains the new Java plugin.  It is needed for builds prior to Tiger.
-    if (!handled) {
-        jobject obj = m_instance->m_instance;
-        switch (jMethod->JNIReturnType()) {
-        case void_type:
-            callJNIMethodIDA<void>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case object_type:
-            result.l = callJNIMethodIDA<jobject>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case boolean_type:
-            result.z = callJNIMethodIDA<jboolean>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case byte_type:
-            result.b = callJNIMethodIDA<jbyte>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case char_type:
-            result.c = callJNIMethodIDA<jchar>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case short_type:
-            result.s = callJNIMethodIDA<jshort>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case int_type:
-            result.i = callJNIMethodIDA<jint>(obj, jMethod->methodID(obj), jArgs);
-            break;
-
-        case long_type:
-            result.j = callJNIMethodIDA<jlong>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case float_type:
-            result.f = callJNIMethodIDA<jfloat>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case double_type:
-            result.d = callJNIMethodIDA<jdouble>(obj, jMethod->methodID(obj), jArgs);
-            break;
-        case invalid_type:
-        default:
-            break;
-        }
-    }
-
-    switch (jMethod->JNIReturnType()) {
-    case void_type:
+    switch (jMethod->returnType()) {
+    case JavaTypeVoid:
         {
             resultValue = jsUndefined();
         }
         break;
 
-    case object_type:
+    case JavaTypeObject:
         {
             if (result.l) {
-                const char* arrayType = jMethod->returnType();
+                // FIXME: JavaTypeArray return type is handled below, can we actually get an array here?
+                const char* arrayType = jMethod->returnTypeClassName();
                 if (arrayType[0] == '[')
                     resultValue = JavaArray::convertJObjectToArray(exec, result.l, arrayType, rootObject);
-                else
-                    resultValue = JavaInstance::create(result.l, rootObject)->createRuntimeObject(exec);
+                else {
+                    jobject classOfInstance = callJNIMethod<jobject>(result.l, "getClass", "()Ljava/lang/Class;");
+                    jstring className = static_cast<jstring>(callJNIMethod<jobject>(classOfInstance, "getName", "()Ljava/lang/String;"));
+                    if (!strcmp(JavaString(className).utf8(), "sun.plugin.javascript.webkit.JSObject")) {
+                        // Pull the nativeJSObject value from the Java instance.  This is a pointer to the JSObject.
+                        JNIEnv* env = getJNIEnv();
+                        jfieldID fieldID = env->GetFieldID(static_cast<jclass>(classOfInstance), "nativeJSObject", "J");
+                        jlong nativeHandle = env->GetLongField(result.l, fieldID);
+                        // FIXME: Handling of undefined values differs between functions in JNIUtilityPrivate.cpp and those in those in jni_jsobject.mm,
+                        // and so it does between different versions of LiveConnect spec. There should not be multiple code paths to do the same work.
+                        if (nativeHandle == 1 /* UndefinedHandle */)
+                            return jsUndefined();
+                        return jlong_to_impptr(nativeHandle);
+                    } else
+                        return JavaInstance::create(result.l, rootObject)->createRuntimeObject(exec);
+                }
             } else
-                resultValue = jsUndefined();
+                return jsUndefined();
         }
         break;
 
-    case boolean_type:
+    case JavaTypeBoolean:
         {
             resultValue = jsBoolean(result.z);
         }
         break;
 
-    case byte_type:
+    case JavaTypeByte:
         {
-            resultValue = jsNumber(exec, result.b);
+            resultValue = jsNumber(result.b);
         }
         break;
 
-    case char_type:
+    case JavaTypeChar:
         {
-            resultValue = jsNumber(exec, result.c);
+            resultValue = jsNumber(result.c);
         }
         break;
 
-    case short_type:
+    case JavaTypeShort:
         {
-            resultValue = jsNumber(exec, result.s);
+            resultValue = jsNumber(result.s);
         }
         break;
 
-    case int_type:
+    case JavaTypeInt:
         {
-            resultValue = jsNumber(exec, result.i);
+            resultValue = jsNumber(result.i);
         }
         break;
 
-    case long_type:
+    case JavaTypeLong:
         {
-            resultValue = jsNumber(exec, result.j);
+            resultValue = jsNumber(result.j);
         }
         break;
 
-    case float_type:
+    case JavaTypeFloat:
         {
-            resultValue = jsNumber(exec, result.f);
+            resultValue = jsNumber(result.f);
         }
         break;
 
-    case double_type:
+    case JavaTypeDouble:
         {
-            resultValue = jsNumber(exec, result.d);
+            resultValue = jsNumber(result.d);
         }
         break;
 
-    case invalid_type:
-    default:
+    case JavaTypeArray:
+        {
+            const char* arrayType = jMethod->returnTypeClassName();
+            ASSERT(arrayType[0] == '[');
+            resultValue = JavaArray::convertJObjectToArray(exec, result.l, arrayType, rootObject);
+        }
+        break;
+
+    case JavaTypeInvalid:
         {
             resultValue = jsUndefined();
         }
         break;
     }
-
-    free(jArgs);
 
     return resultValue;
 }
@@ -320,27 +341,4 @@ JSValue JavaInstance::valueOf(ExecState* exec) const
     return stringValue(exec);
 }
 
-JObjectWrapper::JObjectWrapper(jobject instance)
-    : m_refCount(0)
-{
-    assert(instance);
-
-    // Cache the JNIEnv used to get the global ref for this java instance.
-    // It'll be used to delete the reference.
-    m_env = getJNIEnv();
-
-    m_instance = m_env->NewGlobalRef(instance);
-
-    JS_LOG("new global ref %p for %p\n", m_instance, instance);
-
-    if  (!m_instance)
-        fprintf(stderr, "%s:  could not get GlobalRef for %p\n", __PRETTY_FUNCTION__, instance);
-}
-
-JObjectWrapper::~JObjectWrapper()
-{
-    JS_LOG("deleting global ref %p\n", m_instance);
-    m_env->DeleteGlobalRef(m_instance);
-}
-
-#endif // ENABLE(MAC_JAVA_BRIDGE)
+#endif // ENABLE(JAVA_BRIDGE)

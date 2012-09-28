@@ -32,62 +32,75 @@
 #include "CSSMediaRule.h"
 #include "CSSPageRule.h"
 #include "CSSStyleRule.h"
-#include "CSSVariablesRule.h"
 #include "JSCSSCharsetRule.h"
 #include "JSCSSFontFaceRule.h"
 #include "JSCSSImportRule.h"
 #include "JSCSSMediaRule.h"
 #include "JSCSSPageRule.h"
 #include "JSCSSStyleRule.h"
-#include "JSCSSVariablesRule.h"
+#include "JSNode.h"
 #include "JSWebKitCSSKeyframeRule.h"
 #include "JSWebKitCSSKeyframesRule.h"
+#include "JSWebKitCSSRegionRule.h"
 #include "WebKitCSSKeyframeRule.h"
 #include "WebKitCSSKeyframesRule.h"
+#include "WebKitCSSRegionRule.h"
 
 using namespace JSC;
 
 namespace WebCore {
+
+void JSCSSRule::visitChildren(JSCell* cell, SlotVisitor& visitor)
+{
+    JSCSSRule* thisObject = jsCast<JSCSSRule*>(cell);
+    ASSERT_GC_OBJECT_INHERITS(thisObject, &s_info);
+    COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
+    ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
+    Base::visitChildren(thisObject, visitor);
+    visitor.addOpaqueRoot(root(thisObject->impl()));
+}
 
 JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, CSSRule* rule)
 {
     if (!rule)
         return jsNull();
 
-    DOMObject* wrapper = getCachedDOMObjectWrapper(exec, rule);
+    JSDOMWrapper* wrapper = getCachedWrapper(currentWorld(exec), rule);
     if (wrapper)
         return wrapper;
 
     switch (rule->type()) {
         case CSSRule::STYLE_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, CSSStyleRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, CSSStyleRule, rule);
             break;
         case CSSRule::MEDIA_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, CSSMediaRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, CSSMediaRule, rule);
             break;
         case CSSRule::FONT_FACE_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, CSSFontFaceRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, CSSFontFaceRule, rule);
             break;
         case CSSRule::PAGE_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, CSSPageRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, CSSPageRule, rule);
             break;
         case CSSRule::IMPORT_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, CSSImportRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, CSSImportRule, rule);
             break;
         case CSSRule::CHARSET_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, CSSCharsetRule, rule);
-            break;
-        case CSSRule::VARIABLES_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, CSSVariablesRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, CSSCharsetRule, rule);
             break;
         case CSSRule::WEBKIT_KEYFRAME_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, WebKitCSSKeyframeRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, WebKitCSSKeyframeRule, rule);
             break;
         case CSSRule::WEBKIT_KEYFRAMES_RULE:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, WebKitCSSKeyframesRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, WebKitCSSKeyframesRule, rule);
             break;
+#if ENABLE(CSS_REGIONS)
+        case CSSRule::WEBKIT_REGION_RULE:
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, WebKitCSSRegionRule, rule);
+            break;
+#endif
         default:
-            wrapper = CREATE_DOM_OBJECT_WRAPPER(exec, globalObject, CSSRule, rule);
+            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, CSSRule, rule);
     }
 
     return wrapper;

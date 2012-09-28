@@ -26,8 +26,6 @@
 #ifndef StorageSyncManager_h
 #define StorageSyncManager_h
 
-#if ENABLE(DOM_STORAGE)
-
 #include "PlatformString.h"
 
 #include <wtf/PassRefPtr.h>
@@ -36,7 +34,7 @@
 
 namespace WebCore {
 
-    class LocalStorageThread;
+    class StorageThread;
     class SecurityOrigin;
     class StorageAreaSync;
 
@@ -47,13 +45,14 @@ namespace WebCore {
 
         bool scheduleImport(PassRefPtr<StorageAreaSync>);
         void scheduleSync(PassRefPtr<StorageAreaSync>);
+        void scheduleDeleteEmptyDatabase(PassRefPtr<StorageAreaSync>);
 
         void close();
 
     private:
         StorageSyncManager(const String& path);
 
-        OwnPtr<LocalStorageThread> m_thread;
+        OwnPtr<StorageThread> m_thread;
 
     // The following members are subject to thread synchronization issues
     public:
@@ -65,7 +64,5 @@ namespace WebCore {
     };
 
 } // namespace WebCore
-
-#endif // ENABLE(DOM_STORAGE)
 
 #endif // StorageSyncManager_h

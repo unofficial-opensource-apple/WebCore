@@ -27,7 +27,9 @@
 #include "config.h"
 #include "MIMETypeRegistry.h"
 
+#include <wtf/Assertions.h>
 #include <wtf/HashMap.h>
+#include <wtf/MainThread.h>
 #include <windows.h>
 #include <winreg.h>
 
@@ -84,12 +86,6 @@ static void initMIMETypeEntensionMap()
         // FIXME: Custom font works only when MIME is "text/plain"
         mimetypeMap.add("ttf", "text/plain"); // "font/ttf"
         mimetypeMap.add("otf", "text/plain"); // "font/otf"
-#if ENABLE(WML)
-        mimetypeMap.add("wml", "text/vnd.wap.wml");
-#endif
-#if ENABLE(WBXML)
-        mimetypeMap.add("wbxml", "application/vnd.wap.wmlc");
-#endif
     }
 }
 
@@ -109,16 +105,13 @@ String MIMETypeRegistry::getPreferredExtensionForMIMEType(const String& type)
             return i->first;
     }
 
-#if ENABLE(XHTMLMP)
-    if (equalIgnoringCase("application/vnd.wap.xhtml+xml", type))
-        return String("xml");
-#endif
-
     return String();
 }
 
 String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
 {
+    ASSERT(isMainThread());
+
     if (ext.isEmpty())
         return String();
 
@@ -133,4 +126,9 @@ String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
     return result.isEmpty() ? "unknown/unknown" : result;
 }
 
+bool MIMETypeRegistry::isApplicationPluginMIMEType(const String&)
+{
+    return false;
 }
+
+} // namespace WebCore

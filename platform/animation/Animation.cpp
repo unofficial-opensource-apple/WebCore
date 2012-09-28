@@ -26,7 +26,8 @@ namespace WebCore {
 
 Animation::Animation()
     : m_name(initialAnimationName())
-    , m_property(initialAnimationProperty())
+    , m_property(CSSPropertyInvalid)
+    , m_mode(AnimateAll)
     , m_iterationCount(initialAnimationIterationCount())
     , m_delay(initialAnimationDelay())
     , m_duration(initialAnimationDuration())
@@ -51,6 +52,7 @@ Animation::Animation(const Animation& o)
     : RefCounted<Animation>()
     , m_name(o.m_name)
     , m_property(o.m_property)
+    , m_mode(o.m_mode)
     , m_iterationCount(o.m_iterationCount)
     , m_delay(o.m_delay)
     , m_duration(o.m_duration)
@@ -75,6 +77,7 @@ Animation& Animation::operator=(const Animation& o)
 {
     m_name = o.m_name;
     m_property = o.m_property;
+    m_mode = o.m_mode;
     m_iterationCount = o.m_iterationCount;
     m_delay = o.m_delay;
     m_duration = o.m_duration;
@@ -106,28 +109,35 @@ bool Animation::animationsMatch(const Animation* o, bool matchPlayStates) const
     if (!o)
         return false;
     
-    bool result = m_name == o->m_name &&
-                  m_property == o->m_property && 
-                  m_iterationCount == o->m_iterationCount &&
-                  m_delay == o->m_delay &&
-                  m_duration == o->m_duration &&
-                  m_timingFunction == o->m_timingFunction &&
-                  m_direction == o->m_direction &&
-                  m_fillMode == o->m_fillMode &&
-                  m_delaySet == o->m_delaySet &&
-                  m_directionSet == o->m_directionSet &&
-                  m_durationSet == o->m_durationSet &&
-                  m_fillModeSet == o->m_fillModeSet &&
-                  m_iterationCountSet == o->m_iterationCountSet &&
-                  m_nameSet == o->m_nameSet &&
-                  m_propertySet == o->m_propertySet &&
-                  m_timingFunctionSet == o->m_timingFunctionSet &&
-                  m_isNone == o->m_isNone;
+    bool result = m_name == o->m_name
+                  && m_property == o->m_property 
+                  && m_mode == o->m_mode
+                  && m_iterationCount == o->m_iterationCount
+                  && m_delay == o->m_delay
+                  && m_duration == o->m_duration
+                  && *(m_timingFunction.get()) == *(o->m_timingFunction.get())
+                  && m_direction == o->m_direction
+                  && m_fillMode == o->m_fillMode
+                  && m_delaySet == o->m_delaySet
+                  && m_directionSet == o->m_directionSet
+                  && m_durationSet == o->m_durationSet
+                  && m_fillModeSet == o->m_fillModeSet
+                  && m_iterationCountSet == o->m_iterationCountSet
+                  && m_nameSet == o->m_nameSet
+                  && m_propertySet == o->m_propertySet
+                  && m_timingFunctionSet == o->m_timingFunctionSet
+                  && m_isNone == o->m_isNone;
 
     if (!result)
         return false;
 
     return !matchPlayStates || (m_playState == o->m_playState && m_playStateSet == o->m_playStateSet);
+}
+
+const String& Animation::initialAnimationName()
+{
+    DEFINE_STATIC_LOCAL(String, initialValue, ("none"));
+    return initialValue;
 }
 
 } // namespace WebCore

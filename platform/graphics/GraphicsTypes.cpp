@@ -44,10 +44,9 @@ static const char* const compositeOperatorNames[] = {
     "destination-atop",
     "xor",
     "darker",
-    "highlight",
     "lighter"
 };
-const int numCompositeOperatorNames = sizeof(compositeOperatorNames) / sizeof(compositeOperatorNames[0]);
+const int numCompositeOperatorNames = WTF_ARRAY_LENGTH(compositeOperatorNames);
 
 bool parseCompositeOperator(const String& s, CompositeOperator& op)
 {

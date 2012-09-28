@@ -26,7 +26,7 @@
 #ifndef RUNTIME_FUNCTION_H_
 #define RUNTIME_FUNCTION_H_
 
-#include "Bridge.h"
+#include "BridgeJSC.h"
 #include <runtime/InternalFunction.h>
 #include <runtime/JSGlobalObject.h>
 #include <wtf/OwnPtr.h>
@@ -35,7 +35,17 @@ namespace JSC {
 
 class RuntimeMethod : public InternalFunction {
 public:
-    RuntimeMethod(ExecState*, const Identifier& name, Bindings::MethodList&);
+    typedef InternalFunction Base;
+
+    static void destroy(JSCell*);
+
+    static RuntimeMethod* create(ExecState* exec, JSGlobalObject* globalObject, Structure* structure, const Identifier& name, Bindings::MethodList& methodList)
+    {
+        RuntimeMethod* method = new (NotNull, allocateCell<RuntimeMethod>(*exec->heap())) RuntimeMethod(globalObject, structure, methodList);
+        method->finishCreation(exec->globalData(), name);
+        return method;
+    }
+
     Bindings::MethodList* methods() const { return _methodList.get(); }
 
     static const ClassInfo s_info;
@@ -45,17 +55,22 @@ public:
         return globalObject->functionPrototype();
     }
 
-    static PassRefPtr<Structure> createStructure(JSValue prototype)
+    static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(prototype, TypeInfo(ObjectType, StructureFlags), AnonymousSlotCount);
+        return Structure::create(globalData, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), &s_info);
     }
 
+protected:
+    RuntimeMethod(JSGlobalObject*, Structure*, Bindings::MethodList&);
+    void finishCreation(JSGlobalData&, const Identifier&);
+    static const unsigned StructureFlags = OverridesGetOwnPropertySlot | InternalFunction::StructureFlags;
+    static CallType getCallData(JSCell*, CallData&);
+
+    static bool getOwnPropertySlot(JSCell*, ExecState*, const Identifier&, PropertySlot&);
+    static bool getOwnPropertyDescriptor(JSObject*, ExecState*, const Identifier&, PropertyDescriptor&);
+
 private:
-    static const unsigned StructureFlags = OverridesGetOwnPropertySlot | ImplementsHasInstance | OverridesMarkChildren | InternalFunction::StructureFlags;
-    static JSValue lengthGetter(ExecState*, const Identifier&, const PropertySlot&);
-    virtual bool getOwnPropertySlot(ExecState*, const Identifier&, PropertySlot&);
-    virtual bool getOwnPropertyDescriptor(ExecState*, const Identifier&, PropertyDescriptor&);
-    virtual CallType getCallData(CallData&);
+    static JSValue lengthGetter(ExecState*, JSValue, const Identifier&);
 
     OwnPtr<Bindings::MethodList> _methodList;
 };

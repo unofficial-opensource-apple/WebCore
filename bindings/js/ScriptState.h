@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, Google Inc.
+ * Copyright (c) 2008, 2011 Google Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -32,24 +32,53 @@
 #ifndef ScriptState_h
 #define ScriptState_h
 
-#include "JSDOMBinding.h"
+#include <heap/Strong.h>
+#include <wtf/Noncopyable.h>
+
+namespace JSC {
+class ExecState;
+class JSGlobalObject;
+}
 
 namespace WebCore {
-    class DOMWrapperWorld;
-    class Frame;
-    class Node;
-    class Page;
+class DOMWindow;
+class DOMWrapperWorld;
+class Frame;
+class Node;
+class Page;
+class ScriptExecutionContext;
+class WorkerContext;
 
-    // The idea is to expose "state-like" methods (hadException, and any other
-    // methods where ExecState just dips into globalData) of JSC::ExecState as a
-    // separate abstraction.
-    // For now, the separation is purely by convention.
-    typedef JSC::ExecState ScriptState;
+// The idea is to expose "state-like" methods (hadException, and any other
+// methods where ExecState just dips into globalData) of JSC::ExecState as a
+// separate abstraction.
+// For now, the separation is purely by convention.
+typedef JSC::ExecState ScriptState;
 
-    ScriptState* mainWorldScriptState(Frame*);
+class ScriptStateProtectedPtr {
+    WTF_MAKE_NONCOPYABLE(ScriptStateProtectedPtr);
+public:
+    explicit ScriptStateProtectedPtr(ScriptState*);
+    ~ScriptStateProtectedPtr();
+    ScriptState* get() const;
+private:
+    JSC::Strong<JSC::JSGlobalObject> m_globalObject;
+};
 
-    ScriptState* scriptStateFromNode(DOMWrapperWorld*, Node*);
-    ScriptState* scriptStateFromPage(DOMWrapperWorld*, Page*);
+DOMWindow* domWindowFromScriptState(ScriptState*);
+ScriptExecutionContext* scriptExecutionContextFromScriptState(ScriptState*);
+
+bool evalEnabled(ScriptState*);
+void setEvalEnabled(ScriptState*, bool);
+
+ScriptState* mainWorldScriptState(Frame*);
+
+ScriptState* scriptStateFromNode(DOMWrapperWorld*, Node*);
+ScriptState* scriptStateFromPage(DOMWrapperWorld*, Page*);
+
+#if ENABLE(WORKERS)
+ScriptState* scriptStateFromWorkerContext(WorkerContext*);
+#endif
 
 } // namespace WebCore
 

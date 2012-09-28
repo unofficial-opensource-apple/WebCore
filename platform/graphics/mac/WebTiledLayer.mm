@@ -30,10 +30,12 @@
 #import "WebTiledLayer.h"
 
 #import "GraphicsContext.h"
-#import "GraphicsLayer.h"
+#import "GraphicsLayerCA.h"
+#import "PlatformCALayer.h"
 #import <wtf/UnusedParam.h>
 
 #import "WebCoreThread.h"
+#import "WebCoreThreadRun.h"
 
 using namespace WebCore;
 
@@ -45,10 +47,14 @@ using namespace WebCore;
     return 0;
 }
 
-// Make sure that tiles are drawn on the main thread
 + (BOOL)shouldDrawOnMainThread
 {
-    return YES;
+    return NO;
+}
+
++ (unsigned int)prefetchedTiles
+{
+    return 2;
 }
 
 // Disable default animations
@@ -58,74 +64,67 @@ using namespace WebCore;
     return nil;
 }
 
-// Implement this so presentationLayer can get our custom attributes
-- (id)initWithLayer:(id)layer
-{
-    if ((self = [super initWithLayer:layer]))
-        m_layerOwner = [(WebLayer*)layer layerOwner];
-
-    return self;
-}
-
 - (void)setNeedsDisplay
 {
-    if (m_layerOwner && m_layerOwner->client() && m_layerOwner->drawsContent())
+    PlatformCALayer* layer = PlatformCALayer::platformCALayer(self);
+    if (layer && layer->owner() && layer->owner()->platformCALayerDrawsContent())
         [super setNeedsDisplay];
 }
 
 - (void)setNeedsDisplayInRect:(CGRect)dirtyRect
 {
-    if (m_layerOwner && m_layerOwner->client() && m_layerOwner->drawsContent()) {
-#if defined(BUILDING_ON_LEOPARD)
-        dirtyRect = CGRectApplyAffineTransform(dirtyRect, [self contentsTransform]);
-#endif
+    PlatformCALayer* platformLayer = PlatformCALayer::platformCALayer(self);
+    if (!platformLayer) {
         [super setNeedsDisplayInRect:dirtyRect];
+        return;
+    }
 
-#ifndef NDEBUG
-        if (m_layerOwner->showRepaintCounter()) {
-            CGRect bounds = [self bounds];
-            CGRect indicatorRect = CGRectMake(bounds.origin.x, bounds.origin.y, 46, 25);
-#if defined(BUILDING_ON_LEOPARD)
-            indicatorRect = CGRectApplyAffineTransform(indicatorRect, [self contentsTransform]);
-#endif
-            [super setNeedsDisplayInRect:indicatorRect];
+    if (PlatformCALayerClient* layerOwner = platformLayer->owner()) {
+        if (layerOwner->platformCALayerDrawsContent()) {
+            if (layerOwner->platformCALayerContentsOrientation() == WebCore::GraphicsLayer::CompositingCoordinatesBottomUp)
+                dirtyRect.origin.y = [self bounds].size.height - dirtyRect.origin.y - dirtyRect.size.height;
+
+            [super setNeedsDisplayInRect:dirtyRect];
+
+            if (layerOwner->platformCALayerShowRepaintCounter()) {
+                CGRect bounds = [self bounds];
+                CGRect indicatorRect = CGRectMake(bounds.origin.x, bounds.origin.y, 52, 27);
+                if (layerOwner->platformCALayerContentsOrientation() == WebCore::GraphicsLayer::CompositingCoordinatesBottomUp)
+                    indicatorRect.origin.y = [self bounds].size.height - indicatorRect.origin.y - indicatorRect.size.height;
+
+                [super setNeedsDisplayInRect:indicatorRect];
+            }
         }
-#endif
     }
 }
 
 - (void)display
 {
     [super display];
-    if (m_layerOwner)
-        m_layerOwner->didDisplay(self);
+    // CATiledLayer never calls display on a background thread, so it's safe
+    // to assume we're either on the main thread or on the web thread.
+    if (pthread_main_np())
+        WebThreadLock();
+    ASSERT(WebThreadIsLockedOrDisabled());
+    PlatformCALayer* layer = PlatformCALayer::platformCALayer(self);
+    if (layer && layer->owner())
+        layer->owner()->platformCALayerLayerDidDisplay(self);
 }
 
-- (void)drawInContext:(CGContextRef)ctx
+- (void)drawInContext:(CGContextRef)context
 {
-    if (!WebThreadIsCurrent())
+    void (^draw)() = ^{
+    PlatformCALayer* layer = PlatformCALayer::platformCALayer(self);
+    if (layer)
+        drawLayerContents(context, self, layer);
+    };
+    if (pthread_main_np()) {
         WebThreadLock();
-
-    if (m_layerOwner)
-        [WebLayer drawContents:m_layerOwner ofLayer:self intoContext:ctx];
+        draw();
+    } else
+        WebThreadRunSync(draw);
 }
 
 @end // implementation WebTiledLayer
-
-#pragma mark -
-
-@implementation WebTiledLayer(LayerMacAdditions)
-
-- (void)setLayerOwner:(GraphicsLayer*)aLayer
-{
-    m_layerOwner = aLayer;
-}
-
-- (GraphicsLayer*)layerOwner
-{
-    return m_layerOwner;
-}
-
-@end
 
 #endif // USE(ACCELERATED_COMPOSITING)

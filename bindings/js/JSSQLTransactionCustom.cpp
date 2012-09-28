@@ -27,36 +27,37 @@
  */
 
 #include "config.h"
-#include "JSSQLTransaction.h"
 
-#if ENABLE(DATABASE)
+#if ENABLE(SQL_DATABASE)
+
+#include "JSSQLTransaction.h"
 
 #include "DOMWindow.h"
 #include "ExceptionCode.h"
-#include "JSCustomSQLStatementCallback.h"
-#include "JSCustomSQLStatementErrorCallback.h"
+#include "JSSQLStatementCallback.h"
+#include "JSSQLStatementErrorCallback.h"
 #include "JSDOMWindowCustom.h"
 #include "SQLTransaction.h"
 
 using namespace JSC;
 
 namespace WebCore {
-    
-JSValue JSSQLTransaction::executeSql(ExecState* exec, const ArgList& args)
+
+JSValue JSSQLTransaction::executeSql(ExecState* exec)
 {
-    if (args.isEmpty()) {
+    if (!exec->argumentCount()) {
         setDOMException(exec, SYNTAX_ERR);
         return jsUndefined();
     }
 
-    String sqlStatement = args.at(0).toString(exec);
+    String sqlStatement = ustringToString(exec->argument(0).toString(exec)->value(exec));
     if (exec->hadException())
         return jsUndefined();
 
     // Now assemble the list of SQL arguments
     Vector<SQLValue> sqlValues;
-    if (!args.at(1).isUndefinedOrNull()) {
-        JSObject* object = args.at(1).getObject();
+    if (!exec->argument(1).isUndefinedOrNull()) {
+        JSObject* object = exec->argument(1).getObject();
         if (!object) {
             setDOMException(exec, TYPE_MISMATCH_ERR);
             return jsUndefined();
@@ -68,19 +69,19 @@ JSValue JSSQLTransaction::executeSql(ExecState* exec, const ArgList& args)
         unsigned length = lengthValue.toUInt32(exec);
         if (exec->hadException())
             return jsUndefined();
-        
+
         for (unsigned i = 0 ; i < length; ++i) {
             JSValue value = object->get(exec, i);
             if (exec->hadException())
                 return jsUndefined();
-            
-            if (value.isNull())
+
+            if (value.isUndefinedOrNull())
                 sqlValues.append(SQLValue());
             else if (value.isNumber())
-                sqlValues.append(value.uncheckedGetNumber());
+                sqlValues.append(value.asNumber());
             else {
                 // Convert the argument to a string and append it
-                sqlValues.append(value.toString(exec));
+                sqlValues.append(ustringToString(value.toString(exec)->value(exec)));
                 if (exec->hadException())
                     return jsUndefined();
             }
@@ -88,34 +89,34 @@ JSValue JSSQLTransaction::executeSql(ExecState* exec, const ArgList& args)
     }
 
     RefPtr<SQLStatementCallback> callback;
-    if (!args.at(2).isUndefinedOrNull()) {
-        JSObject* object = args.at(2).getObject();
+    if (!exec->argument(2).isUndefinedOrNull()) {
+        JSObject* object = exec->argument(2).getObject();
         if (!object) {
             setDOMException(exec, TYPE_MISMATCH_ERR);
             return jsUndefined();
         }
-        
-        callback = JSCustomSQLStatementCallback::create(object, static_cast<JSDOMGlobalObject*>(exec->dynamicGlobalObject()));
+
+        callback = JSSQLStatementCallback::create(object, jsCast<JSDOMGlobalObject*>(globalObject()));
     }
-    
+
     RefPtr<SQLStatementErrorCallback> errorCallback;
-    if (!args.at(3).isUndefinedOrNull()) {
-        JSObject* object = args.at(3).getObject();
+    if (!exec->argument(3).isUndefinedOrNull()) {
+        JSObject* object = exec->argument(3).getObject();
         if (!object) {
             setDOMException(exec, TYPE_MISMATCH_ERR);
             return jsUndefined();
         }
-        
-        errorCallback = JSCustomSQLStatementErrorCallback::create(object, static_cast<JSDOMGlobalObject*>(exec->dynamicGlobalObject()));
+
+        errorCallback = JSSQLStatementErrorCallback::create(object, jsCast<JSDOMGlobalObject*>(globalObject()));
     }
-    
+
     ExceptionCode ec = 0;
     m_impl->executeSQL(sqlStatement, sqlValues, callback.release(), errorCallback.release(), ec);
     setDOMException(exec, ec);
-    
+
     return jsUndefined();
 }
 
-}
+} // namespace WebCore
 
-#endif // ENABLE(DATABASE)
+#endif // ENABLE(SQL_DATABASE)

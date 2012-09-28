@@ -29,9 +29,10 @@
 #if PLATFORM(MAC)
 #include "jni_jsobject.h"
 #endif
-#include <runtime/Protect.h>
-
+#include <heap/Strong.h>
+#include <heap/Weak.h>
 #include <wtf/Forward.h>
+#include <wtf/HashCountedSet.h>
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/PassRefPtr.h>
@@ -41,18 +42,18 @@ namespace JSC {
 
 class Interpreter;
 class JSGlobalObject;
-class RuntimeObjectImp;
 
 namespace Bindings {
 
 class RootObject;
+class RuntimeObject;
 
 typedef HashCountedSet<JSObject*> ProtectCountSet;
 
 extern RootObject* findProtectingRootObject(JSObject*);
 extern RootObject* findRootObject(JSGlobalObject*);
 
-class RootObject : public RefCounted<RootObject> {
+class RootObject : public RefCounted<RootObject>, private JSC::WeakHandleOwner {
     friend class JavaJSObject;
 
 public:
@@ -69,19 +70,32 @@ public:
 
     const void* nativeHandle() const;
     JSGlobalObject* globalObject() const;
+    void updateGlobalObject(JSGlobalObject*);
 
-    void addRuntimeObject(RuntimeObjectImp*);
-    void removeRuntimeObject(RuntimeObjectImp*);
+    void addRuntimeObject(JSGlobalData&, RuntimeObject*);
+    void removeRuntimeObject(RuntimeObject*);
+
+    struct InvalidationCallback {
+        virtual void operator()(RootObject*) = 0;
+        virtual ~InvalidationCallback();
+    };
+    void addInvalidationCallback(InvalidationCallback* callback) { m_invalidationCallbacks.add(callback); }
+
 private:
     RootObject(const void* nativeHandle, JSGlobalObject*);
-    
+
+    // WeakHandleOwner
+    virtual void finalize(JSC::Handle<JSC::Unknown>, void* context);
+
     bool m_isValid;
     
     const void* m_nativeHandle;
-    ProtectedPtr<JSGlobalObject> m_globalObject;
-    ProtectCountSet m_protectCountSet;
+    Strong<JSGlobalObject> m_globalObject;
 
-    HashSet<RuntimeObjectImp*> m_runtimeObjects;    
+    ProtectCountSet m_protectCountSet;
+    HashMap<RuntimeObject*, JSC::Weak<RuntimeObject> > m_runtimeObjects; // Really need a WeakGCSet, but this will do.
+
+    HashSet<InvalidationCallback*> m_invalidationCallbacks;
 };
 
 } // namespace Bindings

@@ -30,7 +30,9 @@
 #include "FrameView.h"
 #include "GraphicsContext.h"
 #include "HostWindow.h"
+#include "LocalDC.h"
 #include "NotImplemented.h"
+#include "PaintInfo.h"
 #include "RenderView.h"
 
 #include <wx/defs.h>
@@ -55,14 +57,14 @@ public:
     // A method asking if the theme's controls actually care about redrawing when hovered.
     virtual bool supportsHover(const RenderStyle*) const { return true; }
 
-    virtual bool paintCheckbox(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+    virtual bool paintCheckbox(RenderObject* o, const PaintInfo& i, const IntRect& r)
     {
         return paintButton(o, i, r);
     }
  
     virtual void setCheckboxSize(RenderStyle*) const;
 
-    virtual bool paintRadio(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+    virtual bool paintRadio(RenderObject* o, const PaintInfo& i, const IntRect& r)
     {
         return paintButton(o, i, r);
     }
@@ -71,19 +73,19 @@ public:
 
     virtual void adjustRepaintRect(const RenderObject*, IntRect&);
 
-    virtual void adjustButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
-    virtual bool paintButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+    virtual void adjustButtonStyle(StyleResolver*, RenderStyle*, Element*) const;
+    virtual bool paintButton(RenderObject*, const PaintInfo&, const IntRect&);
 
-    virtual void adjustTextFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
-    virtual bool paintTextField(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+    virtual void adjustTextFieldStyle(StyleResolver*, RenderStyle*, Element*) const;
+    virtual bool paintTextField(RenderObject*, const PaintInfo&, const IntRect&);
 
     virtual int minimumMenuListSize(RenderStyle*) const;
 
-    virtual void adjustMenuListStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
-    virtual bool paintMenuList(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+    virtual void adjustMenuListStyle(StyleResolver*, RenderStyle*, Element*) const;
+    virtual bool paintMenuList(RenderObject*, const PaintInfo&, const IntRect&);
 
-    virtual void adjustMenuListButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
-    virtual bool paintMenuListButton(RenderObject*, const RenderObject::PaintInfo&, const IntRect&);
+    virtual void adjustMenuListButtonStyle(StyleResolver*, RenderStyle*, Element*) const;
+    virtual bool paintMenuListButton(RenderObject*, const PaintInfo&, const IntRect&);
 
     virtual bool isControlStyled(const RenderStyle*, const BorderData&,
                                  const FillLayer&, const Color&) const;
@@ -135,7 +137,7 @@ PassRefPtr<RenderTheme> RenderThemeWx::create()
 
 PassRefPtr<RenderTheme> RenderTheme::themeForPage(Page* page)
 {
-    static RenderTheme* rt = RenderThemeWx::create().releaseRef();
+    static RenderTheme* rt = RenderThemeWx::create().leakRef();
     return rt;
 }
 
@@ -248,39 +250,27 @@ bool RenderThemeWx::supportsFocus(ControlPart part) const
         case PushButtonPart:
         case ButtonPart:
         case TextFieldPart:
+        case MenulistPart:
             return true;
         default: // No for all others...
             return false;
     }
 }
 
-void RenderThemeWx::adjustButtonStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e) const
+void RenderThemeWx::adjustButtonStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
     addIntrinsicMargins(style);
 }
 
-bool RenderThemeWx::paintButton(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeWx::paintButton(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     wxWindow* window = nativeWindowForRenderObject(o);
     wxDC* dc = static_cast<wxDC*>(i.context->platformContext());
+    LocalDC localDC(dc, r, /*transparent =*/ true);
+
     int flags = 0;
     
-    IntRect rect = r; 
-
-// On Mac, wxGraphicsContext and wxDC share the same native implementation,
-// and so transformations are available.
-// On Win and Linux, however, this is not true and transforms are lost,
-// so we need to restore them here.
-#if USE(WXGC) && !defined(__WXMAC__)
-    double xtrans = 0;
-    double ytrans = 0;
-    
-    wxGCDC* gcdc = static_cast<wxGCDC*>(dc);
-    wxGraphicsContext* gc = gcdc->GetGraphicsContext();
-    gc->GetTransform().TransformPoint(&xtrans, &ytrans);
-    rect.setX(r.x() + (int)xtrans);
-    rect.setY(r.y() + (int)ytrans);
-#endif
+    IntRect rect = r;
 
     if (!isEnabled(o))
         flags |= wxCONTROL_DISABLED;
@@ -293,39 +283,48 @@ bool RenderThemeWx::paintButton(RenderObject* o, const RenderObject::PaintInfo& 
         flags |= wxCONTROL_PRESSED;
     
     if (part == PushButtonPart || part == ButtonPart)
-        wxRendererNative::Get().DrawPushButton(window, *dc, rect, flags);
+        wxRendererNative::Get().DrawPushButton(window, *localDC.context(), rect, flags);
     else if(part == RadioPart) {
         if (isChecked(o))
             flags |= wxCONTROL_CHECKED;
 #if wxCHECK_VERSION(2,9,1)
-        wxRendererNative::Get().DrawRadioBitmap(window, *dc, rect, flags);
+        wxRendererNative::Get().DrawRadioBitmap(window, *localDC.context(), rect, flags);
 #elif wxCHECK_VERSION(2,9,0)
-        wxRendererNative::Get().DrawRadioButton(window, *dc, rect, flags);
+        wxRendererNative::Get().DrawRadioButton(window, *localDC.context(), rect, flags);
 #else
-        wxRenderer_DrawRadioButton(window, *dc, rect, flags);
+        wxRenderer_DrawRadioButton(window, *localDC.context(), rect, flags);
 #endif
     }
     else if(part == CheckboxPart) {
         if (isChecked(o))
             flags |= wxCONTROL_CHECKED;
-        wxRendererNative::Get().DrawCheckBox(window, *dc, rect, flags);
+        wxRendererNative::Get().DrawCheckBox(window, *localDC.context(), rect, flags);
     }
     return false;
 }
 
-void RenderThemeWx::adjustTextFieldStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderThemeWx::adjustTextFieldStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
-    
+
 }
 
-bool RenderThemeWx::paintTextField(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeWx::paintTextField(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     wxWindow* window = nativeWindowForRenderObject(o);
     wxDC* dc = static_cast<wxDC*>(i.context->platformContext());
+    LocalDC localDC(dc, r);
+    int flags = 0;
+    
+    IntRect rect = r;
+
+    ControlPart part = o->style()->appearance();
+    if (supportsFocus(part) && isFocused(o))
+        flags |= wxCONTROL_FOCUSED;
+
 #if wxCHECK_VERSION(2,9,0)
-    wxRendererNative::Get().DrawTextCtrl(window, *dc, r, 0);
+    wxRendererNative::Get().DrawTextCtrl(window, *localDC.context(), rect, flags);
 #else
-    wxRenderer_DrawTextCtrl(window, *dc, r, 0);
+    wxRenderer_DrawTextCtrl(window, *localDC.context(), r, 0);
 #endif
 
     return false;
@@ -336,15 +335,25 @@ int RenderThemeWx::minimumMenuListSize(RenderStyle*) const
     return MINIMUM_MENU_LIST_SIZE; 
 }
 
-void RenderThemeWx::adjustMenuListStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderThemeWx::adjustMenuListStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
+     style->resetBorder();
+
+    // Height is locked to auto.
+    style->setHeight(Length(Auto));
+    
+    style->setPaddingTop(Length(2, Fixed));
+    style->setPaddingBottom(Length(2, Fixed));
 }
     
-bool RenderThemeWx::paintMenuList(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeWx::paintMenuList(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     wxWindow* window = nativeWindowForRenderObject(o);
     wxDC* dc = static_cast<wxDC*>(i.context->platformContext());
-    
+
+    LocalDC localDC(dc, r);
+    IntRect rect = r;
+
     int flags = 0;      
     if (!isEnabled(o))
         flags |= wxCONTROL_DISABLED;
@@ -356,24 +365,26 @@ bool RenderThemeWx::paintMenuList(RenderObject* o, const RenderObject::PaintInfo
         flags |= wxCONTROL_PRESSED;
 
 #if wxCHECK_VERSION(2,9,0)
-    wxRendererNative::Get().DrawChoice(window, *dc, r, flags);
+    wxRendererNative::Get().DrawChoice(window, *localDC.context(), rect, flags);
 #else
-    wxRenderer_DrawChoice(window, *dc, r, flags);
+    wxRenderer_DrawChoice(window, *localDC.context(), rect, flags);
 #endif
 
     return false;
 }
 
-void RenderThemeWx::adjustMenuListButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderThemeWx::adjustMenuListButtonStyle(StyleResolver*, RenderStyle*, Element*) const
 {
     notImplemented();
 }
     
-bool RenderThemeWx::paintMenuListButton(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeWx::paintMenuListButton(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     wxWindow* window = nativeWindowForRenderObject(o);
     wxDC* dc = static_cast<wxDC*>(i.context->platformContext());
-    
+    LocalDC localDC(dc, r);
+    IntRect rect = r;
+
     int flags = 0;      
     if (!isEnabled(o))
         flags |= wxCONTROL_DISABLED;
@@ -384,7 +395,7 @@ bool RenderThemeWx::paintMenuListButton(RenderObject* o, const RenderObject::Pai
     if (isPressed(o))
         flags |= wxCONTROL_PRESSED;
 
-    wxRendererNative::Get().DrawComboBoxDropButton(window, *dc, r, flags);
+    wxRendererNative::Get().DrawComboBoxDropButton(window, *localDC.context(), rect, flags);
             
     return false;
 }

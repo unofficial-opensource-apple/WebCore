@@ -24,24 +24,19 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef PluginPackage_H
-#define PluginPackage_H
+#ifndef PluginPackage_h
+#define PluginPackage_h
 
 #include "FileSystem.h"
 #include "PlatformString.h"
 #include "PluginQuirkSet.h"
-#include "StringHash.h"
 #include "Timer.h"
 #if ENABLE(NETSCAPE_PLUGIN_API)
 #include "npruntime_internal.h"
 #endif
 #include <wtf/HashMap.h>
 #include <wtf/RefCounted.h>
-
-#if OS(SYMBIAN)
-class QPluginLoader;
-class NPInterface;
-#endif
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
     typedef HashMap<String, String> MIMEToDescriptionsMap;
@@ -51,12 +46,17 @@ namespace WebCore {
     public:
         ~PluginPackage();
         static PassRefPtr<PluginPackage> createPackage(const String& path, const time_t& lastModified);
+#if ENABLE(NETSCAPE_PLUGIN_METADATA_CACHE)
+        static PassRefPtr<PluginPackage> createPackageFromCache(const String& path, const time_t& lastModified, const String& name, const String& description, const String& mimeDescription);
+#endif
 
         const String& name() const { return m_name; }
         const String& description() const { return m_description; }
         const String& path() const { return m_path; }
         const String& fileName() const { return m_fileName; }
         const String& parentDirectory() const { return m_parentDirectory; }
+        PlatformModule module() const { return m_module; }
+        uint16_t NPVersion() const;
         time_t lastModified() const { return m_lastModified; }
 
         const MIMEToDescriptionsMap& mimeToDescriptions() const { return m_mimeToDescriptions; }
@@ -79,17 +79,15 @@ namespace WebCore {
         int compare(const PluginPackage&) const;
         PluginQuirkSet quirks() const { return m_quirks; }
         const PlatformModuleVersion& version() const { return m_moduleVersion; }
-#if OS(SYMBIAN)
-        NPInterface* npInterface() const { return m_npInterface; }
-#endif // OS(SYMBIAN)
 
+#if ENABLE(NETSCAPE_PLUGIN_METADATA_CACHE)
+        bool ensurePluginLoaded();
+        void setMIMEDescription(const String& mimeDescription);
+        String fullMIMEDescription() const { return m_fullMIMEDescription;}
+#endif
     private:
         PluginPackage(const String& path, const time_t& lastModified);
 
-#if OS(SYMBIAN)
-        NPInterface* m_npInterface;
-        QPluginLoader* m_pluginLoader;
-#endif // OS(SYMBIAN)
         bool fetchInfo();
         bool isPluginBlacklisted();
         void determineQuirks(const String& mimeType);
@@ -126,6 +124,10 @@ namespace WebCore {
         Timer<PluginPackage> m_freeLibraryTimer;
 
         PluginQuirkSet m_quirks;
+#if ENABLE(NETSCAPE_PLUGIN_METADATA_CACHE)
+        String m_fullMIMEDescription;
+        bool m_infoIsFromCache;
+#endif
     };
 
     struct PluginPackageHash {

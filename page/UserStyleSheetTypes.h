@@ -31,11 +31,14 @@
 
 namespace WebCore {
 
+enum UserStyleInjectionTime { InjectInExistingDocuments, InjectInSubsequentDocuments };
+enum UserStyleLevel { UserStyleUserLevel, UserStyleAuthorLevel };
+
 class DOMWrapperWorld;
 class UserStyleSheet;
 
 typedef Vector<OwnPtr<UserStyleSheet> > UserStyleSheetVector;
-typedef HashMap<RefPtr<DOMWrapperWorld>, UserStyleSheetVector*> UserStyleSheetMap;
+typedef HashMap<RefPtr<DOMWrapperWorld>, OwnPtr<UserStyleSheetVector> > UserStyleSheetMap;
 
 } // namespace WebCore
  

@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2008, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2011 Google Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,94 +25,113 @@
 #define HTMLLinkElement_h
 
 #include "CSSStyleSheet.h"
-#include "CachedResourceClient.h"
+#include "CachedStyleSheetClient.h"
 #include "CachedResourceHandle.h"
+#include "DOMSettableTokenList.h"
 #include "HTMLElement.h"
+#include "IconURL.h"
+#include "LinkLoader.h"
+#include "LinkLoaderClient.h"
+#include "LinkRelAttribute.h"
+#include "Timer.h"
 
 namespace WebCore {
 
-class CachedCSSStyleSheet;
+class HTMLLinkElement;
 class KURL;
 
-class HTMLLinkElement : public HTMLElement, public CachedResourceClient {
+template<typename T> class EventSender;
+typedef EventSender<HTMLLinkElement> LinkEventSender;
+
+class HTMLLinkElement : public HTMLElement, public CachedStyleSheetClient, public LinkLoaderClient {
 public:
-    HTMLLinkElement(const QualifiedName&, Document*, bool createdByParser);
-    ~HTMLLinkElement();
-
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
-    virtual int tagPriority() const { return 0; }
-
-    bool disabled() const;
-    void setDisabled(bool);
-
-    String charset() const;
-    void setCharset(const String&);
+    static PassRefPtr<HTMLLinkElement> create(const QualifiedName&, Document*, bool createdByParser);
+    virtual ~HTMLLinkElement();
 
     KURL href() const;
-    void setHref(const String&);
-
-    String hreflang() const;
-    void setHreflang(const String&);
-
-    String media() const;
-    void setMedia(const String&);
-
     String rel() const;
-    void setRel(const String&);
-
-    String rev() const;
-    void setRev(const String&);
 
     virtual String target() const;
-    void setTarget(const String&);
 
     String type() const;
-    void setType(const String&);
 
-    StyleSheet* sheet() const;
+    CSSStyleSheet* sheet() const { return m_sheet.get(); }
 
-    // overload from HTMLElement
-    virtual void parseMappedAttribute(MappedAttribute*);
+    bool styleSheetIsLoading() const;
 
+    bool isDisabled() const { return m_disabledState == Disabled; }
+    bool isEnabledViaScript() const { return m_disabledState == EnabledViaScript; }
+    void setSizes(const String&);
+    DOMSettableTokenList* sizes() const;
+
+    void dispatchPendingEvent(LinkEventSender*);
+    static void dispatchPendingLoadEvents();
+
+private:
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+
+    virtual bool shouldLoadLink();
     void process();
+    static void processCallback(Node*);
+    void clearSheet();
 
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void removedFrom(Node*) OVERRIDE;
 
     // from CachedResourceClient
     virtual void setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet* sheet);
-    bool isLoading() const;
     virtual bool sheetLoaded();
+    virtual void notifyLoadedSheetAndAllCriticalSubresources(bool errorOccurred);
+    virtual void startLoadingDynamicSheet();
 
-    bool isAlternate() const { return m_disabledState == 0 && m_alternate; }
-    bool isDisabled() const { return m_disabledState == 2; }
-    bool isEnabledViaScript() const { return m_disabledState == 1; }
-    bool isIcon() const { return m_isIcon; }
+    virtual void linkLoaded();
+    virtual void linkLoadingErrored();
+
+    bool isAlternate() const { return m_disabledState == Unset && m_relAttribute.m_isAlternate; }
     
-    int disabledState() { return m_disabledState; }
-    void setDisabledState(bool _disabled);
+    void setDisabledState(bool);
 
     virtual bool isURLAttribute(Attribute*) const;
-    
-    static void tokenizeRelAttribute(const AtomicString& value, bool& stylesheet, bool& alternate, bool& icon, bool& dnsPrefetch);
 
+private:
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
     virtual void finishParsingChildren();
+    
+    enum PendingSheetType { None, NonBlocking, Blocking };
+    void addPendingSheet(PendingSheetType);
+    void removePendingSheet();
 
-protected:
+#if ENABLE(MICRODATA)
+    virtual String itemValueText() const OVERRIDE;
+    virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;
+#endif
+
+private:
+    HTMLLinkElement(const QualifiedName&, Document*, bool createdByParser);
+
+    LinkLoader m_linkLoader;
     CachedResourceHandle<CachedCSSStyleSheet> m_cachedSheet;
     RefPtr<CSSStyleSheet> m_sheet;
+    enum DisabledState {
+        Unset,
+        EnabledViaScript,
+        Disabled
+    };
+
     KURL m_url;
     String m_type;
     String m_media;
-    int m_disabledState; // 0=unset(default), 1=enabled via script, 2=disabled
+    RefPtr<DOMSettableTokenList> m_sizes;
+    DisabledState m_disabledState;
+    LinkRelAttribute m_relAttribute;
     bool m_loading;
-    bool m_alternate;
-    bool m_isStyleSheet;
-    bool m_isIcon;
-    bool m_isDNSPrefetch;
     bool m_createdByParser;
+    bool m_isInShadowTree;
+    bool m_firedLoad;
+    bool m_loadedSheet;
+
+    PendingSheetType m_pendingSheetType;
 };
 
 } //namespace

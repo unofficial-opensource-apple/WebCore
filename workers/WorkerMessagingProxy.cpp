@@ -21,7 +21,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
 
@@ -31,16 +31,23 @@
 
 #include "WorkerMessagingProxy.h"
 
+#include "ContentSecurityPolicy.h"
+#include "CrossThreadTask.h"
 #include "DedicatedWorkerContext.h"
 #include "DedicatedWorkerThread.h"
 #include "DOMWindow.h"
 #include "Document.h"
 #include "ErrorEvent.h"
 #include "ExceptionCode.h"
-#include "GenericWorkerTask.h"
+#include "InspectorInstrumentation.h"
 #include "MessageEvent.h"
+#include "NotImplemented.h"
+#include "ScriptCallStack.h"
 #include "ScriptExecutionContext.h"
 #include "Worker.h"
+#include "WorkerDebuggerAgent.h"
+#include "WorkerInspectorController.h"
+#include <wtf/MainThread.h>
 
 namespace WebCore {
 
@@ -48,12 +55,12 @@ class MessageWorkerContextTask : public ScriptExecutionContext::Task {
 public:
     static PassOwnPtr<MessageWorkerContextTask> create(PassRefPtr<SerializedScriptValue> message, PassOwnPtr<MessagePortChannelArray> channels)
     {
-        return new MessageWorkerContextTask(message, channels);
+        return adoptPtr(new MessageWorkerContextTask(message, channels));
     }
 
 private:
     MessageWorkerContextTask(PassRefPtr<SerializedScriptValue> message, PassOwnPtr<MessagePortChannelArray> channels)
-        : m_message(message->release())
+        : m_message(message)
         , m_channels(channels)
     {
     }
@@ -76,12 +83,12 @@ class MessageWorkerTask : public ScriptExecutionContext::Task {
 public:
     static PassOwnPtr<MessageWorkerTask> create(PassRefPtr<SerializedScriptValue> message, PassOwnPtr<MessagePortChannelArray> channels, WorkerMessagingProxy* messagingProxy)
     {
-        return new MessageWorkerTask(message, channels, messagingProxy);
+        return adoptPtr(new MessageWorkerTask(message, channels, messagingProxy));
     }
 
 private:
     MessageWorkerTask(PassRefPtr<SerializedScriptValue> message, PassOwnPtr<MessagePortChannelArray> channels, WorkerMessagingProxy* messagingProxy)
-        : m_message(message->release())
+        : m_message(message)
         , m_channels(channels)
         , m_messagingProxy(messagingProxy)
     {
@@ -107,14 +114,14 @@ class WorkerExceptionTask : public ScriptExecutionContext::Task {
 public:
     static PassOwnPtr<WorkerExceptionTask> create(const String& errorMessage, int lineNumber, const String& sourceURL, WorkerMessagingProxy* messagingProxy)
     {
-        return new WorkerExceptionTask(errorMessage, lineNumber, sourceURL, messagingProxy);
+        return adoptPtr(new WorkerExceptionTask(errorMessage, lineNumber, sourceURL, messagingProxy));
     }
 
 private:
     WorkerExceptionTask(const String& errorMessage, int lineNumber, const String& sourceURL, WorkerMessagingProxy* messagingProxy)
-        : m_errorMessage(errorMessage.crossThreadString())
+        : m_errorMessage(errorMessage.isolatedCopy())
         , m_lineNumber(lineNumber)
-        , m_sourceURL(sourceURL.crossThreadString())
+        , m_sourceURL(sourceURL.isolatedCopy())
         , m_messagingProxy(messagingProxy)
     {
     }
@@ -130,7 +137,7 @@ private:
 
         bool errorHandled = !workerObject->dispatchEvent(ErrorEvent::create(m_errorMessage, m_sourceURL, m_lineNumber));
         if (!errorHandled)
-            context->reportException(m_errorMessage, m_lineNumber, m_sourceURL);
+            context->reportException(m_errorMessage, m_lineNumber, m_sourceURL, 0);
     }
 
     String m_errorMessage;
@@ -143,7 +150,7 @@ class WorkerContextDestroyedTask : public ScriptExecutionContext::Task {
 public:
     static PassOwnPtr<WorkerContextDestroyedTask> create(WorkerMessagingProxy* messagingProxy)
     {
-        return new WorkerContextDestroyedTask(messagingProxy);
+        return adoptPtr(new WorkerContextDestroyedTask(messagingProxy));
     }
 
 private:
@@ -164,7 +171,7 @@ class WorkerTerminateTask : public ScriptExecutionContext::Task {
 public:
     static PassOwnPtr<WorkerTerminateTask> create(WorkerMessagingProxy* messagingProxy)
     {
-        return new WorkerTerminateTask(messagingProxy);
+        return adoptPtr(new WorkerTerminateTask(messagingProxy));
     }
 
 private:
@@ -185,7 +192,7 @@ class WorkerThreadActivityReportTask : public ScriptExecutionContext::Task {
 public:
     static PassOwnPtr<WorkerThreadActivityReportTask> create(WorkerMessagingProxy* messagingProxy, bool confirmingMessage, bool hasPendingActivity)
     {
-        return new WorkerThreadActivityReportTask(messagingProxy, confirmingMessage, hasPendingActivity);
+        return adoptPtr(new WorkerThreadActivityReportTask(messagingProxy, confirmingMessage, hasPendingActivity));
     }
 
 private:
@@ -206,6 +213,32 @@ private:
     bool m_hasPendingActivity;
 };
 
+class PostMessageToPageInspectorTask : public ScriptExecutionContext::Task {
+public:
+    static PassOwnPtr<PostMessageToPageInspectorTask> create(WorkerMessagingProxy* messagingProxy, const String& message)
+    {
+        return adoptPtr(new PostMessageToPageInspectorTask(messagingProxy, message));
+    }
+
+private:
+    PostMessageToPageInspectorTask(WorkerMessagingProxy* messagingProxy, const String& message)
+        : m_messagingProxy(messagingProxy)
+        , m_message(message.isolatedCopy())
+    {
+    }
+
+    virtual void performTask(ScriptExecutionContext*)
+    {
+#if ENABLE(INSPECTOR)
+        if (WorkerContextProxy::PageInspector* pageInspector = m_messagingProxy->m_pageInspector)
+            pageInspector->dispatchMessageFromWorker(m_message);
+#endif
+    }
+
+    WorkerMessagingProxy* m_messagingProxy;
+    String m_message;
+};
+
 
 #if !PLATFORM(CHROMIUM)
 WorkerContextProxy* WorkerContextProxy::create(Worker* worker)
@@ -220,29 +253,35 @@ WorkerMessagingProxy::WorkerMessagingProxy(Worker* workerObject)
     , m_unconfirmedMessageCount(0)
     , m_workerThreadHadPendingActivity(false)
     , m_askedToTerminate(false)
+#if ENABLE(INSPECTOR)
+    , m_pageInspector(0)
+#endif
 {
     ASSERT(m_workerObject);
-    ASSERT((m_scriptExecutionContext->isDocument() && isMainThread())
+    ASSERT((m_scriptExecutionContext->isDocument() && (isMainThread() || pthread_main_np()))
            || (m_scriptExecutionContext->isWorkerContext() && currentThread() == static_cast<WorkerContext*>(m_scriptExecutionContext.get())->thread()->threadID()));
 }
 
 WorkerMessagingProxy::~WorkerMessagingProxy()
 {
     ASSERT(!m_workerObject);
-    ASSERT((m_scriptExecutionContext->isDocument() && isMainThread())
+    ASSERT((m_scriptExecutionContext->isDocument() && (isMainThread() || pthread_main_np()))
            || (m_scriptExecutionContext->isWorkerContext() && currentThread() == static_cast<WorkerContext*>(m_scriptExecutionContext.get())->thread()->threadID()));
 }
 
-void WorkerMessagingProxy::startWorkerContext(const KURL& scriptURL, const String& userAgent, const String& sourceCode)
+void WorkerMessagingProxy::startWorkerContext(const KURL& scriptURL, const String& userAgent, const String& sourceCode, WorkerThreadStartMode startMode)
 {
-    RefPtr<DedicatedWorkerThread> thread = DedicatedWorkerThread::create(scriptURL, userAgent, sourceCode, *this, *this);
+    RefPtr<DedicatedWorkerThread> thread = DedicatedWorkerThread::create(scriptURL, userAgent, sourceCode, *this, *this, startMode,
+                                                                         m_scriptExecutionContext->contentSecurityPolicy()->header(),
+                                                                         m_scriptExecutionContext->contentSecurityPolicy()->headerType());
     workerThreadCreated(thread);
     thread->start();
+    InspectorInstrumentation::didStartWorkerContext(m_scriptExecutionContext.get(), this, scriptURL);
 }
 
 void WorkerMessagingProxy::postMessageToWorkerObject(PassRefPtr<SerializedScriptValue> message, PassOwnPtr<MessagePortChannelArray> channels)
 {
-    m_scriptExecutionContext->postTask(MessageWorkerTask::create(message, channels.release(), this));
+    m_scriptExecutionContext->postTask(MessageWorkerTask::create(message, channels, this));
 }
 
 void WorkerMessagingProxy::postMessageToWorkerContext(PassRefPtr<SerializedScriptValue> message, PassOwnPtr<MessagePortChannelArray> channels)
@@ -252,18 +291,19 @@ void WorkerMessagingProxy::postMessageToWorkerContext(PassRefPtr<SerializedScrip
 
     if (m_workerThread) {
         ++m_unconfirmedMessageCount;
-        m_workerThread->runLoop().postTask(MessageWorkerContextTask::create(message, channels.release()));
+        m_workerThread->runLoop().postTask(MessageWorkerContextTask::create(message, channels));
     } else
-        m_queuedEarlyTasks.append(MessageWorkerContextTask::create(message, channels.release()));
+        m_queuedEarlyTasks.append(MessageWorkerContextTask::create(message, channels));
 }
 
-void WorkerMessagingProxy::postTaskForModeToWorkerContext(PassOwnPtr<ScriptExecutionContext::Task> task, const String& mode)
+bool WorkerMessagingProxy::postTaskForModeToWorkerContext(PassOwnPtr<ScriptExecutionContext::Task> task, const String& mode)
 {
     if (m_askedToTerminate)
-        return;
+        return false;
 
     ASSERT(m_workerThread);
     m_workerThread->runLoop().postTaskForMode(task, mode);
+    return true;
 }
 
 void WorkerMessagingProxy::postTaskToLoader(PassOwnPtr<ScriptExecutionContext::Task> task)
@@ -277,17 +317,19 @@ void WorkerMessagingProxy::postExceptionToWorkerObject(const String& errorMessag
 {
     m_scriptExecutionContext->postTask(WorkerExceptionTask::create(errorMessage, lineNumber, sourceURL, this));
 }
-    
-static void postConsoleMessageTask(ScriptExecutionContext* context, WorkerMessagingProxy* messagingProxy, MessageDestination destination, MessageSource source, MessageType type, MessageLevel level, const String& message, unsigned lineNumber, const String& sourceURL)
+
+static void postConsoleMessageTask(ScriptExecutionContext* context, WorkerMessagingProxy* messagingProxy, MessageSource source, MessageType type, MessageLevel level, const String& message, unsigned lineNumber, const String& sourceURL)
 {
     if (messagingProxy->askedToTerminate())
         return;
-    context->addMessage(destination, source, type, level, message, lineNumber, sourceURL);
+    context->addConsoleMessage(source, type, level, message, sourceURL, lineNumber);
 }
 
-void WorkerMessagingProxy::postConsoleMessageToWorkerObject(MessageDestination destination, MessageSource source, MessageType type, MessageLevel level, const String& message, int lineNumber, const String& sourceURL)
+void WorkerMessagingProxy::postConsoleMessageToWorkerObject(MessageSource source, MessageType type, MessageLevel level, const String& message, int lineNumber, const String& sourceURL)
 {
-    m_scriptExecutionContext->postTask(createCallbackTask(&postConsoleMessageTask, this, destination, source, type, level, message, lineNumber, sourceURL));
+    m_scriptExecutionContext->postTask(
+        createCallbackTask(&postConsoleMessageTask, AllowCrossThreadAccess(this),
+                           source, type, level, message, lineNumber, sourceURL));
 }
 
 void WorkerMessagingProxy::workerThreadCreated(PassRefPtr<DedicatedWorkerThread> workerThread)
@@ -318,6 +360,63 @@ void WorkerMessagingProxy::workerObjectDestroyed()
         workerContextDestroyedInternal();
 }
 
+#if ENABLE(INSPECTOR)
+#if ENABLE(JAVASCRIPT_DEBUGGER)
+static void connectToWorkerContextInspectorTask(ScriptExecutionContext* context, bool)
+{
+    ASSERT(context->isWorkerContext());
+    static_cast<WorkerContext*>(context)->workerInspectorController()->connectFrontend();
+}
+#endif
+
+void WorkerMessagingProxy::connectToInspector(WorkerContextProxy::PageInspector* pageInspector)
+{
+    if (m_askedToTerminate)
+        return;
+    ASSERT(!m_pageInspector);
+    m_pageInspector = pageInspector;
+#if ENABLE(JAVASCRIPT_DEBUGGER)
+    m_workerThread->runLoop().postTaskForMode(createCallbackTask(connectToWorkerContextInspectorTask, true), WorkerDebuggerAgent::debuggerTaskMode);
+#endif
+}
+
+#if ENABLE(JAVASCRIPT_DEBUGGER)
+static void disconnectFromWorkerContextInspectorTask(ScriptExecutionContext* context, bool)
+{
+    ASSERT(context->isWorkerContext());
+    static_cast<WorkerContext*>(context)->workerInspectorController()->disconnectFrontend();
+}
+#endif
+
+void WorkerMessagingProxy::disconnectFromInspector()
+{
+    m_pageInspector = 0;
+    if (m_askedToTerminate)
+        return;
+#if ENABLE(JAVASCRIPT_DEBUGGER)
+    m_workerThread->runLoop().postTaskForMode(createCallbackTask(disconnectFromWorkerContextInspectorTask, true), WorkerDebuggerAgent::debuggerTaskMode);
+#endif
+}
+
+#if ENABLE(JAVASCRIPT_DEBUGGER)
+static void dispatchOnInspectorBackendTask(ScriptExecutionContext* context, const String& message)
+{
+    ASSERT(context->isWorkerContext());
+    static_cast<WorkerContext*>(context)->workerInspectorController()->dispatchMessageFromFrontend(message);
+}
+#endif
+
+void WorkerMessagingProxy::sendMessageToInspector(const String& message)
+{
+    if (m_askedToTerminate)
+        return;
+#if ENABLE(JAVASCRIPT_DEBUGGER)
+    m_workerThread->runLoop().postTaskForMode(createCallbackTask(dispatchOnInspectorBackendTask, String(message)), WorkerDebuggerAgent::debuggerTaskMode);
+    WorkerDebuggerAgent::interruptAndDispatchInspectorCommands(m_workerThread.get());
+#endif
+}
+#endif
+
 void WorkerMessagingProxy::workerContextDestroyed()
 {
     m_scriptExecutionContext->postTask(WorkerContextDestroyedTask::create(this));
@@ -336,6 +435,9 @@ void WorkerMessagingProxy::workerContextDestroyedInternal()
     // in either side any more. However, the Worker object may still exist, and it assumes that the proxy exists, too.
     m_askedToTerminate = true;
     m_workerThread = 0;
+
+    InspectorInstrumentation::workerContextTerminated(m_scriptExecutionContext.get(), this);
+
     if (!m_workerObject)
         delete this;
 }
@@ -348,7 +450,21 @@ void WorkerMessagingProxy::terminateWorkerContext()
 
     if (m_workerThread)
         m_workerThread->stop();
+
+    InspectorInstrumentation::workerContextTerminated(m_scriptExecutionContext.get(), this);
 }
+
+#if ENABLE(INSPECTOR)
+void WorkerMessagingProxy::postMessageToPageInspector(const String& message)
+{
+    m_scriptExecutionContext->postTask(PostMessageToPageInspectorTask::create(this, message));
+}
+
+void WorkerMessagingProxy::updateInspectorStateCookie(const String&)
+{
+    notImplemented();
+}
+#endif
 
 void WorkerMessagingProxy::confirmMessageFromWorkerObject(bool hasPendingActivity)
 {

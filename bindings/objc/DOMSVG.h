@@ -25,7 +25,9 @@
  */
 
 #import <WebCore/DOMSVGAElement.h>
+#import <WebCore/DOMSVGAltGlyphDefElement.h>
 #import <WebCore/DOMSVGAltGlyphElement.h>
+#import <WebCore/DOMSVGAltGlyphItemElement.h>
 #import <WebCore/DOMSVGAngle.h>
 #import <WebCore/DOMSVGAnimateColorElement.h>
 #import <WebCore/DOMSVGAnimateElement.h>
@@ -38,8 +40,6 @@
 #import <WebCore/DOMSVGAnimatedLengthList.h>
 #import <WebCore/DOMSVGAnimatedNumber.h>
 #import <WebCore/DOMSVGAnimatedNumberList.h>
-#import <WebCore/DOMSVGAnimatedPathData.h>
-#import <WebCore/DOMSVGAnimatedPoints.h>
 #import <WebCore/DOMSVGAnimatedPreserveAspectRatio.h>
 #import <WebCore/DOMSVGAnimatedRect.h>
 #import <WebCore/DOMSVGAnimatedString.h>
@@ -63,9 +63,11 @@
 #import <WebCore/DOMSVGFEColorMatrixElement.h>
 #import <WebCore/DOMSVGFEComponentTransferElement.h>
 #import <WebCore/DOMSVGFECompositeElement.h>
+#import <WebCore/DOMSVGFEConvolveMatrixElement.h>
 #import <WebCore/DOMSVGFEDiffuseLightingElement.h>
 #import <WebCore/DOMSVGFEDisplacementMapElement.h>
 #import <WebCore/DOMSVGFEDistantLightElement.h>
+#import <WebCore/DOMSVGFEDropShadowElement.h>
 #import <WebCore/DOMSVGFEFloodElement.h>
 #import <WebCore/DOMSVGFEFuncAElement.h>
 #import <WebCore/DOMSVGFEFuncBElement.h>
@@ -94,6 +96,7 @@
 #import <WebCore/DOMSVGForeignObjectElement.h>
 #import <WebCore/DOMSVGGElement.h>
 #import <WebCore/DOMSVGGlyphElement.h>
+#import <WebCore/DOMSVGGlyphRefElement.h>
 #import <WebCore/DOMSVGGradientElement.h>
 #import <WebCore/DOMSVGImageElement.h>
 #import <WebCore/DOMSVGLangSpace.h>

@@ -20,16 +20,15 @@
 
 #include "config.h"
 #include "CSSParserValues.h"
+
 #include "CSSPrimitiveValue.h"
 #include "CSSFunctionValue.h"
-#include "CSSQuirkPrimitiveValue.h"
+#include "CSSSelector.h"
+#include "CSSSelectorList.h"
 
 namespace WebCore {
 
-bool CSSParserValue::isVariable() const
-{
-    return unit == CSSPrimitiveValue::CSS_PARSER_VARIABLE_FUNCTION_SYNTAX;
-}
+using namespace WTF;
 
 CSSParserValueList::~CSSParserValueList()
 {
@@ -42,16 +41,23 @@ CSSParserValueList::~CSSParserValueList()
 
 void CSSParserValueList::addValue(const CSSParserValue& v)
 {
-    if (v.unit == CSSPrimitiveValue::CSS_PARSER_VARIABLE_FUNCTION_SYNTAX) // isVariable() is not inlined. This is hot.
-        m_variablesCount++;
     m_values.append(v);
 }
-    
+
+void CSSParserValueList::insertValueAt(unsigned i, const CSSParserValue& v)
+{
+    m_values.insert(i, v);
+}
+
 void CSSParserValueList::deleteValueAt(unsigned i)
-{ 
-    if (m_values[i].isVariable())
-        m_variablesCount--;
+{
     m_values.remove(i);
+}
+
+void CSSParserValueList::extend(CSSParserValueList& valueList)
+{
+    for (unsigned int i = 0; i < valueList.size(); ++i)
+        m_values.append(*(valueList.valueAt(i)));
 }
 
 PassRefPtr<CSSValue> CSSParserValue::createCSSValue()
@@ -69,15 +75,60 @@ PassRefPtr<CSSValue> CSSParserValue::createCSSValue()
         parsedValue = primitiveValue;
     } else if (unit == CSSParserValue::Function)
         parsedValue = CSSFunctionValue::create(function);
-    else if (unit == CSSPrimitiveValue::CSS_STRING || unit == CSSPrimitiveValue::CSS_URI || unit == CSSPrimitiveValue::CSS_PARSER_HEXCOLOR || isVariable())
+    else if (unit == CSSPrimitiveValue::CSS_STRING || unit == CSSPrimitiveValue::CSS_URI || unit == CSSPrimitiveValue::CSS_PARSER_HEXCOLOR)
         parsedValue = CSSPrimitiveValue::create(string, (CSSPrimitiveValue::UnitTypes)unit);
     else if (unit >= CSSPrimitiveValue::CSS_NUMBER && unit <= CSSPrimitiveValue::CSS_KHZ)
         parsedValue = CSSPrimitiveValue::create(fValue, (CSSPrimitiveValue::UnitTypes)unit);
     else if (unit >= CSSPrimitiveValue::CSS_TURN && unit <= CSSPrimitiveValue::CSS_REMS) // CSS3 Values and Units
         parsedValue = CSSPrimitiveValue::create(fValue, (CSSPrimitiveValue::UnitTypes)unit);
     else if (unit >= CSSParserValue::Q_EMS)
-        parsedValue = CSSQuirkPrimitiveValue::create(fValue, CSSPrimitiveValue::CSS_EMS);
+        parsedValue = CSSPrimitiveValue::createAllowingMarginQuirk(fValue, CSSPrimitiveValue::CSS_EMS);
     return parsedValue;
+}
+
+CSSParserSelector::CSSParserSelector()
+    : m_selector(adoptPtr(fastNew<CSSSelector>()))
+{
+}
+
+CSSParserSelector::~CSSParserSelector()
+{
+    if (!m_tagHistory)
+        return;
+    Vector<OwnPtr<CSSParserSelector>, 16> toDelete;
+    OwnPtr<CSSParserSelector> selector = m_tagHistory.release();
+    while (true) {
+        OwnPtr<CSSParserSelector> next = selector->m_tagHistory.release();
+        toDelete.append(selector.release());
+        if (!next)
+            break;
+        selector = next.release();
+    }
+}
+
+void CSSParserSelector::adoptSelectorVector(Vector<OwnPtr<CSSParserSelector> >& selectorVector)
+{
+    CSSSelectorList* selectorList = fastNew<CSSSelectorList>();
+    selectorList->adoptSelectorVector(selectorVector);
+    m_selector->setSelectorList(adoptPtr(selectorList));
+}
+
+void CSSParserSelector::insertTagHistory(CSSSelector::Relation before, PassOwnPtr<CSSParserSelector> selector, CSSSelector::Relation after)
+{
+    if (m_tagHistory)
+        selector->setTagHistory(m_tagHistory.release());
+    setRelation(before);
+    selector->setRelation(after);
+    m_tagHistory = selector;
+}
+
+void CSSParserSelector::appendTagHistory(CSSSelector::Relation relation, PassOwnPtr<CSSParserSelector> selector)
+{
+    CSSParserSelector* end = this;
+    while (end->tagHistory())
+        end = end->tagHistory();
+    end->setRelation(relation);
+    end->setTagHistory(selector);
 }
 
 }

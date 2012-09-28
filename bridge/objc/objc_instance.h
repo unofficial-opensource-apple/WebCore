@@ -46,10 +46,12 @@ public:
         
     virtual JSValue valueOf(ExecState*) const;
     virtual JSValue defaultValue(ExecState*, PreferredPrimitiveType) const;
-    
-    virtual JSValue invokeMethod(ExecState*, const MethodList&, const ArgList&);
+
+    virtual JSValue getMethod(ExecState* exec, const Identifier& propertyName);
+    JSValue invokeObjcMethod(ExecState*, ObjcMethod* method);
+    virtual JSValue invokeMethod(ExecState*, RuntimeMethod* method);
     virtual bool supportsInvokeDefaultMethod() const;
-    virtual JSValue invokeDefaultMethod(ExecState*, const ArgList&);
+    virtual JSValue invokeDefaultMethod(ExecState*);
 
     JSValue getValueOfUndefinedField(ExecState*, const Identifier&) const;
     virtual bool setValueOfUndefinedField(ExecState*, const Identifier&, JSValue);
@@ -65,10 +67,13 @@ protected:
     virtual void virtualEnd();
 
 private:
+    friend class ObjcField;
     static void moveGlobalExceptionToExecState(ExecState*);
 
     ObjcInstance(ObjectStructPtr, PassRefPtr<RootObject>);
-    
+
+    virtual RuntimeObject* newRuntimeObject(ExecState*);
+
     RetainPtr<ObjectStructPtr> _instance;
     mutable ObjcClass *_class;
     ObjectStructPtr _pool;

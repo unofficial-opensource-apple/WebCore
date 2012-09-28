@@ -31,7 +31,31 @@ namespace WebCore {
 // This is used by the loader to control the number of issued parallel load requests. 
 unsigned initializeMaximumHTTPConnectionCountPerHost()
 {
-    return 6;
+    // The chromium network stack already handles limiting the number of
+    // parallel requests per host, so there's no need to do it here.  Therefore,
+    // this is set to a high value that should never be hit in practice.
+    return 10000;
+}
+
+PassOwnPtr<CrossThreadResourceRequestData> ResourceRequest::doPlatformCopyData(PassOwnPtr<CrossThreadResourceRequestData> data) const
+{
+    data->m_requestorID = m_requestorID;
+    data->m_requestorProcessID = m_requestorProcessID;
+    data->m_appCacheHostID = m_appCacheHostID;
+    data->m_hasUserGesture = m_hasUserGesture;
+    data->m_downloadToFile = m_downloadToFile;
+    data->m_targetType = m_targetType;
+    return data;
+}
+
+void ResourceRequest::doPlatformAdopt(PassOwnPtr<CrossThreadResourceRequestData> data)
+{
+    m_requestorID = data->m_requestorID;
+    m_requestorProcessID = data->m_requestorProcessID;
+    m_appCacheHostID = data->m_appCacheHostID;
+    m_hasUserGesture = data->m_hasUserGesture;
+    m_downloadToFile = data->m_downloadToFile;
+    m_targetType = data->m_targetType;
 }
 
 } // namespace WebCore

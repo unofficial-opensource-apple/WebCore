@@ -26,8 +26,17 @@
 #include "config.h"
 #include "ProgressEvent.h"
 
+#include "EventNames.h"
+
 namespace WebCore {
-    
+
+ProgressEventInit::ProgressEventInit()
+    : lengthComputable(false)
+    , loaded(0)
+    , total(0)
+{
+}
+
 ProgressEvent::ProgressEvent()
     : m_lengthComputable(false)
     , m_loaded(0)
@@ -35,7 +44,15 @@ ProgressEvent::ProgressEvent()
 {
 }
 
-ProgressEvent::ProgressEvent(const AtomicString& type, bool lengthComputable, unsigned loaded, unsigned total)
+ProgressEvent::ProgressEvent(const AtomicString& type, const ProgressEventInit& initializer)
+    : Event(type, initializer)
+    , m_lengthComputable(initializer.lengthComputable)
+    , m_loaded(initializer.loaded)
+    , m_total(initializer.total)
+{
+}
+
+ProgressEvent::ProgressEvent(const AtomicString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total)
     : Event(type, false, true)
     , m_lengthComputable(lengthComputable)
     , m_loaded(loaded)
@@ -43,21 +60,9 @@ ProgressEvent::ProgressEvent(const AtomicString& type, bool lengthComputable, un
 {
 }
     
-void ProgressEvent::initProgressEvent(const AtomicString& typeArg, 
-                                      bool canBubbleArg,
-                                      bool cancelableArg,
-                                      bool lengthComputableArg,
-                                      unsigned loadedArg,
-                                      unsigned totalArg)
-{    
-    if (dispatched())
-        return;
-
-    initEvent(typeArg, canBubbleArg, cancelableArg);
-
-    m_lengthComputable = lengthComputableArg;
-    m_loaded = loadedArg;
-    m_total = totalArg;
+const AtomicString& ProgressEvent::interfaceName() const
+{
+    return eventNames().interfaceForProgressEvent;
 }
 
 }

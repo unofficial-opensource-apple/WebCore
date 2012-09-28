@@ -28,6 +28,7 @@
 #import "config.h"
 
 #import "CSSRule.h"
+#import "CSSStyleSheet.h"
 #import "CSSValue.h"
 #import "DOMCSSCharsetRule.h"
 #import "DOMCSSFontFaceRule.h"
@@ -42,12 +43,19 @@
 #import "DOMCSSUnknownRule.h"
 #import "DOMCSSValueInternal.h"
 #import "DOMCSSValueList.h"
-#import "DOMCSSVariablesRule.h"
 #import "DOMInternal.h"
 #import "DOMStyleSheetInternal.h"
 #import "DOMWebKitCSSKeyframeRule.h"
 #import "DOMWebKitCSSKeyframesRule.h"
 #import "DOMWebKitCSSTransformValue.h"
+
+#if ENABLE(CSS_FILTERS)
+#import "DOMWebKitCSSFilterValue.h"
+#endif
+
+#if ENABLE(CSS_REGIONS)
+#import "DOMWebKitCSSRegionRule.h"
+#endif
 
 #if ENABLE(SVG_DOM_OBJC_BINDINGS)
 #import "DOMSVGPaint.h"
@@ -83,12 +91,14 @@ Class kitClass(WebCore::CSSRule* impl)
             return [DOMCSSFontFaceRule class];
         case DOM_PAGE_RULE:
             return [DOMCSSPageRule class];
-        case DOM_VARIABLES_RULE:
-            return [DOMCSSVariablesRule class];
         case DOM_WEBKIT_KEYFRAMES_RULE:
             return [DOMWebKitCSSKeyframesRule class];
         case DOM_WEBKIT_KEYFRAME_RULE:
             return [DOMWebKitCSSKeyframeRule class];
+#if ENABLE(CSS_REGIONS)
+        case DOM_WEBKIT_REGION_RULE:
+            return [DOMWebKitCSSRegionRule class];
+#endif
     }
     ASSERT_NOT_REACHED();
     return nil;
@@ -105,6 +115,10 @@ Class kitClass(WebCore::CSSValue* impl)
         case WebCore::CSSValue::CSS_VALUE_LIST:
             if (impl->isWebKitCSSTransformValue())
                 return [DOMWebKitCSSTransformValue class];
+#if ENABLE(CSS_FILTERS)
+            if (impl->isWebKitCSSFilterValue())
+                return [DOMWebKitCSSFilterValue class];
+#endif
             return [DOMCSSValueList class];
         case WebCore::CSSValue::CSS_INHERIT:
         case WebCore::CSSValue::CSS_INITIAL:

@@ -27,8 +27,6 @@
 #include "config.h"
 #include "XPathResult.h"
 
-#if ENABLE(XPATH)
-
 #include "Document.h"
 #include "Node.h"
 #include "ExceptionCode.h"
@@ -41,6 +39,8 @@ using namespace XPath;
 
 XPathResult::XPathResult(Document* document, const Value& value)
     : m_value(value)
+    , m_nodeSetPosition(0)
+    , m_domTreeVersion(0)
 {
     switch (m_value.type()) {
         case Value::BooleanValue:
@@ -215,5 +215,3 @@ Node* XPathResult::snapshotItem(unsigned long index, ExceptionCode& ec)
 }
 
 }
-
-#endif // ENABLE(XPATH)

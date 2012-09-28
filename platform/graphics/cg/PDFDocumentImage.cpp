@@ -27,7 +27,7 @@
 #include "config.h"
 #include "PDFDocumentImage.h"
 
-#if PLATFORM(CG)
+#if USE(CG)
 
 #import <CoreGraphics/CGContextPrivate.h>
 #import <CoreGraphics/CGContextGState.h>
@@ -36,7 +36,12 @@
 
 #include "GraphicsContext.h"
 #include "ImageObserver.h"
+#include "Length.h"
+#include "SharedBuffer.h"
+#include <CoreGraphics/CGContext.h>
+#include <CoreGraphics/CGPDFDocument.h>
 #include <wtf/MathExtras.h>
+#include <wtf/RetainPtr.h>
 
 #if !PLATFORM(MAC)
 #include "ImageSourceCG.h"
@@ -59,6 +64,11 @@ PDFDocumentImage::~PDFDocumentImage()
     CGPDFDocumentRelease(m_document);
 }
 
+String PDFDocumentImage::filenameExtension() const
+{
+    return "pdf";
+}
+
 IntSize PDFDocumentImage::size() const
 {
     const float sina = sinf(-m_rotation);
@@ -69,6 +79,13 @@ IntSize PDFDocumentImage::size() const
     const float rotHeight = width * sina + height * cosa;
     
     return IntSize((int)(fabsf(rotWidth) + 0.5f), (int)(fabsf(rotHeight) + 0.5f));
+}
+
+void PDFDocumentImage::computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsicHeight, FloatSize& intrinsicRatio)
+{
+    // FIXME: If we want size negotiation with PDF documents as-image, this is the place to implement it (https://bugs.webkit.org/show_bug.cgi?id=12095).
+    Image::computeIntrinsicDimensions(intrinsicWidth, intrinsicHeight, intrinsicRatio);
+    intrinsicRatio = FloatSize();
 }
 
 bool PDFDocumentImage::dataChanged(bool allDataReceived)
@@ -156,29 +173,29 @@ void PDFDocumentImage::draw(GraphicsContext* context, const FloatRect& dstRect, 
     if (!m_document || m_currentPage == -1)
         return;
 
-    context->save();
+    {
+        GraphicsContextStateSaver stateSaver(*context);
 
-    context->setCompositeOperation(op);
+        context->setCompositeOperation(op);
 
-    float hScale = dstRect.width() / srcRect.width();
-    float vScale = dstRect.height() / srcRect.height();
+        float hScale = dstRect.width() / srcRect.width();
+        float vScale = dstRect.height() / srcRect.height();
 
-    // Scale and translate so the document is rendered in the correct location,
-    // including accounting for the fact that a GraphicsContext is always flipped
-    // and doing appropriate flipping.
-    CGContextTranslateCTM(context->platformContext(), dstRect.x() - srcRect.x() * hScale, dstRect.y() - srcRect.y() * vScale);
-    CGContextScaleCTM(context->platformContext(), hScale, vScale);
-    CGContextScaleCTM(context->platformContext(), 1, -1);
-    CGContextTranslateCTM(context->platformContext(), 0, -srcRect.height());
-    CGContextClipToRect(context->platformContext(), CGRectIntegral(srcRect));
+        // Scale and translate so the document is rendered in the correct location,
+        // including accounting for the fact that a GraphicsContext is always flipped
+        // and doing appropriate flipping.
+        CGContextTranslateCTM(context->platformContext(), dstRect.x() - srcRect.x() * hScale, dstRect.y() - srcRect.y() * vScale);
+        CGContextScaleCTM(context->platformContext(), hScale, vScale);
+        CGContextScaleCTM(context->platformContext(), 1, -1);
+        CGContextTranslateCTM(context->platformContext(), 0, -srcRect.height());
+        CGContextClipToRect(context->platformContext(), CGRectIntegral(srcRect));
 
-    // Rotate translate image into position according to doc properties.
-    adjustCTM(context);
+        // Rotate translate image into position according to doc properties.
+        adjustCTM(context);
 
-    CGContextTranslateCTM(context->platformContext(), -m_mediaBox.x(), -m_mediaBox.y());
-    CGContextDrawPDFPage(context->platformContext(), CGPDFDocumentGetPage(m_document, m_currentPage + 1));
-
-    context->restore();
+        CGContextTranslateCTM(context->platformContext(), -m_mediaBox.x(), -m_mediaBox.y());
+        CGContextDrawPDFPage(context->platformContext(), CGPDFDocumentGetPage(m_document, m_currentPage + 1));
+    }
 
     if (imageObserver())
         imageObserver()->didDraw(this);
@@ -186,4 +203,4 @@ void PDFDocumentImage::draw(GraphicsContext* context, const FloatRect& dstRect, 
 
 }
 
-#endif // PLATFORM(CG)
+#endif // USE(CG)

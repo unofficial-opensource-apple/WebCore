@@ -1,6 +1,7 @@
 /*
- * Copyright (C) 2004, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006, 2009, 2010 Apple Inc. All rights reserved.
  * Copyright (C) 2007 Alp Toker <alp@atoker.com>
+ * Copyright (C) 2010 Torch Mobile (Beijing) Co. Ltd. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,25 +28,28 @@
 #ifndef HTMLCanvasElement_h
 #define HTMLCanvasElement_h
 
-#include "TransformationMatrix.h"
 #include "FloatRect.h"
 #include "HTMLElement.h"
-#if ENABLE(3D_CANVAS)    
-#include "GraphicsContext3D.h"
-#endif
 #include "IntSize.h"
+
+#if PLATFORM(CHROMIUM) || PLATFORM(QT)
+#define DefaultInterpolationQuality InterpolationMedium
+#elif USE(CG)
+#define DefaultInterpolationQuality InterpolationLow
+#else
+#define DefaultInterpolationQuality InterpolationDefault
+#endif
 
 namespace WebCore {
 
 class CanvasContextAttributes;
 class CanvasRenderingContext;
-class FloatPoint;
-class FloatRect;
-class FloatSize;
 class GraphicsContext;
+class GraphicsContextStateSaver;
 class HTMLCanvasElement;
+class Image;
+class ImageData;
 class ImageBuffer;
-class IntPoint;
 class IntSize;
 
 class CanvasObserver {
@@ -59,82 +63,124 @@ public:
 
 class HTMLCanvasElement : public HTMLElement {
 public:
-    HTMLCanvasElement(const QualifiedName&, Document*);
+    static PassRefPtr<HTMLCanvasElement> create(Document*);
+    static PassRefPtr<HTMLCanvasElement> create(const QualifiedName&, Document*);
     virtual ~HTMLCanvasElement();
 
-    int width() const { return m_size.width(); }
-    int height() const { return m_size.height(); }
+    void addObserver(CanvasObserver*);
+    void removeObserver(CanvasObserver*);
+
+    // Attributes and functions exposed to script
+    int width() const { return size().width(); }
+    int height() const { return size().height(); }
+
+    const IntSize& size() const { return m_size; }
+
     void setWidth(int);
     void setHeight(int);
 
-    String toDataURL(const String& mimeType, ExceptionCode&);
-
-    CanvasRenderingContext* getContext(const String&, CanvasContextAttributes* attributes = 0);
-
-    const IntSize& size() const { return m_size; }
-    void setSize(const IntSize& size)
+    void setSize(const IntSize& newSize)
     { 
-        if (size == m_size)
+        if (newSize == size())
             return;
         m_ignoreReset = true; 
-        setWidth(size.width());
-        setHeight(size.height());
+        setWidth(newSize.width());
+        setHeight(newSize.height());
         m_ignoreReset = false;
         reset();
     }
 
-    void willDraw(const FloatRect&);
+    CanvasRenderingContext* getContext(const String&, CanvasContextAttributes* attributes = 0);
 
-    void paint(GraphicsContext*, const IntRect&);
+    static String toEncodingMimeType(const String& mimeType);
+    String toDataURL(const String& mimeType, const double* quality, ExceptionCode&);
+    String toDataURL(const String& mimeType, ExceptionCode& ec) { return toDataURL(mimeType, 0, ec); }
+
+    // Used for rendering
+    void didDraw(const FloatRect&);
+
+    void paint(GraphicsContext*, const LayoutRect&, bool useLowQualityScale = false);
 
     GraphicsContext* drawingContext() const;
-
-    ImageBuffer* buffer() const;
-
-    IntRect convertLogicalToDevice(const FloatRect&) const;
-    IntSize convertLogicalToDevice(const FloatSize&) const;
-    IntPoint convertLogicalToDevice(const FloatPoint&) const;
-
-    void setOriginTainted() { m_originClean = false; } 
-    bool originClean() const { return m_originClean; }
-
-    void setObserver(CanvasObserver* observer) { m_observer = observer; }
-
-    TransformationMatrix baseTransform() const;
+    GraphicsContext* existingDrawingContext() const;
 
     CanvasRenderingContext* renderingContext() const { return m_context.get(); }
 
-#if ENABLE(3D_CANVAS)    
+    ImageBuffer* buffer() const;
+    Image* copiedImage() const;
+    void clearCopiedImage();
+    PassRefPtr<ImageData> getImageData();
+    void makePresentationCopy();
+    void clearPresentationCopy();
+
+    FloatRect convertLogicalToDevice(const FloatRect&) const;
+    FloatSize convertLogicalToDevice(const FloatSize&) const;
+
+    FloatSize convertDeviceToLogical(const FloatSize&) const;
+
+    SecurityOrigin* securityOrigin() const;
+    void setOriginTainted() { m_originClean = false; }
+    bool originClean() const { return m_originClean; }
+
+    StyleResolver* styleResolver();
+
+    void setMaxiumDecodedImageSize(float maximumDecodedImageSize) { m_maximumDecodedImageSize = maximumDecodedImageSize; }
+    float maximumDecodedImageSize() { return m_maximumDecodedImageSize; }
+
+    AffineTransform baseTransform() const;
+
+#if ENABLE(WEBGL)    
     bool is3D() const;
 #endif
 
-private:
-#if ENABLE(DASHBOARD_SUPPORT)
-    virtual HTMLTagStatus endTagRequirement() const;
-    virtual int tagPriority() const;
-#endif
+    void makeRenderingResultsAvailable();
+    bool hasCreatedImageBuffer() const { return m_hasCreatedImageBuffer; }
 
-    virtual void parseMappedAttribute(MappedAttribute*);
+    bool shouldAccelerate(const IntSize&) const;
+
+    float deviceScaleFactor() const { return m_deviceScaleFactor; }
+
+private:
+    HTMLCanvasElement(const QualifiedName&, Document*);
+
+    virtual void parseAttribute(Attribute*) OVERRIDE;
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
-    void createImageBuffer() const;
     void reset();
 
-    static const float MaxCanvasArea;
+    void createImageBuffer() const;
+    void clearImageBuffer() const;
+
+    void setSurfaceSize(const IntSize&);
+
+    bool shouldDefer() const;
+
+    bool paintsIntoCanvasBuffer() const;
+
+    HashSet<CanvasObserver*> m_observers;
+
+    IntSize m_size;
+
+    OwnPtr<CanvasRenderingContext> m_context;
 
     bool m_rendererIsCanvas;
 
-    OwnPtr<CanvasRenderingContext> m_context;
-    IntSize m_size;    
-    CanvasObserver* m_observer;
-
-    bool m_originClean;
     bool m_ignoreReset;
     FloatRect m_dirtyRect;
 
+    float m_deviceScaleFactor;
+    bool m_originClean;
+
+    float m_maximumDecodedImageSize;
+
     // m_createdImageBuffer means we tried to malloc the buffer.  We didn't necessarily get it.
-    mutable bool m_createdImageBuffer;
+    mutable bool m_hasCreatedImageBuffer;
+    mutable bool m_didClearImageBuffer;
     mutable OwnPtr<ImageBuffer> m_imageBuffer;
+    mutable OwnPtr<GraphicsContextStateSaver> m_contextStateSaver;
+    
+    mutable RefPtr<Image> m_presentedImage;
+    mutable RefPtr<Image> m_copiedImage; // FIXME: This is temporary for platforms that have to copy the image buffer to render (and for CSSCanvasValue).
 };
 
 } //namespace

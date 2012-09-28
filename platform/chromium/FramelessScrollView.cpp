@@ -32,6 +32,7 @@
 #include "FramelessScrollView.h"
 
 #include "FramelessScrollViewClient.h"
+#include "ScrollbarTheme.h"
 
 namespace WebCore {
 
@@ -56,10 +57,16 @@ bool FramelessScrollView::isActive() const
     return true;
 }
 
+ScrollableArea* FramelessScrollView::enclosingScrollableArea() const
+{
+    // FIXME: Look for an ancestor scrollable area that can be scrolled.
+    return 0;
+}
+
 void FramelessScrollView::invalidateRect(const IntRect& rect)
 {
     if (HostWindow* h = hostWindow())
-        h->repaint(rect, true);
+        h->invalidateContentsAndRootView(rect, false /*immediate*/);
 }
 
 HostWindow* FramelessScrollView::hostWindow() const
@@ -72,7 +79,7 @@ IntRect FramelessScrollView::windowClipRect(bool clipToContents) const
     return contentsToWindow(visibleContentRect(!clipToContents));
 }
 
-void FramelessScrollView::paintContents(GraphicsContext*, const IntRect& damageRect)
+void FramelessScrollView::paintContents(GraphicsContext*, const IntRect&)
 {
 }
 

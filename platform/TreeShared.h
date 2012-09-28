@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,18 +22,25 @@
 #define TreeShared_h
 
 #include <wtf/Assertions.h>
+#include <wtf/MainThread.h>
 #include <wtf/Noncopyable.h>
-#ifndef NDEBUG
-#include <wtf/Threading.h>
-#endif
 
 namespace WebCore {
 
-template<class T> class TreeShared : public Noncopyable {
+#ifndef NDEBUG
+template<typename T> class TreeShared;
+template<typename T> void adopted(TreeShared<T>*);
+#endif
+
+template<typename T> class TreeShared {
+    WTF_MAKE_NONCOPYABLE(TreeShared);
 public:
-    TreeShared(int initialRefCount = 1)
-        : m_refCount(initialRefCount)
-        , m_parent(0)
+    TreeShared()
+        : m_parent(0)
+        , m_refCount(1)
+#ifndef NDEBUG
+        , m_adoptionIsRequired(true)
+#endif
     {
         ASSERT(isMainThread() || pthread_main_np());
 #ifndef NDEBUG
@@ -46,6 +53,7 @@ public:
         ASSERT(isMainThread() || pthread_main_np());
         ASSERT(!m_refCount);
         ASSERT(m_deletionHasBegun);
+        ASSERT(!m_adoptionIsRequired);
     }
 
     void ref()
@@ -53,6 +61,7 @@ public:
         ASSERT(isMainThread() || pthread_main_np());
         ASSERT(!m_deletionHasBegun);
         ASSERT(!m_inRemovedLastRefFunction);
+        ASSERT(!m_adoptionIsRequired);
         ++m_refCount;
     }
 
@@ -62,6 +71,7 @@ public:
         ASSERT(m_refCount >= 0);
         ASSERT(!m_deletionHasBegun);
         ASSERT(!m_inRemovedLastRefFunction);
+        ASSERT(!m_adoptionIsRequired);
         if (--m_refCount <= 0 && !m_parent) {
 #ifndef NDEBUG
             m_inRemovedLastRefFunction = true;
@@ -90,7 +100,7 @@ public:
 
     T* parent() const
     {
-        ASSERT(isMainThread() || pthread_main_np());
+        ASSERT(isMainThreadOrGCThread() || pthread_main_np());
         return m_parent;
     }
 
@@ -99,7 +109,7 @@ public:
     bool m_inRemovedLastRefFunction;
 #endif
 
-private:
+protected:
     virtual void removedLastRef()
     {
 #ifndef NDEBUG
@@ -108,9 +118,31 @@ private:
         delete this;
     }
 
-    int m_refCount;
+private:
+#ifndef NDEBUG
+    friend void adopted<>(TreeShared<T>*);
+#endif
+
     T* m_parent;
+    int m_refCount;
+
+#ifndef NDEBUG
+    bool m_adoptionIsRequired;
+#endif
 };
+
+#ifndef NDEBUG
+
+template<typename T> inline void adopted(TreeShared<T>* object)
+{
+    if (!object)
+        return;
+    ASSERT(!object->m_deletionHasBegun);
+    ASSERT(!object->m_inRemovedLastRefFunction);
+    object->m_adoptionIsRequired = false;
+}
+
+#endif
 
 }
 

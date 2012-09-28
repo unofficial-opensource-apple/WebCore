@@ -32,6 +32,8 @@
 #include "DOMDataStore.h"
 
 #include "DOMData.h"
+#include "V8Binding.h"
+#include <wtf/MainThread.h>
 
 namespace WebCore {
 
@@ -82,41 +84,21 @@ namespace WebCore {
 //    them.
 
 
-DOMDataStore::DOMDataStore(DOMData* domData)
+DOMDataStore::DOMDataStore()
     : m_domNodeMap(0)
+    , m_activeDomNodeMap(0)
     , m_domObjectMap(0)
     , m_activeDomObjectMap(0)
-#if ENABLE(SVG)
-    , m_domSvgElementInstanceMap(0)
-    , m_domSvgObjectWithContextMap(0)
-#endif
-    , m_domData(domData)
 {
-    WTF::MutexLocker locker(DOMDataStore::allStoresMutex());
-    DOMDataStore::allStores().append(this);
 }
 
 DOMDataStore::~DOMDataStore()
 {
-    WTF::MutexLocker locker(DOMDataStore::allStoresMutex());
-    DOMDataStore::allStores().remove(DOMDataStore::allStores().find(this));
 }
 
 DOMDataList& DOMDataStore::allStores()
 {
-  DEFINE_STATIC_LOCAL(DOMDataList, staticDOMDataList, ());
-  return staticDOMDataList;
-}
-
-WTF::Mutex& DOMDataStore::allStoresMutex()
-{
-    DEFINE_STATIC_LOCAL(WTF::Mutex, staticDOMDataListMutex, ());
-    return staticDOMDataListMutex;
-}
-
-void DOMDataStore::forgetDelayedObject(DOMData* domData, void* object)
-{
-    domData->forgetDelayedObject(object);
+    return V8BindingPerIsolateData::current()->allStores();
 }
 
 void* DOMDataStore::getDOMWrapperMap(DOMWrapperMapType type)
@@ -124,16 +106,12 @@ void* DOMDataStore::getDOMWrapperMap(DOMWrapperMapType type)
     switch (type) {
     case DOMNodeMap:
         return m_domNodeMap;
+    case ActiveDOMNodeMap:
+        return m_activeDomNodeMap;
     case DOMObjectMap:
         return m_domObjectMap;
     case ActiveDOMObjectMap:
         return m_activeDomObjectMap;
-#if ENABLE(SVG)
-    case DOMSVGElementInstanceMap:
-        return m_domSvgElementInstanceMap;
-    case DOMSVGObjectWithContextMap:
-        return m_domSvgObjectWithContextMap;
-#endif
     }
 
     ASSERT_NOT_REACHED();
@@ -156,54 +134,28 @@ void DOMDataStore::weakActiveDOMObjectCallback(v8::Persistent<v8::Value> v8Objec
     DOMData::handleWeakObject(DOMDataStore::ActiveDOMObjectMap, v8::Persistent<v8::Object>::Cast(v8Object), domObject);
 }
 
-void DOMDataStore::weakNodeCallback(v8::Persistent<v8::Value> v8Object, void* domObject)
+void DOMDataStore::weakNodeCallback(v8::Persistent<v8::Value> value, void* domObject)
 {
-    ASSERT(WTF::isMainThread());
+    ASSERT(isMainThread());
 
     Node* node = static_cast<Node*>(domObject);
+    // Node wrappers must be JS objects.
+    v8::Persistent<v8::Object> v8Object = v8::Persistent<v8::Object>::Cast(value);
 
-    WTF::MutexLocker locker(DOMDataStore::allStoresMutex());
     DOMDataList& list = DOMDataStore::allStores();
     for (size_t i = 0; i < list.size(); ++i) {
         DOMDataStore* store = list[i];
-        if (store->domNodeMap().removeIfPresent(node, v8Object)) {
-            ASSERT(store->domData()->owningThread() == WTF::currentThread());
-            node->deref();  // Nobody overrides Node::deref so it's safe
-            break;  // There might be at most one wrapper for the node in world's maps
+        DOMNodeMapping& nodeMap = node->isActiveNode() ? store->activeDomNodeMap() : store->domNodeMap();
+        if (nodeMap.removeIfPresent(node, v8Object)) {
+            node->deref(); // Nobody overrides Node::deref so it's safe
+            return; // There might be at most one wrapper for the node in world's maps
         }
     }
+
+    // If not found, it means map for the wrapper has been already destroyed, just dispose the
+    // handle and deref the object to fight memory leak.
+    v8Object.Dispose();
+    node->deref(); // Nobody overrides Node::deref so it's safe
 }
-
-bool DOMDataStore::IntrusiveDOMWrapperMap::removeIfPresent(Node* obj, v8::Persistent<v8::Data> value)
-{
-    ASSERT(obj);
-    v8::Persistent<v8::Object>* entry = obj->wrapper();
-    if (!entry)
-        return false;
-    if (*entry != value)
-        return false;
-    obj->clearWrapper();
-    m_table.remove(entry);
-    value.Dispose();
-    return true;
-}
-
-#if ENABLE(SVG)
-
-void DOMDataStore::weakSVGElementInstanceCallback(v8::Persistent<v8::Value> v8Object, void* domObject)
-{
-    v8::HandleScope scope;
-    ASSERT(v8Object->IsObject());
-    DOMData::handleWeakObject(DOMDataStore::DOMSVGElementInstanceMap, v8::Persistent<v8::Object>::Cast(v8Object), static_cast<SVGElementInstance*>(domObject));
-}
-
-void DOMDataStore::weakSVGObjectWithContextCallback(v8::Persistent<v8::Value> v8Object, void* domObject)
-{
-    v8::HandleScope scope;
-    ASSERT(v8Object->IsObject());
-    DOMData::handleWeakObject(DOMDataStore::DOMSVGObjectWithContextMap, v8::Persistent<v8::Object>::Cast(v8Object), domObject);
-}
-
-#endif  // ENABLE(SVG)
 
 } // namespace WebCore

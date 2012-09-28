@@ -29,7 +29,8 @@
 module css {
 
     interface [
-            HasIndexGetter
+            IndexedGetter,
+            DoNotCheckConstants
     ] WebKitCSSTransformValue : CSSValueList {
 
         // OperationTypes

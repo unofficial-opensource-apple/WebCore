@@ -29,12 +29,17 @@
 #include "config.h"
 #include "FileSystem.h"
 
-#include "CString.h"
 #include "PlatformString.h"
-
-#include <sys/stat.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <fnmatch.h>
 #include <libgen.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -63,6 +68,74 @@ bool deleteFile(const String& path)
 
     // unlink(...) returns 0 on successful deletion of the path and non-zero in any other case (including invalid permissions or non-existent file)
     return !unlink(fsRep.data());
+}
+
+PlatformFileHandle openFile(const String& path, FileOpenMode mode)
+{
+    CString fsRep = fileSystemRepresentation(path);
+
+    if (fsRep.isNull())
+        return invalidPlatformFileHandle;
+
+    int platformFlag = 0;
+    if (mode == OpenForRead)
+        platformFlag |= O_RDONLY;
+    else if (mode == OpenForWrite)
+        platformFlag |= (O_WRONLY | O_CREAT | O_TRUNC);
+    return open(fsRep.data(), platformFlag, 0666);
+}
+
+void closeFile(PlatformFileHandle& handle)
+{
+    if (isHandleValid(handle)) {
+        close(handle);
+        handle = invalidPlatformFileHandle;
+    }
+}
+
+long long seekFile(PlatformFileHandle handle, long long offset, FileSeekOrigin origin)
+{
+    int whence = SEEK_SET;
+    switch (origin) {
+    case SeekFromBeginning:
+        whence = SEEK_SET;
+        break;
+    case SeekFromCurrent:
+        whence = SEEK_CUR;
+        break;
+    case SeekFromEnd:
+        whence = SEEK_END;
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
+    return static_cast<long long>(lseek(handle, offset, whence));
+}
+
+bool truncateFile(PlatformFileHandle handle, long long offset)
+{
+    // ftruncate returns 0 to indicate the success.
+    return !ftruncate(handle, offset);
+}
+
+int writeToFile(PlatformFileHandle handle, const char* data, int length)
+{
+    do {
+        int bytesWritten = write(handle, data, static_cast<size_t>(length));
+        if (bytesWritten >= 0)
+            return bytesWritten;
+    } while (errno == EINTR);
+    return -1;
+}
+
+int readFromFile(PlatformFileHandle handle, char* data, int length)
+{
+    do {
+        int bytesRead = read(handle, data, static_cast<size_t>(length));
+        if (bytesRead >= 0)
+            return bytesRead;
+    } while (errno == EINTR);
+    return -1;
 }
 
 bool deleteEmptyDirectory(const String& path)
@@ -110,10 +183,9 @@ bool getFileModificationTime(const String& path, time_t& result)
 
 String pathByAppendingComponent(const String& path, const String& component)
 {
-    if (path.endsWith("/"))
+    if (path.endsWith('/'))
         return path + component;
-    else
-        return path + "/" + component;
+    return path + "/" + component;
 }
 
 bool makeAllDirectories(const String& path)
@@ -157,10 +229,54 @@ String directoryName(const String& path)
     return dirname(fsRep.mutableData());
 }
 
-// OK to not implement listDirectory at the moment, because it's only used for plug-ins, and
-// all platforms that use the shared plug-in implementation have implementations. We'd need
-// to implement it if we wanted to use PluginDatabase.cpp on the Mac. Better to not implement
-// at all and get a link error in case this arises, rather than having a stub here, because
-// with a stub you learn about the problem at runtime instead of link time.
+#if !PLATFORM(EFL)
+Vector<String> listDirectory(const String& path, const String& filter)
+{
+    Vector<String> entries;
+    CString cpath = path.utf8();
+    CString cfilter = filter.utf8();
+    DIR* dir = opendir(cpath.data());
+    if (dir) {
+        struct dirent* dp;
+        while ((dp = readdir(dir))) {
+            const char* name = dp->d_name;
+            if (!strcmp(name, ".") || !strcmp(name, ".."))
+                continue;
+            if (fnmatch(cfilter.data(), name, 0))
+                continue;
+            char filePath[1024];
+            if (static_cast<int>(sizeof(filePath) - 1) < snprintf(filePath, sizeof(filePath), "%s/%s", cpath.data(), name))
+                continue; // buffer overflow
+            entries.append(filePath);
+        }
+        closedir(dir);
+    }
+    return entries;
+}
+#endif
+
+#if !PLATFORM(MAC)
+String openTemporaryFile(const String& prefix, PlatformFileHandle& handle)
+{
+    char buffer[PATH_MAX];
+    const char* tmpDir = getenv("TMPDIR");
+
+    if (!tmpDir)
+        tmpDir = "/tmp";
+
+    if (snprintf(buffer, PATH_MAX, "%s/%sXXXXXX", tmpDir, prefix.utf8().data()) >= PATH_MAX)
+        goto end;
+
+    handle = mkstemp(buffer);
+    if (handle < 0)
+        goto end;
+
+    return String::fromUTF8(buffer);
+
+end:
+    handle = invalidPlatformFileHandle;
+    return String();
+}
+#endif
 
 } // namespace WebCore

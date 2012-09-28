@@ -24,28 +24,34 @@
  *
  */
 
+#ifndef CrossOriginPreflightResultCache_h
+#define CrossOriginPreflightResultCache_h
+
 #include "KURLHash.h"
-#include "StringHash.h"
+#include "ResourceHandle.h"
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
+#include <wtf/PassOwnPtr.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
     class HTTPHeaderMap;
     class ResourceResponse;
 
-    class CrossOriginPreflightResultCacheItem : public Noncopyable {
+    class CrossOriginPreflightResultCacheItem {
+        WTF_MAKE_NONCOPYABLE(CrossOriginPreflightResultCacheItem); WTF_MAKE_FAST_ALLOCATED;
     public:
-        CrossOriginPreflightResultCacheItem(bool credentials)
+        CrossOriginPreflightResultCacheItem(StoredCredentials credentials)
             : m_absoluteExpiryTime(0)
             , m_credentials(credentials)
         {
         }
 
-        bool parse(const ResourceResponse&);
-        bool allowsCrossOriginMethod(const String&) const;
-        bool allowsCrossOriginHeaders(const HTTPHeaderMap&) const;
-        bool allowsRequest(bool includeCredentials, const String& method, const HTTPHeaderMap& requestHeaders) const;
+        bool parse(const ResourceResponse&, String& errorDescription);
+        bool allowsCrossOriginMethod(const String&, String& errorDescription) const;
+        bool allowsCrossOriginHeaders(const HTTPHeaderMap&, String& errorDescription) const;
+        bool allowsRequest(StoredCredentials, const String& method, const HTTPHeaderMap& requestHeaders) const;
 
     private:
         typedef HashSet<String, CaseFoldingHash> HeadersSet;
@@ -54,26 +60,29 @@ namespace WebCore {
         // to start a timer for the expiration delta that removes this from the cache when
         // it fires.
         double m_absoluteExpiryTime;
-        bool m_credentials;
+        StoredCredentials m_credentials;
         HashSet<String> m_methods;
         HeadersSet m_headers;
     };
 
-    class CrossOriginPreflightResultCache : public Noncopyable {
+    class CrossOriginPreflightResultCache {
+        WTF_MAKE_NONCOPYABLE(CrossOriginPreflightResultCache); WTF_MAKE_FAST_ALLOCATED;
     public:
         static CrossOriginPreflightResultCache& shared();
 
-        void appendEntry(const String& origin, const KURL&, CrossOriginPreflightResultCacheItem*);
-        bool canSkipPreflight(const String& origin, const KURL&, bool includeCredentials, const String& method, const HTTPHeaderMap& requestHeaders);
+        void appendEntry(const String& origin, const KURL&, PassOwnPtr<CrossOriginPreflightResultCacheItem>);
+        bool canSkipPreflight(const String& origin, const KURL&, StoredCredentials, const String& method, const HTTPHeaderMap& requestHeaders);
 
         void empty();
 
     private:
         CrossOriginPreflightResultCache() { }
 
-        typedef HashMap<std::pair<String, KURL>, CrossOriginPreflightResultCacheItem*> CrossOriginPreflightResultHashMap;
+        typedef HashMap<std::pair<String, KURL>, OwnPtr<CrossOriginPreflightResultCacheItem> > CrossOriginPreflightResultHashMap;
 
         CrossOriginPreflightResultHashMap m_preflightHashMap;
     };
 
 } // namespace WebCore
+
+#endif

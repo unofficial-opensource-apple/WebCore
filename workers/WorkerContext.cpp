@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Apple Inc. All Rights Reserved.
- * Copyright (C) 2009 Google Inc. All Rights Reserved.
+ * Copyright (C) 2009, 2011 Google Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,16 +32,23 @@
 #include "WorkerContext.h"
 
 #include "ActiveDOMObject.h"
-#include "Database.h"
+#include "ContentSecurityPolicy.h"
 #include "DOMTimer.h"
+#include "DOMURL.h"
 #include "DOMWindow.h"
+#include "ErrorEvent.h"
 #include "Event.h"
 #include "EventException.h"
+#include "InspectorConsoleInstrumentation.h"
+#include "KURL.h"
 #include "MessagePort.h"
 #include "NotImplemented.h"
+#include "ScheduledAction.h"
+#include "ScriptCallStack.h"
 #include "ScriptSourceCode.h"
 #include "ScriptValue.h"
 #include "SecurityOrigin.h"
+#include "WorkerInspectorController.h"
 #include "WorkerLocation.h"
 #include "WorkerNavigator.h"
 #include "WorkerObjectProxy.h"
@@ -52,28 +59,55 @@
 #include <wtf/RefPtr.h>
 #include <wtf/UnusedParam.h>
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 #include "NotificationCenter.h"
 #endif
 
+#include "ExceptionCode.h"
+
 namespace WebCore {
 
-WorkerContext::WorkerContext(const KURL& url, const String& userAgent, WorkerThread* thread)
+class CloseWorkerContextTask : public ScriptExecutionContext::Task {
+public:
+    static PassOwnPtr<CloseWorkerContextTask> create()
+    {
+        return adoptPtr(new CloseWorkerContextTask);
+    }
+
+    virtual void performTask(ScriptExecutionContext *context)
+    {
+        ASSERT(context->isWorkerContext());
+        WorkerContext* workerContext = static_cast<WorkerContext*>(context);
+        // Notify parent that this context is closed. Parent is responsible for calling WorkerThread::stop().
+        workerContext->thread()->workerReportingProxy().workerContextClosed();
+    }
+
+    virtual bool isCleanupTask() const { return true; }
+};
+
+WorkerContext::WorkerContext(const KURL& url, const String& userAgent, WorkerThread* thread, const String& policy, ContentSecurityPolicy::HeaderType contentSecurityPolicyType)
     : m_url(url)
     , m_userAgent(userAgent)
-    , m_script(new WorkerScriptController(this))
+    , m_script(adoptPtr(new WorkerScriptController(this)))
     , m_thread(thread)
+#if ENABLE(INSPECTOR)
+    , m_workerInspectorController(adoptPtr(new WorkerInspectorController(this)))
+#endif
     , m_closing(false)
+    , m_eventQueue(WorkerEventQueue::create(this))
 {
     setSecurityOrigin(SecurityOrigin::create(url));
+    setContentSecurityPolicy(ContentSecurityPolicy::create(this));
+    contentSecurityPolicy()->didReceiveHeader(policy, contentSecurityPolicyType);
 }
 
 WorkerContext::~WorkerContext()
 {
     ASSERT(currentThread() == thread()->threadID());
-#if ENABLE(NOTIFICATIONS)
-    m_notifications.clear();
-#endif
+
+    // Make sure we have no observers.
+    notifyObserversOfStop();
+
     // Notify proxy that we are going away. This can free the WorkerThread object, so do not access it after this.
     thread()->workerReportingProxy().workerContextDestroyed();
 }
@@ -108,6 +142,11 @@ String WorkerContext::userAgent(const KURL&) const
     return m_userAgent;
 }
 
+void WorkerContext::disableEval()
+{
+    m_script->disableEval();
+}
+
 WorkerLocation* WorkerContext::location() const
 {
     if (!m_location)
@@ -120,9 +159,11 @@ void WorkerContext::close()
     if (m_closing)
         return;
 
+    // Let current script run to completion but prevent future script evaluations.
+    // After m_closing is set, all the tasks in the queue continue to be fetched but only
+    // tasks with isCleanupTask()==true will be executed.
     m_closing = true;
-    // Notify parent that this context is closed. Parent is responsible for calling WorkerThread::stop().
-    thread()->workerReportingProxy().workerContextClosed();
+    postTask(CloseWorkerContextTask::create());
 }
 
 WorkerNavigator* WorkerContext::navigator() const
@@ -141,26 +182,13 @@ bool WorkerContext::hasPendingActivity() const
             return true;
     }
 
-    // Keep the worker active as long as there is a MessagePort with pending activity or that is remotely entangled.
     HashSet<MessagePort*>::const_iterator messagePortsEnd = messagePorts().end();
     for (HashSet<MessagePort*>::const_iterator iter = messagePorts().begin(); iter != messagePortsEnd; ++iter) {
-        if ((*iter)->hasPendingActivity() || ((*iter)->isEntangled() && !(*iter)->locallyEntangledPort()))
+        if ((*iter)->hasPendingActivity())
             return true;
     }
 
     return false;
-}
-
-void WorkerContext::resourceRetrievedByXMLHttpRequest(unsigned long, const ScriptString&)
-{
-    // FIXME: The implementation is pending the fixes in https://bugs.webkit.org/show_bug.cgi?id=23175
-    notImplemented();
-}
-
-void WorkerContext::scriptImported(unsigned long, const String&)
-{
-    // FIXME: The implementation is pending the fixes in https://bugs.webkit.org/show_bug.cgi?id=23175
-    notImplemented();
 }
 
 void WorkerContext::postTask(PassOwnPtr<Task> task)
@@ -168,7 +196,7 @@ void WorkerContext::postTask(PassOwnPtr<Task> task)
     thread()->runLoop().postTask(task);
 }
 
-int WorkerContext::setTimeout(ScheduledAction* action, int timeout)
+int WorkerContext::setTimeout(PassOwnPtr<ScheduledAction> action, int timeout)
 {
     return DOMTimer::install(scriptExecutionContext(), action, timeout, true);
 }
@@ -178,7 +206,14 @@ void WorkerContext::clearTimeout(int timeoutId)
     DOMTimer::removeById(scriptExecutionContext(), timeoutId);
 }
 
-int WorkerContext::setInterval(ScheduledAction* action, int timeout)
+#if ENABLE(INSPECTOR)
+void WorkerContext::clearInspector()
+{
+    m_workerInspectorController.clear();
+}
+#endif
+
+int WorkerContext::setInterval(PassOwnPtr<ScheduledAction> action, int timeout)
 {
     return DOMTimer::install(scriptExecutionContext(), action, timeout, false);
 }
@@ -188,12 +223,8 @@ void WorkerContext::clearInterval(int timeoutId)
     DOMTimer::removeById(scriptExecutionContext(), timeoutId);
 }
 
-void WorkerContext::importScripts(const Vector<String>& urls, const String& callerURL, int callerLine, ExceptionCode& ec)
+void WorkerContext::importScripts(const Vector<String>& urls, ExceptionCode& ec)
 {
-#if !ENABLE(INSPECTOR)
-    UNUSED_PARAM(callerURL);
-    UNUSED_PARAM(callerLine);
-#endif
     ec = 0;
     Vector<String>::const_iterator urlsEnd = urls.end();
     Vector<KURL> completedURLs;
@@ -208,22 +239,22 @@ void WorkerContext::importScripts(const Vector<String>& urls, const String& call
     Vector<KURL>::const_iterator end = completedURLs.end();
 
     for (Vector<KURL>::const_iterator it = completedURLs.begin(); it != end; ++it) {
-        WorkerScriptLoader scriptLoader;
-        scriptLoader.loadSynchronously(scriptExecutionContext(), *it, AllowCrossOriginRequests);
+        RefPtr<WorkerScriptLoader> scriptLoader(WorkerScriptLoader::create());
+#if PLATFORM(CHROMIUM) || PLATFORM(BLACKBERRY)
+        scriptLoader->setTargetType(ResourceRequest::TargetIsScript);
+#endif
+        scriptLoader->loadSynchronously(scriptExecutionContext(), *it, AllowCrossOriginRequests);
 
         // If the fetching attempt failed, throw a NETWORK_ERR exception and abort all these steps.
-        if (scriptLoader.failed()) {
+        if (scriptLoader->failed()) {
             ec = XMLHttpRequestException::NETWORK_ERR;
             return;
         }
 
-        scriptExecutionContext()->scriptImported(scriptLoader.identifier(), scriptLoader.script());
-#if ENABLE(INSPECTOR)
-        scriptExecutionContext()->addMessage(InspectorControllerDestination, JSMessageSource, LogMessageType, LogMessageLevel, "Worker script imported: \"" + *it + "\".", callerLine, callerURL);
-#endif
+        InspectorInstrumentation::scriptImported(scriptExecutionContext(), scriptLoader->identifier(), scriptLoader->script());
 
         ScriptValue exception;
-        m_script->evaluate(ScriptSourceCode(scriptLoader.script(), *it), &exception);
+        m_script->evaluate(ScriptSourceCode(scriptLoader->script(), scriptLoader->responseURL()), &exception);
         if (!exception.hasNoValue()) {
             m_script->setException(exception);
             return;
@@ -231,49 +262,43 @@ void WorkerContext::importScripts(const Vector<String>& urls, const String& call
     }
 }
 
-void WorkerContext::reportException(const String& errorMessage, int lineNumber, const String& sourceURL)
+EventTarget* WorkerContext::errorEventTarget()
 {
-    bool errorHandled = false;
-    if (onerror())
-        errorHandled = onerror()->reportError(this, errorMessage, sourceURL, lineNumber);
-
-    if (!errorHandled)
-        thread()->workerReportingProxy().postExceptionToWorkerObject(errorMessage, lineNumber, sourceURL);
+    return this;
 }
 
-void WorkerContext::addMessage(MessageDestination destination, MessageSource source, MessageType type, MessageLevel level, const String& message, unsigned lineNumber, const String& sourceURL)
+void WorkerContext::logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, PassRefPtr<ScriptCallStack>)
 {
-    thread()->workerReportingProxy().postConsoleMessageToWorkerObject(destination, source, type, level, message, lineNumber, sourceURL);
+    thread()->workerReportingProxy().postExceptionToWorkerObject(errorMessage, lineNumber, sourceURL);
 }
 
-#if ENABLE(NOTIFICATIONS)
-NotificationCenter* WorkerContext::webkitNotifications() const
+void WorkerContext::addMessage(MessageSource source, MessageType type, MessageLevel level, const String& message, const String& sourceURL, unsigned lineNumber, PassRefPtr<ScriptCallStack> callStack)
 {
-    if (!m_notifications)
-        m_notifications = NotificationCenter::create(scriptExecutionContext(), m_thread->getNotificationPresenter());
-    return m_notifications.get();
-}
-#endif
-
-#if ENABLE(DATABASE)
-PassRefPtr<Database> WorkerContext::openDatabase(const String& name, const String& version, const String& displayName, unsigned long estimatedSize, ExceptionCode& ec)
-{
-    if (!securityOrigin()->canAccessDatabase()) {
-        ec = SECURITY_ERR;
-        return 0;
+    if (!isContextThread()) {
+        postTask(AddConsoleMessageTask::create(source, type, level, message));
+        return;
     }
-
-    ASSERT(Database::isAvailable());
-    if (!Database::isAvailable())
-        return 0;
-
-    return Database::openDatabase(this, name, version, displayName, estimatedSize, ec);
+    thread()->workerReportingProxy().postConsoleMessageToWorkerObject(source, type, level, message, lineNumber, sourceURL);
+    addMessageToWorkerConsole(source, type, level, message, sourceURL, lineNumber, callStack);
 }
-#endif
+
+void WorkerContext::addMessageToWorkerConsole(MessageSource source, MessageType type, MessageLevel level, const String& message, const String& sourceURL, unsigned lineNumber, PassRefPtr<ScriptCallStack> callStack)
+{
+    ASSERT(isContextThread());
+    if (callStack)
+        InspectorInstrumentation::addMessageToConsole(this, source, type, level, message, 0, callStack);
+    else
+        InspectorInstrumentation::addMessageToConsole(this, source, type, level, message, sourceURL, lineNumber);
+}
 
 bool WorkerContext::isContextThread() const
 {
     return currentThread() == thread()->threadID();
+}
+
+bool WorkerContext::isJSExecutionForbidden() const
+{
+    return m_script->isExecutionForbidden();
 }
 
 EventTargetData* WorkerContext::eventTargetData()
@@ -284,6 +309,58 @@ EventTargetData* WorkerContext::eventTargetData()
 EventTargetData* WorkerContext::ensureEventTargetData()
 {
     return &m_eventTargetData;
+}
+
+WorkerContext::Observer::Observer(WorkerContext* context)
+    : m_context(context)
+{
+    ASSERT(m_context && m_context->isContextThread());
+    m_context->registerObserver(this);
+}
+
+WorkerContext::Observer::~Observer()
+{
+    if (!m_context)
+        return;
+    ASSERT(m_context->isContextThread());
+    m_context->unregisterObserver(this);
+}
+
+void WorkerContext::Observer::stopObserving()
+{
+    if (!m_context)
+        return;
+    ASSERT(m_context->isContextThread());
+    m_context->unregisterObserver(this);
+    m_context = 0;
+}
+
+void WorkerContext::registerObserver(Observer* observer)
+{
+    ASSERT(observer);
+    m_workerObservers.add(observer);
+}
+
+void WorkerContext::unregisterObserver(Observer* observer)
+{
+    ASSERT(observer);
+    m_workerObservers.remove(observer);
+}
+
+void WorkerContext::notifyObserversOfStop()
+{
+    HashSet<Observer*>::iterator iter = m_workerObservers.begin();
+    while (iter != m_workerObservers.end()) {
+        WorkerContext::Observer* observer = *iter;
+        observer->stopObserving();
+        observer->notifyStop();
+        iter = m_workerObservers.begin();
+    }
+}
+
+WorkerEventQueue* WorkerContext::eventQueue() const
+{
+    return m_eventQueue.get();
 }
 
 } // namespace WebCore

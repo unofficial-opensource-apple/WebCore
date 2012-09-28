@@ -2,7 +2,7 @@
  * Copyright (C) 2006, 2007, 2008 Apple Computer, Inc. All rights reserved.
  * Copyright (C) 2006 Michael Emmel mike.emmel@gmail.com
  * Copyright (C) 2007, 2009 Holger Hans Peter Freyther
- * Copyright (C) 2008 Collabora Ltd.
+ * Copyright (C) 2008, 2010 Collabora Ltd.
  *
  * All rights reserved.
  *
@@ -31,143 +31,102 @@
 #include "config.h"
 #include "ScrollView.h"
 
-#include "ChromeClient.h"
-#include "FloatRect.h"
-#include "Frame.h"
-#include "FrameView.h"
-#include "GraphicsContext.h"
 #include "HostWindow.h"
-#include "IntRect.h"
-#include "Page.h"
-#include "PlatformMouseEvent.h"
-#include "PlatformWheelEvent.h"
-#include "ScrollbarGtk.h"
+#include "MainFrameScrollbarGtk.h"
 #include "ScrollbarTheme.h"
-
 #include <gtk/gtk.h>
 
 using namespace std;
 
 namespace WebCore {
 
-void ScrollView::platformInit()
+static bool shouldCreateMainFrameScrollbar(const ScrollView* scrollView)
 {
-    m_horizontalAdjustment = 0;
-    m_verticalAdjustment = 0;
-}
+    // Interior frame ScrollViews never have MainFrameScrollbars.
+    if (scrollView->parent())
+        return false;
 
-void ScrollView::platformDestroy()
-{
-    m_horizontalAdjustment = 0;
-    m_verticalAdjustment = 0;
+    // If we don't have a host window or a containing widget (ala WebKit2).
+    HostWindow* hostWindow = scrollView->hostWindow();
+    if (!hostWindow || !hostWindow->platformPageClient())
+        return false;
+
+    gboolean selfScrolling = FALSE;
+    g_object_get(hostWindow->platformPageClient(), "self-scrolling", &selfScrolling, NULL);
+    return !selfScrolling;
 }
 
 PassRefPtr<Scrollbar> ScrollView::createScrollbar(ScrollbarOrientation orientation)
 {
-    if (orientation == HorizontalScrollbar && m_horizontalAdjustment)
-        return ScrollbarGtk::createScrollbar(this, orientation, m_horizontalAdjustment);
-    else if (orientation == VerticalScrollbar && m_verticalAdjustment)
-        return ScrollbarGtk::createScrollbar(this, orientation, m_verticalAdjustment);
-    else
-        return Scrollbar::createNativeScrollbar(this, orientation, RegularScrollbar);
-}
-
-/*
- * The following is assumed:
- *   (hadj && vadj) || (!hadj && !vadj)
- */
-void ScrollView::setGtkAdjustments(GtkAdjustment* hadj, GtkAdjustment* vadj)
-{
-    ASSERT(!hadj == !vadj);
-
-    m_horizontalAdjustment = hadj;
-    m_verticalAdjustment = vadj;
-
-    // Reset the adjustments to a sane default
-    if (m_horizontalAdjustment) {
-        m_horizontalAdjustment->lower = 0;
-        m_horizontalAdjustment->upper = 0;
-        m_horizontalAdjustment->value = 0;
-        gtk_adjustment_changed(m_horizontalAdjustment);
-        gtk_adjustment_value_changed(m_horizontalAdjustment);
-
-        m_verticalAdjustment->lower = 0;
-        m_verticalAdjustment->upper = 0;
-        m_verticalAdjustment->value = 0;
-        gtk_adjustment_changed(m_verticalAdjustment);
-        gtk_adjustment_value_changed(m_verticalAdjustment);
-    }
-
-    /* reconsider having a scrollbar */
-    setHasVerticalScrollbar(false);
-    setHasHorizontalScrollbar(false);
-}
-
-void ScrollView::platformAddChild(Widget* child)
-{
-    if (!GTK_IS_SOCKET(child->platformWidget()))
-        gtk_container_add(GTK_CONTAINER(hostWindow()->platformPageClient()), child->platformWidget());
-}
-
-void ScrollView::platformRemoveChild(Widget* child)
-{
-    GtkWidget* parent;
-
-    // HostWindow can be NULL here. If that's the case
-    // let's grab the child's parent instead.
-    if (hostWindow())
-        parent = GTK_WIDGET(hostWindow()->platformPageClient());
-    else
-        parent = GTK_WIDGET(child->platformWidget()->parent);
-
-    if (GTK_IS_CONTAINER(parent) && parent == child->platformWidget()->parent)
-        gtk_container_remove(GTK_CONTAINER(parent), child->platformWidget());
+    if (shouldCreateMainFrameScrollbar(this))
+        return MainFrameScrollbarGtk::create(this, orientation);
+    return Scrollbar::createNativeScrollbar(this, orientation, RegularScrollbar);
 }
 
 IntRect ScrollView::visibleContentRect(bool includeScrollbars) const
 {
-    if (!m_horizontalAdjustment)
+    // If we are an interior frame scrollbar or are in some sort of transition
+    // state, just calculate our size based on what the GTK+ theme says the
+    // scrollbar width should be.
+    if (!shouldCreateMainFrameScrollbar(this)) {
         return IntRect(IntPoint(m_scrollOffset.width(), m_scrollOffset.height()),
                        IntSize(max(0, width() - (verticalScrollbar() && !includeScrollbars ? verticalScrollbar()->width() : 0)),
                                max(0, height() - (horizontalScrollbar() && !includeScrollbars ? horizontalScrollbar()->height() : 0))));
+    }
 
-    // Main frame.
+    // We don't have a parent, so we are the main frame and thus have
+    // a parent widget which we can use to measure the visible region.
     GtkWidget* measuredWidget = hostWindow()->platformPageClient();
-    GtkWidget* parent = gtk_widget_get_parent(measuredWidget);
+    GtkWidget* parentWidget = gtk_widget_get_parent(measuredWidget);
 
     // We may not be in a widget that displays scrollbars, but we may
     // have other kinds of decoration that make us smaller.
-    if (parent && includeScrollbars)
-        measuredWidget = parent;
+    if (parentWidget && includeScrollbars)
+        measuredWidget = parentWidget;
 
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(measuredWidget, &allocation);
     return IntRect(IntPoint(m_scrollOffset.width(), m_scrollOffset.height()),
-                   IntSize(measuredWidget->allocation.width,
-                           measuredWidget->allocation.height));
+                   IntSize(allocation.width, allocation.height));
 }
 
-void ScrollView::setScrollbarModes(ScrollbarMode horizontalMode, ScrollbarMode verticalMode)
+void ScrollView::setScrollbarModes(ScrollbarMode horizontalMode, ScrollbarMode verticalMode, bool horizontalLock, bool verticalLock)
 {
-    if (horizontalMode == m_horizontalScrollbarMode && verticalMode == m_verticalScrollbarMode)
-        return;
+    // FIXME: Restructure the ScrollView abstraction so that we do not have to
+    // copy this verbatim from ScrollView.cpp. Until then, we should make sure this
+    // is kept in sync.
+    bool needsUpdate = false;
 
-    m_horizontalScrollbarMode = horizontalMode;
-    m_verticalScrollbarMode = verticalMode;
-
-    // We don't really care about reporting policy changes on frames
-    // that have no adjustments attached to them.
-    if (!m_horizontalAdjustment) {
-        updateScrollbars(scrollOffset());
-        return;
+    if (horizontalMode != horizontalScrollbarMode() && !m_horizontalScrollbarLock) {
+        m_horizontalScrollbarMode = horizontalMode;
+        needsUpdate = true;
     }
 
-    if (!isFrameView())
+    if (verticalMode != verticalScrollbarMode() && !m_verticalScrollbarLock) {
+        m_verticalScrollbarMode = verticalMode;
+        needsUpdate = true;
+    }
+
+    if (horizontalLock)
+        setHorizontalScrollbarLock();
+
+    if (verticalLock)
+        setVerticalScrollbarLock();
+
+    if (needsUpdate)
+        updateScrollbars(scrollOffset());
+
+    // We don't need to report policy changes on ScrollView's unless this
+    // one has an adjustment attached and it is a main frame.
+    if (parent() || !isFrameView())
         return;
 
     // For frames that do have adjustments attached, we want to report
     // policy changes, so that they may be applied to the widget to
-    // which the WebView has been added, for instance.
+    // which the WebView's container (e.g. GtkScrolledWindow).
     if (hostWindow())
         hostWindow()->scrollbarsModeDidChange();
 }
 
 }
+

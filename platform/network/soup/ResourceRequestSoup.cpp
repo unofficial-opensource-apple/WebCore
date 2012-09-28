@@ -20,15 +20,40 @@
 #include "config.h"
 #include "ResourceRequest.h"
 
-#include "CString.h"
-#include "GOwnPtr.h"
+#include <wtf/gobject/GOwnPtr.h>
+#include "GOwnPtrSoup.h"
+#include "HTTPParsers.h"
+#include "MIMETypeRegistry.h"
 #include "PlatformString.h"
+#include "SoupURIUtils.h"
 
 #include <libsoup/soup.h>
+#include <wtf/text/CString.h>
 
 using namespace std;
 
 namespace WebCore {
+
+void ResourceRequest::updateSoupMessage(SoupMessage* soupMessage) const
+{
+    g_object_set(soupMessage, SOUP_MESSAGE_METHOD, httpMethod().utf8().data(), NULL);
+
+    const HTTPHeaderMap& headers = httpHeaderFields();
+    SoupMessageHeaders* soupHeaders = soupMessage->request_headers;
+    if (!headers.isEmpty()) {
+        HTTPHeaderMap::const_iterator end = headers.end();
+        for (HTTPHeaderMap::const_iterator it = headers.begin(); it != end; ++it)
+            soup_message_headers_append(soupHeaders, it->first.string().utf8().data(), it->second.utf8().data());
+    }
+
+    String firstPartyString = firstPartyForCookies().string();
+    if (!firstPartyString.isEmpty()) {
+        GOwnPtr<SoupURI> firstParty(soup_uri_new(firstPartyString.utf8().data()));
+        soup_message_set_first_party(soupMessage, firstParty.get());
+    }
+
+    soup_message_set_flags(soupMessage, m_soupFlags);
+}
 
 SoupMessage* ResourceRequest::toSoupMessage() const
 {
@@ -36,13 +61,21 @@ SoupMessage* ResourceRequest::toSoupMessage() const
     if (!soupMessage)
         return 0;
 
-    HTTPHeaderMap headers = httpHeaderFields();
+    const HTTPHeaderMap& headers = httpHeaderFields();
     SoupMessageHeaders* soupHeaders = soupMessage->request_headers;
     if (!headers.isEmpty()) {
         HTTPHeaderMap::const_iterator end = headers.end();
         for (HTTPHeaderMap::const_iterator it = headers.begin(); it != end; ++it)
             soup_message_headers_append(soupHeaders, it->first.string().utf8().data(), it->second.utf8().data());
     }
+
+    String firstPartyString = firstPartyForCookies().string();
+    if (!firstPartyString.isEmpty()) {
+        GOwnPtr<SoupURI> firstParty(soup_uri_new(firstPartyString.utf8().data()));
+        soup_message_set_first_party(soupMessage, firstParty.get());
+    }
+
+    soup_message_set_flags(soupMessage, m_soupFlags);
 
     // Body data is only handled at ResourceHandleSoup::startHttp for
     // now; this is because this may not be a good place to go
@@ -52,16 +85,20 @@ SoupMessage* ResourceRequest::toSoupMessage() const
 
 void ResourceRequest::updateFromSoupMessage(SoupMessage* soupMessage)
 {
-    SoupURI* soupURI = soup_message_get_uri(soupMessage);
-    GOwnPtr<gchar> uri(soup_uri_to_string(soupURI, FALSE));
-    m_url = KURL(KURL(), String::fromUTF8(uri.get()));
+    bool shouldPortBeResetToZero = m_url.hasPort() && !m_url.port();
+    m_url = soupURIToKURL(soup_message_get_uri(soupMessage));
+
+    // SoupURI cannot differeniate between an explicitly specified port 0 and
+    // no port specified.
+    if (shouldPortBeResetToZero)
+        m_url.setPort(0);
 
     m_httpMethod = String::fromUTF8(soupMessage->method);
 
+    m_httpHeaderFields.clear();
     SoupMessageHeadersIter headersIter;
     const char* headerName;
     const char* headerValue;
-
     soup_message_headers_iter_init(&headersIter, soupMessage->request_headers);
     while (soup_message_headers_iter_next(&headersIter, &headerName, &headerValue))
         m_httpHeaderFields.set(String::fromUTF8(headerName), String::fromUTF8(headerValue));
@@ -69,9 +106,14 @@ void ResourceRequest::updateFromSoupMessage(SoupMessage* soupMessage)
     if (soupMessage->request_body->data)
         m_httpBody = FormData::create(soupMessage->request_body->data, soupMessage->request_body->length);
 
-    // FIXME: m_allowCookies and m_firstPartyForCookies should
-    // probably be handled here and on doUpdatePlatformRequest
-    // somehow.
+    SoupURI* firstParty = soup_message_get_first_party(soupMessage);
+    if (firstParty)
+        m_firstPartyForCookies = soupURIToKURL(firstParty);
+
+    m_soupFlags = soup_message_get_flags(soupMessage);
+
+    // FIXME: m_allowCookies should probably be handled here and on
+    // doUpdatePlatformRequest somehow.
 }
 
 unsigned initializeMaximumHTTPConnectionCountPerHost()

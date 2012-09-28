@@ -36,13 +36,11 @@
 #include "config.h"
 #include "ScriptController.h"
 
-#include "Bridge.h"
+#include "BridgeJSC.h"
 #include "DOMWindow.h"
 #include "PluginView.h"
 #include "qt_instance.h"
 #include "runtime_root.h"
-
-#include <QWidget>
 
 namespace WebCore {
 
@@ -53,10 +51,15 @@ PassRefPtr<JSC::Bindings::Instance> ScriptController::createScriptInstanceForWid
         return pluginView->bindingInstance();
     }
 
-    QWidget* platformWidget = widget->platformWidget();
-    if (!platformWidget)
+    QObject* object = widget->bindingObject();
+
+    if (!object)
+        object = widget->platformWidget();
+
+    if (!object)
         return 0;
-    return JSC::Bindings::QtInstance::getQtInstance(platformWidget, bindingRootObject(), QScriptEngine::QtOwnership);
+
+    return JSC::Bindings::QtInstance::getQtInstance(object, bindingRootObject(), QScriptEngine::QtOwnership);
 }
 
 }

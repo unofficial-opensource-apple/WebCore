@@ -31,26 +31,33 @@
 #include "config.h"
 #include "HTTPHeaderMap.h"
 
-#include <memory>
 #include <utility>
 
 using namespace std;
 
 namespace WebCore {
 
-auto_ptr<CrossThreadHTTPHeaderMapData> HTTPHeaderMap::copyData() const
+HTTPHeaderMap::HTTPHeaderMap()
 {
-    auto_ptr<CrossThreadHTTPHeaderMapData> data(new CrossThreadHTTPHeaderMapData());
+}
+
+HTTPHeaderMap::~HTTPHeaderMap()
+{
+}
+
+PassOwnPtr<CrossThreadHTTPHeaderMapData> HTTPHeaderMap::copyData() const
+{
+    OwnPtr<CrossThreadHTTPHeaderMapData> data = adoptPtr(new CrossThreadHTTPHeaderMapData());
     data->reserveInitialCapacity(size());
 
     HTTPHeaderMap::const_iterator end_it = end();
     for (HTTPHeaderMap::const_iterator it = begin(); it != end_it; ++it) {
-        data->append(make_pair(it->first.string().crossThreadString(), it->second.crossThreadString()));
+        data->append(make_pair(it->first.string().isolatedCopy(), it->second.isolatedCopy()));
     }
-    return data;
+    return data.release();
 }
 
-void HTTPHeaderMap::adopt(auto_ptr<CrossThreadHTTPHeaderMapData> data)
+void HTTPHeaderMap::adopt(PassOwnPtr<CrossThreadHTTPHeaderMapData> data)
 {
     clear();
     size_t dataSize = data->size();
@@ -59,7 +66,17 @@ void HTTPHeaderMap::adopt(auto_ptr<CrossThreadHTTPHeaderMapData> data)
         set(header.first, header.second);
     }
 }
-    
+
+String HTTPHeaderMap::get(const AtomicString& name) const
+{
+    return HashMap<AtomicString, String, CaseFoldingHash>::get(name);
+}
+
+HTTPHeaderMap::AddResult HTTPHeaderMap::add(const AtomicString& name, const String& value)
+{
+    return HashMap<AtomicString, String, CaseFoldingHash>::add(name, value);
+}
+
 // Adapter that allows the HashMap to take C strings as keys.
 struct CaseFoldingCStringTranslator {
     static unsigned hash(const char* cString)
@@ -91,7 +108,7 @@ bool HTTPHeaderMap::contains(const char* name) const
     return find<const char*, CaseFoldingCStringTranslator>(name) != end();
 }
 
-pair<HTTPHeaderMap::iterator, bool> HTTPHeaderMap::add(const char* name, const String& value)
+HTTPHeaderMap::AddResult HTTPHeaderMap::add(const char* name, const String& value)
 {
     return HashMap<AtomicString, String, CaseFoldingHash>::add<const char*, CaseFoldingCStringTranslator>(name, value);
 }

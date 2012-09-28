@@ -36,6 +36,7 @@
 #include <wtf/CurrentTime.h>
 #include <wtf/Vector.h>
 
+#include "limits.h"
 #include "SystemTime.h"
 
 namespace WebCore {
@@ -47,9 +48,6 @@ static int frameBytes(const IntSize& frameSize)
 
 BitmapImage::BitmapImage(ImageObserver* observer)
     : Image(observer)
-    , m_imageAnimationDisabled(false)
-    , m_progressiveLoadChunkTime(0)
-    , m_progressiveLoadChunkCount(0)
     , m_currentFrame(0)
     , m_frames(0)
     , m_frameTimer(0)
@@ -57,6 +55,11 @@ BitmapImage::BitmapImage(ImageObserver* observer)
     , m_repetitionCountStatus(Unknown)
     , m_repetitionsComplete(0)
     , m_desiredFrameStartTime(0)
+    , m_decodedSize(0)
+    , m_decodedPropertiesSize(0)
+    , m_frameCount(0)
+    , m_progressiveLoadChunkTime(0)
+    , m_progressiveLoadChunkCount(0)
     , m_isSolidColor(false)
     , m_checkedForSolidColor(false)
     , m_animationFinished(false)
@@ -64,9 +67,7 @@ BitmapImage::BitmapImage(ImageObserver* observer)
     , m_haveSize(false)
     , m_sizeAvailable(false)
     , m_hasUniformFrameSize(true)
-    , m_decodedSize(0)
     , m_haveFrameCount(false)
-    , m_frameCount(0)
 {
     initPlatformData();
 }
@@ -77,6 +78,17 @@ BitmapImage::~BitmapImage()
     stopAnimation();
 }
 
+bool BitmapImage::isBitmapImage() const
+{
+    return true;
+}
+
+bool BitmapImage::hasSingleSecurityOrigin() const
+{
+    return true;
+}
+
+
 void BitmapImage::destroyDecodedData(bool destroyAll)
 {
     int deltaBytes = 0;
@@ -86,8 +98,13 @@ void BitmapImage::destroyDecodedData(bool destroyAll)
         // save the memory for the framebuffer data), so we don't need to clear
         // the metadata.
         int bytes = m_frames[i].m_bytes;
-        if (m_frames[i].clear(false))
+        if (m_frames[i].clear(false)) {
             deltaBytes -= bytes;
+            if (m_decodedPropertiesSize) {
+                deltaBytes -= m_decodedPropertiesSize;
+                m_decodedPropertiesSize = 0;
+            }
+        }
     }
 
     destroyMetadataAndNotify(deltaBytes);
@@ -101,6 +118,8 @@ void BitmapImage::destroyDecodedDataIfNecessary(bool destroyAll)
     // Animated images >5MB are considered large enough that we'll only hang on
     // to one frame at a time.
     static const unsigned cLargeAnimationCutoff = 2097152;
+    if (!canDestroyDecodedDataIfNecessary())
+        return;
     if (m_frames.size() * frameBytes(m_size) > cLargeAnimationCutoff)
         destroyDecodedData(destroyAll);
 }
@@ -110,6 +129,7 @@ void BitmapImage::destroyMetadataAndNotify(const int deltaBytes)
     ASSERT(deltaBytes <= 0);
     ASSERT(static_cast<int>(m_decodedSize) + deltaBytes >= 0);
     m_isSolidColor = false;
+    m_checkedForSolidColor = false;
     invalidatePlatformData();
 
     m_decodedSize += deltaBytes;
@@ -132,9 +152,7 @@ void BitmapImage::cacheFrame(size_t index, float scaleHint)
     if (numFrames == 1 && m_frames[index].m_frame)
         checkForSolidColor();
 
-#if ENABLE(RESPECT_EXIF_ORIENTATION)
     m_frames[index].m_orientation = m_source.orientationAtIndex(index);
-#endif
     m_frames[index].m_haveMetadata = true;
     m_frames[index].m_isComplete = m_source.frameIsCompleteAtIndex(index);
     if (repetitionCount(false) != cAnimationNone)
@@ -145,8 +163,12 @@ void BitmapImage::cacheFrame(size_t index, float scaleHint)
     if (frameSize != m_size)
         m_hasUniformFrameSize = false;
     if (m_frames[index].m_frame) {
-        const int deltaBytes = m_frames[index].m_bytes;
+        int deltaBytes = m_frames[index].m_bytes;
         m_decodedSize += deltaBytes;
+        // The fully-decoded frame will subsume the partially decoded data used
+        // to determine image properties.
+        deltaBytes -= m_decodedPropertiesSize;
+        m_decodedPropertiesSize = 0;
         if (imageObserver())
             imageObserver()->decodedSizeChanged(this, deltaBytes);
     }
@@ -167,20 +189,75 @@ void BitmapImage::cacheFrameInfo(size_t index)
     m_frames[index].m_haveInfo = true;
 }
 
+void BitmapImage::didDecodeProperties() const
+{
+    if (m_decodedSize)
+        return;
+    size_t updatedSize = m_source.bytesDecodedToDetermineProperties();
+    if (m_decodedPropertiesSize == updatedSize)
+        return;
+    int deltaBytes = updatedSize - m_decodedPropertiesSize;
+#if !ASSERT_DISABLED
+    bool overflow = updatedSize > m_decodedPropertiesSize && deltaBytes < 0;
+    bool underflow = updatedSize < m_decodedPropertiesSize && deltaBytes > 0;
+    ASSERT(!overflow && !underflow);
+#endif
+    m_decodedPropertiesSize = updatedSize;
+    if (imageObserver())
+        imageObserver()->decodedSizeChanged(this, deltaBytes);
+}
+
+void BitmapImage::updateSize() const
+{
+    if (!m_sizeAvailable || m_haveSize)
+        return;
+
+    m_size = m_source.size();
+    m_sizeRespectingOrientation = m_source.size(RespectImageOrientation);
+    m_originalSize = m_source.originalSize();
+    m_originalSizeRespectingOrientation = m_source.originalSize(RespectImageOrientation);
+    m_haveSize = true;
+    didDecodeProperties();
+}
+
 IntSize BitmapImage::size() const
 {
-    if (m_sizeAvailable && !m_haveSize) {
-        m_size = m_source.size();
-        m_haveSize = true;
-    }
+    updateSize();
     return m_size;
+}
+
+IntSize BitmapImage::sizeRespectingOrientation() const
+{
+    updateSize();
+    return m_sizeRespectingOrientation;
+}
+
+IntSize BitmapImage::originalSize() const
+{
+    updateSize();
+    return m_originalSize;
+}
+
+IntSize BitmapImage::originalSizeRespectingOrientation() const
+{
+    updateSize();
+    return m_originalSizeRespectingOrientation;
 }
 
 IntSize BitmapImage::currentFrameSize() const
 {
     if (!m_currentFrame || m_hasUniformFrameSize)
         return size();
-    return m_source.frameSizeAtIndex(m_currentFrame);
+    IntSize frameSize = m_source.frameSizeAtIndex(m_currentFrame);
+    didDecodeProperties();
+    return frameSize;
+}
+
+bool BitmapImage::getHotSpot(IntPoint& hotSpot) const
+{
+    bool result = m_source.getHotSpot(hotSpot);
+    didDecodeProperties();
+    return result;
 }
 
 bool BitmapImage::dataChanged(bool allDataReceived)
@@ -190,33 +267,31 @@ bool BitmapImage::dataChanged(bool allDataReceived)
     int deltaBytes = 0;
     if (!m_frames.isEmpty()) {
         int bytes = m_frames[m_frames.size() - 1].m_bytes;
-        if (m_frames[m_frames.size() - 1].clear(true))
+        if (m_frames[m_frames.size() - 1].clear(true)) {
             deltaBytes -= bytes;
+            deltaBytes -= m_decodedPropertiesSize;
+            m_decodedPropertiesSize = 0;
+        }
     }
     destroyMetadataAndNotify(deltaBytes);
     
     // Feed all the data we've seen so far to the image decoder.
     m_allDataReceived = allDataReceived;
-
     static const double chunkLoadIntervals[] = {0.0, 1.0, 3.0, 6.0, 15.0};
-    double interval = chunkLoadIntervals[std::min(m_progressiveLoadChunkCount, 4u)];
+    double interval = chunkLoadIntervals[std::min(m_progressiveLoadChunkCount, static_cast<uint16_t>(4))];
     
     bool needsUpdate = false;
     if (currentTime() - m_progressiveLoadChunkTime > interval) { // the first time through, the chunk time will be 0 and the image will get an update.
         needsUpdate = true;
         m_progressiveLoadChunkTime = currentTime();
+        ASSERT(m_progressiveLoadChunkCount <= std::numeric_limits<uint16_t>::max());
         m_progressiveLoadChunkCount++;
     }
     if (needsUpdate || allDataReceived)
         m_source.setData(data(), allDataReceived);
     
-    // Clear the frame count.
     m_haveFrameCount = false;
-
     m_hasUniformFrameSize = true;
-
-    // Image properties will not be available until the first frame of the file
-    // reaches kCGImageStatusIncomplete.
     return isSizeAvailable();
 }
 
@@ -230,6 +305,7 @@ size_t BitmapImage::frameCount()
     if (!m_haveFrameCount) {
         m_haveFrameCount = true;
         m_frameCount = m_source.frameCount();
+        didDecodeProperties();
     }
     return m_frameCount;
 }
@@ -240,8 +316,19 @@ bool BitmapImage::isSizeAvailable()
         return true;
 
     m_sizeAvailable = m_source.isSizeAvailable();
+    didDecodeProperties();
 
     return m_sizeAvailable;
+}
+
+bool BitmapImage::ensureFrameInfoIsCached(size_t index)
+{
+    if (index >= frameCount())
+        return false;
+
+    if (index >= m_frames.size() || !m_frames[index].m_haveInfo)
+        cacheFrameInfo(index);
+    return true;
 }
 
 NativeImagePtr BitmapImage::frameAtIndex(size_t index)
@@ -268,53 +355,58 @@ NativeImagePtr BitmapImage::frameAtIndex(size_t index, float scaleHint)
 
         cacheFrame(index, scaleHint);
     }
-
     return m_frames[index].m_frame;
 }
 
 bool BitmapImage::frameIsCompleteAtIndex(size_t index)
 {
-    if (index >= frameCount())
-        return true;
-
-    if (index >= m_frames.size() || !m_frames[index].m_haveInfo)
-        cacheFrameInfo(index);
-
+    // FIXME: cacheFrameInfo does not set m_isComplete. Should it?
+    if (!ensureFrameInfoIsCached(index))
+        return true; // Why would an invalid index return true here?
     return m_frames[index].m_isComplete;
 }
 
 float BitmapImage::frameDurationAtIndex(size_t index)
 {
-    if (index >= frameCount())
+    if (!ensureFrameInfoIsCached(index))
         return 0;
-
-    if (index >= m_frames.size() || !m_frames[index].m_haveInfo)
-        cacheFrameInfo(index);
-
     return m_frames[index].m_duration;
+}
+
+NativeImagePtr BitmapImage::nativeImageForCurrentFrame()
+{
+    return frameAtIndex(currentFrame());
 }
 
 bool BitmapImage::frameHasAlphaAtIndex(size_t index)
 {
-    if (index >= frameCount())
-        return true;
-
-    if (index >= m_frames.size() || !m_frames[index].m_haveInfo)
-        cacheFrameInfo(index);
-
+    if (!ensureFrameInfoIsCached(index))
+        return true; // Why would an invalid index return true here?
     return m_frames[index].m_hasAlpha;
 }
 
-#if ENABLE(RESPECT_EXIF_ORIENTATION)
-int BitmapImage::frameOrientationAtIndex(size_t index)
+bool BitmapImage::currentFrameHasAlpha()
 {
-    if (index >= frameCount())
-        return 1;
-        
-    if (index >= m_frames.size() || !m_frames[index].m_haveInfo)
-        cacheFrameInfo(index);
-        
+    return frameHasAlphaAtIndex(currentFrame());
+}
+
+ImageOrientation BitmapImage::currentFrameOrientation()
+{
+    return frameOrientationAtIndex(currentFrame());
+}
+
+ImageOrientation BitmapImage::frameOrientationAtIndex(size_t index)
+{
+    // FIXME: cacheFrameInfo does not set m_orientation. Should it?
+    if (!ensureFrameInfoIsCached(index))
+        return DefaultImageOrientation;
     return m_frames[index].m_orientation;
+}
+
+#if !ASSERT_DISABLED
+bool BitmapImage::notSolidColor()
+{
+    return size().width() != 1 || size().height() != 1 || frameCount() > 1;
 }
 #endif
 
@@ -326,6 +418,7 @@ int BitmapImage::repetitionCount(bool imageKnownToBeComplete)
         // decoder will default to cAnimationLoopOnce, and we'll try and read
         // the count again once the whole image is decoded.
         m_repetitionCount = m_source.repetitionCount();
+        didDecodeProperties();
         m_repetitionCountStatus = (imageKnownToBeComplete || m_repetitionCount == cAnimationNone) ? Certain : Uncertain;
     }
     return m_repetitionCount;
@@ -341,20 +434,10 @@ void BitmapImage::startAnimation(bool catchUpIfNecessary)
     if (m_frameTimer || !shouldAnimate() || frameCount() <= 1)
         return;
 
-    // Determine time for next frame to start.  By ignoring paint and timer lag
-    // in this calculation, we make the animation appear to run at its desired
-    // rate regardless of how fast it's being repainted.
-    const double currentDuration = frameDurationAtIndex(m_currentFrame);
-    const double time = currentTime();
-    if (m_desiredFrameStartTime == 0) {
-        m_desiredFrameStartTime = time + currentDuration;
-    } else {
-        m_desiredFrameStartTime += currentDuration;
-
-        // Maintaining frame-to-frame delays is more important than
-        // maintaining absolute animation timing, so reset the timings each frame.
-        m_desiredFrameStartTime = time + currentDuration;
-    }
+    // If we aren't already animating, set now as the animation start time.
+    const double time = monotonicallyIncreasingTime();
+    if (!m_desiredFrameStartTime)
+        m_desiredFrameStartTime = time;
 
     // Don't advance the animation to an incomplete frame.
     size_t nextFrame = (m_currentFrame + 1) % frameCount();
@@ -367,6 +450,16 @@ void BitmapImage::startAnimation(bool catchUpIfNecessary)
     // wait on it.
     if (!m_allDataReceived && repetitionCount(false) == cAnimationLoopOnce && m_currentFrame >= (frameCount() - 1))
         return;
+
+    // Determine time for next frame to start.  By ignoring paint and timer lag
+    // in this calculation, we make the animation appear to run at its desired
+    // rate regardless of how fast it's being repainted.
+    const double currentDuration = frameDurationAtIndex(m_currentFrame);
+    m_desiredFrameStartTime += currentDuration;
+
+    // Maintaining frame-to-frame delays is more important than
+    // maintaining absolute animation timing, so reset the timings each frame.
+    m_desiredFrameStartTime = time + currentDuration;
 
     // The image may load more slowly than it's supposed to animate, so that by
     // the time we reach the end of the first repetition, we're well behind.
@@ -449,6 +542,13 @@ void BitmapImage::resetAnimation()
     destroyDecodedDataIfNecessary(true);
 }
 
+unsigned BitmapImage::decodedSize() const
+{
+    return m_decodedSize;
+}
+
+
+
 void BitmapImage::advanceAnimation(Timer<BitmapImage>*)
 {
     internalAdvanceAnimation(false);
@@ -472,7 +572,9 @@ bool BitmapImage::internalAdvanceAnimation(bool skippingFrames)
         // Get the repetition count again.  If we weren't able to get a
         // repetition count before, we should have decoded the whole image by
         // now, so it should now be available.
-        if (repetitionCount(true) && m_repetitionsComplete >= m_repetitionCount) {
+        // Note that we don't need to special-case cAnimationLoopOnce here
+        // because it is 0 (see comments on its declaration in ImageSource.h).
+        if (repetitionCount(true) != cAnimationLoopInfinite && m_repetitionsComplete > m_repetitionCount) {
             m_animationFinished = true;
             m_desiredFrameStartTime = 0;
             --m_currentFrame;
@@ -491,16 +593,29 @@ bool BitmapImage::internalAdvanceAnimation(bool skippingFrames)
     return advancedAnimation;
 }
 
-unsigned BitmapImage::animatedImageSize()
+bool BitmapImage::mayFillWithSolidColor()
 {
-    if (frameCount() <= 1)
-        return 0;
-    return (width() * height() * 4 * frameCount());
+    if (!m_checkedForSolidColor && frameCount() > 0) {
+        checkForSolidColor();
+        // WINCE PORT: checkForSolidColor() doesn't set m_checkedForSolidColor until
+        // it gets enough information to make final decision.
+#if !OS(WINCE)
+        ASSERT(m_checkedForSolidColor);
+#endif
+    }
+    return m_isSolidColor && !m_currentFrame;
 }
-    
-void BitmapImage::disableImageAnimation()
+
+Color BitmapImage::solidColor() const
 {
-    m_imageAnimationDisabled = true;
+    return m_solidColor;
 }
-    
+
+#if !USE(CG)
+void BitmapImage::draw(GraphicsContext* ctx, const FloatRect& dstRect, const FloatRect& srcRect, ColorSpace styleColorSpace, CompositeOperator op, RespectImageOrientationEnum)
+{
+    draw(ctx, dstRect, srcRect, styleColorSpace, op);
+}
+#endif
+
 }

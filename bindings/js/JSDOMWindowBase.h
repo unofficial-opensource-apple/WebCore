@@ -20,77 +20,73 @@
 #ifndef JSDOMWindowBase_h
 #define JSDOMWindowBase_h
 
-#include "PlatformString.h"
 #include "JSDOMBinding.h"
-#include <runtime/Protect.h>
-#include <wtf/HashMap.h>
-#include <wtf/OwnPtr.h>
-#include <wtf/Platform.h>
+#include "JSDOMGlobalObject.h"
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
-    class AtomicString;
     class DOMWindow;
-    class Event;
     class Frame;
     class DOMWrapperWorld;
     class JSDOMWindow;
     class JSDOMWindowShell;
-    class JSLocation;
-    class JSEventListener;
-    class SecurityOrigin;
 
     class JSDOMWindowBasePrivate;
 
     class JSDOMWindowBase : public JSDOMGlobalObject {
         typedef JSDOMGlobalObject Base;
     protected:
-        JSDOMWindowBase(NonNullPassRefPtr<JSC::Structure>, PassRefPtr<DOMWindow>, JSDOMWindowShell*);
+        JSDOMWindowBase(JSC::JSGlobalData&, JSC::Structure*, PassRefPtr<DOMWindow>, JSDOMWindowShell*);
+        void finishCreation(JSC::JSGlobalData&, JSDOMWindowShell*);
+
+        static void destroy(JSCell*);
 
     public:
         void updateDocument();
 
-        DOMWindow* impl() const { return d()->impl.get(); }
-        virtual ScriptExecutionContext* scriptExecutionContext() const;
+        DOMWindow* impl() const { return m_impl.get(); }
+        ScriptExecutionContext* scriptExecutionContext() const;
 
         // Called just before removing this window from the JSDOMWindowShell.
         void willRemoveFromWindowShell();
 
-        virtual const JSC::ClassInfo* classInfo() const { return &s_info; }
         static const JSC::ClassInfo s_info;
 
-        virtual JSC::ExecState* globalExec();
-        virtual bool supportsProfiling() const;
-        virtual bool shouldInterruptScript() const;
-        virtual bool shouldInterruptScriptBeforeTimeout() const;
+        static JSC::Structure* createStructure(JSC::JSGlobalData& globalData, JSC::JSValue prototype)
+        {
+            return JSC::Structure::create(globalData, 0, prototype, JSC::TypeInfo(JSC::GlobalObjectType, StructureFlags), &s_info);
+        }
 
+        static const JSC::GlobalObjectMethodTable s_globalObjectMethodTable;
+
+        static bool supportsProfiling(const JSC::JSGlobalObject*);
+        static bool supportsRichSourceInfo(const JSC::JSGlobalObject*);
+        static bool shouldInterruptScript(const JSC::JSGlobalObject*);
+        static bool allowsAccessFrom(const JSC::JSGlobalObject*, JSC::ExecState*);
+        static bool shouldInterruptScriptBeforeTimeout(const JSGlobalObject*);
+        
         bool allowsAccessFrom(JSC::ExecState*) const;
         bool allowsAccessFromNoErrorMessage(JSC::ExecState*) const;
         bool allowsAccessFrom(JSC::ExecState*, String& message) const;
         void printErrorMessage(const String&) const;
 
         // Don't call this version of allowsAccessFrom -- it's a slightly incorrect implementation used only by WebScriptObject
-        virtual bool allowsAccessFrom(const JSC::JSGlobalObject*) const;
-
-        virtual JSC::JSObject* toThisObject(JSC::ExecState*) const;
+        bool allowsAccessFrom(const JSC::JSGlobalObject*) const;
+        
+        static JSC::JSObject* toThisObject(JSC::JSCell*, JSC::ExecState*);
         JSDOMWindowShell* shell() const;
 
         static JSC::JSGlobalData* commonJSGlobalData();
+        static bool commonJSGlobalDataExists();
+        static JSC::JSGlobalData*& commonJSGlobalDataInternal();
 
     private:
-        struct JSDOMWindowBaseData : public JSDOMGlobalObjectData {
-            JSDOMWindowBaseData(PassRefPtr<DOMWindow> window, JSDOMWindowShell* shell);
-
-            RefPtr<DOMWindow> impl;
-            JSDOMWindowShell* shell;
-        };
+        RefPtr<DOMWindow> m_impl;
+        JSDOMWindowShell* m_shell;
 
         bool allowsAccessFromPrivate(const JSC::JSGlobalObject*) const;
         String crossDomainAccessErrorMessage(const JSC::JSGlobalObject*) const;
-        
-        static void destroyJSDOMWindowBaseData(void*);
-
-        JSDOMWindowBaseData* d() const { return static_cast<JSDOMWindowBaseData*>(JSC::JSVariableObject::d); }
     };
 
     // Returns a JSDOMWindow or jsNull()

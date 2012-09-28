@@ -30,10 +30,12 @@
 #include "CrossOriginAccessControl.h"
 #include "ResourceResponse.h"
 #include <wtf/CurrentTime.h>
+#include <wtf/MainThread.h>
 #include <wtf/StdLibExtras.h>
-#include <wtf/Threading.h>
 
 namespace WebCore {
+
+using namespace std;
 
 // These values are at the discretion of the user agent.
 static const unsigned defaultPreflightCacheTimeoutSeconds = 5;
@@ -72,30 +74,34 @@ static void addToAccessControlAllowList(const String& string, unsigned start, un
 template<class HashType>
 static bool parseAccessControlAllowList(const String& string, HashSet<String, HashType>& set)
 {
-    int start = 0;
-    int end;
-    while ((end = string.find(',', start)) != -1) {
+    unsigned start = 0;
+    size_t end;
+    while ((end = string.find(',', start)) != notFound) {
         if (start == end)
             return false;
 
         addToAccessControlAllowList(string, start, end - 1, set);
         start = end + 1;
     }
-    if (start != static_cast<int>(string.length()))
+    if (start != string.length())
         addToAccessControlAllowList(string, start, string.length() - 1, set);
 
     return true;
 }
 
-bool CrossOriginPreflightResultCacheItem::parse(const ResourceResponse& response)
+bool CrossOriginPreflightResultCacheItem::parse(const ResourceResponse& response, String& errorDescription)
 {
     m_methods.clear();
-    if (!parseAccessControlAllowList(response.httpHeaderField("Access-Control-Allow-Methods"), m_methods))
+    if (!parseAccessControlAllowList(response.httpHeaderField("Access-Control-Allow-Methods"), m_methods)) {
+        errorDescription = "Cannot parse Access-Control-Allow-Methods response header field.";
         return false;
+    }
 
     m_headers.clear();
-    if (!parseAccessControlAllowList(response.httpHeaderField("Access-Control-Allow-Headers"), m_headers))
+    if (!parseAccessControlAllowList(response.httpHeaderField("Access-Control-Allow-Headers"), m_headers)) {
+        errorDescription = "Cannot parse Access-Control-Allow-Headers response header field.";
         return false;
+    }
 
     unsigned expiryDelta;
     if (parseAccessControlMaxAge(response.httpHeaderField("Access-Control-Max-Age"), expiryDelta)) {
@@ -108,30 +114,37 @@ bool CrossOriginPreflightResultCacheItem::parse(const ResourceResponse& response
     return true;
 }
 
-bool CrossOriginPreflightResultCacheItem::allowsCrossOriginMethod(const String& method) const
+bool CrossOriginPreflightResultCacheItem::allowsCrossOriginMethod(const String& method, String& errorDescription) const
 {
-    return m_methods.contains(method) || isOnAccessControlSimpleRequestMethodWhitelist(method);
+    if (m_methods.contains(method) || isOnAccessControlSimpleRequestMethodWhitelist(method))
+        return true;
+
+    errorDescription = "Method " + method + " is not allowed by Access-Control-Allow-Methods.";
+    return false;
 }
 
-bool CrossOriginPreflightResultCacheItem::allowsCrossOriginHeaders(const HTTPHeaderMap& requestHeaders) const
+bool CrossOriginPreflightResultCacheItem::allowsCrossOriginHeaders(const HTTPHeaderMap& requestHeaders, String& errorDescription) const
 {
     HTTPHeaderMap::const_iterator end = requestHeaders.end();
     for (HTTPHeaderMap::const_iterator it = requestHeaders.begin(); it != end; ++it) {
-        if (!m_headers.contains(it->first) && !isOnAccessControlSimpleRequestHeaderWhitelist(it->first, it->second))
+        if (!m_headers.contains(it->first) && !isOnAccessControlSimpleRequestHeaderWhitelist(it->first, it->second)) {
+            errorDescription = "Request header field " + it->first.string() + " is not allowed by Access-Control-Allow-Headers.";
             return false;
+        }
     }
     return true;
 }
 
-bool CrossOriginPreflightResultCacheItem::allowsRequest(bool includeCredentials, const String& method, const HTTPHeaderMap& requestHeaders) const
+bool CrossOriginPreflightResultCacheItem::allowsRequest(StoredCredentials includeCredentials, const String& method, const HTTPHeaderMap& requestHeaders) const
 {
+    String ignoredExplanation;
     if (m_absoluteExpiryTime < currentTime())
         return false;
-    if (includeCredentials && !m_credentials)
+    if (includeCredentials == AllowStoredCredentials && m_credentials == DoNotAllowStoredCredentials)
         return false;
-    if (!allowsCrossOriginMethod(method))
+    if (!allowsCrossOriginMethod(method, ignoredExplanation))
         return false;
-    if (!allowsCrossOriginHeaders(requestHeaders))
+    if (!allowsCrossOriginHeaders(requestHeaders, ignoredExplanation))
         return false;
     return true;
 }
@@ -143,23 +156,22 @@ CrossOriginPreflightResultCache& CrossOriginPreflightResultCache::shared()
     return cache;
 }
 
-void CrossOriginPreflightResultCache::appendEntry(const String& origin, const KURL& url, CrossOriginPreflightResultCacheItem* preflightResult)
+void CrossOriginPreflightResultCache::appendEntry(const String& origin, const KURL& url, PassOwnPtr<CrossOriginPreflightResultCacheItem> preflightResult)
 {
     ASSERT(isMainThread() || pthread_main_np());
-    m_preflightHashMap.set(std::make_pair(origin, url), preflightResult);
+    m_preflightHashMap.set(make_pair(origin, url), preflightResult);
 }
 
-bool CrossOriginPreflightResultCache::canSkipPreflight(const String& origin, const KURL& url, bool includeCredentials, const String& method, const HTTPHeaderMap& requestHeaders)
+bool CrossOriginPreflightResultCache::canSkipPreflight(const String& origin, const KURL& url, StoredCredentials includeCredentials, const String& method, const HTTPHeaderMap& requestHeaders)
 {
     ASSERT(isMainThread() || pthread_main_np());
-    CrossOriginPreflightResultHashMap::iterator cacheIt = m_preflightHashMap.find(std::make_pair(origin, url));
+    CrossOriginPreflightResultHashMap::iterator cacheIt = m_preflightHashMap.find(make_pair(origin, url));
     if (cacheIt == m_preflightHashMap.end())
         return false;
 
     if (cacheIt->second->allowsRequest(includeCredentials, method, requestHeaders))
         return true;
 
-    delete cacheIt->second;
     m_preflightHashMap.remove(cacheIt);
     return false;
 }
@@ -167,7 +179,6 @@ bool CrossOriginPreflightResultCache::canSkipPreflight(const String& origin, con
 void CrossOriginPreflightResultCache::empty()
 {
     ASSERT(isMainThread() || pthread_main_np());
-    deleteAllValues(m_preflightHashMap);
     m_preflightHashMap.clear();
 }
 

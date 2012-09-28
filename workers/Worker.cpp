@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2010 Apple Inc. All Rights Reserved.
  * Copyright (C) 2009 Google Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,7 @@
 #include "Worker.h"
 
 #include "DOMWindow.h"
-#include "DocLoader.h"
+#include "CachedResourceLoader.h"
 #include "Document.h"
 #include "EventException.h"
 #include "EventListener.h"
@@ -40,6 +40,7 @@
 #include "ExceptionCode.h"
 #include "Frame.h"
 #include "FrameLoader.h"
+#include "InspectorInstrumentation.h"
 #include "MessageEvent.h"
 #include "TextEncoding.h"
 #include "WorkerContextProxy.h"
@@ -49,17 +50,34 @@
 
 namespace WebCore {
 
-Worker::Worker(const String& url, ScriptExecutionContext* context, ExceptionCode& ec)
+inline Worker::Worker(ScriptExecutionContext* context)
     : AbstractWorker(context)
     , m_contextProxy(WorkerContextProxy::create(this))
 {
-    KURL scriptURL = resolveURL(url, ec);
-    if (ec)
-        return;
+}
 
-    m_scriptLoader = new WorkerScriptLoader();
-    m_scriptLoader->loadAsynchronously(scriptExecutionContext(), scriptURL, DenyCrossOriginRequests, this);
-    setPendingActivity(this);  // The worker context does not exist while loading, so we must ensure that the worker object is not collected, as well as its event listeners.
+PassRefPtr<Worker> Worker::create(ScriptExecutionContext* context, const String& url, ExceptionCode& ec)
+{
+    RefPtr<Worker> worker = adoptRef(new Worker(context));
+
+    worker->suspendIfNeeded();
+
+    KURL scriptURL = worker->resolveURL(url, ec);
+    if (scriptURL.isEmpty())
+        return 0;
+
+    // The worker context does not exist while loading, so we must ensure that the worker object is not collected, nor are its event listeners.
+    worker->setPendingActivity(worker.get());
+
+    worker->m_scriptLoader = WorkerScriptLoader::create();
+#if PLATFORM(BLACKBERRY)
+    worker->m_scriptLoader->setTargetType(ResourceRequest::TargetIsWorker);
+#endif
+    worker->m_scriptLoader->loadAsynchronously(context, scriptURL, DenyCrossOriginRequests, worker.get());
+
+    InspectorInstrumentation::didCreateWorker(context, worker->asID(), scriptURL.string(), false);
+
+    return worker.release();
 }
 
 Worker::~Worker()
@@ -67,6 +85,11 @@ Worker::~Worker()
     ASSERT(isMainThread());
     ASSERT(scriptExecutionContext()); // The context is protected by worker context proxy, so it cannot be destroyed while a Worker exists.
     m_contextProxy->workerObjectDestroyed();
+}
+
+const AtomicString& Worker::interfaceName() const
+{
+    return eventNames().interfaceForWorker;
 }
 
 // FIXME: remove this when we update the ObjC bindings (bug #28774).
@@ -113,14 +136,23 @@ bool Worker::hasPendingActivity() const
     return m_contextProxy->hasPendingActivity() || ActiveDOMObject::hasPendingActivity();
 }
 
+void Worker::didReceiveResponse(unsigned long identifier, const ResourceResponse&)
+{
+    InspectorInstrumentation::didReceiveScriptResponse(scriptExecutionContext(), identifier);
+}
+
 void Worker::notifyFinished()
 {
     if (m_scriptLoader->failed())
         dispatchEvent(Event::create(eventNames().errorEvent, false, true));
-    else
-        m_contextProxy->startWorkerContext(m_scriptLoader->url(), scriptExecutionContext()->userAgent(m_scriptLoader->url()), m_scriptLoader->script());
-
-    m_scriptLoader = 0;
+    else {
+        WorkerThreadStartMode startMode = DontPauseWorkerContextOnStart;
+        if (InspectorInstrumentation::shouldPauseDedicatedWorkerOnStart(scriptExecutionContext()))
+            startMode = PauseWorkerContextOnStart;
+        m_contextProxy->startWorkerContext(m_scriptLoader->url(), scriptExecutionContext()->userAgent(m_scriptLoader->url()), m_scriptLoader->script(), startMode);
+        InspectorInstrumentation::scriptImported(scriptExecutionContext(), m_scriptLoader->identifier(), m_scriptLoader->script());
+    }
+    m_scriptLoader = nullptr;
 
     unsetPendingActivity(this);
 }

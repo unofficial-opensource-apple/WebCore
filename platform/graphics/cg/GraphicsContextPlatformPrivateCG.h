@@ -23,38 +23,31 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#ifndef GraphicsContextPlatformPrivateCG_h
+#define GraphicsContextPlatformPrivateCG_h
+
+#include <wtf/RetainPtr.h>
 #include <CoreGraphics/CGContext.h>
 
 namespace WebCore {
 
-// FIXME: This would be in GraphicsContextCG.h if that existed.
-inline CGColorSpaceRef deviceRGBColorSpaceRef()
-{
-    static CGColorSpaceRef deviceSpace = CGColorSpaceCreateDeviceRGB();
-    return deviceSpace;
-}
+enum GraphicsContextCGFlag {
+    IsLayerCGContext = 1 << 0,
+    IsAcceleratedCGContext = 1 << 1
+};
 
-// FIXME: This would be in GraphicsContextCG.h if that existed.
-inline CGColorSpaceRef sRGBColorSpaceRef()
-{
-    // FIXME: Windows should be able to use kCGColorSpaceSRGB, this is tracked by http://webkit.org/b/31363.
-    return deviceRGBColorSpaceRef();
-}
+typedef unsigned GraphicsContextCGFlags;
 
 class GraphicsContextPlatformPrivate {
 public:
-    GraphicsContextPlatformPrivate(CGContextRef cgContext)
+    GraphicsContextPlatformPrivate(CGContextRef cgContext, GraphicsContextCGFlags flags = 0)
         : m_cgContext(cgContext)
 #if PLATFORM(WIN)
         , m_hdc(0)
-        , m_transparencyCount(0)
         , m_shouldIncludeChildWindows(false)
 #endif
         , m_userToDeviceTransformKnownToBeIdentity(false)
-    {
-    }
-    
-    ~GraphicsContextPlatformPrivate()
+        , m_contextFlags(flags)
     {
     }
 
@@ -68,9 +61,8 @@ public:
     void scale(const FloatSize&) {}
     void rotate(float) {}
     void translate(float, float) {}
-    void concatCTM(const TransformationMatrix&) {}
-    void beginTransparencyLayer() {}
-    void endTransparencyLayer() {}
+    void concatCTM(const AffineTransform&) {}
+    void setCTM(const AffineTransform&) {}
 #endif
 
 #if PLATFORM(WIN)
@@ -83,17 +75,18 @@ public:
     void scale(const FloatSize&);
     void rotate(float);
     void translate(float, float);
-    void concatCTM(const TransformationMatrix&);
-    void beginTransparencyLayer() { m_transparencyCount++; }
-    void endTransparencyLayer() { m_transparencyCount--; }
+    void concatCTM(const AffineTransform&);
+    void setCTM(const AffineTransform&);
 
     HDC m_hdc;
-    unsigned m_transparencyCount;
     bool m_shouldIncludeChildWindows;
 #endif
 
     RetainPtr<CGContextRef> m_cgContext;
     bool m_userToDeviceTransformKnownToBeIdentity;
+    GraphicsContextCGFlags m_contextFlags;
 };
 
 }
+
+#endif // GraphicsContextPlatformPrivateCG_h

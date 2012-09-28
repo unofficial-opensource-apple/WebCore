@@ -61,21 +61,10 @@
 #endif
 
 #else
-#include <pthread.h>
-#endif // defined(WIN32) || defined(_WIN32)
 
-#if defined(ANDROID)
-#ifdef __cplusplus
-// Must come before include of algorithm.
-#define PREFIX_FOR_WEBCORE 1
-#define EXPORT __attribute__((visibility("default")))
-#endif
-// Android uses a single set of include directories when building WebKit and
-// JavaScriptCore. Since WebCore/ is included before JavaScriptCore/, Android
-// includes JavaScriptCore/config.h explicitly here to make sure it gets picked
-// up.
-#include <JavaScriptCore/config.h>
-#endif
+#include <pthread.h>
+
+#endif // defined(WIN32) || defined(_WIN32)
 
 #include <sys/types.h>
 #include <fcntl.h>
@@ -102,6 +91,32 @@
 
 #ifdef __cplusplus
 
+
+#include <ciso646>
+
+#if defined(_LIBCPP_VERSION)
+
+// Add work around for a bug in libc++ that caused standard heap
+// APIs to not compile <rdar://problem/10858112>.
+
+#include <type_traits>
+
+namespace WebCore {
+    class TimerHeapReference;
+}
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+inline _LIBCPP_INLINE_VISIBILITY
+const WebCore::TimerHeapReference& move(const WebCore::TimerHeapReference& t)
+{
+    return t;
+}
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif // defined(_LIBCPP_VERSION)
+
 #include <algorithm>
 #include <cstddef>
 #include <new>
@@ -120,22 +135,31 @@
 
 #include <time.h>
 
-#if !defined(BUILDING_WX__) && !defined(ANDROID)
+#if !defined(BUILDING_WX__)
 #include <CoreFoundation/CoreFoundation.h>
-#ifdef WIN_CAIRO
+#ifdef WTF_PLATFORM_WIN_CAIRO
 #include <ConditionalMacros.h>
 #include <windows.h>
 #include <stdio.h>
 #else
 
 #if defined(WIN32) || defined(_WIN32)
-/* Including CoreServices.h on Windows doesn't include CFNetwork.h, so we do
+// FIXME <rdar://problem/8208868> Remove support for obsolete ColorSync API, CoreServices header in CoreGraphics
+// We can remove this once the new ColorSync APIs are available in an internal Safari SDK.
+#include <ColorSync/ColorSync.h>
+#ifdef __COLORSYNCDEPRECATED__
+#define COREGRAPHICS_INCLUDES_CORESERVICES_HEADER
+#define OBSOLETE_COLORSYNC_API
+#endif
+/* Windows doesn't include CFNetwork.h via CoreServices.h, so we do
    it explicitly here to make Windows more consistent with Mac. */
 #include <CFNetwork/CFNetwork.h>
+#include <windows.h>
+#else
 #endif
 
 #endif
-#endif  // !defined(BUILDING_WX__) && !defined(ANDROID)
+#endif // !defined(BUILDING_WX__)
 
 #ifdef __OBJC__
 #import <Foundation/Foundation.h>
@@ -154,3 +178,4 @@
 #undef try
 #undef catch
 #endif
+

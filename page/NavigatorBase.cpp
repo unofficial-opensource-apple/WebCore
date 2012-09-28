@@ -40,14 +40,6 @@ extern "C" {
 
 #ifndef WEBCORE_NAVIGATOR_PLATFORM
 #define WEBCORE_NAVIGATOR_PLATFORM (String(GSGetDeviceName()))
-#elif OS(MAC_OS_X) && (CPU(PPC) || CPU(PPC64))
-#define WEBCORE_NAVIGATOR_PLATFORM "MacPPC"
-#elif OS(MAC_OS_X) && (CPU(X86) || CPU(X86_64))
-#define WEBCORE_NAVIGATOR_PLATFORM "MacIntel"
-#elif OS(WINDOWS)
-#define WEBCORE_NAVIGATOR_PLATFORM "Win32"
-#elif OS(SYMBIAN)
-#define WEBCORE_NAVIGATOR_PLATFORM "Symbian"
 #endif // ifndef WEBCORE_NAVIGATOR_PLATFORM
 
 #ifndef WEBCORE_NAVIGATOR_PRODUCT
@@ -88,10 +80,10 @@ String NavigatorBase::appVersion() const
 String NavigatorBase::platform() const
 {
 #if OS(LINUX)
-    if (String("") != WEBCORE_NAVIGATOR_PLATFORM)
+    if (!String(WEBCORE_NAVIGATOR_PLATFORM).isEmpty())
         return WEBCORE_NAVIGATOR_PLATFORM;
     struct utsname osname;
-    DEFINE_STATIC_LOCAL(String, platformName, (uname(&osname) >= 0 ? String(osname.sysname) + String(" ") + String(osname.machine) : ""));
+    DEFINE_STATIC_LOCAL(String, platformName, (uname(&osname) >= 0 ? String(osname.sysname) + String(" ") + String(osname.machine) : emptyString()));
     return platformName;
 #else
     return WEBCORE_NAVIGATOR_PLATFORM;

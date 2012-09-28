@@ -1,6 +1,6 @@
-/**
+/*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,45 +17,38 @@
  * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+
 #include "config.h"
 #include "CSSValueList.h"
 
 #include "CSSParserValues.h"
 #include "PlatformString.h"
+#include <wtf/PassOwnPtr.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
-CSSValueList::CSSValueList(bool isSpaceSeparated)
-    : m_isSpaceSeparated(isSpaceSeparated)
+CSSValueList::CSSValueList(ClassType classType, ValueListSeparator listSeparator)
+    : CSSValue(classType)
 {
+    m_valueListSeparator = listSeparator;
+}
+
+CSSValueList::CSSValueList(ValueListSeparator listSeparator)
+    : CSSValue(ValueListClass)
+{
+    m_valueListSeparator = listSeparator;
 }
 
 CSSValueList::CSSValueList(CSSParserValueList* list)
-    : m_isSpaceSeparated(true)
+    : CSSValue(ValueListClass)
 {
+    m_valueListSeparator = SpaceSeparator;
     if (list) {
-        unsigned s = list->size();
-        for (unsigned i = 0; i < s; ++i) {
-            CSSParserValue* v = list->valueAt(i);
-            append(v->createCSSValue());
-        }
+        size_t size = list->size();
+        for (unsigned i = 0; i < size; ++i)
+            append(list->valueAt(i)->createCSSValue());
     }
-}
-
-CSSValueList::~CSSValueList()
-{
-}
-
-CSSValue* CSSValueList::item(unsigned index)
-{
-    if (index >= m_values.size())
-        return 0;
-    return m_values[index].get();
-}
-
-unsigned short CSSValueList::cssValueType() const
-{
-    return CSS_VALUE_LIST;
 }
 
 void CSSValueList::append(PassRefPtr<CSSValue> val)
@@ -79,11 +72,11 @@ bool CSSValueList::removeAll(CSSValue* val)
             found = true;
         }
     }
-    
+
     return found;
 }
-    
-bool CSSValueList::hasValue(CSSValue* val)
+
+bool CSSValueList::hasValue(CSSValue* val) const
 {
     // FIXME: we should be implementing operator== to CSSValue and its derived classes
     // to make comparison more flexible and fast.
@@ -96,46 +89,81 @@ bool CSSValueList::hasValue(CSSValue* val)
 
 PassRefPtr<CSSValueList> CSSValueList::copy()
 {
-    PassRefPtr<CSSValueList> newList = m_isSpaceSeparated ? createSpaceSeparated() : createCommaSeparated();
+    RefPtr<CSSValueList> newList;
+    switch (m_valueListSeparator) {
+    case SpaceSeparator:
+        newList = createSpaceSeparated();
+        break;
+    case CommaSeparator:
+        newList = createCommaSeparated();
+        break;
+    case SlashSeparator:
+        newList = createSlashSeparated();
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
     for (size_t index = 0; index < m_values.size(); index++)
-        newList->append(item(index));
-    return newList;
+        newList->append(m_values[index]);
+    return newList.release();
 }
 
-String CSSValueList::cssText() const
+String CSSValueList::customCssText() const
 {
-    String result = "";
+    StringBuilder result;
+    String separator;
+    switch (m_valueListSeparator) {
+    case SpaceSeparator:
+        separator = " ";
+        break;
+    case CommaSeparator:
+        separator = ", ";
+        break;
+    case SlashSeparator:
+        separator = " / ";
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
 
     unsigned size = m_values.size();
     for (unsigned i = 0; i < size; i++) {
-        if (!result.isEmpty()) {
-            if (m_isSpaceSeparated)
-                result += " ";
-            else
-                result += ", ";
-        }
-        result += m_values[i]->cssText();
+        if (!result.isEmpty())
+            result.append(separator);
+        result.append(m_values[i]->cssText());
     }
 
-    return result;
+    return result.toString();
 }
 
-CSSParserValueList* CSSValueList::createParserValueList() const
-{
-    unsigned s = m_values.size();
-    if (!s)
-        return 0;
-    CSSParserValueList* result = new CSSParserValueList;
-    for (unsigned i = 0; i < s; ++i)
-        result->addValue(m_values[i]->parserValue());
-    return result;
-}
-
-void CSSValueList::addSubresourceStyleURLs(ListHashSet<KURL>& urls, const CSSStyleSheet* styleSheet)
+void CSSValueList::addSubresourceStyleURLs(ListHashSet<KURL>& urls, const StyleSheetInternal* styleSheet)
 {
     size_t size = m_values.size();
     for (size_t i = 0; i < size; ++i)
         m_values[i]->addSubresourceStyleURLs(urls, styleSheet);
+}
+
+bool CSSValueList::hasFailedOrCanceledSubresources() const
+{
+    for (unsigned i = 0; i < m_values.size(); ++i) {
+        if (m_values[i]->hasFailedOrCanceledSubresources())
+            return true;
+    }
+    return false;
+}
+
+CSSValueList::CSSValueList(const CSSValueList& cloneFrom)
+    : CSSValue(cloneFrom.classType(), /* isCSSOMSafe */ true)
+{
+    m_valueListSeparator = cloneFrom.m_valueListSeparator;
+    m_values.resize(cloneFrom.m_values.size());
+    for (unsigned i = 0; i < m_values.size(); ++i)
+        m_values[i] = cloneFrom.m_values[i]->cloneForCSSOM();
+}
+
+PassRefPtr<CSSValueList> CSSValueList::cloneForCSSOM() const
+{
+    return adoptRef(new CSSValueList(*this));
 }
 
 } // namespace WebCore

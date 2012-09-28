@@ -26,13 +26,13 @@
 #include "config.h"
 #include "XMLHttpRequestUpload.h"
 
-#include "AtomicString.h"
 #include "Event.h"
 #include "EventException.h"
 #include "EventNames.h"
 #include "XMLHttpRequest.h"
 #include "XMLHttpRequestProgressEvent.h"
 #include <wtf/Assertions.h>
+#include <wtf/text/AtomicString.h>
 
 namespace WebCore {
 
@@ -41,12 +41,14 @@ XMLHttpRequestUpload::XMLHttpRequestUpload(XMLHttpRequest* xmlHttpRequest)
 {
 }
 
+const AtomicString& XMLHttpRequestUpload::interfaceName() const
+{
+    return eventNames().interfaceForXMLHttpRequestUpload;
+}
+
 ScriptExecutionContext* XMLHttpRequestUpload::scriptExecutionContext() const
 {
-    XMLHttpRequest* xmlHttpRequest = associatedXMLHttpRequest();
-    if (!xmlHttpRequest)
-        return 0;
-    return xmlHttpRequest->scriptExecutionContext();
+    return m_xmlHttpRequest->scriptExecutionContext();
 }
 
 EventTargetData* XMLHttpRequestUpload::eventTargetData()
@@ -58,5 +60,15 @@ EventTargetData* XMLHttpRequestUpload::ensureEventTargetData()
 {
     return &m_eventTargetData;
 }
+
+void XMLHttpRequestUpload::dispatchEventAndLoadEnd(PassRefPtr<Event> event)
+{
+    ASSERT(event->type() == eventNames().loadEvent || event->type() == eventNames().abortEvent || event->type() == eventNames().errorEvent || event->type() == eventNames().timeoutEvent);
+
+    dispatchEvent(event);
+    dispatchEvent(XMLHttpRequestProgressEvent::create(eventNames().loadendEvent));
+}
+
+
 
 } // namespace WebCore

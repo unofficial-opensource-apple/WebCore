@@ -29,25 +29,38 @@
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
 #include "LinkHash.h"
-#include "StringHash.h"
+#include "Supplementable.h"
 #include "UserScript.h"
 #include "UserStyleSheet.h"
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
     class KURL;
+    class GroupSettings;
+    class IDBFactoryBackendInterface;
     class Page;
+    class SecurityOrigin;
     class StorageNamespace;
 
-    class PageGroup : public Noncopyable {
+    class PageGroup : public Supplementable<PageGroup> {
+        WTF_MAKE_NONCOPYABLE(PageGroup); WTF_MAKE_FAST_ALLOCATED;
     public:
         PageGroup(const String& name);
-        PageGroup(Page*);
         ~PageGroup();
 
+        static PassOwnPtr<PageGroup> create(Page*);
         static PageGroup* pageGroup(const String& groupName);
+
         static void closeLocalStorage();
-        
+
+        static void clearLocalStorageForAllOrigins();
+        static void clearLocalStorageForOrigin(SecurityOrigin*);
+        // DumpRenderTree helper that triggers a StorageArea sync.
+        static void syncLocalStorage();
+
+        static unsigned numberOfPageGroups();
+
         const HashSet<Page*>& pages() const { return m_pages; }
 
         void addPage(Page*);
@@ -57,6 +70,8 @@ namespace WebCore {
 
         void addVisitedLink(const KURL&);
         void addVisitedLink(const UChar*, size_t);
+        void addVisitedLinkHash(LinkHash);
+        void removeVisitedLink(const KURL&);
         void removeVisitedLinks();
 
         static void setShouldTrackVisitedLinks(bool);
@@ -65,31 +80,36 @@ namespace WebCore {
         const String& name() { return m_name; }
         unsigned identifier() { return m_identifier; }
 
-#if ENABLE(DOM_STORAGE)
         StorageNamespace* localStorage();
         bool hasLocalStorage() { return m_localStorage; }
-#endif
 
-        void addUserScriptToWorld(DOMWrapperWorld*, const String& source, const KURL&, 
+        void addUserScriptToWorld(DOMWrapperWorld*, const String& source, const KURL&,
                                   PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
-                                  UserScriptInjectionTime);
+                                  UserScriptInjectionTime, UserContentInjectedFrames);
         void addUserStyleSheetToWorld(DOMWrapperWorld*, const String& source, const KURL&,
-                               PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist);
-        
+                                      PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
+                                      UserContentInjectedFrames,
+                                      UserStyleLevel level = UserStyleUserLevel,
+                                      UserStyleInjectionTime injectionTime = InjectInExistingDocuments);
         void removeUserScriptFromWorld(DOMWrapperWorld*, const KURL&);
         void removeUserStyleSheetFromWorld(DOMWrapperWorld*, const KURL&);
-        
+
         void removeUserScriptsFromWorld(DOMWrapperWorld*);
         void removeUserStyleSheetsFromWorld(DOMWrapperWorld*);
-    
+
         void removeAllUserContent();
-        
+
         const UserScriptMap* userScripts() const { return m_userScripts.get(); }
         const UserStyleSheetMap* userStyleSheets() const { return m_userStyleSheets.get(); }
 
-    private:
-        void addVisitedLink(LinkHash stringHash);
+        GroupSettings* groupSettings() const { return m_groupSettings.get(); }
 
+    private:
+        PageGroup(Page*);
+
+        void addVisitedLink(LinkHash stringHash);
+        void resetUserStyleCacheInAllFrames();
+  
         String m_name;
 
         HashSet<Page*> m_pages;
@@ -98,12 +118,12 @@ namespace WebCore {
         bool m_visitedLinksPopulated;
 
         unsigned m_identifier;
-#if ENABLE(DOM_STORAGE)
         RefPtr<StorageNamespace> m_localStorage;
-#endif
 
         OwnPtr<UserScriptMap> m_userScripts;
         OwnPtr<UserStyleSheetMap> m_userStyleSheets;
+
+        OwnPtr<GroupSettings> m_groupSettings;
     };
 
 } // namespace WebCore

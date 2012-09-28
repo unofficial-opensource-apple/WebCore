@@ -39,7 +39,8 @@
 
 namespace WebCore {
 
-class ArchiveResourceCollection : public Noncopyable {
+class ArchiveResourceCollection {
+    WTF_MAKE_NONCOPYABLE(ArchiveResourceCollection); WTF_MAKE_FAST_ALLOCATED;
 public:
     ArchiveResourceCollection();
 
@@ -47,7 +48,7 @@ public:
     void addAllResources(Archive*);
     
     ArchiveResource* archiveResourceForURL(const KURL&);
-    PassRefPtr<Archive> popSubframeArchive(const String& frameName);
+    PassRefPtr<Archive> popSubframeArchive(const String& frameName, const KURL&);
     
 private:    
     HashMap<String, RefPtr<ArchiveResource> > m_subresources;

@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef CSSSegmentedFontFace_h
@@ -45,8 +45,6 @@ public:
     static PassRefPtr<CSSSegmentedFontFace> create(CSSFontSelector* selector) { return adoptRef(new CSSSegmentedFontFace(selector)); }
     ~CSSSegmentedFontFace();
 
-    bool isLoaded() const;
-    bool isValid() const;
     CSSFontSelector* fontSelector() const { return m_fontSelector; }
 
     void fontLoaded(CSSFontFace*);
@@ -59,6 +57,7 @@ private:
     CSSSegmentedFontFace(CSSFontSelector*);
 
     void pruneTable();
+    bool isValid() const;
 
     CSSFontSelector* m_fontSelector;
     HashMap<unsigned, SegmentedFontData*> m_fontDataTable;

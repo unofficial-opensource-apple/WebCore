@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,60 +32,86 @@
 #ifndef NotificationCenter_h
 #define NotificationCenter_h
 
+#include "ExceptionCode.h"
 #include "Notification.h"
-#include "NotificationContents.h"
-#include "WorkerThread.h"
+#include "ScriptExecutionContext.h"
+#include "Timer.h"
+#include "VoidCallback.h"
 #include <wtf/OwnPtr.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 
 namespace WebCore {
 
-    class ScriptExecutionContext;
+class NotificationClient;
+class VoidCallback;
 
-    class NotificationCenter : public RefCounted<NotificationCenter>, public ActiveDOMObject { 
+class NotificationCenter : public RefCounted<NotificationCenter>, public ActiveDOMObject {
+public:
+    static PassRefPtr<NotificationCenter> create(ScriptExecutionContext*, NotificationClient*);
+
+#if ENABLE(LEGACY_NOTIFICATIONS)
+    PassRefPtr<Notification> createHTMLNotification(const String& URI, ExceptionCode& ec)
+    {
+        if (!client()) {
+            ec = INVALID_STATE_ERR;
+            return 0;
+        }
+        if (URI.isEmpty()) {
+            ec = SYNTAX_ERR;
+            return 0;
+        }
+        return Notification::create(scriptExecutionContext()->completeURL(URI), scriptExecutionContext(), ec, this);
+    }
+#endif
+
+#if ENABLE(LEGACY_NOTIFICATIONS)
+    PassRefPtr<Notification> createNotification(const String& iconURI, const String& title, const String& body, ExceptionCode& ec)
+    {
+        if (!client()) {
+            ec = INVALID_STATE_ERR;
+            return 0;
+        }
+        return Notification::create(title, body, iconURI, scriptExecutionContext(), ec, this);
+    }
+#endif
+
+    NotificationClient* client() const { return m_client; }
+
+#if ENABLE(LEGACY_NOTIFICATIONS)
+    int checkPermission();
+    void requestPermission(PassRefPtr<VoidCallback>);
+#endif
+
+    virtual void stop() OVERRIDE;
+
+private:
+    NotificationCenter(ScriptExecutionContext*, NotificationClient*);
+
+    class NotificationRequestCallback : public RefCounted<NotificationRequestCallback> {
     public:
-        static PassRefPtr<NotificationCenter> create(ScriptExecutionContext* context, NotificationPresenter* presenter) { return adoptRef(new NotificationCenter(context, presenter)); }
-
-        Notification* createHTMLNotification(const String& URI, ExceptionCode& ec)
-        {
-            if (!presenter()) {
-                ec = INVALID_STATE_ERR;
-                return 0;
-            }
-            return Notification::create(KURL(ParsedURLString, URI), context(), ec, presenter());
-        }
-
-        Notification* createNotification(const String& iconURI, const String& title, const String& body, ExceptionCode& ec)
-        {
-            if (!presenter()) {
-                ec = INVALID_STATE_ERR;
-                return 0;
-            }
-            NotificationContents contents(iconURI, title, body);
-            return Notification::create(contents, context(), ec, presenter());
-        }
-
-        ScriptExecutionContext* context() const { return m_scriptExecutionContext; }
-        NotificationPresenter* presenter() const { return m_notificationPresenter; }
-
-        int checkPermission();
-        void requestPermission(PassRefPtr<VoidCallback> callback);
-
-        void disconnectFrame() { m_notificationPresenter = 0; }
-
+        static PassRefPtr<NotificationRequestCallback> createAndStartTimer(NotificationCenter*, PassRefPtr<VoidCallback>);
+        void startTimer();
+        void timerFired(Timer<NotificationRequestCallback>*);
     private:
-        NotificationCenter(ScriptExecutionContext*, NotificationPresenter*);
+        NotificationRequestCallback(NotificationCenter*, PassRefPtr<VoidCallback>);
 
-        ScriptExecutionContext* m_scriptExecutionContext;
-        NotificationPresenter* m_notificationPresenter;
+        RefPtr<NotificationCenter> m_notificationCenter;
+        Timer<NotificationRequestCallback> m_timer;
+        RefPtr<VoidCallback> m_callback;
     };
+
+    void requestTimedOut(NotificationRequestCallback*);
+
+    NotificationClient* m_client;
+    HashSet<RefPtr<NotificationRequestCallback> > m_callbacks;
+};
 
 } // namespace WebCore
 
-#endif // ENABLE(NOTIFICATIONS)
+#endif // ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 
 #endif // NotificationCenter_h

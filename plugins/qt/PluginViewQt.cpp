@@ -28,7 +28,11 @@
 #include "config.h"
 #include "PluginView.h"
 
-#include "Bridge.h"
+#if USE(JSC)
+#include "BridgeJSC.h"
+#endif
+#include "Chrome.h"
+#include "ChromeClient.h"
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "Element.h"
@@ -43,8 +47,11 @@
 #include "HTMLNames.h"
 #include "HTMLPlugInElement.h"
 #include "HostWindow.h"
+#include "IFrameShimSupport.h"
 #include "Image.h"
+#if USE(JSC)
 #include "JSDOMBinding.h"
+#endif
 #include "KeyboardEvent.h"
 #include "MouseEvent.h"
 #include "NotImplemented.h"
@@ -56,16 +63,19 @@
 #include "PluginPackage.h"
 #include "PluginMainThreadScheduler.h"
 #include "QWebPageClient.h"
-#include "RenderLayer.h"
-#include "ScriptController.h"
+#include "RenderObject.h"
 #include "Settings.h"
 #include "npruntime_impl.h"
+#if USE(JSC)
 #include "runtime_root.h"
+#endif
 
 #include <QApplication>
 #include <QDesktopWidget>
+#include <QGraphicsWidget>
 #include <QKeyEvent>
 #include <QPainter>
+#include <QStyleOptionGraphicsItem>
 #include <QWidget>
 #include <QX11Info>
 #include <X11/X.h>
@@ -78,7 +88,9 @@
 #include <runtime/JSValue.h>
 
 using JSC::ExecState;
+#if USE(JSC)
 using JSC::Interpreter;
+#endif
 using JSC::JSLock;
 using JSC::JSObject;
 using JSC::UString;
@@ -89,7 +101,34 @@ using namespace WTF;
 
 namespace WebCore {
 
+bool PluginView::s_isRunningUnderDRT = false;
+
 using namespace HTMLNames;
+
+#if USE(ACCELERATED_COMPOSITING)
+// Qt's GraphicsLayer (GraphicsLayerQt) requires layers to be QGraphicsWidgets
+class PluginGraphicsLayerQt : public QGraphicsWidget {
+public:
+    PluginGraphicsLayerQt(PluginView* view) : m_view(view) { }
+    ~PluginGraphicsLayerQt() { }
+
+    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget = 0)
+    {
+        Q_UNUSED(widget);
+        m_view->paintUsingXPixmap(painter, option->exposedRect.toRect());
+    }
+
+private:
+    PluginView* m_view;
+};
+
+bool PluginView::shouldUseAcceleratedCompositing() const
+{
+    return m_parentFrame->page()->chrome()->client()->allowsAcceleratedCompositing()
+           && m_parentFrame->page()->settings()
+           && m_parentFrame->page()->settings()->acceleratedCompositingEnabled();
+}
+#endif
 
 void PluginView::updatePluginWidget()
 {
@@ -109,11 +148,15 @@ void PluginView::updatePluginWidget()
     if (m_windowRect == oldWindowRect && m_clipRect == oldClipRect)
         return;
 
+    // The plugin had a zero width or height before but was resized, we need to show it again.
+    if (oldWindowRect.isEmpty())
+        show();
+
     if (!m_isWindowed && m_windowRect.size() != oldWindowRect.size()) {
         if (m_drawable)
             XFreePixmap(QX11Info::display(), m_drawable);
 
-        m_drawable = XCreatePixmap(QX11Info::display(), QX11Info::appRootWindow(), m_windowRect.width(), m_windowRect.height(), 
+        m_drawable = XCreatePixmap(QX11Info::display(), QX11Info::appRootWindow(), m_windowRect.width(), m_windowRect.height(),
                                    ((NPSetWindowCallbackStruct*)m_npWindow.ws_info)->depth);
         QApplication::syncX(); // make sure that the server knows about the Drawable
     }
@@ -121,25 +164,35 @@ void PluginView::updatePluginWidget()
     // do not call setNPWindowIfNeeded immediately, will be called on paint()
     m_hasPendingGeometryChange = true;
 
-    // in order to move/resize the plugin window at the same time as the
+    // (i) in order to move/resize the plugin window at the same time as the
     // rest of frame during e.g. scrolling, we set the window geometry
     // in the paint() function, but as paint() isn't called when the
     // plugin window is outside the frame which can be caused by a
     // scroll, we need to move/resize immediately.
-    if (!m_windowRect.intersects(frameView->frameRect()))
+    // (ii) if we are running layout tests from DRT, paint() won't ever get called
+    // so we need to call setNPWindowIfNeeded() if window geometry has changed
+    if (!m_windowRect.intersects(frameView->frameRect())
+        || (s_isRunningUnderDRT && platformPluginWidget() && (m_windowRect != oldWindowRect || m_clipRect != oldClipRect)))
         setNPWindowIfNeeded();
 
-    // Make sure we get repainted afterwards. This is necessary for downward
-    // scrolling to move the plugin widget properly.
-    invalidate();
+    if (!m_platformLayer) {
+        // Make sure we get repainted afterwards. This is necessary for downward
+        // scrolling to move the plugin widget properly.
+        // Note that we don't invalidate the frameRect() here. This is because QWebFrame::renderRelativeCoords()
+        // imitates ScrollView and adds the scroll offset back on to the rect we damage here (making the co-ordinates absolute
+        // to the frame again) before passing it to FrameView.
+        invalidate();
+    }
 }
 
-void PluginView::setFocus()
+void PluginView::setFocus(bool focused)
 {
-    if (platformPluginWidget())
-        platformPluginWidget()->setFocus(Qt::OtherFocusReason);
-    else
-        Widget::setFocus();
+    if (platformPluginWidget()) {
+        if (focused)
+            static_cast<QWidget*>(platformPluginWidget())->setFocus(Qt::OtherFocusReason);
+    } else {
+        Widget::setFocus(focused);
+    }
 }
 
 void PluginView::show()
@@ -154,31 +207,12 @@ void PluginView::hide()
     Widget::hide();
 }
 
-void PluginView::paint(GraphicsContext* context, const IntRect& rect)
+void PluginView::paintUsingXPixmap(QPainter* painter, const QRect &exposedRect)
 {
-    if (!m_isStarted) {
-        paintMissingPluginIcon(context, rect);
-        return;
-    }
-
-    if (context->paintingDisabled())
-        return;
-
-    setNPWindowIfNeeded();
-
-    if (m_isWindowed || !m_drawable)
-        return;
-
-    const bool syncX = m_pluginDisplay && m_pluginDisplay != QX11Info::display();
-
-    QPainter* painter = context->platformContext();
-    IntRect exposedRect(rect);
-    exposedRect.intersect(frameRect());
-    exposedRect.move(-frameRect().x(), -frameRect().y());
-
     QPixmap qtDrawable = QPixmap::fromX11Pixmap(m_drawable, QPixmap::ExplicitlyShared);
     const int drawableDepth = ((NPSetWindowCallbackStruct*)m_npWindow.ws_info)->depth;
     ASSERT(drawableDepth == qtDrawable.depth());
+    const bool syncX = m_pluginDisplay && m_pluginDisplay != QX11Info::display();
 
     // When printing, Qt uses a QPicture to capture the output in preview mode. The
     // QPicture holds a reference to the X Pixmap. As a result, the print preview would
@@ -230,10 +264,42 @@ void PluginView::paint(GraphicsContext* context, const IntRect& rect)
     dispatchNPEvent(xevent);
 
     if (syncX)
-        XSync(m_pluginDisplay, False); // sync changes by plugin
+        XSync(m_pluginDisplay, false); // sync changes by plugin
 
-    painter->drawPixmap(QPoint(frameRect().x() + exposedRect.x(), frameRect().y() + exposedRect.y()), qtDrawable,
-                        exposedRect);
+    painter->drawPixmap(QPoint(exposedRect.x(), exposedRect.y()), qtDrawable, exposedRect);
+}
+
+void PluginView::paint(GraphicsContext* context, const IntRect& rect)
+{
+    if (!m_isStarted) {
+        paintMissingPluginIcon(context, rect);
+        return;
+    }
+
+    if (context->paintingDisabled())
+        return;
+
+    setNPWindowIfNeeded();
+
+    if (m_isWindowed)
+        return;
+
+#if USE(ACCELERATED_COMPOSITING)
+    if (m_platformLayer)
+        return;
+#endif
+
+    if (!m_drawable)
+        return;
+
+    QPainter* painter = context->platformContext();
+    IntRect exposedRect(rect);
+    exposedRect.intersect(frameRect());
+    exposedRect.move(-frameRect().x(), -frameRect().y());
+
+    painter->translate(frameRect().x(), frameRect().y());
+    paintUsingXPixmap(painter, exposedRect);
+    painter->translate(-frameRect().x(), -frameRect().y());
 }
 
 // TODO: Unify across ports.
@@ -242,12 +308,25 @@ bool PluginView::dispatchNPEvent(NPEvent& event)
     if (!m_plugin->pluginFuncs()->event)
         return false;
 
+    bool shouldPop = false;
+
+    if (m_plugin->pluginFuncs()->version < NPVERS_HAS_POPUPS_ENABLED_STATE
+        && (event.type == ButtonRelease || event.type == 3 /*KeyRelease*/)) {
+        pushPopupsEnabledState(true);
+        shouldPop = true;
+    }
+
     PluginView::setCurrentPluginView(this);
-    JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+#if USE(JSC)
+    JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
+#endif
     setCallingPlugin(true);
-    bool accepted = m_plugin->pluginFuncs()->event(m_instance, &event);
+    bool accepted = !m_plugin->pluginFuncs()->event(m_instance, &event);
     setCallingPlugin(false);
     PluginView::setCurrentPluginView(0);
+
+    if (shouldPop)
+        popPopupsEnabledState();
 
     return accepted;
 }
@@ -272,16 +351,28 @@ void PluginView::initXEvent(XEvent* xEvent)
     setSharedXEventFields(xEvent, ownerWidget);
 }
 
-void setXKeyEventSpecificFields(XEvent* xEvent, KeyboardEvent* event)
+void PluginView::setXKeyEventSpecificFields(XEvent* xEvent, KeyboardEvent* event)
 {
-    QKeyEvent* qKeyEvent = event->keyEvent()->qtEvent();
+    const PlatformKeyboardEvent* keyEvent = event->keyEvent();
 
     xEvent->type = (event->type() == eventNames().keydownEvent) ? 2 : 3; // ints as Qt unsets KeyPress and KeyRelease
     xEvent->xkey.root = QX11Info::appRootWindow();
     xEvent->xkey.subwindow = 0; // we have no child window
     xEvent->xkey.time = event->timeStamp();
-    xEvent->xkey.state = qKeyEvent->nativeModifiers();
-    xEvent->xkey.keycode = qKeyEvent->nativeScanCode();
+    xEvent->xkey.state = keyEvent->nativeModifiers();
+    xEvent->xkey.keycode = keyEvent->nativeScanCode();
+
+    // We may not have a nativeScanCode() if the key event is from DRT's eventsender. In that
+    // case fetch the XEvent's keycode from the event's text. The only
+    // place this keycode will be used is in webkit_test_plugin_handle_event().
+    // FIXME: Create Qt API so that we can set the appropriate keycode in DRT EventSender instead.
+    if (s_isRunningUnderDRT && !xEvent->xkey.keycode) {
+        QKeyEvent* qKeyEvent = keyEvent->qtEvent();
+        ASSERT(qKeyEvent);
+        QString keyText = qKeyEvent->text().left(1);
+        xEvent->xkey.keycode = XKeysymToKeycode(QX11Info::display(), XStringToKeysym(keyText.toUtf8().constData()));
+    }
+
     xEvent->xkey.same_screen = true;
 
     // NOTE: As the XEvents sent to the plug-in are synthesized and there is not a native window
@@ -306,7 +397,7 @@ void PluginView::handleKeyboardEvent(KeyboardEvent* event)
     initXEvent(&npEvent);
     setXKeyEventSpecificFields(&npEvent, event);
 
-    if (!dispatchNPEvent(npEvent))
+    if (dispatchNPEvent(npEvent))
         event->setDefaultHandled();
 }
 
@@ -390,6 +481,9 @@ void PluginView::handleMouseEvent(MouseEvent* event)
     if (m_isWindowed)
         return;
 
+    if (event->button() == RightButton && m_plugin->quirks().contains(PluginQuirkIgnoreRightClickInWindowlessMode))
+        return;
+
     if (event->type() == eventNames().mousedownEvent) {
         // Give focus to the plugin on click
         if (Page* page = m_parentFrame->page())
@@ -412,7 +506,7 @@ void PluginView::handleMouseEvent(MouseEvent* event)
     else
         return;
 
-    if (!dispatchNPEvent(npEvent))
+    if (dispatchNPEvent(npEvent))
         event->setDefaultHandled();
 }
 
@@ -478,38 +572,60 @@ void PluginView::setNPWindowIfNeeded()
     m_hasPendingGeometryChange = false;
 
     if (m_isWindowed) {
-        platformPluginWidget()->setGeometry(m_windowRect);
+        QWidget* widget = static_cast<QWidget*>(platformPluginWidget());
+        widget->setGeometry(m_windowRect);
+
+        // Cut out areas of the plugin occluded by iframe shims
+        Vector<IntRect> cutOutRects;
+        QRegion clipRegion = QRegion(m_clipRect);
+        getPluginOcclusions(m_element, this->parent(), frameRect(), cutOutRects);
+        for (size_t i = 0; i < cutOutRects.size(); i++) {
+            cutOutRects[i].move(-frameRect().x(), -frameRect().y());
+            clipRegion = clipRegion.subtracted(QRegion(cutOutRects[i]));
+        }
         // if setMask is set with an empty QRegion, no clipping will
         // be performed, so in that case we hide the plugin view
-        platformPluginWidget()->setVisible(!m_clipRect.isEmpty());
-        platformPluginWidget()->setMask(QRegion(m_clipRect));
+        widget->setVisible(!clipRegion.isEmpty());
+        widget->setMask(clipRegion);
 
         m_npWindow.x = m_windowRect.x();
         m_npWindow.y = m_windowRect.y();
-
-        m_npWindow.clipRect.left = m_clipRect.x();
-        m_npWindow.clipRect.top = m_clipRect.y();
-        m_npWindow.clipRect.right = m_clipRect.width();
-        m_npWindow.clipRect.bottom = m_clipRect.height();
     } else {
         m_npWindow.x = 0;
         m_npWindow.y = 0;
-
-        m_npWindow.clipRect.left = 0;
-        m_npWindow.clipRect.top = 0;
-        m_npWindow.clipRect.right = 0;
-        m_npWindow.clipRect.bottom = 0;
     }
 
-    // FLASH WORKAROUND: Only set initially. Multiple calls to
-    // setNPWindow() cause the plugin to crash in windowed mode.
-    if (!m_isWindowed || m_npWindow.width == -1 || m_npWindow.height == -1) {
+    // If the width or height are null, set the clipRect to null, indicating that
+    // the plugin is not visible/scrolled out.
+    if (!m_clipRect.width() || !m_clipRect.height()) {
+        m_npWindow.clipRect.left = 0;
+        m_npWindow.clipRect.right = 0;
+        m_npWindow.clipRect.top = 0;
+        m_npWindow.clipRect.bottom = 0;
+    } else {
+        // Clipping rectangle of the plug-in; the origin is the top left corner of the drawable or window. 
+        m_npWindow.clipRect.left = m_npWindow.x + m_clipRect.x();
+        m_npWindow.clipRect.top = m_npWindow.y + m_clipRect.y();
+        m_npWindow.clipRect.right = m_npWindow.x + m_clipRect.x() + m_clipRect.width();
+        m_npWindow.clipRect.bottom = m_npWindow.y + m_clipRect.y() + m_clipRect.height();
+    }
+
+    if (m_plugin->quirks().contains(PluginQuirkDontCallSetWindowMoreThanOnce)) {
+        // FLASH WORKAROUND: Only set initially. Multiple calls to
+        // setNPWindow() cause the plugin to crash in windowed mode.
+        if (!m_isWindowed || m_npWindow.width == -1 || m_npWindow.height == -1) {
+            m_npWindow.width = m_windowRect.width();
+            m_npWindow.height = m_windowRect.height();
+        }
+    } else {
         m_npWindow.width = m_windowRect.width();
         m_npWindow.height = m_windowRect.height();
     }
 
     PluginView::setCurrentPluginView(this);
-    JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+#if USE(JSC)
+    JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
+#endif
     setCallingPlugin(true);
     m_plugin->pluginFuncs()->setwindow(m_instance, &m_npWindow);
     setCallingPlugin(false);
@@ -524,10 +640,10 @@ void PluginView::setParentVisible(bool visible)
     Widget::setParentVisible(visible);
 
     if (isSelfVisible() && platformPluginWidget())
-        platformPluginWidget()->setVisible(visible);
+        static_cast<QWidget*>(platformPluginWidget())->setVisible(visible);
 }
 
-NPError PluginView::handlePostReadFile(Vector<char>& buffer, uint32 len, const char* buf)
+NPError PluginView::handlePostReadFile(Vector<char>& buffer, uint32_t len, const char* buf)
 {
     String filename(buf, len);
 
@@ -553,104 +669,84 @@ NPError PluginView::handlePostReadFile(Vector<char>& buffer, uint32 len, const c
     return NPERR_NO_ERROR;
 }
 
-NPError PluginView::getValueStatic(NPNVariable variable, void* value)
+bool PluginView::platformGetValueStatic(NPNVariable variable, void* value, NPError* result)
 {
-    LOG(Plugins, "PluginView::getValueStatic(%s)", prettyNameForNPNVariable(variable).data());
-
     switch (variable) {
     case NPNVToolkit:
-        *static_cast<uint32*>(value) = 0;
-        return NPERR_NO_ERROR;
+        *static_cast<uint32_t*>(value) = 0;
+        *result = NPERR_NO_ERROR;
+        return true;
 
     case NPNVSupportsXEmbedBool:
         *static_cast<NPBool*>(value) = true;
-        return NPERR_NO_ERROR;
+        *result = NPERR_NO_ERROR;
+        return true;
 
     case NPNVjavascriptEnabledBool:
         *static_cast<NPBool*>(value) = true;
-        return NPERR_NO_ERROR;
+        *result = NPERR_NO_ERROR;
+        return true;
 
     case NPNVSupportsWindowless:
         *static_cast<NPBool*>(value) = true;
-        return NPERR_NO_ERROR;
+        *result = NPERR_NO_ERROR;
+        return true;
 
     default:
-        return NPERR_GENERIC_ERROR;
+        return false;
     }
 }
 
-NPError PluginView::getValue(NPNVariable variable, void* value)
+bool PluginView::platformGetValue(NPNVariable variable, void* value, NPError* result)
 {
-    LOG(Plugins, "PluginView::getValue(%s)", prettyNameForNPNVariable(variable).data());
-
     switch (variable) {
     case NPNVxDisplay:
         *(void **)value = QX11Info::display();
-        return NPERR_NO_ERROR;
+        *result = NPERR_NO_ERROR;
+        return true;
 
     case NPNVxtAppContext:
-        return NPERR_GENERIC_ERROR;
-
-#if ENABLE(NETSCAPE_PLUGIN_API)
-    case NPNVWindowNPObject: {
-        if (m_isJavaScriptPaused)
-            return NPERR_GENERIC_ERROR;
-
-        NPObject* windowScriptObject = m_parentFrame->script()->windowScriptNPObject();
-
-        // Return value is expected to be retained, as described here: <http://www.mozilla.org/projects/plugin/npruntime.html>
-        if (windowScriptObject)
-            _NPN_RetainObject(windowScriptObject);
-
-        void** v = (void**)value;
-        *v = windowScriptObject;
-
-        return NPERR_NO_ERROR;
-    }
-
-    case NPNVPluginElementNPObject: {
-        if (m_isJavaScriptPaused)
-            return NPERR_GENERIC_ERROR;
-
-        NPObject* pluginScriptObject = 0;
-
-        if (m_element->hasTagName(appletTag) || m_element->hasTagName(embedTag) || m_element->hasTagName(objectTag))
-            pluginScriptObject = static_cast<HTMLPlugInElement*>(m_element)->getNPObject();
-
-        // Return value is expected to be retained, as described here: <http://www.mozilla.org/projects/plugin/npruntime.html>
-        if (pluginScriptObject)
-            _NPN_RetainObject(pluginScriptObject);
-
-        void** v = (void**)value;
-        *v = pluginScriptObject;
-
-        return NPERR_NO_ERROR;
-    }
-#endif
+        *result = NPERR_GENERIC_ERROR;
+        return true;
 
     case NPNVnetscapeWindow: {
         void* w = reinterpret_cast<void*>(value);
         QWebPageClient* client = m_parentFrame->view()->hostWindow()->platformPageClient();
         *((XID *)w) = client ? client->ownerWidget()->window()->winId() : 0;
-        return NPERR_NO_ERROR;
+        *result = NPERR_NO_ERROR;
+        return true;
     }
 
     case NPNVToolkit:
         if (m_plugin->quirks().contains(PluginQuirkRequiresGtkToolKit)) {
-            *((uint32 *)value) = 2;
-            return NPERR_NO_ERROR;
+            *((uint32_t *)value) = 2;
+            *result = NPERR_NO_ERROR;
+            return true;
         }
-        // fall through
+        return false;
+
     default:
-        return getValueStatic(variable, value);
+        return false;
     }
 }
 
 void PluginView::invalidateRect(const IntRect& rect)
 {
+#if USE(ACCELERATED_COMPOSITING) && !USE(TEXTURE_MAPPER)
+    if (m_platformLayer) {
+        m_platformLayer->update(QRectF(rect));
+        return;
+    }
+#endif
+
     if (m_isWindowed) {
-        if (platformWidget())
-            platformWidget()->update(rect);
+        if (platformWidget()) {
+            // update() will schedule a repaint of the widget so ensure
+            // its knowledge of its position on the page is up to date.
+            QWidget* w = static_cast<QWidget*>(platformWidget());
+            w->setGeometry(m_windowRect);
+            w->update(rect);
+        }
         return;
     }
 
@@ -664,11 +760,12 @@ void PluginView::invalidateRect(NPRect* rect)
         return;
     }
     IntRect r(rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top);
-    invalidateWindowlessPluginRect(r);
+    invalidateRect(r);
 }
 
 void PluginView::invalidateRegion(NPRegion region)
 {
+    Q_UNUSED(region);
     invalidate();
 }
 
@@ -683,8 +780,13 @@ static Display *getPluginDisplay()
     // support gdk based plugins (like flash) that use a different X connection.
     // The code below has the same effect as this one:
     // Display *gdkDisplay = gdk_x11_display_get_xdisplay(gdk_display_get_default());
-    QLibrary library("libgdk-x11-2.0");
+    QLibrary library(QLatin1String("libgdk-x11-2.0"), 0);
     if (!library.load())
+        return 0;
+
+    typedef void *(*gdk_init_check_ptr)(void*, void*);
+    gdk_init_check_ptr gdk_init_check = (gdk_init_check_ptr)library.resolve("gdk_init_check");
+    if (!gdk_init_check)
         return 0;
 
     typedef void *(*gdk_display_get_default_ptr)();
@@ -697,6 +799,7 @@ static Display *getPluginDisplay()
     if (!gdk_x11_display_get_xdisplay)
         return 0;
 
+    gdk_init_check(0, 0);
     return (Display*)gdk_x11_display_get_xdisplay(gdk_display_get_default());
 }
 
@@ -750,7 +853,9 @@ bool PluginView::platformStart()
 
     if (m_plugin->pluginFuncs()->getvalue) {
         PluginView::setCurrentPluginView(this);
-        JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+#if USE(JSC)
+        JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
+#endif
         setCallingPlugin(true);
         m_plugin->pluginFuncs()->getvalue(m_instance, NPPVpluginNeedsXEmbed, &m_needsXEmbed);
         setCallingPlugin(false);
@@ -771,15 +876,25 @@ bool PluginView::platformStart()
     } else {
         setPlatformWidget(0);
         m_pluginDisplay = getPluginDisplay();
+
+#if USE(ACCELERATED_COMPOSITING) && !USE(TEXTURE_MAPPER)
+        if (shouldUseAcceleratedCompositing()) {
+            m_platformLayer = adoptPtr(new PluginGraphicsLayerQt(this));
+            // Trigger layer computation in RenderLayerCompositor
+            m_element->setNeedsStyleRecalc(SyntheticStyleChange);
+        }
+#endif
     }
 
-    show();
+    // If the width and the height are not zero we show the PluginView.
+    if (!frameRect().isEmpty())
+        show();
 
     NPSetWindowCallbackStruct* wsi = new NPSetWindowCallbackStruct();
     wsi->type = 0;
 
     if (m_isWindowed) {
-        const QX11Info* x11Info = &platformPluginWidget()->x11Info();
+        const QX11Info* x11Info = &static_cast<QWidget*>(platformPluginWidget())->x11Info();
 
         wsi->display = x11Info->display();
         wsi->visual = (Visual*)x11Info->visual();
@@ -787,7 +902,7 @@ bool PluginView::platformStart()
         wsi->colormap = x11Info->colormap();
 
         m_npWindow.type = NPWindowTypeWindow;
-        m_npWindow.window = (void*)platformPluginWidget()->winId();
+        m_npWindow.window = (void*)static_cast<QWidget*>(platformPluginWidget())->winId();
         m_npWindow.width = -1;
         m_npWindow.height = -1;
     } else {
@@ -837,12 +952,11 @@ void PluginView::platformDestroy()
         XFreeColormap(QX11Info::display(), m_colormap);
 }
 
-void PluginView::halt()
+#if USE(ACCELERATED_COMPOSITING)
+PlatformLayer* PluginView::platformLayer() const
 {
+    return m_platformLayer.get();
 }
-
-void PluginView::restart()
-{
-}
+#endif
 
 } // namespace WebCore

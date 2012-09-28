@@ -30,13 +30,14 @@
 #include <winsock2.h>
 #include "FontCache.h"
 #include "Font.h"
+#include "HWndDC.h"
 #include "SimpleFontData.h"
-#include "StringHash.h"
 #include "UnicodeRange.h"
 #include <mlang.h>
 #include <windows.h>
 #include <wtf/StdLibExtras.h>
-#if PLATFORM(CG)
+#include <wtf/text/StringHash.h>
+#if USE(CG)
 #include <ApplicationServices/ApplicationServices.h>
 #include <WebKitSystemInterface/WebKitSystemInterface.h>
 #endif
@@ -48,7 +49,7 @@ namespace WebCore
 
 void FontCache::platformInit()
 {
-#if PLATFORM(CG)
+#if USE(CG)
     wkSetUpFontCache(1536 * 1024 * 4); // This size matches Mac.
 #endif
 }
@@ -189,7 +190,7 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
 {
     UChar character = characters[0];
     SimpleFontData* fontData = 0;
-    HDC hdc = GetDC(0);
+    HWndDC hdc(0);
     HFONT primaryFont = font.primaryFont()->fontDataForCharacter(character)->platformData().hfont();
     HGDIOBJ oldFont = SelectObject(hdc, primaryFont);
     HFONT hfont = 0;
@@ -285,38 +286,83 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
         if (!familyName.isEmpty()) {
             FontPlatformData* result = getCachedFontPlatformData(font.fontDescription(), familyName);
             if (result)
-                fontData = getCachedFontData(result);
+                fontData = getCachedFontData(result, DoNotRetain);
         }
 
         SelectObject(hdc, oldFont);
         DeleteObject(hfont);
     }
 
-    ReleaseDC(0, hdc);
     return fontData;
 }
 
-FontPlatformData* FontCache::getSimilarFontPlatformData(const Font& font)
+SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
 {
     return 0;
 }
 
-FontPlatformData* FontCache::getLastResortFallbackFont(const FontDescription& fontDescription)
+SimpleFontData* FontCache::fontDataFromDescriptionAndLogFont(const FontDescription& fontDescription, ShouldRetain shouldRetain, const LOGFONT& font, AtomicString& outFontFamilyName)
 {
+    AtomicString familyName = String(font.lfFaceName, wcsnlen(font.lfFaceName, LF_FACESIZE));
+    SimpleFontData* fontData = getCachedFontData(fontDescription, familyName, false, shouldRetain);
+    if (fontData)
+        outFontFamilyName = familyName;
+    return fontData;
+}
+
+SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& fontDescription, ShouldRetain shouldRetain)
+{
+    DEFINE_STATIC_LOCAL(AtomicString, fallbackFontName, ());
+    if (!fallbackFontName.isEmpty())
+        return getCachedFontData(fontDescription, fallbackFontName, false, shouldRetain);
+
     // FIXME: Would be even better to somehow get the user's default font here.  For now we'll pick
     // the default that the user would get without changing any prefs.
-    static AtomicString timesStr("Times New Roman");
-    if (FontPlatformData* platformFont = getCachedFontPlatformData(fontDescription, timesStr))
-        return platformFont;
 
-    DEFINE_STATIC_LOCAL(String, defaultGUIFontFamily, ());
-    if (defaultGUIFontFamily.isEmpty()) {
-        HFONT defaultGUIFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
-        LOGFONT logFont;
-        GetObject(defaultGUIFont, sizeof(logFont), &logFont);
-        defaultGUIFontFamily = String(logFont.lfFaceName, wcsnlen(logFont.lfFaceName, LF_FACESIZE));
+    // Search all typical Windows-installed full Unicode fonts.
+    // Sorted by most to least glyphs according to http://en.wikipedia.org/wiki/Unicode_typefaces
+    // Start with Times New Roman also since it is the default if the user doesn't change prefs.
+    static AtomicString fallbackFonts[] = {
+        AtomicString("Times New Roman"),
+        AtomicString("Microsoft Sans Serif"),
+        AtomicString("Tahoma"),
+        AtomicString("Lucida Sans Unicode"),
+        AtomicString("Arial")
+    };
+    SimpleFontData* simpleFont;
+    for (size_t i = 0; i < WTF_ARRAY_LENGTH(fallbackFonts); ++i) {
+        if (simpleFont = getCachedFontData(fontDescription, fallbackFonts[i]), false, shouldRetain) {
+            fallbackFontName = fallbackFonts[i];
+            return simpleFont;
+        }
     }
-    return getCachedFontPlatformData(fontDescription, defaultGUIFontFamily);
+
+    // Fall back to the DEFAULT_GUI_FONT if no known Unicode fonts are available.
+    if (HFONT defaultGUIFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT))) {
+        LOGFONT defaultGUILogFont;
+        GetObject(defaultGUIFont, sizeof(defaultGUILogFont), &defaultGUILogFont);
+        if (simpleFont = fontDataFromDescriptionAndLogFont(fontDescription, shouldRetain, defaultGUILogFont, fallbackFontName))
+            return simpleFont;
+    }
+
+    // Fall back to Non-client metrics fonts.
+    NONCLIENTMETRICS nonClientMetrics = {0};
+    nonClientMetrics.cbSize = sizeof(nonClientMetrics);
+    if (SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(nonClientMetrics), &nonClientMetrics, 0)) {
+        if (simpleFont = fontDataFromDescriptionAndLogFont(fontDescription, shouldRetain, nonClientMetrics.lfMessageFont, fallbackFontName))
+            return simpleFont;
+        if (simpleFont = fontDataFromDescriptionAndLogFont(fontDescription, shouldRetain, nonClientMetrics.lfMenuFont, fallbackFontName))
+            return simpleFont;
+        if (simpleFont = fontDataFromDescriptionAndLogFont(fontDescription, shouldRetain, nonClientMetrics.lfStatusFont, fallbackFontName))
+            return simpleFont;
+        if (simpleFont = fontDataFromDescriptionAndLogFont(fontDescription, shouldRetain, nonClientMetrics.lfCaptionFont, fallbackFontName))
+            return simpleFont;
+        if (simpleFont = fontDataFromDescriptionAndLogFont(fontDescription, shouldRetain, nonClientMetrics.lfSmCaptionFont, fallbackFontName))
+            return simpleFont;
+    }
+    
+    ASSERT_NOT_REACHED();
+    return 0;
 }
 
 static LONG toGDIFontWeight(FontWeight fontWeight)
@@ -401,7 +447,7 @@ static int CALLBACK matchImprovingEnumProc(CONST LOGFONT* candidate, CONST TEXTM
 
 static HFONT createGDIFont(const AtomicString& family, LONG desiredWeight, bool desiredItalic, int size, bool synthesizeItalic)
 {
-    HDC hdc = GetDC(0);
+    HWndDC hdc(0);
 
     LOGFONT logFont;
     logFont.lfCharSet = DEFAULT_CHARSET;
@@ -413,8 +459,6 @@ static HFONT createGDIFont(const AtomicString& family, LONG desiredWeight, bool 
     MatchImprovingProcData matchData(desiredWeight, desiredItalic);
     EnumFontFamiliesEx(hdc, &logFont, matchImprovingEnumProc, reinterpret_cast<LPARAM>(&matchData), 0);
 
-    ReleaseDC(0, hdc);
-
     if (!matchData.m_hasMatched)
         return 0;
 
@@ -425,7 +469,7 @@ static HFONT createGDIFont(const AtomicString& family, LONG desiredWeight, bool 
     matchData.m_chosen.lfUnderline = false;
     matchData.m_chosen.lfStrikeOut = false;
     matchData.m_chosen.lfCharSet = DEFAULT_CHARSET;
-#if PLATFORM(CG) || PLATFORM(CAIRO)
+#if USE(CG) || USE(CAIRO)
     matchData.m_chosen.lfOutPrecision = OUT_TT_ONLY_PRECIS;
 #else
     matchData.m_chosen.lfOutPrecision = OUT_TT_PRECIS;
@@ -440,13 +484,12 @@ static HFONT createGDIFont(const AtomicString& family, LONG desiredWeight, bool 
     if (!result)
         return 0;
 
-    HDC dc = GetDC(0);
+    HWndDC dc(0);
     SaveDC(dc);
     SelectObject(dc, result);
     WCHAR actualName[LF_FACESIZE];
     GetTextFace(dc, LF_FACESIZE, actualName);
     RestoreDC(dc, -1);
-    ReleaseDC(0, dc);
 
     if (wcsicmp(matchData.m_chosen.lfFaceName, actualName)) {
         DeleteObject(result);
@@ -488,7 +531,7 @@ static int CALLBACK traitsInFamilyEnumProc(CONST LOGFONT* logFont, CONST TEXTMET
 }
 void FontCache::getTraitsInFamily(const AtomicString& familyName, Vector<unsigned>& traitsMasks)
 {
-    HDC hdc = GetDC(0);
+    HWndDC hdc(0);
 
     LOGFONT logFont;
     logFont.lfCharSet = DEFAULT_CHARSET;
@@ -500,8 +543,6 @@ void FontCache::getTraitsInFamily(const AtomicString& familyName, Vector<unsigne
     TraitsInFamilyProcData procData(familyName);
     EnumFontFamiliesEx(hdc, &logFont, traitsInFamilyEnumProc, reinterpret_cast<LPARAM>(&procData), 0);
     copyToVector(procData.m_traitsMasks, traitsMasks);
-
-    ReleaseDC(0, hdc);
 }
 
 FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontDescription, const AtomicString& family)
@@ -517,14 +558,9 @@ FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontD
     // This masks rounding errors related to the HFONT metrics being  different from the CGFont metrics.
     // FIXME: We will eventually want subpixel precision for GDI mode, but the scaled rendering doesn't
     // look as nice. That may be solvable though.
-#if PLATFORM(CG)
-    bool canCreateCGFontWithLOGFONT = wkCanCreateCGFontWithLOGFONT();
-#else
-    bool canCreateCGFontWithLOGFONT = true;
-#endif
     LONG weight = adjustedGDIFontWeight(toGDIFontWeight(fontDescription.weight()), family);
     HFONT hfont = createGDIFont(family, weight, fontDescription.italic(),
-                                fontDescription.computedPixelSize() * (useGDI ? 1 : 32), useGDI && canCreateCGFontWithLOGFONT);
+                                fontDescription.computedPixelSize() * (useGDI ? 1 : 32), useGDI);
 
     if (!hfont)
         return 0;
@@ -540,10 +576,10 @@ FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontD
 
     FontPlatformData* result = new FontPlatformData(hfont, fontDescription.computedPixelSize(), synthesizeBold, synthesizeItalic, useGDI);
 
-#if PLATFORM(CG)
+#if USE(CG)
     bool fontCreationFailed = !result->cgFont();
-#elif PLATFORM(CAIRO)
-    bool fontCreationFailed = !result->fontFace();
+#elif USE(CAIRO)
+    bool fontCreationFailed = !result->scaledFont();
 #endif
 
     if (fontCreationFailed) {

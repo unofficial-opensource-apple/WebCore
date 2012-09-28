@@ -29,18 +29,18 @@
 #include "config.h"
 #include "SimpleFontData.h"
 
-#include <winsock2.h>
 #include "Font.h"
 #include "FontCache.h"
 #include "FloatRect.h"
 #include "FontDescription.h"
-#include <wtf/MathExtras.h>
+#include "HWndDC.h"
+#include <mlang.h>
 #include <unicode/uchar.h>
 #include <unicode/unorm.h>
-#include <mlang.h>
-#include <tchar.h>
+#include <winsock2.h>
+#include <wtf/MathExtras.h>
 
-#if PLATFORM(CG)
+#if USE(CG)
 #include <ApplicationServices/ApplicationServices.h>
 #include <WebKitSystemInterface/WebKitSystemInterface.h>
 #endif
@@ -63,60 +63,111 @@ bool SimpleFontData::shouldApplyMacAscentHack()
     return g_shouldApplyMacAscentHack;
 }
 
+float SimpleFontData::ascentConsideringMacAscentHack(const WCHAR* faceName, float ascent, float descent)
+{
+    if (!shouldApplyMacAscentHack())
+        return ascent;
+
+    // This code comes from FontDataMac.mm. We only ever do this when running regression tests so that our metrics will match Mac.
+
+    // We need to adjust Times, Helvetica, and Courier to closely match the
+    // vertical metrics of their Microsoft counterparts that are the de facto
+    // web standard. The AppKit adjustment of 20% is too big and is
+    // incorrectly added to line spacing, so we use a 15% adjustment instead
+    // and add it to the ascent.
+    if (!wcscmp(faceName, L"Times") || !wcscmp(faceName, L"Helvetica") || !wcscmp(faceName, L"Courier"))
+        ascent += floorf(((ascent + descent) * 0.15f) + 0.5f);
+
+    return ascent;
+}
+
 void SimpleFontData::initGDIFont()
 {
-     HDC hdc = GetDC(0);
+    if (!m_platformData.size()) {
+        m_fontMetrics.reset();
+        m_avgCharWidth = 0;
+        m_maxCharWidth = 0;
+        return;
+    }
+
+     HWndDC hdc(0);
      HGDIOBJ oldFont = SelectObject(hdc, m_platformData.hfont());
      OUTLINETEXTMETRIC metrics;
      GetOutlineTextMetrics(hdc, sizeof(metrics), &metrics);
      TEXTMETRIC& textMetrics = metrics.otmTextMetrics;
-     m_ascent = textMetrics.tmAscent;
-     m_descent = textMetrics.tmDescent;
-     m_lineGap = textMetrics.tmExternalLeading;
-     m_lineSpacing = m_ascent + m_descent + m_lineGap;
-     m_xHeight = m_ascent * 0.56f; // Best guess for xHeight if no x glyph is present.
+     float ascent = textMetrics.tmAscent;
+     float descent = textMetrics.tmDescent;
+     float lineGap = textMetrics.tmExternalLeading;
+     m_fontMetrics.setAscent(ascent);
+     m_fontMetrics.setDescent(descent);
+     m_fontMetrics.setLineGap(lineGap);
+     m_fontMetrics.setLineSpacing(lroundf(ascent) + lroundf(descent) + lroundf(lineGap));
+     m_avgCharWidth = textMetrics.tmAveCharWidth;
+     m_maxCharWidth = textMetrics.tmMaxCharWidth;
+     float xHeight = ascent * 0.56f; // Best guess for xHeight if no x glyph is present.
 
      GLYPHMETRICS gm;
      MAT2 mat = { 1, 0, 0, 1 };
      DWORD len = GetGlyphOutline(hdc, 'x', GGO_METRICS, &gm, 0, 0, &mat);
      if (len != GDI_ERROR && gm.gmptGlyphOrigin.y > 0)
-         m_xHeight = gm.gmptGlyphOrigin.y;
+         xHeight = gm.gmptGlyphOrigin.y;
 
-     m_unitsPerEm = metrics.otmEMSquare;
+     m_fontMetrics.setXHeight(xHeight);
+     m_fontMetrics.setUnitsPerEm(metrics.otmEMSquare);
 
      SelectObject(hdc, oldFont);
-     ReleaseDC(0, hdc);
+}
 
-     return;
+void SimpleFontData::platformCharWidthInit()
+{
+    // GDI Fonts init charwidths in initGDIFont.
+    if (!m_platformData.useGDI()) {
+        m_avgCharWidth = 0.f;
+        m_maxCharWidth = 0.f;
+        initCharWidths();
+    }
 }
 
 void SimpleFontData::platformDestroy()
 {
-    // We don't hash this on Win32, so it's effectively owned by us.
-    delete m_smallCapsFontData;
-    m_smallCapsFontData = 0;
-
     ScriptFreeCache(&m_scriptCache);
     delete m_scriptFontProperties;
 }
 
+PassOwnPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
+{
+    float scaledSize = scaleFactor * m_platformData.size();
+    if (isCustomFont()) {
+        FontPlatformData scaledFont(m_platformData);
+        scaledFont.setSize(scaledSize);
+        return adoptPtr(new SimpleFontData(scaledFont, true, false));
+    }
+
+    LOGFONT winfont;
+    GetObject(m_platformData.hfont(), sizeof(LOGFONT), &winfont);
+    winfont.lfHeight = -lroundf(scaledSize * (m_platformData.useGDI() ? 1 : 32));
+    HFONT hfont = CreateFontIndirect(&winfont);
+    return adoptPtr(new SimpleFontData(FontPlatformData(hfont, scaledSize, m_platformData.syntheticBold(), m_platformData.syntheticOblique(), m_platformData.useGDI()), isCustomFont(), false));
+}
+
 SimpleFontData* SimpleFontData::smallCapsFontData(const FontDescription& fontDescription) const
 {
-    if (!m_smallCapsFontData) {
-        float smallCapsHeight = cSmallCapsFontSizeMultiplier * m_platformData.size();
-        if (isCustomFont()) {
-            FontPlatformData smallCapsFontData(m_platformData);
-            smallCapsFontData.setSize(smallCapsHeight);
-            m_smallCapsFontData = new SimpleFontData(smallCapsFontData, true, false);
-        } else {
-            LOGFONT winfont;
-            GetObject(m_platformData.hfont(), sizeof(LOGFONT), &winfont);
-            winfont.lfHeight = -lroundf(smallCapsHeight * (m_platformData.useGDI() ? 1 : 32));
-            HFONT hfont = CreateFontIndirect(&winfont);
-            m_smallCapsFontData = new SimpleFontData(FontPlatformData(hfont, smallCapsHeight, m_platformData.syntheticBold(), m_platformData.syntheticOblique(), m_platformData.useGDI()));
-        }
-    }
-    return m_smallCapsFontData;
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->smallCaps)
+        m_derivedFontData->smallCaps = createScaledFontData(fontDescription, cSmallCapsFontSizeMultiplier);
+
+    return m_derivedFontData->smallCaps.get();
+}
+
+SimpleFontData* SimpleFontData::emphasisMarkFontData(const FontDescription& fontDescription) const
+{
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->emphasisMark)
+        m_derivedFontData->emphasisMark = createScaledFontData(fontDescription, .5);
+
+    return m_derivedFontData->emphasisMark.get();
 }
 
 bool SimpleFontData::containsCharacters(const UChar* characters, int length) const
@@ -132,8 +183,8 @@ bool SimpleFontData::containsCharacters(const UChar* characters, int length) con
     if (!langFontLink)
         return false;
 
-    HDC dc = GetDC(0);
-    
+    HWndDC dc(0);
+
     DWORD acpCodePages;
     langFontLink->CodePageToCodePages(CP_ACP, &acpCodePages);
 
@@ -150,8 +201,6 @@ bool SimpleFontData::containsCharacters(const UChar* characters, int length) con
         offset += numCharactersProcessed;
     }
 
-    ReleaseDC(0, dc);
-
     return true;
 }
 
@@ -163,7 +212,7 @@ void SimpleFontData::determinePitch()
     }
 
     // TEXTMETRICS have this.  Set m_treatAsFixedPitch based off that.
-    HDC dc = GetDC(0);
+    HWndDC dc(0);
     SaveDC(dc);
     SelectObject(dc, m_platformData.hfont());
 
@@ -174,12 +223,11 @@ void SimpleFontData::determinePitch()
     m_treatAsFixedPitch = ((tm.tmPitchAndFamily & TMPF_FIXED_PITCH) == 0);
 
     RestoreDC(dc, -1);
-    ReleaseDC(0, dc);
 }
 
 FloatRect SimpleFontData::boundsForGDIGlyph(Glyph glyph) const
 {
-    HDC hdc = GetDC(0);
+    HWndDC hdc(0);
     SetGraphicsMode(hdc, GM_ADVANCED);
     HGDIOBJ oldFont = SelectObject(hdc, m_platformData.hfont());
     
@@ -188,7 +236,6 @@ FloatRect SimpleFontData::boundsForGDIGlyph(Glyph glyph) const
     GetGlyphOutline(hdc, glyph, GGO_METRICS | GGO_GLYPH_INDEX, &gdiMetrics, 0, 0, &identity);
     
     SelectObject(hdc, oldFont);
-    ReleaseDC(0, hdc);
     
     return FloatRect(gdiMetrics.gmptGlyphOrigin.x, -gdiMetrics.gmptGlyphOrigin.y,
         gdiMetrics.gmBlackBoxX + m_syntheticBoldOffset, gdiMetrics.gmBlackBoxY); 
@@ -196,7 +243,7 @@ FloatRect SimpleFontData::boundsForGDIGlyph(Glyph glyph) const
     
 float SimpleFontData::widthForGDIGlyph(Glyph glyph) const
 {
-    HDC hdc = GetDC(0);
+    HWndDC hdc(0);
     SetGraphicsMode(hdc, GM_ADVANCED);
     HGDIOBJ oldFont = SelectObject(hdc, m_platformData.hfont());
 
@@ -205,7 +252,6 @@ float SimpleFontData::widthForGDIGlyph(Glyph glyph) const
     GetGlyphOutline(hdc, glyph, GGO_METRICS | GGO_GLYPH_INDEX, &gdiMetrics, 0, 0, &identity);
 
     SelectObject(hdc, oldFont);
-    ReleaseDC(0, hdc);
 
     return gdiMetrics.gmCellIncX + m_syntheticBoldOffset;
 }
@@ -218,12 +264,11 @@ SCRIPT_FONTPROPERTIES* SimpleFontData::scriptFontProperties() const
         m_scriptFontProperties->cBytes = sizeof(SCRIPT_FONTPROPERTIES);
         HRESULT result = ScriptGetFontProperties(0, scriptCache(), m_scriptFontProperties);
         if (result == E_PENDING) {
-            HDC dc = GetDC(0);
+            HWndDC dc(0);
             SaveDC(dc);
             SelectObject(dc, m_platformData.hfont());
             ScriptGetFontProperties(dc, scriptCache(), m_scriptFontProperties);
             RestoreDC(dc, -1);
-            ReleaseDC(0, dc);
         }
     }
     return m_scriptFontProperties;

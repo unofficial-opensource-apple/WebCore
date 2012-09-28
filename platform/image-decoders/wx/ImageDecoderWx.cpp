@@ -37,7 +37,7 @@
 
 namespace WebCore {
 
-NativeImagePtr RGBA32Buffer::asNewNativeImage() const
+NativeImagePtr ImageFrame::asNewNativeImage() const
 {
     wxBitmap* bmp = new wxBitmap(width(), height(), 32);
 
@@ -48,17 +48,23 @@ NativeImagePtr RGBA32Buffer::asNewNativeImage() const
         // NB: It appears that the data is in BGRA format instead of RGBA format.
         // This code works properly on both ppc and intel, meaning the issue is
         // likely not an issue of byte order getting mixed up on different archs. 
-        const unsigned char* bytes = (const unsigned char*)m_bytes.data();
+        const unsigned char* bytes = (const unsigned char*)m_bytes;
         int rowCounter = 0;
         long pixelCounter = 0;
         WxPixelData::Iterator p(data);
         WxPixelData::Iterator rowStart = p; 
-        for (size_t i = 0; i < m_bytes.size() * sizeof(PixelData); i += sizeof(PixelData)) {
-                p.Red() = bytes[i + 2];
-                p.Green() = bytes[i + 1];
-                p.Blue() = bytes[i + 0];
-                p.Alpha() = bytes[i + 3];
-            
+        for (size_t i = 0; i < m_size.width() * m_size.height() * sizeof(PixelData); i += sizeof(PixelData)) {
+#if !CPU(BIG_ENDIAN)
+            p.Alpha() = bytes[i + 3];
+            p.Red() = bytes[i + 2];
+            p.Green() = bytes[i + 1];
+            p.Blue() = bytes[i + 0];
+#else
+            p.Alpha() = bytes[i + 0];
+            p.Red() = bytes[i + 1];
+            p.Green() = bytes[i + 2];
+            p.Blue() = bytes[i + 3];
+#endif
             p++;
 
             pixelCounter++;
@@ -78,7 +84,14 @@ NativeImagePtr RGBA32Buffer::asNewNativeImage() const
     ASSERT(bmp->IsOk());
 
 #if USE(WXGC)
-    wxGraphicsBitmap* bitmap = new wxGraphicsBitmap(wxGraphicsRenderer::GetDefaultRenderer()->CreateBitmap(*bmp));
+    wxGraphicsRenderer* renderer = 0;
+#if wxUSE_CAIRO
+    renderer = wxGraphicsRenderer::GetCairoRenderer();
+#else
+    renderer = wxGraphicsRenderer::GetDefaultRenderer();
+#endif
+    ASSERT(renderer);
+    wxGraphicsBitmap* bitmap = new wxGraphicsBitmap(renderer->CreateBitmap(*bmp));
     delete bmp;
     return bitmap;
 #else

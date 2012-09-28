@@ -25,7 +25,7 @@
 
 #include "config.h"
 
-#include "PluginInfoStore.h"
+#include "Page.h"
 #include "PluginMainThreadScheduler.h"
 #include "PluginView.h"
 #include "npruntime_internal.h"
@@ -43,7 +43,7 @@ static PluginView* pluginViewForInstance(NPP instance)
     return PluginView::currentPluginView();
 }
 
-void* NPN_MemAlloc(uint32 size)
+void* NPN_MemAlloc(uint32_t size)
 {
     return malloc(size);
 }
@@ -53,7 +53,7 @@ void NPN_MemFree(void* ptr)
     free(ptr);
 }
 
-uint32 NPN_MemFlush(uint32 size)
+uint32_t NPN_MemFlush(uint32_t size)
 {
     // Do nothing
     return 0;
@@ -61,7 +61,7 @@ uint32 NPN_MemFlush(uint32 size)
 
 void NPN_ReloadPlugins(NPBool reloadPages)
 {
-    refreshPlugins(reloadPages);
+    Page::refreshPlugins(reloadPages);
 }
 
 NPError NPN_RequestRead(NPStream* stream, NPByteRange* rangeList)
@@ -79,12 +79,12 @@ NPError NPN_GetURL(NPP instance, const char* url, const char* target)
     return pluginViewForInstance(instance)->getURL(url, target);
 }
 
-NPError NPN_PostURLNotify(NPP instance, const char* url, const char* target, uint32 len, const char* buf, NPBool file, void* notifyData)
+NPError NPN_PostURLNotify(NPP instance, const char* url, const char* target, uint32_t len, const char* buf, NPBool file, void* notifyData)
 {
     return pluginViewForInstance(instance)->postURLNotify(url, target, len, buf, file, notifyData);
 }
 
-NPError NPN_PostURL(NPP instance, const char* url, const char* target, uint32 len, const char* buf, NPBool file)
+NPError NPN_PostURL(NPP instance, const char* url, const char* target, uint32_t len, const char* buf, NPBool file)
 {
     return pluginViewForInstance(instance)->postURL(url, target, len, buf, file);
 }
@@ -94,7 +94,7 @@ NPError NPN_NewStream(NPP instance, NPMIMEType type, const char* target, NPStrea
     return pluginViewForInstance(instance)->newStream(type, target, stream);
 }
 
-int32 NPN_Write(NPP instance, NPStream* stream, int32 len, void* buffer)
+int32_t NPN_Write(NPP instance, NPStream* stream, int32_t len, void* buffer)
 {
     return pluginViewForInstance(instance)->write(stream, len, buffer);
 }
@@ -121,7 +121,14 @@ void NPN_Status(NPP instance, const char* message)
 
 void NPN_InvalidateRect(NPP instance, NPRect* invalidRect)
 {
-    pluginViewForInstance(instance)->invalidateRect(invalidRect);
+    PluginView* view = pluginViewForInstance(instance);
+#if defined(XP_UNIX)
+    // NSPluginWrapper, a plugin wrapper binary that allows running 32-bit plugins
+    // on 64-bit architectures typically used in X11, will sometimes give us a null NPP here.
+    if (!view)
+        return;
+#endif
+    view->invalidateRect(invalidRect);
 }
 
 void NPN_InvalidateRegion(NPP instance, NPRegion invalidRegion)
@@ -171,7 +178,24 @@ void NPN_PopPopupsEnabledState(NPP instance)
     pluginViewForInstance(instance)->popPopupsEnabledState();
 }
 
-void NPN_PluginThreadAsyncCall(NPP instance, void (*func) (void *), void *userData)
+extern "C" typedef void PluginThreadAsyncCallFunction(void*);
+void NPN_PluginThreadAsyncCall(NPP instance, PluginThreadAsyncCallFunction func, void* userData)
 {
-    PluginMainThreadScheduler::scheduler().scheduleCall(instance, func, userData);
+    // Callback function type only differs from MainThreadFunction by being extern "C", which doesn't affect calling convention on any compilers we use.
+    PluginMainThreadScheduler::scheduler().scheduleCall(instance, reinterpret_cast<PluginMainThreadScheduler::MainThreadFunction*>(func), userData);
+}
+
+NPError NPN_GetValueForURL(NPP instance, NPNURLVariable variable, const char* url, char** value, uint32_t* len)
+{
+    return pluginViewForInstance(instance)->getValueForURL(variable, url, value, len);
+}
+
+NPError NPN_SetValueForURL(NPP instance, NPNURLVariable variable, const char* url, const char* value, uint32_t len)
+{
+    return pluginViewForInstance(instance)->setValueForURL(variable, url, value, len);
+}
+
+NPError NPN_GetAuthenticationInfo(NPP instance, const char* protocol, const char* host, int32_t port, const char* scheme, const char* realm, char** username, uint32_t* ulen, char** password, uint32_t* plen)
+{
+    return pluginViewForInstance(instance)->getAuthenticationInfo(protocol, host, port, scheme, realm, username, ulen, password, plen);
 }

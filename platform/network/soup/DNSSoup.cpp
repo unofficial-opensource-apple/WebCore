@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2009 Igalia S.L.
+ * Copyright (C) 2009, 2012 Igalia S.L.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,20 +26,42 @@
 
 #include "config.h"
 #include "DNS.h"
+#include "DNSResolveQueue.h"
 
-#include "CString.h"
+#include "GOwnPtrSoup.h"
 #include "ResourceHandle.h"
+#include <wtf/MainThread.h>
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
+// There is no current reliable way to know if we're behind a proxy at
+// this level. We'll have to implement it in
+// SoupSession/SoupProxyURIResolver/GProxyResolver
+bool DNSResolveQueue::platformProxyIsEnabledInSystemPreferences()
+{
+    return false;
+}
+
+static void resolvedCallback(SoupAddress* soupAddress, guint status, void* userData)
+{
+    DNSResolveQueue::shared().decrementRequestCount();
+}
+
+void DNSResolveQueue::platformResolve(const String& hostname)
+{
+    ASSERT(isMainThread());
+
+    soup_session_prefetch_dns(ResourceHandle::defaultSession(), hostname.utf8().data(), 0, resolvedCallback, 0);
+}
+
 void prefetchDNS(const String& hostname)
 {
-    #ifdef HAVE_LIBSOUP_2_29_3
-    String uri = "http://"+hostname;
-    SoupURI* soupUri = soup_uri_new(uri.utf8().data());
-    soup_session_prepare_for_uri(ResourceHandle::defaultSession(), soupUri);
-    soup_uri_free(soupUri);
-    #endif
+    ASSERT(isMainThread());
+    if (hostname.isEmpty())
+        return;
+
+    DNSResolveQueue::shared().add(hostname);
 }
 
 }

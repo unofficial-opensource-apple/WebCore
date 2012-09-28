@@ -35,17 +35,29 @@
 #include "Document.h"
 #include "ExceptionCode.h"
 #include "Node.h"
+#include "TouchList.h"
 #include "XPathNSResolver.h"
 #include "XPathResult.h"
-#include "CanvasRenderingContext.h"
 
 #include "V8Binding.h"
-#include "V8CustomBinding.h"
+#include "V8CanvasRenderingContext2D.h"
 #include "V8CustomXPathNSResolver.h"
+#include "V8DOMImplementation.h"
+#include "V8HTMLDocument.h"
+#include "V8IsolatedContext.h"
 #include "V8Node.h"
 #include "V8Proxy.h"
+#include "V8Touch.h"
+#include "V8TouchList.h"
+#if ENABLE(WEBGL)
+#include "V8WebGLRenderingContext.h"
+#endif
 #include "V8XPathNSResolver.h"
 #include "V8XPathResult.h"
+
+#if ENABLE(SVG)
+#include "V8SVGDocument.h"
+#endif
 
 #include <wtf/RefPtr.h>
 
@@ -62,7 +74,7 @@ v8::Handle<v8::Value> V8Document::evaluateCallback(const v8::Arguments& args)
     if (V8Node::HasInstance(args[1]))
         contextNode = V8Node::toNative(v8::Handle<v8::Object>::Cast(args[1]));
 
-    RefPtr<XPathNSResolver> resolver = V8DOMWrapper::getXPathNSResolver(args[2], V8Proxy::retrieve(V8Proxy::retrieveFrameForCallingContext()));
+    RefPtr<XPathNSResolver> resolver = V8DOMWrapper::getXPathNSResolver(args[2]);
     if (!resolver && !args[2]->IsNull() && !args[2]->IsUndefined())
         return throwError(TYPE_MISMATCH_ERR);
 
@@ -79,7 +91,7 @@ v8::Handle<v8::Value> V8Document::evaluateCallback(const v8::Arguments& args)
     if (ec)
         return throwError(ec);
 
-    return V8DOMWrapper::convertToV8Object(V8ClassIndex::XPATHRESULT, result.release());
+    return toV8(result.release(), args.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8Document::getCSSCanvasContextCallback(const v8::Arguments& args)
@@ -95,41 +107,46 @@ v8::Handle<v8::Value> V8Document::getCSSCanvasContextCallback(const v8::Argument
     if (!result)
         return v8::Undefined();
     if (result->is2d())
-        return V8DOMWrapper::convertToV8Object(V8ClassIndex::CANVASRENDERINGCONTEXT2D, result);
-#if ENABLE(3D_CANVAS)
+        return toV8(static_cast<CanvasRenderingContext2D*>(result), args.GetIsolate());
+#if ENABLE(WEBGL)
     else if (result->is3d())
-        return V8DOMWrapper::convertToV8Object(V8ClassIndex::WEBGLRENDERINGCONTEXT, result);
-#endif // ENABLE(3D_CANVAS)
+        return toV8(static_cast<WebGLRenderingContext*>(result), args.GetIsolate());
+#endif // ENABLE(WEBGL)
     ASSERT_NOT_REACHED();
     return v8::Undefined();
 }
 
-
-// DOMImplementation is a singleton in WebCore. If we use our normal
-// mapping from DOM objects to V8 wrappers, the same wrapper will be
-// shared for all frames in the same process. This is a major
-// security problem. Therefore, we generate a DOMImplementation
-// wrapper per document and store it in an internal field of the
-// document. Since the DOMImplementation object is a singleton, we do
-// not have to do anything to keep the DOMImplementation object alive
-// for the lifetime of the wrapper.
-v8::Handle<v8::Value> V8Document::implementationAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
+v8::Handle<v8::Value> toV8(Document* impl, v8::Isolate* isolate, bool forceNewObject)
 {
-    ASSERT(info.Holder()->InternalFieldCount() >= internalFieldCount);
-
-    // Check if the internal field already contains a wrapper.
-    v8::Local<v8::Value> implementation = info.Holder()->GetInternalField(V8Document::implementationIndex);
-    if (!implementation->IsUndefined())
-        return implementation;
-
-    // Generate a wrapper.
-    Document* document = V8Document::toNative(info.Holder());
-    v8::Handle<v8::Value> wrapper = V8DOMWrapper::convertDOMImplementationToV8Object(document->implementation());
-
-    // Store the wrapper in the internal field.
-    info.Holder()->SetInternalField(implementationIndex, wrapper);
-
+    if (!impl)
+        return v8::Null();
+    if (impl->isHTMLDocument())
+        return toV8(static_cast<HTMLDocument*>(impl), isolate, forceNewObject);
+#if ENABLE(SVG)
+    if (impl->isSVGDocument())
+        return toV8(static_cast<SVGDocument*>(impl), isolate, forceNewObject);
+#endif
+    v8::Handle<v8::Object> wrapper = V8Document::wrap(impl, isolate, forceNewObject);
+    if (wrapper.IsEmpty())
+        return wrapper;
+    if (!V8IsolatedContext::getEntered()) {
+        if (V8Proxy* proxy = V8Proxy::retrieve(impl->frame()))
+            proxy->windowShell()->updateDocumentWrapper(wrapper);
+    }
     return wrapper;
+}
+
+v8::Handle<v8::Value> V8Document::createTouchListCallback(const v8::Arguments& args)
+{
+    RefPtr<TouchList> touchList = TouchList::create();
+
+    for (int i = 0; i < args.Length(); i++) {
+        if (!args[i]->IsObject())
+            return v8::Undefined();
+        touchList->append(V8Touch::toNative(args[i]->ToObject()));
+    }
+
+    return toV8(touchList.release(), args.GetIsolate());
 }
 
 } // namespace WebCore

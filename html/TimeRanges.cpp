@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2009 Apple Inc.  All rights reserved.
+ * Copyright (C) 2007, 2009, 2010 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,14 +27,18 @@
 
 #include "TimeRanges.h"
 
+#include "ExceptionCode.h"
+#include <math.h>
+
 using namespace WebCore;
+using namespace std;
 
 TimeRanges::TimeRanges(float start, float end)
 {
     add(start, end);
 }
 
-PassRefPtr<TimeRanges> TimeRanges::copy()
+PassRefPtr<TimeRanges> TimeRanges::copy() const
 {
     RefPtr<TimeRanges> newSession = TimeRanges::create();
     
@@ -43,6 +47,51 @@ PassRefPtr<TimeRanges> TimeRanges::copy()
         newSession->add(m_ranges[i].m_start, m_ranges[i].m_end);
     
     return newSession.release();
+}
+
+void TimeRanges::invert()
+{
+    RefPtr<TimeRanges> inverted = TimeRanges::create();
+    float posInf = std::numeric_limits<float>::infinity();
+    float negInf = -std::numeric_limits<float>::infinity();
+
+    if (!m_ranges.size())
+        inverted->add(negInf, posInf);
+    else {
+        if (float start = m_ranges.first().m_start != negInf)
+            inverted->add(negInf, start);
+
+        for (size_t index = 0; index + 1 < m_ranges.size(); ++index)
+            inverted->add(m_ranges[index].m_end, m_ranges[index + 1].m_start);
+
+        if (float end = m_ranges.last().m_end != posInf)
+            inverted->add(end, posInf);
+    }
+
+    m_ranges.swap(inverted->m_ranges);
+}
+
+void TimeRanges::intersectWith(const TimeRanges* other)
+{
+    ASSERT(other);
+    RefPtr<TimeRanges> inverted = copy();
+    RefPtr<TimeRanges> invertedOther = other->copy();
+    inverted->unionWith(invertedOther.get());
+    inverted->invert();
+
+    m_ranges.swap(inverted->m_ranges);
+}
+
+void TimeRanges::unionWith(const TimeRanges* other)
+{
+    ASSERT(other);
+    RefPtr<TimeRanges> unioned = copy();
+    for (size_t index = 0; index < other->m_ranges.size(); ++index) {
+        const Range& range = other->m_ranges[index];
+        unioned->add(range.m_start, range.m_end);
+    }
+
+    m_ranges.swap(unioned->m_ranges);
 }
 
 float TimeRanges::start(unsigned index, ExceptionCode& ec) const 
@@ -114,4 +163,22 @@ bool TimeRanges::contain(float time) const
             return true;
     }
     return false;
+}
+
+float TimeRanges::nearest(float time) const
+{ 
+    ExceptionCode unused;
+    float closest = 0;
+    unsigned count = length();
+    for (unsigned ndx = 0; ndx < count; ndx++) {
+        float startTime = start(ndx, unused);
+        float endTime = end(ndx, unused);
+        if (time >= startTime && time <= endTime)
+            return time;
+        if (fabs(startTime - time) < closest)
+            closest = fabsf(startTime - time);
+        else if (fabs(endTime - time) < closest)
+            closest = fabsf(endTime - time);
+    }
+    return closest;
 }

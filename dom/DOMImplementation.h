@@ -24,6 +24,9 @@
 #ifndef DOMImplementation_h
 #define DOMImplementation_h
 
+#include "Document.h"
+#include "MediaPlayer.h"
+#include <wtf/Forward.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 
@@ -34,18 +37,23 @@ class Document;
 class DocumentType;
 class Frame;
 class HTMLDocument;
-class String;
+class KURL;
+class RegularExpression;
 
 typedef int ExceptionCode;
 
-class DOMImplementation : public RefCounted<DOMImplementation> {
+class DOMImplementation {
 public:
-    static PassRefPtr<DOMImplementation> create() { return adoptRef(new DOMImplementation); }
+    static PassOwnPtr<DOMImplementation> create(Document* document) { return adoptPtr(new DOMImplementation(document)); }
+    
+    void ref() { m_document->ref(); }
+    void deref() { m_document->deref(); }
+    Document* document() { return m_document; }
 
     // DOM methods & attributes for DOMImplementation
     static bool hasFeature(const String& feature, const String& version);
-    static PassRefPtr<DocumentType> createDocumentType(const String& qualifiedName, const String& publicId, const String &systemId, ExceptionCode&);
-    static PassRefPtr<Document> createDocument(const String& namespaceURI, const String& qualifiedName, DocumentType*, ExceptionCode&);
+    PassRefPtr<DocumentType> createDocumentType(const String& qualifiedName, const String& publicId, const String& systemId, ExceptionCode&);
+    PassRefPtr<Document> createDocument(const String& namespaceURI, const String& qualifiedName, DocumentType*, ExceptionCode&);
 
     DOMImplementation* getInterface(const String& feature);
 
@@ -53,20 +61,32 @@ public:
     static PassRefPtr<CSSStyleSheet> createCSSStyleSheet(const String& title, const String& media, ExceptionCode&);
 
     // From the HTMLDOMImplementation interface
-    static PassRefPtr<HTMLDocument> createHTMLDocument(const String& title);
+    PassRefPtr<HTMLDocument> createHTMLDocument(const String& title);
 
     // Other methods (not part of DOM)
-    static PassRefPtr<Document> createDocument(const String& MIMEType, Frame*, bool inViewSourceMode);
-    static PassRefPtr<Document> createDocument(Frame*);
-    static PassRefPtr<HTMLDocument> createHTMLDocument(Frame*);
+    static PassRefPtr<Document> createDocument(const String& MIMEType, Frame*, const KURL&, bool inViewSourceMode);
 
     static bool isXMLMIMEType(const String& MIMEType);
     static bool isTextMIMEType(const String& MIMEType);
 
 private:
-    DOMImplementation() { }
+    DOMImplementation(Document*);
+
+    Document* m_document;
 };
 
-} //namespace
+class XMLMIMETypeRegExp {
+public:
+    XMLMIMETypeRegExp();
+    ~XMLMIMETypeRegExp();
+    bool isXMLMIMEType(const String& mimeType);
+
+    WTF_MAKE_NONCOPYABLE(XMLMIMETypeRegExp);
+private:
+    OwnPtr<RegularExpression> m_regex;
+};
+
+
+} // namespace WebCore
 
 #endif

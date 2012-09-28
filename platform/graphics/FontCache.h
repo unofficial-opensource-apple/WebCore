@@ -31,10 +31,12 @@
 #define FontCache_h
 
 #include <limits.h>
+#include <wtf/Forward.h>
 #include <wtf/Vector.h>
 #include <wtf/unicode/Unicode.h>
 
-#if PLATFORM(WIN)
+#if OS(WINDOWS)
+#include <windows.h>
 #include <objidl.h>
 #include <mlang.h>
 #endif
@@ -42,7 +44,6 @@
 namespace WebCore
 {
 
-class AtomicString;
 class Font;
 class FontPlatformData;
 class FontData;
@@ -50,17 +51,21 @@ class FontDescription;
 class FontSelector;
 class SimpleFontData;
 
-class FontCache : public Noncopyable {
+class FontCache {
+    friend class FontCachePurgePreventer;
+
+    WTF_MAKE_NONCOPYABLE(FontCache); WTF_MAKE_FAST_ALLOCATED;
 public:
     friend FontCache* fontCache();
 
+    enum ShouldRetain { Retain, DoNotRetain };
+
     const FontData* getFontData(const Font&, int& familyIndex, FontSelector*);
     void releaseFontData(const SimpleFontData*);
-    
+
     // This method is implemented by the platform.
-    // FIXME: Font data returned by this method never go inactive because callers don't track and release them.
     const SimpleFontData* getFontDataForCharacters(const Font&, const UChar* characters, int length);
-    
+
     // Also implemented by the platform.
     void platformInit();
 
@@ -72,41 +77,77 @@ public:
 #endif
     static void comInitialize();
     static void comUninitialize();
+    static IMultiLanguage* getMultiLanguageInterface();
 #elif PLATFORM(WIN)
     IMLangFontLink2* getFontLinkInterface();
 #endif
 
     void getTraitsInFamily(const AtomicString&, Vector<unsigned>&);
 
-    FontPlatformData* getCachedFontPlatformData(const FontDescription&, const AtomicString& family, bool checkingAlternateName = false);
-    SimpleFontData* getCachedFontData(const FontPlatformData*);
-    FontPlatformData* getLastResortFallbackFont(const FontDescription&);
+    SimpleFontData* getCachedFontData(const FontDescription&, const AtomicString&, bool checkingAlternateName = false, ShouldRetain = Retain);
+    SimpleFontData* getLastResortFallbackFont(const FontDescription&, ShouldRetain = Retain);
+    SimpleFontData* getNonRetainedLastResortFallbackFont(const FontDescription&);
 
     void addClient(FontSelector*);
     void removeClient(FontSelector*);
 
-    unsigned generation();
+    unsigned short generation();
     void invalidate();
 
     size_t fontDataCount();
     size_t inactiveFontDataCount();
     void purgeInactiveFontData(int count = INT_MAX);
 
+#if PLATFORM(WIN)
+    SimpleFontData* fontDataFromDescriptionAndLogFont(const FontDescription&, ShouldRetain, const LOGFONT& font, AtomicString& outFontFamilyName);
+#elif PLATFORM(CHROMIUM) && OS(WINDOWS)
+    SimpleFontData* fontDataFromDescriptionAndLogFont(const FontDescription&, ShouldRetain, const LOGFONT& font, wchar_t* outFontFamilyName);
+#endif
+
 private:
     FontCache();
     ~FontCache();
 
+    void disablePurging() { m_purgePreventCount++; }
+    void enablePurging()
+    {
+        ASSERT(m_purgePreventCount);
+        if (!--m_purgePreventCount)
+            purgeInactiveFontDataIfNeeded();
+    }
+
+    void purgeInactiveFontDataIfNeeded();
+
+    // FIXME: This method should eventually be removed.
+    FontPlatformData* getCachedFontPlatformData(const FontDescription&, const AtomicString& family, bool checkingAlternateName = false);
+
     // These methods are implemented by each platform.
-    FontPlatformData* getSimilarFontPlatformData(const Font&);
+    SimpleFontData* getSimilarFontPlatformData(const Font&);
     FontPlatformData* getCustomFallbackFont(const UInt32 c, const Font&);
     FontPlatformData* createFontPlatformData(const FontDescription&, const AtomicString& family);
 
-    friend class SimpleFontData;
+    SimpleFontData* getCachedFontData(const FontPlatformData*, ShouldRetain = Retain);
+
+    // Don't purge if this count is > 0;
+    int m_purgePreventCount;
+
+#if USE(CORE_TEXT) || OS(ANDROID)
+    friend class ComplexTextController;
+#endif
+    friend class SimpleFontData; // For getCachedFontData(const FontPlatformData*)
     friend class FontFallbackList;
+    friend class ComplexTextController;
 };
 
 // Get the global fontCache.
 FontCache* fontCache();
+
+class FontCachePurgePreventer {
+public:
+    FontCachePurgePreventer() { fontCache()->disablePurging(); }
+    ~FontCachePurgePreventer() { fontCache()->enablePurging(); }
+};
+
 }
 
 #endif

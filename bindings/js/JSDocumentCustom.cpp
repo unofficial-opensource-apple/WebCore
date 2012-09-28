@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2011 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,42 +25,28 @@
 #include "FrameLoader.h"
 #include "HTMLDocument.h"
 #include "JSCanvasRenderingContext2D.h"
-#if ENABLE(3D_CANVAS)
+#if ENABLE(WEBGL)
 #include "JSWebGLRenderingContext.h"
 #endif
 #include "JSDOMWindowCustom.h"
 #include "JSHTMLDocument.h"
 #include "JSLocation.h"
+#include "JSTouch.h"
+#include "JSTouchList.h"
 #include "Location.h"
 #include "ScriptController.h"
+#include "TouchList.h"
 
 #if ENABLE(SVG)
 #include "JSSVGDocument.h"
 #include "SVGDocument.h"
 #endif
 
-#include "TouchList.h"
-#include "JSTouch.h"
-#include "JSTouchList.h"
-
 #include <wtf/GetPtr.h>
 
 using namespace JSC;
 
 namespace WebCore {
-
-void JSDocument::markChildren(MarkStack& markStack)
-{
-    JSNode::markChildren(markStack);
-
-    Document* document = impl();
-    JSGlobalData& globalData = *Heap::heap(this)->globalData();
-
-    markDOMNodesForDocument(markStack, document);
-    markActiveObjectsForContext(markStack, globalData, document);
-    markDOMObjectWrapper(markStack, globalData, document->implementation());
-    markDOMObjectWrapper(markStack, globalData, document->styleSheets());
-}
 
 JSValue JSDocument::location(ExecState* exec) const
 {
@@ -69,11 +55,11 @@ JSValue JSDocument::location(ExecState* exec) const
         return jsNull();
 
     Location* location = frame->domWindow()->location();
-    if (DOMObject* wrapper = getCachedDOMObjectWrapper(exec, location))
+    if (JSDOMWrapper* wrapper = getCachedWrapper(currentWorld(exec), location))
         return wrapper;
 
-    JSLocation* jsLocation = new (exec) JSLocation(getDOMStructure<JSLocation>(exec, globalObject()), globalObject(), location);
-    cacheDOMObjectWrapper(exec, location, jsLocation);
+    JSLocation* jsLocation = JSLocation::create(getDOMStructure<JSLocation>(exec, globalObject()), globalObject(), location);
+    cacheWrapper(currentWorld(exec), location, jsLocation);
     return jsLocation;
 }
 
@@ -83,16 +69,12 @@ void JSDocument::setLocation(ExecState* exec, JSValue value)
     if (!frame)
         return;
 
-    String str = value.toString(exec);
+    UString locationString = value.toString(exec)->value(exec);
+    if (exec->hadException())
+        return;
 
-    // IE and Mozilla both resolve the URL relative to the source frame,
-    // not the target frame.
-    Frame* activeFrame = asJSDOMWindow(exec->dynamicGlobalObject())->impl()->frame();
-    if (activeFrame)
-        str = activeFrame->document()->completeURL(str).string();
-
-    bool userGesture = activeFrame->script()->processingUserGesture(currentWorld(exec));
-    frame->redirectScheduler()->scheduleLocationChange(str, activeFrame->loader()->outgoingReferrer(), !activeFrame->script()->anyPageIsProcessingUserGesture(), false, userGesture);
+    if (Location* location = frame->domWindow()->location())
+        location->setHref(ustringToString(locationString), activeDOMWindow(exec), firstDOMWindow(exec));
 }
 
 JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, Document* document)
@@ -100,18 +82,18 @@ JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, Document* documen
     if (!document)
         return jsNull();
 
-    DOMObject* wrapper = getCachedDOMNodeWrapper(exec, document, document);
+    JSDOMWrapper* wrapper = getCachedWrapper(currentWorld(exec), document);
     if (wrapper)
         return wrapper;
 
     if (document->isHTMLDocument())
-        wrapper = CREATE_DOM_NODE_WRAPPER(exec, globalObject, HTMLDocument, document);
+        wrapper = CREATE_DOM_WRAPPER(exec, globalObject, HTMLDocument, document);
 #if ENABLE(SVG)
     else if (document->isSVGDocument())
-        wrapper = CREATE_DOM_NODE_WRAPPER(exec, globalObject, SVGDocument, document);
+        wrapper = CREATE_DOM_WRAPPER(exec, globalObject, SVGDocument, document);
 #endif
     else
-        wrapper = CREATE_DOM_NODE_WRAPPER(exec, globalObject, Document, document);
+        wrapper = CREATE_DOM_WRAPPER(exec, globalObject, Document, document);
 
     // Make sure the document is kept around by the window object, and works right with the
     // back/forward cache.
@@ -126,16 +108,14 @@ JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, Document* documen
     return wrapper;
 }
 
-JSValue JSDocument::createTouchList(ExecState* exec, const ArgList& args)
+JSValue JSDocument::createTouchList(ExecState* exec)
 {
     RefPtr<TouchList> touchList = TouchList::create();
-    
-    int sz = args.size();
-    for (int i = 0; i < sz; i++) {
-        touchList->append(toTouch(args.at(i)));
-    }
-    
-    return toJS(exec, touchList.release());
+
+    for (size_t i = 0; i < exec->argumentCount(); i++)
+        touchList->append(toTouch(exec->argument(i)));
+
+    return toJS(exec, globalObject(), touchList.release());
 }
 
 } // namespace WebCore

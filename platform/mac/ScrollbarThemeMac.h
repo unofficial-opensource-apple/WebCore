@@ -28,6 +28,8 @@
 
 #include "ScrollbarThemeComposite.h"
 
+typedef id ScrollbarPainter;
+
 namespace WebCore {
 
 class ScrollbarThemeMac : public ScrollbarThemeComposite {
@@ -35,34 +37,54 @@ public:
     ScrollbarThemeMac();
     virtual ~ScrollbarThemeMac();
 
-    virtual bool paint(Scrollbar*, GraphicsContext* context, const IntRect& damageRect);
+    void preferencesChanged();
+
+    virtual void updateEnabledState(ScrollbarThemeClient*);
+
+#if !PLATFORM(CHROMIUM)
+    virtual bool paint(ScrollbarThemeClient*, GraphicsContext*, const IntRect& damageRect);
+#endif
 
     virtual int scrollbarThickness(ScrollbarControlSize = RegularScrollbar);
     
     virtual bool supportsControlTints() const { return true; }
+    virtual bool usesOverlayScrollbars() const;
+    virtual void updateScrollbarOverlayStyle(ScrollbarThemeClient*);
 
     virtual double initialAutoscrollTimerDelay();
     virtual double autoscrollTimerDelay();
 
     virtual ScrollbarButtonsPlacement buttonsPlacement() const;
 
-    virtual void registerScrollbar(Scrollbar*);
-    virtual void unregisterScrollbar(Scrollbar*);
+    virtual void registerScrollbar(ScrollbarThemeClient*);
+    virtual void unregisterScrollbar(ScrollbarThemeClient*);
+
+    void setNewPainterForScrollbar(ScrollbarThemeClient*, ScrollbarPainter);
+    ScrollbarPainter painterForScrollbar(ScrollbarThemeClient*);
+
+    static bool isCurrentlyDrawingIntoLayer();
+    static void setIsCurrentlyDrawingIntoLayer(bool);
 
 protected:
-    virtual bool hasButtons(Scrollbar*);
-    virtual bool hasThumb(Scrollbar*);
+    virtual bool hasButtons(ScrollbarThemeClient*);
+    virtual bool hasThumb(ScrollbarThemeClient*);
 
-    virtual IntRect backButtonRect(Scrollbar*, ScrollbarPart, bool painting = false);
-    virtual IntRect forwardButtonRect(Scrollbar*, ScrollbarPart, bool painting = false);
-    virtual IntRect trackRect(Scrollbar*, bool painting = false);
+    virtual IntRect backButtonRect(ScrollbarThemeClient*, ScrollbarPart, bool painting = false);
+    virtual IntRect forwardButtonRect(ScrollbarThemeClient*, ScrollbarPart, bool painting = false);
+    virtual IntRect trackRect(ScrollbarThemeClient*, bool painting = false);
 
-    virtual int minimumThumbLength(Scrollbar*);
+    virtual int maxOverlapBetweenPages() { return 40; }
+
+    virtual int minimumThumbLength(ScrollbarThemeClient*);
     
-    virtual bool shouldCenterOnThumb(Scrollbar*, const PlatformMouseEvent&);
-    
-public:
-    void preferencesChanged();
+    virtual bool shouldCenterOnThumb(ScrollbarThemeClient*, const PlatformMouseEvent&);
+    virtual bool shouldDragDocumentInsteadOfThumb(ScrollbarThemeClient*, const PlatformMouseEvent&);
+    int scrollbarPartToHIPressedState(ScrollbarPart);
+
+#if !PLATFORM(CHROMIUM) && USE(ACCELERATED_COMPOSITING) && ENABLE(RUBBER_BANDING)
+    virtual void setUpOverhangAreasLayerContents(GraphicsLayer*) OVERRIDE;
+    virtual void setUpContentShadowLayer(GraphicsLayer*) OVERRIDE;
+#endif
 };
 
 }

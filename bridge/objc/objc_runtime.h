@@ -26,7 +26,8 @@
 #ifndef KJS_BINDINGS_OBJC_RUNTIME_H
 #define KJS_BINDINGS_OBJC_RUNTIME_H
 
-#include "Bridge.h"
+#include "BridgeJSC.h"
+#include "JSDOMBinding.h"
 #include "objc_header.h"
 #include <runtime/JSGlobalObject.h>
 #include <wtf/RetainPtr.h>
@@ -89,9 +90,18 @@ private:
     RetainPtr<ObjectStructPtr> _array;
 };
 
-class ObjcFallbackObjectImp : public JSObject {
+class ObjcFallbackObjectImp : public JSNonFinalObject {
 public:
-    ObjcFallbackObjectImp(ExecState*, ObjcInstance*, const Identifier& propertyName);
+    typedef JSNonFinalObject Base;
+
+    static ObjcFallbackObjectImp* create(ExecState* exec, JSGlobalObject* globalObject, ObjcInstance* instance, const Identifier& propertyName)
+    {
+        // FIXME: deprecatedGetDOMStructure uses the prototype off of the wrong global object
+        Structure* domStructure = WebCore::deprecatedGetDOMStructure<ObjcFallbackObjectImp>(exec);
+        ObjcFallbackObjectImp* fallbackObject = new (NotNull, allocateCell<ObjcFallbackObjectImp>(*exec->heap())) ObjcFallbackObjectImp(globalObject, domStructure, instance, propertyName);
+        fallbackObject->finishCreation(globalObject);
+        return fallbackObject;
+    }
 
     static const ClassInfo s_info;
 
@@ -102,23 +112,26 @@ public:
         return globalObject->objectPrototype();
     }
 
-    static PassRefPtr<Structure> createStructure(JSValue prototype)
+    static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(prototype, TypeInfo(ObjectType, StructureFlags), AnonymousSlotCount);
+        return Structure::create(globalData, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), &s_info);
     }
 
+protected:
+    void finishCreation(JSGlobalObject*);
+
 private:
+    ObjcFallbackObjectImp(JSGlobalObject*, Structure*, ObjcInstance*, const Identifier& propertyName);
+    static void destroy(JSCell*);
     static const unsigned StructureFlags = OverridesGetOwnPropertySlot | JSObject::StructureFlags;
-    virtual bool getOwnPropertySlot(ExecState*, const Identifier&, PropertySlot&);
-    virtual bool getOwnPropertyDescriptor(ExecState*, const Identifier&, PropertyDescriptor&);
-    virtual void put(ExecState*, const Identifier& propertyName, JSValue, PutPropertySlot&);
-    virtual CallType getCallData(CallData&);
-    virtual bool deleteProperty(ExecState*, const Identifier& propertyName);
-    virtual JSValue defaultValue(ExecState*, PreferredPrimitiveType) const;
+    static bool getOwnPropertySlot(JSCell*, ExecState*, const Identifier&, PropertySlot&);
+    static bool getOwnPropertyDescriptor(JSObject*, ExecState*, const Identifier&, PropertyDescriptor&);
+    static void put(JSCell*, ExecState*, const Identifier& propertyName, JSValue, PutPropertySlot&);
+    static CallType getCallData(JSCell*, CallData&);
+    static bool deleteProperty(JSCell*, ExecState*, const Identifier& propertyName);
+    static JSValue defaultValue(const JSObject*, ExecState*, PreferredPrimitiveType);
 
-    virtual bool toBoolean(ExecState*) const;
-
-    virtual const ClassInfo* classInfo() const { return &s_info; }
+    bool toBoolean(ExecState*) const; // FIXME: Currently this is broken because none of the superclasses are marked virtual. We need to solve this in the longer term.
 
     RefPtr<ObjcInstance> _instance;
     Identifier _item;

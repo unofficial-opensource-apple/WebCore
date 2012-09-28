@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -142,9 +142,9 @@ static String keyIdentifierForWindowsKeyCode(unsigned short keyCode)
     }
 }
 
-static bool isKeypadEvent(WPARAM code, LPARAM keyData, PlatformKeyboardEvent::Type type)
+static bool isKeypadEvent(WPARAM code, LPARAM keyData, PlatformEvent::Type type)
 {
-    if (type != PlatformKeyboardEvent::RawKeyDown && type != PlatformKeyboardEvent::KeyUp)
+    if (type != PlatformEvent::RawKeyDown && type != PlatformEvent::KeyUp)
         return false;
 
     switch (code) {
@@ -184,21 +184,21 @@ static bool isKeypadEvent(WPARAM code, LPARAM keyData, PlatformKeyboardEvent::Ty
     }
 }
 
-static inline String singleCharacterString(UChar c) { return String(&c, 1); }
+static inline String singleCharacterString(UChar c)
+{
+    return String(&c, 1);
+}
 
 PlatformKeyboardEvent::PlatformKeyboardEvent(HWND, WPARAM code, LPARAM keyData, Type type, bool systemKey)
-    : m_type(type)
-    , m_text((type == Char) ? singleCharacterString(code) : String())
-    , m_unmodifiedText((type == Char) ? singleCharacterString(code) : String())
-    , m_keyIdentifier((type == Char) ? String() : keyIdentifierForWindowsKeyCode(code))
-    , m_autoRepeat(HIWORD(keyData) & KF_REPEAT)
+    : PlatformEvent(type, GetKeyState(VK_SHIFT) & HIGH_BIT_MASK_SHORT, GetKeyState(VK_CONTROL) & HIGH_BIT_MASK_SHORT, GetKeyState(VK_MENU) & HIGH_BIT_MASK_SHORT, false, ::GetTickCount() * 0.001)
+    , m_text((type == PlatformEvent::Char) ? singleCharacterString(code) : String())
+    , m_unmodifiedText((type == PlatformEvent::Char) ? singleCharacterString(code) : String())
+    , m_keyIdentifier((type == PlatformEvent::Char) ? String() : keyIdentifierForWindowsKeyCode(code))
     , m_windowsVirtualKeyCode((type == RawKeyDown || type == KeyUp) ? code : 0)
     , m_nativeVirtualKeyCode(m_windowsVirtualKeyCode)
+    , m_macCharCode(0)
+    , m_autoRepeat(HIWORD(keyData) & KF_REPEAT)
     , m_isKeypad(isKeypadEvent(code, keyData, type))
-    , m_shiftKey(GetKeyState(VK_SHIFT) & HIGH_BIT_MASK_SHORT)
-    , m_ctrlKey(GetKeyState(VK_CONTROL) & HIGH_BIT_MASK_SHORT)
-    , m_altKey(GetKeyState(VK_MENU) & HIGH_BIT_MASK_SHORT)
-    , m_metaKey(false)
     , m_isSystemKey(systemKey)
 {
 }
@@ -212,6 +212,14 @@ void PlatformKeyboardEvent::disambiguateKeyDownEvent(Type, bool)
 bool PlatformKeyboardEvent::currentCapsLockState()
 {
      return GetKeyState(VK_CAPITAL) & 1;
+}
+
+void PlatformKeyboardEvent::getCurrentModifierState(bool& shiftKey, bool& ctrlKey, bool& altKey, bool& metaKey)
+{
+    shiftKey = GetKeyState(VK_SHIFT) & HIGH_BIT_MASK_SHORT;
+    ctrlKey = GetKeyState(VK_CONTROL) & HIGH_BIT_MASK_SHORT;
+    altKey = GetKeyState(VK_MENU) & HIGH_BIT_MASK_SHORT;
+    metaKey = false;
 }
 
 }

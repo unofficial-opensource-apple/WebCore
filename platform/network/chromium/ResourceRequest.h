@@ -30,17 +30,49 @@
 
 #include "ResourceRequestBase.h"
 
+#include <wtf/PassRefPtr.h>
+#include <wtf/RefCounted.h>
+
 namespace WebCore {
 
     class Frame;
 
     class ResourceRequest : public ResourceRequestBase {
     public:
+        // The type of this ResourceRequest, based on how the resource will be used.
+        enum TargetType {
+            TargetIsMainFrame,
+            TargetIsSubframe,
+            TargetIsSubresource, // Resource is a generic subresource. (Generally a specific type should be specified)
+            TargetIsStyleSheet,
+            TargetIsScript,
+            TargetIsFontResource,
+            TargetIsImage,
+            TargetIsObject,
+            TargetIsMedia,
+            TargetIsWorker,
+            TargetIsSharedWorker,
+            TargetIsPrefetch,
+            TargetIsPrerender,
+            TargetIsFavicon,
+            TargetIsXHR,
+            TargetIsTextTrack,
+            TargetIsUnspecified,
+        };
+
+        class ExtraData : public RefCounted<ExtraData> {
+        public:
+            virtual ~ExtraData() { }
+        };
+
         ResourceRequest(const String& url) 
             : ResourceRequestBase(KURL(ParsedURLString, url), UseProtocolCachePolicy)
             , m_requestorID(0)
             , m_requestorProcessID(0)
             , m_appCacheHostID(0)
+            , m_hasUserGesture(false)
+            , m_downloadToFile(false)
+            , m_targetType(TargetIsUnspecified)
         {
         }
 
@@ -49,6 +81,9 @@ namespace WebCore {
             , m_requestorID(0)
             , m_requestorProcessID(0)
             , m_appCacheHostID(0)
+            , m_hasUserGesture(false)
+            , m_downloadToFile(false)
+            , m_targetType(TargetIsUnspecified)
         {
         }
 
@@ -57,6 +92,9 @@ namespace WebCore {
             , m_requestorID(0)
             , m_requestorProcessID(0)
             , m_appCacheHostID(0)
+            , m_hasUserGesture(false)
+            , m_downloadToFile(false)
+            , m_targetType(TargetIsUnspecified)
         {
             setHTTPReferrer(referrer);
         }
@@ -66,6 +104,9 @@ namespace WebCore {
             , m_requestorID(0)
             , m_requestorProcessID(0)
             , m_appCacheHostID(0)
+            , m_hasUserGesture(false)
+            , m_downloadToFile(false)
+            , m_targetType(TargetIsUnspecified)
         {
         }
 
@@ -84,15 +125,47 @@ namespace WebCore {
         int appCacheHostID() const { return m_appCacheHostID; }
         void setAppCacheHostID(int id) { m_appCacheHostID = id; }
 
+        // True if request was user initiated.
+        bool hasUserGesture() const { return m_hasUserGesture; }
+        void setHasUserGesture(bool hasUserGesture) { m_hasUserGesture = hasUserGesture; }
+
+        // True if request should be downloaded to file.
+        bool downloadToFile() const { return m_downloadToFile; }
+        void setDownloadToFile(bool downloadToFile) { m_downloadToFile = downloadToFile; }
+
+        // Extra data associated with this request.
+        ExtraData* extraData() const { return m_extraData.get(); }
+        void setExtraData(PassRefPtr<ExtraData> extraData) { m_extraData = extraData; }
+
+        // What this request is for.
+        TargetType targetType() const { return m_targetType; }
+        void setTargetType(TargetType type) { m_targetType = type; }
+
     private:
         friend class ResourceRequestBase;
 
         void doUpdatePlatformRequest() {}
         void doUpdateResourceRequest() {}
 
+        PassOwnPtr<CrossThreadResourceRequestData> doPlatformCopyData(PassOwnPtr<CrossThreadResourceRequestData>) const;
+        void doPlatformAdopt(PassOwnPtr<CrossThreadResourceRequestData>);
+
         int m_requestorID;
         int m_requestorProcessID;
         int m_appCacheHostID;
+        bool m_hasUserGesture;
+        bool m_downloadToFile;
+        RefPtr<ExtraData> m_extraData;
+        TargetType m_targetType;
+    };
+
+    struct CrossThreadResourceRequestData : public CrossThreadResourceRequestDataBase {
+        int m_requestorID;
+        int m_requestorProcessID;
+        int m_appCacheHostID;
+        bool m_hasUserGesture;
+        bool m_downloadToFile;
+        ResourceRequest::TargetType m_targetType;
     };
 
 } // namespace WebCore

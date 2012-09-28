@@ -1,22 +1,23 @@
 /*
-    Copyright (C) 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
-    Copyright (C) Research In Motion Limited 2010. All rights reserved.
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) Research In Motion Limited 2010. All rights reserved.
+ * Copyright (C) 2011 Torch Mobile (Beijing) Co. Ltd. All rights reserved.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
 
@@ -29,6 +30,7 @@
 #include "EventListener.h"
 #include "EventNames.h"
 #include "FrameView.h"
+#include "SVGDocumentExtensions.h"
 #include "SVGElementInstanceList.h"
 #include "SVGUseElement.h"
 
@@ -36,19 +38,18 @@
 
 namespace WebCore {
 
-#ifndef NDEBUG
-static WTF::RefCountedLeakCounter instanceCounter("WebCoreSVGElementInstance");
-#endif
+DEFINE_DEBUG_ONLY_GLOBAL(WTF::RefCountedLeakCounter, instanceCounter, ("WebCoreSVGElementInstance"));
 
-SVGElementInstance::SVGElementInstance(SVGUseElement* useElement, PassRefPtr<SVGElement> originalElement)
-    : m_useElement(useElement)
+SVGElementInstance::SVGElementInstance(SVGUseElement* correspondingUseElement, SVGUseElement* directUseElement, PassRefPtr<SVGElement> originalElement)
+    : m_correspondingUseElement(correspondingUseElement)
+    , m_directUseElement(directUseElement)
     , m_element(originalElement)
     , m_previousSibling(0)
     , m_nextSibling(0)
     , m_firstChild(0)
     , m_lastChild(0)
 {
-    ASSERT(m_useElement);
+    ASSERT(m_correspondingUseElement);
     ASSERT(m_element);
 
     // Register as instance for passed element.
@@ -61,12 +62,30 @@ SVGElementInstance::SVGElementInstance(SVGUseElement* useElement, PassRefPtr<SVG
 
 SVGElementInstance::~SVGElementInstance()
 {
+    // Call detach because we may be deleted directly if we are a child of a detached instance.
+    detach();
+
 #ifndef NDEBUG
     instanceCounter.decrement();
 #endif
 
-    // Deregister as instance for passed element.
-    m_element->removeInstanceMapping(this);
+    m_element = 0;
+}
+
+void SVGElementInstance::detach()
+{
+    // Clear all pointers. When the node is detached from the shadow DOM it should be removed but,
+    // due to ref counting, it may not be. So clear everything to avoid dangling pointers.
+
+    // Deregister as instance for passed element, if we haven't already.
+    if (m_element->instancesForElement().contains(this))
+        m_element->removeInstanceMapping(this);
+    // DO NOT clear ref to m_element because JavaScriptCore uses it for garbage collection
+
+    m_shadowTreeElement = 0;
+
+    m_directUseElement = 0;
+    m_correspondingUseElement = 0;
 
     removeAllChildrenInContainer<SVGElementInstance, SVGElementInstance>(this);
 }
@@ -89,7 +108,7 @@ void SVGElementInstance::appendChild(PassRefPtr<SVGElementInstance> child)
 
 void SVGElementInstance::invalidateAllInstancesOfElement(SVGElement* element)
 {
-    if (!element)
+    if (!element || !element->inDocument())
         return;
 
     if (element->isStyled() && static_cast<SVGStyledElement*>(element)->instanceUpdatesBlocked())
@@ -102,9 +121,32 @@ void SVGElementInstance::invalidateAllInstancesOfElement(SVGElement* element)
     // Mark all use elements referencing 'element' for rebuilding
     const HashSet<SVGElementInstance*>::const_iterator end = set.end();
     for (HashSet<SVGElementInstance*>::const_iterator it = set.begin(); it != end; ++it) {
+        ASSERT((*it)->shadowTreeElement());
+        ASSERT((*it)->shadowTreeElement()->correspondingElement());
+        ASSERT((*it)->shadowTreeElement()->correspondingElement() == (*it)->correspondingElement());
         ASSERT((*it)->correspondingElement() == element);
-        (*it)->correspondingUseElement()->invalidateShadowTree();
+        (*it)->shadowTreeElement()->setCorrespondingElement(0);
+
+        // The shadow tree, which is eventually animated, is mutated. In order to keep the animVal
+        // logic correct, we have to stop the animation, and restart it once the shadow tree has
+        // recloned. Otherwise we miss to call stopAnimValAnimation() on the old shadow tree element
+        // which leads to an assertion once garbage is collected, if the animVal bindings have been
+        // accessed from JS. It would also assert on the next updateAnimations() call as the new
+        // SVGAnimatedProperty object hasn't been initialized yet (using startAnimValAnimation).
+        element->document()->accessSVGExtensions()->removeAllAnimationElementsFromTarget(element);
+
+        if (SVGUseElement* element = (*it)->correspondingUseElement()) {
+            ASSERT(element->inDocument());
+            element->invalidateShadowTree();
+        }
     }
+
+    element->document()->updateStyleIfNeeded();
+}
+
+const AtomicString& SVGElementInstance::interfaceName() const
+{
+    return eventNames().interfaceForSVGElementInstance;
 }
 
 ScriptExecutionContext* SVGElementInstance::scriptExecutionContext() const
@@ -127,34 +169,44 @@ void SVGElementInstance::removeAllEventListeners()
     m_element->removeAllEventListeners();
 }
 
-bool SVGElementInstance::dispatchEvent(PassRefPtr<Event> prpEvent)
+bool SVGElementInstance::dispatchEvent(PassRefPtr<Event> event)
 {
-    RefPtr<EventTarget> protect = this;
-    RefPtr<Event> event = prpEvent;
-
-    event->setTarget(this);
-
     SVGElement* element = shadowTreeElement();
     if (!element)
         return false;
 
-    RefPtr<FrameView> view = element->document()->view();
-    return element->dispatchGenericEvent(event.release());
+    return element->dispatchEvent(event);
 }
 
 EventTargetData* SVGElementInstance::eventTargetData()
 {
-    return m_element->eventTargetData();
+    // EventTarget would use these methods if we were actually using its add/removeEventListener logic.
+    // As we're forwarding those calls to the correspondingElement(), no one should ever call this function.
+    ASSERT_NOT_REACHED();
+    return 0;
 }
 
 EventTargetData* SVGElementInstance::ensureEventTargetData()
 {
-    // Avoid crashing - return a default dummy value
-    DEFINE_STATIC_LOCAL(EventTargetData, dummyEventTargetData, ());
-    dummyEventTargetData.eventListenerMap.clear();
-    return &dummyEventTargetData;
+    // EventTarget would use these methods if we were actually using its add/removeEventListener logic.
+    // As we're forwarding those calls to the correspondingElement(), no one should ever call this function.
+    ASSERT_NOT_REACHED();
+    return 0;
 }
 
+SVGElementInstance::InstanceUpdateBlocker::InstanceUpdateBlocker(SVGElement* targetElement)
+    : m_targetElement(targetElement->isStyled() ? static_cast<SVGStyledElement*>(targetElement) : 0)
+{
+    if (m_targetElement)
+        m_targetElement->setInstanceUpdatesBlocked(true);
+}
+
+SVGElementInstance::InstanceUpdateBlocker::~InstanceUpdateBlocker()
+{
+    if (m_targetElement)
+        m_targetElement->setInstanceUpdatesBlocked(false);
+}
+   
 }
 
 #endif

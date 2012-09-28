@@ -24,10 +24,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef PluginStream_H
-#define PluginStream_H
+#ifndef PluginStream_h
+#define PluginStream_h
 
-#include "CString.h"
 #include "FileSystem.h"
 #include "KURL.h"
 #include "NetscapePlugInStreamLoader.h"
@@ -35,13 +34,14 @@
 #include "PluginQuirkSet.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
-#include "StringHash.h"
 #include "Timer.h"
 #include "npruntime_internal.h"
 #include <wtf/HashMap.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
     class Frame;
@@ -70,7 +70,7 @@ namespace WebCore {
 
         void setLoadManually(bool loadManually) { m_loadManually = loadManually; }
 
-        void sendJavaScriptStream(const KURL& requestURL, const CString& resultString);
+        void sendJavaScriptStream(const KURL& requestURL, const WTF::CString& resultString);
         void cancelAndDestroyStream(NPReason);
 
         static NPP ownerForStream(NPStream*);
@@ -109,10 +109,10 @@ namespace WebCore {
 
         const NPPluginFuncs* m_pluginFuncs;
         NPP m_instance;
-        uint16 m_transferMode;
-        int32 m_offset;
+        uint16_t m_transferMode;
+        int32_t m_offset;
         CString m_headers;
-        CString m_path;
+        String m_path;
         NPReason m_reason;
         NPStream m_stream;
         PluginQuirkSet m_quirks;

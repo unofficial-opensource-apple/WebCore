@@ -22,29 +22,22 @@
 #include "config.h"
 #include "Text.h"
 
-#include "CString.h"
 #include "ExceptionCode.h"
+#include "NodeRenderingContext.h"
+#include "RenderCombineText.h"
 #include "RenderText.h"
-#include "TextBreakIterator.h"
 
 #if ENABLE(SVG)
 #include "RenderSVGInlineText.h"
 #include "SVGNames.h"
 #endif
 
-#if ENABLE(WML)
-#include "WMLDocument.h"
-#include "WMLVariables.h"
-#endif
+#include <wtf/text/CString.h>
+#include <wtf/text/StringBuilder.h>
 
 using namespace std;
 
 namespace WebCore {
-
-Text::Text(Document* document, const String& data)
-    : CharacterData(document, data, CreateText)
-{
-}
 
 PassRefPtr<Text> Text::create(Document* document, const String& data)
 {
@@ -62,11 +55,11 @@ PassRefPtr<Text> Text::splitText(unsigned offset, ExceptionCode& ec)
         return 0;
     }
 
-    RefPtr<StringImpl> oldStr = dataImpl();
-    RefPtr<Text> newText = virtualCreate(oldStr->substring(offset));
-    setDataImpl(oldStr->substring(0, offset));
+    String oldStr = data();
+    RefPtr<Text> newText = virtualCreate(oldStr.substring(offset));
+    setDataWithoutUpdate(oldStr.substring(0, offset));
 
-    dispatchModifiedEvent(oldStr.get());
+    dispatchModifiedEvent(oldStr);
 
     if (parentNode())
         parentNode()->insertBefore(newText.get(), nextSibling(), ec);
@@ -77,7 +70,7 @@ PassRefPtr<Text> Text::splitText(unsigned offset, ExceptionCode& ec)
         document()->textNodeSplit(this);
 
     if (renderer())
-        toRenderText(renderer())->setText(dataImpl());
+        toRenderText(renderer())->setTextWithOffset(dataImpl(), 0, oldStr.length());
 
     return newText.release();
 }
@@ -128,23 +121,21 @@ String Text::wholeText() const
             continue;
         const Text* t = static_cast<const Text*>(n);
         const String& data = t->data();
+        if (std::numeric_limits<unsigned>::max() - data.length() < resultLength)
+            CRASH();
         resultLength += data.length();
     }
-    UChar* resultData;
-    String result = String::createUninitialized(resultLength, resultData);
-    UChar* p = resultData;
+    StringBuilder result;
+    result.reserveCapacity(resultLength);
     for (const Node* n = startText; n != onePastEndText; n = n->nextSibling()) {
         if (!n->isTextNode())
             continue;
         const Text* t = static_cast<const Text*>(n);
-        const String& data = t->data();
-        unsigned dataLength = data.length();
-        memcpy(p, data.characters(), dataLength * sizeof(UChar));
-        p += dataLength;
+        result.append(t->data());
     }
-    ASSERT(p == resultData + resultLength);
+    ASSERT(result.length() == resultLength);
 
-    return result;
+    return result.toString();
 }
 
 PassRefPtr<Text> Text::replaceWholeText(const String& newText, ExceptionCode&)
@@ -156,7 +147,7 @@ PassRefPtr<Text> Text::replaceWholeText(const String& newText, ExceptionCode&)
     RefPtr<Text> endText = const_cast<Text*>(latestLogicallyAdjacentTextNode(this));
 
     RefPtr<Text> protectedThis(this); // Mutation event handlers could cause our last ref to go away
-    Node* parent = parentNode(); // Protect against mutation handlers moving this node during traversal
+    RefPtr<ContainerNode> parent = parentNode(); // Protect against mutation handlers moving this node during traversal
     ExceptionCode ignored = 0;
     for (RefPtr<Node> n = startText; n && n != this && n->isTextNode() && n->parentNode() == parent;) {
         RefPtr<Node> nodeToRemove(n.release());
@@ -198,24 +189,23 @@ PassRefPtr<Node> Text::cloneNode(bool /*deep*/)
     return create(document(), data());
 }
 
-bool Text::rendererIsNeeded(RenderStyle *style)
+bool Text::rendererIsNeeded(const NodeRenderingContext& context)
 {
-    if (!CharacterData::rendererIsNeeded(style))
+    if (!CharacterData::rendererIsNeeded(context))
         return false;
 
     bool onlyWS = containsOnlyWhitespace();
     if (!onlyWS)
         return true;
 
-    RenderObject *par = parentNode()->renderer();
-    
+    RenderObject* par = context.parentRenderer();
     if (par->isTable() || par->isTableRow() || par->isTableSection() || par->isTableCol() || par->isFrameSet())
         return false;
     
-    if (style->preserveNewline()) // pre/pre-wrap/pre-line always make renderers.
+    if (context.style()->preserveNewline()) // pre/pre-wrap/pre-line always make renderers.
         return true;
     
-    RenderObject *prev = previousRenderer();
+    RenderObject* prev = context.previousRenderer();
     if (prev && prev->isBR()) // <span><br/> <br/></span>
         return false;
         
@@ -227,10 +217,10 @@ bool Text::rendererIsNeeded(RenderStyle *style)
         if (par->isRenderBlock() && !par->childrenInline() && (!prev || !prev->isInline()))
             return false;
         
-        RenderObject *first = par->firstChild();
+        RenderObject* first = par->firstChild();
         while (first && first->isFloatingOrPositioned())
             first = first->nextSibling();
-        RenderObject *next = nextRenderer();
+        RenderObject* next = context.nextRenderer();
         if (!first || next == first)
             // Whitespace at the start of a block just goes away.  Don't even
             // make a render object for this text.
@@ -240,42 +230,32 @@ bool Text::rendererIsNeeded(RenderStyle *style)
     return true;
 }
 
-RenderObject* Text::createRenderer(RenderArena* arena, RenderStyle*)
+RenderObject* Text::createRenderer(RenderArena* arena, RenderStyle* style)
 {
 #if ENABLE(SVG)
-    if (parentNode()->isSVGElement()
-#if ENABLE(SVG_FOREIGN_OBJECT)
-        && !parentNode()->hasTagName(SVGNames::foreignObjectTag)
-#endif
-    )
+    Node* parentOrHost = parentOrHostNode();
+    if (parentOrHost->isSVGElement() && !parentOrHost->hasTagName(SVGNames::foreignObjectTag))
         return new (arena) RenderSVGInlineText(this, dataImpl());
 #endif
-    
+
+    if (style->hasTextCombine())
+        return new (arena) RenderCombineText(this, dataImpl());
+
     return new (arena) RenderText(this, dataImpl());
 }
 
 void Text::attach()
 {
-#if ENABLE(WML)
-    if (document()->isWMLDocument() && !containsOnlyWhitespace()) {
-        String text = data();
-        ASSERT(!text.isEmpty());
-
-        text = substituteVariableReferences(text, document());
-
-        ExceptionCode code = 0;
-        setData(text, code);
-        ASSERT(!code);
-    }
-#endif
-
     createRendererIfNeeded();
     CharacterData::attach();
 }
 
-void Text::recalcStyle(StyleChange change)
+void Text::recalcTextStyle(StyleChange change)
 {
-    if (change != NoChange && parentNode()) {
+    if (hasCustomWillOrDidRecalcStyle())
+        willRecalcTextStyle(change);
+
+    if (change != NoChange && parentNode() && parentNode()->renderer()) {
         if (renderer())
             renderer()->setStyle(parentNode()->renderer()->style());
     }
@@ -283,16 +263,13 @@ void Text::recalcStyle(StyleChange change)
         if (renderer()) {
             if (renderer()->isText())
                 toRenderText(renderer())->setText(dataImpl());
-        } else {
-            if (attached())
-                detach();
-            attach();
-        }
+        } else
+            reattach();
     }
-    setNeedsStyleRecalc(NoStyleChange);
+    clearNeedsStyleRecalc();
 }
 
-bool Text::childTypeAllowed(NodeType)
+bool Text::childTypeAllowed(NodeType) const
 {
     return false;
 }
@@ -302,37 +279,17 @@ PassRefPtr<Text> Text::virtualCreate(const String& data)
     return create(document(), data);
 }
 
-PassRefPtr<Text> Text::createWithLengthLimit(Document* document, const String& data, unsigned& charsLeft, unsigned maxChars)
+PassRefPtr<Text> Text::createWithLengthLimit(Document* document, const String& data, unsigned start, unsigned maxChars)
 {
     unsigned dataLength = data.length();
 
-    if (charsLeft == dataLength && charsLeft <= maxChars) {
-        charsLeft = 0;
+    if (!start && dataLength <= maxChars)
         return create(document, data);
-    }
 
-    unsigned start = dataLength - charsLeft;
-    unsigned end = start + min(charsLeft, maxChars);
-    
-    // Check we are not on an unbreakable boundary.
-    // Some text break iterator implementations work best if the passed buffer is as small as possible, 
-    // see <https://bugs.webkit.org/show_bug.cgi?id=29092>. 
-    // We need at least two characters look-ahead to account for UTF-16 surrogates.
-    if (end < dataLength) {
-        TextBreakIterator* it = characterBreakIterator(data.characters() + start, (end + 2 > dataLength) ? dataLength - start : end - start + 2);
-        if (!isTextBreak(it, end - start))
-            end = textBreakPreceding(it, end - start) + start;
-    }
-    
-    // If we have maxChars of unbreakable characters the above could lead to
-    // an infinite loop.
-    // FIXME: It would be better to just have the old value of end before calling
-    // textBreakPreceding rather than this, because this exceeds the length limit.
-    if (end <= start)
-        end = dataLength;
-    
-    charsLeft = dataLength - end;
-    return create(document, data.substring(start, end - start));
+    RefPtr<Text> result = Text::create(document, String());
+    result->parserAppendData(data.characters() + start, dataLength - start, maxChars);
+
+    return result;
 }
 
 #ifndef NDEBUG

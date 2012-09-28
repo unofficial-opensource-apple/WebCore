@@ -36,6 +36,9 @@ public:
         return adoptRef(new SkewTransformOperation(angleX, angleY, type));
     }
 
+    double angleX() const { return m_angleX; }
+    double angleY() const { return m_angleY; }
+
 private:
     virtual bool isIdentity() const { return m_angleX == 0 && m_angleY == 0; }
     virtual OperationType getOperationType() const { return m_type; }
@@ -49,7 +52,7 @@ private:
         return m_angleX == s->m_angleX && m_angleY == s->m_angleY;
     }
 
-    virtual bool apply(TransformationMatrix& transform, const IntSize&) const
+    virtual bool apply(TransformationMatrix& transform, const FloatSize&) const
     {
         transform.skew(m_angleX, m_angleY);
         return false;

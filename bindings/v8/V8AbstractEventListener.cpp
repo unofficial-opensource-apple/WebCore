@@ -34,9 +34,13 @@
 #include "DateExtension.h"
 #include "Document.h"
 #include "Event.h"
+#include "EventNames.h"
 #include "Frame.h"
+#include "InspectorCounters.h"
 #include "V8Binding.h"
+#include "V8Event.h"
 #include "V8EventListenerList.h"
+#include "V8HiddenPropertyName.h"
 #include "V8Proxy.h"
 #include "V8Utilities.h"
 #include "WorkerContext.h"
@@ -52,10 +56,12 @@ static void weakEventListenerCallback(v8::Persistent<v8::Value>, void* parameter
 
 V8AbstractEventListener::V8AbstractEventListener(bool isAttribute, const WorldContextHandle& worldContext)
     : EventListener(JSEventListenerType)
-    , m_isWeak(true)
     , m_isAttribute(isAttribute)
     , m_worldContext(worldContext)
 {
+#if ENABLE(INSPECTOR)
+    ThreadLocalInspectorCounters::current().incrementCounter(ThreadLocalInspectorCounters::JSEventListenerCounter);
+#endif
 }
 
 V8AbstractEventListener::~V8AbstractEventListener()
@@ -66,10 +72,19 @@ V8AbstractEventListener::~V8AbstractEventListener()
         V8EventListenerList::clearWrapper(listener, m_isAttribute);
     }
     disposeListenerObject();
+#if ENABLE(INSPECTOR)
+    ThreadLocalInspectorCounters::current().decrementCounter(ThreadLocalInspectorCounters::JSEventListenerCounter);
+#endif
 }
 
 void V8AbstractEventListener::handleEvent(ScriptExecutionContext* context, Event* event)
 {
+    // Don't reenter V8 if execution was terminated in this instance of V8.
+    if (context->isJSExecutionForbidden())
+        return;
+
+    ASSERT(event);
+
     // The callback function on XMLHttpRequest can clear the event listener and destroys 'this' object. Keep a local reference to it.
     // See issue 889829.
     RefPtr<V8AbstractEventListener> protect(this);
@@ -84,11 +99,10 @@ void V8AbstractEventListener::handleEvent(ScriptExecutionContext* context, Event
     v8::Context::Scope scope(v8Context);
 
     // Get the V8 wrapper for the event object.
-    v8::Handle<v8::Value> jsEvent = V8DOMWrapper::convertEventToV8Object(event);
+    v8::Handle<v8::Value> jsEvent = toV8(event);
+    ASSERT(!jsEvent.IsEmpty());
 
     invokeEventHandler(context, event, jsEvent);
-
-    Document::updateStyleForAllDocuments();
 }
 
 void V8AbstractEventListener::disposeListenerObject()
@@ -109,23 +123,25 @@ void V8AbstractEventListener::setListenerObject(v8::Handle<v8::Object> listener)
 #ifndef NDEBUG
     V8GCController::registerGlobalHandle(EVENT_LISTENER, this, m_listener);
 #endif
-    if (m_isWeak)
-        m_listener.MakeWeak(this, &weakEventListenerCallback);
+    m_listener.MakeWeak(this, &weakEventListenerCallback);
 }
 
 void V8AbstractEventListener::invokeEventHandler(ScriptExecutionContext* context, Event* event, v8::Handle<v8::Value> jsEvent)
 {
+    // If jsEvent is empty, attempt to set it as a hidden value would crash v8.
+    if (jsEvent.IsEmpty())
+        return;
 
     v8::Local<v8::Context> v8Context = toV8Context(context, worldContext());
     if (v8Context.IsEmpty())
         return;
 
     // We push the event being processed into the global object, so that it can be exposed by DOMWindow's bindings.
-    v8::Local<v8::String> eventSymbol = v8::String::NewSymbol("event");
+    v8::Handle<v8::String> eventSymbol = V8HiddenPropertyName::event();
     v8::Local<v8::Value> returnValue;
 
     // In beforeunload/unload handlers, we want to avoid sleeps which do tight loops of calling Date.getTime().
-    if (event->type() == "beforeunload" || event->type() == "unload")
+    if (event->type() == eventNames().beforeunloadEvent || event->type() == eventNames().unloadEvent)
         DateExtension::get()->setAllowSleep(false);
 
     {
@@ -141,16 +157,18 @@ void V8AbstractEventListener::invokeEventHandler(ScriptExecutionContext* context
         v8Context->Global()->SetHiddenValue(eventSymbol, jsEvent);
         tryCatch.Reset();
 
-        // Call the event handler.
         returnValue = callListenerFunction(context, jsEvent, event);
-        if (!tryCatch.CanContinue())
-            return;
+        if (tryCatch.HasCaught())
+            event->target()->uncaughtExceptionInEventHandler();
 
-        // If an error occurs while handling the event, it should be reported.
-        if (tryCatch.HasCaught()) {
-            reportException(0, tryCatch);
-            tryCatch.Reset();
+        if (!tryCatch.CanContinue()) { // Result of TerminateExecution().
+#if ENABLE(WORKERS)
+            if (context->isWorkerContext())
+                static_cast<WorkerContext*>(context)->script()->forbidExecution();
+#endif
+            return;
         }
+        tryCatch.Reset();
 
         // Restore the old event. This must be done for all exit paths through this method.
         if (savedEvent.IsEmpty())
@@ -160,7 +178,7 @@ void V8AbstractEventListener::invokeEventHandler(ScriptExecutionContext* context
         tryCatch.Reset();
     }
 
-    if (event->type() == "beforeunload" || event->type() == "unload")
+    if (event->type() == eventNames().beforeunloadEvent || event->type() == eventNames().unloadEvent)
         DateExtension::get()->setAllowSleep(true);
 
     ASSERT(!V8Proxy::handleOutOfMemory() || returnValue.IsEmpty());
@@ -171,10 +189,15 @@ void V8AbstractEventListener::invokeEventHandler(ScriptExecutionContext* context
     if (!returnValue->IsNull() && !returnValue->IsUndefined() && event->storesResultAsString())
         event->storeResult(toWebCoreString(returnValue));
 
-    // Prevent default action if the return value is false;
-    // FIXME: Add example, and reference to bug entry.
-    if (m_isAttribute && returnValue->IsBoolean() && !returnValue->BooleanValue())
+    if (m_isAttribute && shouldPreventDefault(returnValue))
         event->preventDefault();
+}
+
+bool V8AbstractEventListener::shouldPreventDefault(v8::Local<v8::Value> returnValue)
+{
+    // Prevent default action if the return value is false in accord with the spec
+    // http://www.w3.org/TR/html5/webappapis.html#event-handler-attributes
+    return returnValue->IsBoolean() && !returnValue->BooleanValue();
 }
 
 v8::Local<v8::Object> V8AbstractEventListener::getReceiverObject(Event* event)

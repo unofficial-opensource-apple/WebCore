@@ -33,7 +33,7 @@
 
 #if ENABLE(SHARED_WORKERS)
 
-#include "ExceptionCode.h"
+#include <wtf/Forward.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/PassRefPtr.h>
 
@@ -43,7 +43,8 @@ namespace WebCore {
     class KURL;
     class MessagePortChannel;
     class SharedWorker;
-    class String;
+
+    typedef int ExceptionCode;
 
     // Interface to a repository which manages references to the set of active shared workers.
     class SharedWorkerRepository {

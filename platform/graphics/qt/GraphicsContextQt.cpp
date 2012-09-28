@@ -8,6 +8,8 @@
  * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies).
  * Copyright (C) 2008 Dirk Schulze <vbs85@gmx.de>
+ * Copyright (C) 2010, 2011 Sencha, Inc.
+ * Copyright (C) 2011 Andreas Kling <kling@webkit.org>
  *
  * All rights reserved.
  *
@@ -40,19 +42,18 @@
 #include <windows.h>
 #endif
 
+#include "AffineTransform.h"
 #include "Color.h"
 #include "FloatConversion.h"
 #include "Font.h"
-#include "GraphicsContextPrivate.h"
 #include "ImageBuffer.h"
 #include "NotImplemented.h"
 #include "Path.h"
 #include "Pattern.h"
-#include "Pen.h"
-#include "TransformationMatrix.h"
+#include "ShadowBlur.h"
+#include "TransparencyLayer.h"
 
 #include <QBrush>
-#include <QDebug>
 #include <QGradient>
 #include <QPaintDevice>
 #include <QPaintEngine>
@@ -62,10 +63,7 @@
 #include <QPolygonF>
 #include <QStack>
 #include <QVector>
-
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
+#include <wtf/MathExtras.h>
 
 namespace WebCore {
 
@@ -97,10 +95,10 @@ static inline QPainter::CompositionMode toQtCompositionMode(CompositeOperator op
     case CompositePlusDarker:
         // there is no exact match, but this is the closest
         return QPainter::CompositionMode_Darken;
-    case CompositeHighlight:
-        return QPainter::CompositionMode_SourceOver;
     case CompositePlusLighter:
         return QPainter::CompositionMode_Plus;
+    default:
+        ASSERT_NOT_REACHED();
     }
 
     return QPainter::CompositionMode_SourceOver;
@@ -115,6 +113,8 @@ static inline Qt::PenCapStyle toQtLineCap(LineCap lc)
         return Qt::RoundCap;
     case SquareCap:
         return Qt::SquareCap;
+    default:
+        ASSERT_NOT_REACHED();
     }
 
     return Qt::FlatCap;
@@ -129,9 +129,11 @@ static inline Qt::PenJoinStyle toQtLineJoin(LineJoin lj)
         return Qt::RoundJoin;
     case BevelJoin:
         return Qt::BevelJoin;
+    default:
+        ASSERT_NOT_REACHED();
     }
 
-    return Qt::MiterJoin;
+    return Qt::SvgMiterJoin;
 }
 
 static Qt::PenStyle toQPenStyle(StrokeStyle style)
@@ -149,8 +151,9 @@ static Qt::PenStyle toQPenStyle(StrokeStyle style)
     case DashedStroke:
         return Qt::DashLine;
         break;
+    default:
+        ASSERT_NOT_REACHED();
     }
-    qWarning("couldn't recognize the pen style");
     return Qt::NoPen;
 }
 
@@ -161,112 +164,114 @@ static inline Qt::FillRule toQtFillRule(WindRule rule)
         return Qt::OddEvenFill;
     case RULE_NONZERO:
         return Qt::WindingFill;
+    default:
+        ASSERT_NOT_REACHED();
     }
-    qDebug("Qt: unrecognized wind rule!");
     return Qt::OddEvenFill;
 }
 
-struct TransparencyLayer : FastAllocBase {
-    TransparencyLayer(const QPainter* p, const QRect &rect)
-        : pixmap(rect.width(), rect.height())
-    {
-        offset = rect.topLeft();
-        pixmap.fill(Qt::transparent);
-        painter.begin(&pixmap);
-        painter.setRenderHint(QPainter::Antialiasing, p->testRenderHint(QPainter::Antialiasing));
-        painter.translate(-offset);
-        painter.setPen(p->pen());
-        painter.setBrush(p->brush());
-        painter.setTransform(p->transform(), true);
-        painter.setOpacity(p->opacity());
-        painter.setFont(p->font());
-        if (painter.paintEngine()->hasFeature(QPaintEngine::PorterDuff))
-            painter.setCompositionMode(p->compositionMode());
-        painter.setClipPath(p->clipPath());
-    }
-
-    TransparencyLayer()
-    {
-    }
-
-    QPixmap pixmap;
-    QPoint offset;
-    QPainter painter;
-    qreal opacity;
-private:
-    TransparencyLayer(const TransparencyLayer &) {}
-    TransparencyLayer & operator=(const TransparencyLayer &) { return *this; }
-};
-
-class GraphicsContextPlatformPrivate : public Noncopyable {
+class GraphicsContextPlatformPrivate {
+    WTF_MAKE_NONCOPYABLE(GraphicsContextPlatformPrivate); WTF_MAKE_FAST_ALLOCATED;
 public:
-    GraphicsContextPlatformPrivate(QPainter* painter);
+    GraphicsContextPlatformPrivate(QPainter*, const QColor& initialSolidColor);
     ~GraphicsContextPlatformPrivate();
 
-    inline QPainter* p()
+    inline QPainter* p() const
     {
-        if (layers.isEmpty()) {
-            if (redirect)
-                return redirect;
-
+        if (layers.isEmpty())
             return painter;
-        }
         return &layers.top()->painter;
     }
 
     bool antiAliasingForRectsAndLines;
 
     QStack<TransparencyLayer*> layers;
-    QPainter* redirect;
+    // Counting real layers. Required by isInTransparencyLayer() calls
+    // For example, layers with valid alphaMask are not real layers
+    int layerCount;
 
+    // reuse this brush for solid color (to prevent expensive QBrush construction)
     QBrush solidColor;
 
-    // Only used by SVG for now.
-    QPainterPath currentPath;
+    InterpolationQuality imageInterpolationQuality;
+    bool initialSmoothPixmapTransformHint;
+
+    ShadowBlur* shadow;
+
+    QRectF clipBoundingRect() const
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(4, 8, 0)
+        return p()->clipBoundingRect();
+#else
+        return p()->clipRegion().boundingRect();
+#endif
+    }
+
+    void takeOwnershipOfPlatformContext() { platformContextIsOwned = true; }
 
 private:
     QPainter* painter;
+    bool platformContextIsOwned;
 };
 
-
-GraphicsContextPlatformPrivate::GraphicsContextPlatformPrivate(QPainter* p)
+GraphicsContextPlatformPrivate::GraphicsContextPlatformPrivate(QPainter* p, const QColor& initialSolidColor)
+    : antiAliasingForRectsAndLines(false)
+    , layerCount(0)
+    , solidColor(initialSolidColor)
+    , imageInterpolationQuality(InterpolationDefault)
+    , initialSmoothPixmapTransformHint(false)
+    , shadow(new ShadowBlur())
+    , painter(p)
+    , platformContextIsOwned(false)
 {
-    painter = p;
-    redirect = 0;
+    if (!painter)
+        return;
 
-    solidColor = QBrush(Qt::black);
+    // Use the default the QPainter was constructed with.
+    antiAliasingForRectsAndLines = painter->testRenderHint(QPainter::Antialiasing);
 
-    if (painter) {
-        // use the default the QPainter was constructed with
-        antiAliasingForRectsAndLines = painter->testRenderHint(QPainter::Antialiasing);
-        // FIXME: Maybe only enable in SVG mode?
-        painter->setRenderHint(QPainter::Antialiasing, true);
-    } else
-        antiAliasingForRectsAndLines = false;
+    // Used for default image interpolation quality.
+    initialSmoothPixmapTransformHint = painter->testRenderHint(QPainter::SmoothPixmapTransform);
+
+    painter->setRenderHint(QPainter::Antialiasing, true);
+
 }
 
 GraphicsContextPlatformPrivate::~GraphicsContextPlatformPrivate()
 {
+    if (!platformContextIsOwned)
+        return;
+
+    QPaintDevice* device = painter->device();
+    painter->end();
+    delete shadow;
+    delete painter;
+    delete device;
 }
 
-GraphicsContext::GraphicsContext(PlatformGraphicsContext* context)
-    : m_common(createGraphicsContextPrivate())
-    , m_data(new GraphicsContextPlatformPrivate(context))
+void GraphicsContext::platformInit(PlatformGraphicsContext* painter)
 {
-    setPaintingDisabled(!context);
-    if (context) {
-        // Make sure the context starts in sync with our state.
-        setPlatformFillColor(fillColor(), DeviceColorSpace);
-        setPlatformStrokeColor(strokeColor(), DeviceColorSpace);
-    }
+    m_data = new GraphicsContextPlatformPrivate(painter, fillColor());
+
+    setPaintingDisabled(!painter);
+
+    if (!painter)
+        return;
+
+    // solidColor is initialized with the fillColor().
+    painter->setBrush(m_data->solidColor);
+
+    QPen pen(painter->pen());
+    pen.setColor(strokeColor());
+    pen.setJoinStyle(toQtLineJoin(MiterJoin));
+    painter->setPen(pen);
 }
 
-GraphicsContext::~GraphicsContext()
+void GraphicsContext::platformDestroy()
 {
     while (!m_data->layers.isEmpty())
         endTransparencyLayer();
 
-    destroyGraphicsContextPrivate(m_common);
     delete m_data;
 }
 
@@ -275,137 +280,37 @@ PlatformGraphicsContext* GraphicsContext::platformContext() const
     return m_data->p();
 }
 
-TransformationMatrix GraphicsContext::getCTM() const
+AffineTransform GraphicsContext::getCTM() const
 {
-    QTransform matrix(platformContext()->combinedTransform());
-    return TransformationMatrix(matrix.m11(), matrix.m12(), 0, matrix.m13(),
-                                matrix.m21(), matrix.m22(), 0, matrix.m23(),
-                                           0,            0, 1,            0,
-                                matrix.m31(), matrix.m32(), 0, matrix.m33());
+    if (paintingDisabled())
+        return AffineTransform();
+
+    const QTransform& matrix = platformContext()->combinedTransform();
+    return AffineTransform(matrix.m11(), matrix.m12(), matrix.m21(),
+                           matrix.m22(), matrix.dx(), matrix.dy());
 }
 
 void GraphicsContext::savePlatformState()
 {
+    if (!m_data->layers.isEmpty() && !m_data->layers.top()->alphaMask.isNull())
+        ++m_data->layers.top()->saveCounter;
     m_data->p()->save();
 }
 
 void GraphicsContext::restorePlatformState()
 {
+    if (!m_data->layers.isEmpty() && !m_data->layers.top()->alphaMask.isNull())
+        if (!--m_data->layers.top()->saveCounter)
+            endPlatformTransparencyLayer();
+
     m_data->p()->restore();
 
-    if (!m_data->currentPath.isEmpty() && m_common->state.pathTransform.isInvertible()) {
-        QTransform matrix = m_common->state.pathTransform;
-        m_data->currentPath = m_data->currentPath * matrix;
-    }
+    m_data->shadow->setShadowValues(FloatSize(m_state.shadowBlur, m_state.shadowBlur), m_state.shadowOffset, m_state.shadowColor, m_state.shadowColorSpace, m_state.shadowsIgnoreTransforms);
 }
-
-/* FIXME: DISABLED WHILE MERGING BACK FROM UNITY
-void GraphicsContext::drawTextShadow(const TextRun& run, const IntPoint& point, const FontStyle& style)
-{
-    if (paintingDisabled())
-        return;
-
-    if (m_data->shadow.isNull())
-        return;
-
-    TextShadow* shadow = &m_data->shadow;
-
-    if (shadow->blur <= 0) {
-        Pen p = pen();
-        setPen(shadow->color);
-        font().drawText(this, run, style, IntPoint(point.x() + shadow->x, point.y() + shadow->y));
-        setPen(p);
-    } else {
-        const int thickness = shadow->blur;
-        // FIXME: OPTIMIZE: limit the area to only the actually painted area + 2*thickness
-        const int w = m_data->p()->device()->width();
-        const int h = m_data->p()->device()->height();
-        const QRgb color = qRgb(255, 255, 255);
-        const QRgb bgColor = qRgb(0, 0, 0);
-        QImage image(QSize(w, h), QImage::Format_ARGB32);
-        image.fill(bgColor);
-        QPainter p;
-
-        Pen curPen = pen();
-        p.begin(&image);
-        setPen(color);
-        m_data->redirect = &p;
-        font().drawText(this, run, style, IntPoint(point.x() + shadow->x, point.y() + shadow->y));
-        m_data->redirect = 0;
-        p.end();
-        setPen(curPen);
-
-        int md = thickness * thickness; // max-dist^2
-
-        // blur map/precalculated shadow-decay
-        float* bmap = (float*) alloca(sizeof(float) * (md + 1));
-        for (int n = 0; n <= md; n++) {
-            float f;
-            f = n / (float) (md + 1);
-            f = 1.0 - f * f;
-            bmap[n] = f;
-        }
-
-        float factor = 0.0; // maximal potential opacity-sum
-        for (int n = -thickness; n <= thickness; n++) {
-            for (int m = -thickness; m <= thickness; m++) {
-                int d = n * n + m * m;
-                if (d <= md)
-                    factor += bmap[d];
-            }
-        }
-
-        // alpha map
-        float* amap = (float*) alloca(sizeof(float) * (h * w));
-        memset(amap, 0, h * w * (sizeof(float)));
-
-        for (int j = thickness; j<h-thickness; j++) {
-            for (int i = thickness; i<w-thickness; i++) {
-                QRgb col = image.pixel(i,j);
-                if (col == bgColor)
-                    continue;
-
-                float g = qAlpha(col);
-                g = g / 255;
-
-                for (int n = -thickness; n <= thickness; n++) {
-                    for (int m = -thickness; m <= thickness; m++) {
-                        int d = n * n + m * m;
-                        if (d > md)
-                            continue;
-
-                        float f = bmap[d];
-                        amap[(i + m) + (j + n) * w] += (g * f);
-                    }
-                }
-            }
-        }
-
-        QImage res(QSize(w,h),QImage::Format_ARGB32);
-        int r = shadow->color.red();
-        int g = shadow->color.green();
-        int b = shadow->color.blue();
-        int a1 = shadow->color.alpha();
-
-        // arbitratry factor adjustment to make shadows more solid.
-        factor = 1.333 / factor;
-
-        for (int j = 0; j < h; j++) {
-            for (int i = 0; i < w; i++) {
-                int a = (int) (amap[i + j * w] * factor * a1);
-                if (a > 255)
-                    a = 255;
-
-                res.setPixel(i,j, qRgba(r, g, b, a));
-            }
-        }
-
-        m_data->p()->drawImage(0, 0, res, 0, 0, -1, -1, Qt::DiffuseAlphaDither | Qt::ColorOnly | Qt::PreferDither);
-    }
-}
-*/
 
 // Draws a filled rectangle with a stroked border.
+// This is only used to draw borders (real fill is done via fillRect), and
+// thus it must not cast any shadow.
 void GraphicsContext::drawRect(const IntRect& rect)
 {
     if (paintingDisabled())
@@ -415,22 +320,13 @@ void GraphicsContext::drawRect(const IntRect& rect)
     const bool antiAlias = p->testRenderHint(QPainter::Antialiasing);
     p->setRenderHint(QPainter::Antialiasing, m_data->antiAliasingForRectsAndLines);
 
-    IntSize shadowSize;
-    int shadowBlur;
-    Color shadowColor;
-    if (getShadow(shadowSize, shadowBlur, shadowColor)) {
-        IntRect shadowRect = rect;
-        shadowRect.move(shadowSize.width(), shadowSize.height());
-        shadowRect.inflate(static_cast<int>(p->pen().widthF()));
-        p->fillRect(shadowRect, QColor(shadowColor));
-    }
-
     p->drawRect(rect);
 
     p->setRenderHint(QPainter::Antialiasing, antiAlias);
 }
 
 // This is only used to draw borders.
+// Must not cast any shadow.
 void GraphicsContext::drawLine(const IntPoint& point1, const IntPoint& point2)
 {
     if (paintingDisabled())
@@ -438,7 +334,7 @@ void GraphicsContext::drawLine(const IntPoint& point1, const IntPoint& point2)
 
     StrokeStyle style = strokeStyle();
     Color color = strokeColor();
-    if (style == NoStroke || !color.alpha())
+    if (style == NoStroke)
         return;
 
     float width = strokeThickness();
@@ -451,17 +347,6 @@ void GraphicsContext::drawLine(const IntPoint& point1, const IntPoint& point2)
     const bool antiAlias = p->testRenderHint(QPainter::Antialiasing);
     p->setRenderHint(QPainter::Antialiasing, m_data->antiAliasingForRectsAndLines);
     adjustLineToPixelBoundaries(p1, p2, width, style);
-
-    IntSize shadowSize;
-    int shadowBlur;
-    Color shadowColor;
-    if (textDrawingMode() == cTextFill && getShadow(shadowSize, shadowBlur, shadowColor)) {
-        p->save();
-        p->translate(shadowSize.width(), shadowSize.height());
-        p->setPen(shadowColor);
-        p->drawLine(p1, p2);
-        p->restore();
-    }
 
     int patWidth = 0;
     switch (style) {
@@ -513,7 +398,7 @@ void GraphicsContext::drawLine(const IntPoint& point1, const IntPoint& point2)
                     patternOffset = patWidth / 2;
             } else {
                 if (remainder)
-                    patternOffset = (patWidth - remainder)/2;
+                    patternOffset = (patWidth - remainder) / 2;
             }
         }
 
@@ -545,34 +430,6 @@ void GraphicsContext::drawEllipse(const IntRect& rect)
     m_data->p()->drawEllipse(rect);
 }
 
-void GraphicsContext::strokeArc(const IntRect& rect, int startAngle, int angleSpan)
-{
-    if (paintingDisabled() || strokeStyle() == NoStroke || strokeThickness() <= 0.0f || !strokeColor().alpha())
-        return;
-
-    QPainter* p = m_data->p();
-    const bool antiAlias = p->testRenderHint(QPainter::Antialiasing);
-    p->setRenderHint(QPainter::Antialiasing, true);
-
-    IntSize shadowSize;
-    int shadowBlur;
-    Color shadowColor;
-    startAngle *= 16;
-    angleSpan *= 16;
-    if (getShadow(shadowSize, shadowBlur, shadowColor)) {
-        p->save();
-        p->translate(shadowSize.width(), shadowSize.height());
-        QPen pen(p->pen());
-        pen.setColor(shadowColor);
-        p->setPen(pen);
-        p->drawArc(rect, startAngle, angleSpan);
-        p->restore();
-    }
-    p->drawArc(rect, startAngle, angleSpan);
-
-    p->setRenderHint(QPainter::Antialiasing, antiAlias);
-}
-
 void GraphicsContext::drawConvexPolygon(size_t npoints, const FloatPoint* points, bool shouldAntialias)
 {
     if (paintingDisabled())
@@ -587,125 +444,210 @@ void GraphicsContext::drawConvexPolygon(size_t npoints, const FloatPoint* points
         polygon[i] = points[i];
 
     QPainter* p = m_data->p();
-    p->save();
+
+    const bool antiAlias = p->testRenderHint(QPainter::Antialiasing);
     p->setRenderHint(QPainter::Antialiasing, shouldAntialias);
-    IntSize shadowSize;
-    int shadowBlur;
-    Color shadowColor;
-    if (getShadow(shadowSize, shadowBlur, shadowColor)) {
-        p->save();
-        p->translate(shadowSize.width(), shadowSize.height());
-        if (p->brush().style() != Qt::NoBrush)
-            p->setBrush(QBrush(shadowColor));
-        QPen pen(p->pen());
-        if (pen.style() != Qt::NoPen) {
-            pen.setColor(shadowColor);
-            p->setPen(pen);
-        }
-        p->drawConvexPolygon(polygon);
-        p->restore();
-    }
+
     p->drawConvexPolygon(polygon);
-    p->restore();
+
+    p->setRenderHint(QPainter::Antialiasing, antiAlias);
 }
 
-QPen GraphicsContext::pen()
+void GraphicsContext::clipConvexPolygon(size_t numPoints, const FloatPoint* points, bool antialiased)
 {
     if (paintingDisabled())
-        return QPen();
+        return;
+
+    if (numPoints <= 1)
+        return;
+
+    QPainterPath path(points[0]);
+    for (size_t i = 1; i < numPoints; ++i)
+        path.lineTo(points[i]);
+    path.setFillRule(Qt::WindingFill);
 
     QPainter* p = m_data->p();
-    return p->pen();
+
+    bool painterWasAntialiased = p->testRenderHint(QPainter::Antialiasing);
+
+    if (painterWasAntialiased != antialiased)
+        p->setRenderHint(QPainter::Antialiasing, antialiased);
+
+    p->setClipPath(path, Qt::IntersectClip);
+
+    if (painterWasAntialiased != antialiased)
+        p->setRenderHint(QPainter::Antialiasing, painterWasAntialiased);
 }
 
-static void inline drawFilledShadowPath(GraphicsContext* context, QPainter* p, const QPainterPath& path)
-{
-    IntSize shadowSize;
-    int shadowBlur;
-    Color shadowColor;
-    if (context->getShadow(shadowSize, shadowBlur, shadowColor)) {
-        p->translate(shadowSize.width(), shadowSize.height());
-        p->fillPath(path, QBrush(shadowColor));
-        p->translate(-shadowSize.width(), -shadowSize.height());
-    }
-}
-
-void GraphicsContext::fillPath()
+void GraphicsContext::fillPath(const Path& path)
 {
     if (paintingDisabled())
         return;
 
     QPainter* p = m_data->p();
-    QPainterPath path = m_data->currentPath;
-    path.setFillRule(toQtFillRule(fillRule()));
+    QPainterPath platformPath = path.platformPath();
+    platformPath.setFillRule(toQtFillRule(fillRule()));
 
-    if (m_common->state.fillPattern || m_common->state.fillGradient || fillColor().alpha()) {
-        drawFilledShadowPath(this, p, path);
-        if (m_common->state.fillPattern) {
-            TransformationMatrix affine;
-            p->fillPath(path, QBrush(m_common->state.fillPattern->createPlatformPattern(affine)));
-        } else if (m_common->state.fillGradient) {
-            QBrush brush(*m_common->state.fillGradient->platformGradient());
-            brush.setTransform(m_common->state.fillGradient->gradientSpaceTransform());
-            p->fillPath(path, brush);
+    if (hasShadow()) {
+        ShadowBlur* shadow = shadowBlur();
+        if (shadow->mustUseShadowBlur(this) || m_state.fillPattern || m_state.fillGradient)
+        {
+            GraphicsContext* shadowContext = shadow->beginShadowLayer(this, platformPath.controlPointRect());
+            if (shadowContext) {
+                QPainter* shadowPainter = shadowContext->platformContext();
+                if (m_state.fillPattern) {
+                    AffineTransform affine;
+                    shadowPainter->fillPath(platformPath, QBrush(m_state.fillPattern->createPlatformPattern(affine)));
+                } else if (m_state.fillGradient) {
+                    QBrush brush(*m_state.fillGradient->platformGradient());
+                    brush.setTransform(m_state.fillGradient->gradientSpaceTransform());
+                    shadowPainter->fillPath(platformPath, brush);
+                } else {
+                    shadowPainter->fillPath(platformPath, p->brush());
+                }
+                shadow->endShadowLayer(this);
+            }
         } else {
-            if (fillColor().alpha())
-                p->fillPath(path, p->brush());
+            QPointF offset(m_state.shadowOffset.width(), m_state.shadowOffset.height());
+            p->translate(offset);
+            QColor shadowColor = m_state.shadowColor;
+            shadowColor.setAlphaF(shadowColor.alphaF() * p->brush().color().alphaF());
+            p->fillPath(platformPath, shadowColor);
+            p->translate(-offset);
         }
     }
-    m_data->currentPath = QPainterPath();
+    if (m_state.fillPattern) {
+        AffineTransform affine;
+        p->fillPath(platformPath, QBrush(m_state.fillPattern->createPlatformPattern(affine)));
+    } else if (m_state.fillGradient) {
+        QBrush brush(*m_state.fillGradient->platformGradient());
+        brush.setTransform(m_state.fillGradient->gradientSpaceTransform());
+        p->fillPath(platformPath, brush);
+    } else
+        p->fillPath(platformPath, p->brush());
 }
 
-void GraphicsContext::strokePath()
+void GraphicsContext::strokePath(const Path& path)
 {
     if (paintingDisabled())
         return;
 
     QPainter* p = m_data->p();
     QPen pen(p->pen());
-    QPainterPath path = m_data->currentPath;
-    path.setFillRule(toQtFillRule(fillRule()));
+    QPainterPath platformPath = path.platformPath();
+    platformPath.setFillRule(toQtFillRule(fillRule()));
 
-    if (m_common->state.strokePattern || m_common->state.strokeGradient || strokeColor().alpha()) {
-        IntSize shadowSize;
-        int shadowBlur;
-        Color shadowColor;
-        if (getShadow(shadowSize, shadowBlur, shadowColor)) {
-            QTransform t(p->worldTransform());
-            p->translate(shadowSize.width(), shadowSize.height());
+    if (hasShadow()) {
+        ShadowBlur* shadow = shadowBlur();
+        if (shadow->mustUseShadowBlur(this) || m_state.strokePattern || m_state.strokeGradient)
+        {
+            FloatRect boundingRect = platformPath.controlPointRect();
+            boundingRect.inflate(pen.miterLimit() + pen.widthF());
+            GraphicsContext* shadowContext = shadow->beginShadowLayer(this, boundingRect);
+            if (shadowContext) {
+                QPainter* shadowPainter = shadowContext->platformContext();
+                if (m_state.strokeGradient) {
+                    QBrush brush(*m_state.strokeGradient->platformGradient());
+                    brush.setTransform(m_state.strokeGradient->gradientSpaceTransform());
+                    QPen shadowPen(pen);
+                    shadowPen.setBrush(brush);
+                    shadowPainter->strokePath(platformPath, shadowPen);
+                } else {
+                    shadowPainter->strokePath(platformPath, pen);
+                }
+                shadow->endShadowLayer(this);
+            }
+        } else {
+            QPointF offset(m_state.shadowOffset.width(), m_state.shadowOffset.height());
+            p->translate(offset);
+            QColor shadowColor = m_state.shadowColor;
+            shadowColor.setAlphaF(shadowColor.alphaF() * pen.color().alphaF());
             QPen shadowPen(pen);
             shadowPen.setColor(shadowColor);
-            p->strokePath(path, shadowPen);
-            p->setWorldTransform(t);
-        }
-        if (m_common->state.strokePattern) {
-            TransformationMatrix affine;
-            pen.setBrush(QBrush(m_common->state.strokePattern->createPlatformPattern(affine)));
-            p->setPen(pen);
-            p->strokePath(path, pen);
-        } else if (m_common->state.strokeGradient) {
-            QBrush brush(*m_common->state.strokeGradient->platformGradient());
-            brush.setTransform(m_common->state.strokeGradient->gradientSpaceTransform());
-            pen.setBrush(brush);
-            p->setPen(pen);
-            p->strokePath(path, pen);
-        } else {
-            if (strokeColor().alpha())
-                p->strokePath(path, pen);
+            p->strokePath(platformPath, shadowPen);
+            p->translate(-offset);
         }
     }
-    m_data->currentPath = QPainterPath();
+
+    if (m_state.strokePattern) {
+        AffineTransform affine;
+        pen.setBrush(QBrush(m_state.strokePattern->createPlatformPattern(affine)));
+        p->setPen(pen);
+        p->strokePath(platformPath, pen);
+    } else if (m_state.strokeGradient) {
+        QBrush brush(*m_state.strokeGradient->platformGradient());
+        brush.setTransform(m_state.strokeGradient->gradientSpaceTransform());
+        pen.setBrush(brush);
+        p->setPen(pen);
+        p->strokePath(platformPath, pen);
+    } else
+        p->strokePath(platformPath, pen);
 }
 
-static inline void drawBorderlessRectShadow(GraphicsContext* context, QPainter* p, const FloatRect& rect)
+static inline void drawRepeatPattern(QPainter* p, QPixmap* image, const FloatRect& rect, const bool repeatX, const bool repeatY)
 {
-    IntSize shadowSize;
-    int shadowBlur;
-    Color shadowColor;
-    if (context->getShadow(shadowSize, shadowBlur, shadowColor)) {
-        FloatRect shadowRect(rect);
-        shadowRect.move(shadowSize.width(), shadowSize.height());
-        p->fillRect(shadowRect, QColor(shadowColor));
+    // Patterns must be painted so that the top left of the first image is anchored at
+    // the origin of the coordinate space
+    if (image) {
+        int w = image->width();
+        int h = image->height();
+        int startX, startY;
+        QRect r(static_cast<int>(rect.x()), static_cast<int>(rect.y()), static_cast<int>(rect.width()), static_cast<int>(rect.height()));
+
+        // startX, startY is the coordinate of the first image we need to put on the left-top of the rect
+        if (repeatX && repeatY) {
+            // repeat
+            // startX, startY is at the left top side of the left-top of the rect
+            startX = r.x() >=0 ? r.x() - (r.x() % w) : r.x() - (w - qAbs(r.x()) % w);
+            startY = r.y() >=0 ? r.y() - (r.y() % h) : r.y() - (h - qAbs(r.y()) % h);
+        } else {
+           if (!repeatX && !repeatY) {
+               // no-repeat
+               // only draw the image once at orgin once, check if need to draw
+               QRect imageRect(0, 0, w, h);
+               if (imageRect.intersects(r)) {
+                   startX = 0;
+                   startY = 0;
+               } else
+                   return;   
+           } else if (repeatX && !repeatY) {
+               // repeat-x
+               // startY is fixed, but startX change based on the left-top of the rect
+               QRect imageRect(r.x(), 0, r.width(), h);
+               if (imageRect.intersects(r)) {
+                   startX = r.x() >=0 ? r.x() - (r.x() % w) : r.x() - (w - qAbs(r.x()) % w);
+                   startY = 0;
+               } else
+                   return;
+           } else {
+               // repeat-y
+               // startX is fixed, but startY change based on the left-top of the rect
+               QRect imageRect(0, r.y(), w, r.height());
+               if (imageRect.intersects(r)) {
+                   startX = 0;
+                   startY = r.y() >=0 ? r.y() - (r.y() % h) : r.y() - (h - qAbs(r.y()) % h);
+               } else
+                   return;
+           }
+        }
+
+        int x = startX;
+        int y = startY; 
+        do {
+            // repeat Y
+            do {
+                // repeat X
+                QRect   imageRect(x, y, w, h);
+                QRect   intersectRect = imageRect.intersected(r);
+                QPoint  destStart(intersectRect.x(), intersectRect.y());
+                QRect   sourceRect(intersectRect.x() - imageRect.x(), intersectRect.y() - imageRect.y(), intersectRect.width(), intersectRect.height());
+
+                p->drawPixmap(destStart, *image, sourceRect);
+                x += w;
+            } while (repeatX && x < r.x() + r.width());
+            x = startX;
+            y += h;
+        } while (repeatY && y < r.y() + r.height());
     }
 }
 
@@ -715,65 +657,124 @@ void GraphicsContext::fillRect(const FloatRect& rect)
         return;
 
     QPainter* p = m_data->p();
+    QRectF normalizedRect = rect.normalized();
+    ShadowBlur* shadow = shadowBlur();
 
-    if (m_common->state.fillPattern || m_common->state.fillGradient || fillColor().alpha()) {
-        drawBorderlessRectShadow(this, p, rect);
-        if (m_common->state.fillPattern) {
-            TransformationMatrix affine;
-            p->fillRect(rect, QBrush(m_common->state.fillPattern->createPlatformPattern(affine)));
-        } else if (m_common->state.fillGradient) {
-            QBrush brush(*m_common->state.fillGradient->platformGradient());
-            brush.setTransform(m_common->state.fillGradient->gradientSpaceTransform());
-            p->fillRect(rect, brush);
-        } else {
-            if (fillColor().alpha())
-                p->fillRect(rect, p->brush());
+    if (m_state.fillPattern) {
+        QPixmap* image = m_state.fillPattern->tileImage()->nativeImageForCurrentFrame();
+        GraphicsContext* shadowContext = hasShadow() ? shadow->beginShadowLayer(this, normalizedRect) : 0;
+        if (shadowContext) {
+            QPainter* shadowPainter = shadowContext->platformContext();
+            drawRepeatPattern(shadowPainter, image, normalizedRect, m_state.fillPattern->repeatX(), m_state.fillPattern->repeatY());
+            shadow->endShadowLayer(this);
         }
+        drawRepeatPattern(p, image, normalizedRect, m_state.fillPattern->repeatX(), m_state.fillPattern->repeatY());
+    } else if (m_state.fillGradient) {
+        QBrush brush(*m_state.fillGradient->platformGradient());
+        brush.setTransform(m_state.fillGradient->gradientSpaceTransform());
+        GraphicsContext* shadowContext = hasShadow() ? shadow->beginShadowLayer(this, normalizedRect) : 0;
+        if (shadowContext) {
+            QPainter* shadowPainter = shadowContext->platformContext();
+            shadowPainter->fillRect(normalizedRect, brush);
+            shadow->endShadowLayer(this);
+        }
+        p->fillRect(normalizedRect, brush);
+    } else {
+        if (hasShadow()) {
+            if (shadow->mustUseShadowBlur(this)) {
+                GraphicsContext* shadowContext = shadow->beginShadowLayer(this, normalizedRect);
+                if (shadowContext) {
+                    QPainter* shadowPainter = shadowContext->platformContext();
+                    shadowPainter->fillRect(normalizedRect, p->brush());
+                    shadow->endShadowLayer(this);
+                }
+            } else {
+                // Solid rectangle fill with no blur shadow or transformations applied can be done
+                // faster without using the shadow layer at all.
+                QColor shadowColor = m_state.shadowColor;
+                shadowColor.setAlphaF(shadowColor.alphaF() * p->brush().color().alphaF());
+                p->fillRect(normalizedRect.translated(QPointF(m_state.shadowOffset.width(), m_state.shadowOffset.height())), shadowColor);
+            }
+        }
+
+        p->fillRect(normalizedRect, p->brush());
     }
 }
 
-void GraphicsContext::fillRect(const FloatRect& rect, const Color& c, ColorSpace colorSpace)
+
+void GraphicsContext::fillRect(const FloatRect& rect, const Color& color, ColorSpace colorSpace)
 {
-    if (paintingDisabled())
+    if (paintingDisabled() || !color.isValid())
         return;
 
-    m_data->solidColor.setColor(c);
+    m_data->solidColor.setColor(color);
     QPainter* p = m_data->p();
-    drawBorderlessRectShadow(this, p, rect);
-    p->fillRect(rect, m_data->solidColor);
+    QRectF normalizedRect = rect.normalized();
+
+    if (hasShadow()) {
+        ShadowBlur* shadow = shadowBlur();
+        if (shadow->mustUseShadowBlur(this)) {
+            GraphicsContext* shadowContext = shadow->beginShadowLayer(this, normalizedRect);
+            if (shadowContext) {
+                QPainter* shadowPainter = shadowContext->platformContext();
+                shadowPainter->setCompositionMode(QPainter::CompositionMode_Source);
+                shadowPainter->fillRect(normalizedRect, m_state.shadowColor);
+                shadow->endShadowLayer(this);
+            }
+        } else {
+            QColor shadowColor = m_state.shadowColor;
+            shadowColor.setAlphaF(shadowColor.alphaF() * p->brush().color().alphaF());
+            p->fillRect(normalizedRect.translated(QPointF(m_state.shadowOffset.width(), m_state.shadowOffset.height())), shadowColor);
+        }
+    }
+
+    p->fillRect(normalizedRect, m_data->solidColor);
 }
 
 void GraphicsContext::fillRoundedRect(const IntRect& rect, const IntSize& topLeft, const IntSize& topRight, const IntSize& bottomLeft, const IntSize& bottomRight, const Color& color, ColorSpace colorSpace)
 {
-    if (paintingDisabled() || !color.alpha())
+    if (paintingDisabled() || !color.isValid())
         return;
 
-    Path path = Path::createRoundedRectangle(rect, topLeft, topRight, bottomLeft, bottomRight);
+    Path path;
+    path.addRoundedRect(rect, topLeft, topRight, bottomLeft, bottomRight);
     QPainter* p = m_data->p();
-    drawFilledShadowPath(this, p, path.platformPath());
+    if (hasShadow()) {
+        ShadowBlur* shadow = shadowBlur();
+        if (shadow->mustUseShadowBlur(this)) {
+            GraphicsContext* shadowContext = shadow->beginShadowLayer(this, rect);
+            if (shadowContext) {
+                QPainter* shadowPainter = shadowContext->platformContext();
+                shadowPainter->setCompositionMode(QPainter::CompositionMode_Source);
+                shadowPainter->fillPath(path.platformPath(), QColor(m_state.shadowColor));
+                shadow->endShadowLayer(this);
+            }
+        } else {
+            const QPointF shadowOffset(m_state.shadowOffset.width(), m_state.shadowOffset.height());
+            p->translate(shadowOffset);
+            p->fillPath(path.platformPath(), QColor(m_state.shadowColor));
+            p->translate(-shadowOffset);
+        }
+    }
     p->fillPath(path.platformPath(), QColor(color));
 }
 
-void GraphicsContext::beginPath()
+bool GraphicsContext::isInTransparencyLayer() const
 {
-    m_data->currentPath = QPainterPath();
+    return m_data->layerCount;
 }
 
-void GraphicsContext::addPath(const Path& path)
+ShadowBlur* GraphicsContext::shadowBlur()
 {
-    QPainterPath newPath = m_data->currentPath;
-    newPath.addPath(path.platformPath());
-    m_data->currentPath = newPath;
+    return m_data->shadow;
 }
 
-bool GraphicsContext::inTransparencyLayer() const
+void GraphicsContext::clip(const IntRect& rect)
 {
-    return !m_data->layers.isEmpty();
-}
+    if (paintingDisabled())
+        return;
 
-PlatformPath* GraphicsContext::currentPath()
-{
-    return &m_data->currentPath;
+    m_data->p()->setClipRect(rect, Qt::IntersectClip);
 }
 
 void GraphicsContext::clip(const FloatRect& rect)
@@ -783,41 +784,34 @@ void GraphicsContext::clip(const FloatRect& rect)
 
     m_data->p()->setClipRect(rect, Qt::IntersectClip);
 }
+IntRect GraphicsContext::clipBounds() const
+{
+    QPainter* p = m_data->p();
+    QRectF clipRect;
 
-void GraphicsContext::clipPath(WindRule clipRule)
+    if (p->hasClipping())
+        clipRect = m_data->clipBoundingRect();
+    else
+        clipRect = p->transform().inverted().mapRect(p->window());
+
+    return enclosingIntRect(clipRect);
+}
+
+void GraphicsContext::clipPath(const Path& path, WindRule clipRule)
 {
     if (paintingDisabled())
         return;
 
     QPainter* p = m_data->p();
-    QPainterPath newPath = m_data->currentPath;
-    newPath.setFillRule(clipRule == RULE_EVENODD ? Qt::OddEvenFill : Qt::WindingFill);
-    p->setClipPath(newPath);
+    QPainterPath platformPath = path.platformPath();
+    platformPath.setFillRule(clipRule == RULE_EVENODD ? Qt::OddEvenFill : Qt::WindingFill);
+    p->setClipPath(platformPath, Qt::IntersectClip);
 }
 
-void GraphicsContext::drawFocusRing(const Vector<Path>& paths, int width, int offset, const Color& color)
+void drawFocusRingForPath(QPainter* p, const QPainterPath& path, const Color& color, bool antiAliasing)
 {
-    // FIXME: implement
-}
-
-/**
- * Focus ring handling is not handled here. Qt style in 
- * RenderTheme handles drawing focus on widgets which 
- * need it.
- */
-void GraphicsContext::drawFocusRing(const Vector<IntRect>& rects, int /* width */, int /* offset */, const Color& color)
-{
-    if (paintingDisabled())
-        return;
-
-    unsigned rectCount = rects.size();
-
-    if (!rects.size())
-        return;
-
-    QPainter* p = m_data->p();
     const bool antiAlias = p->testRenderHint(QPainter::Antialiasing);
-    p->setRenderHint(QPainter::Antialiasing, m_data->antiAliasingForRectsAndLines);
+    p->setRenderHint(QPainter::Antialiasing, antiAliasing);
 
     const QPen oldPen = p->pen();
     const QBrush oldBrush = p->brush();
@@ -826,70 +820,243 @@ void GraphicsContext::drawFocusRing(const Vector<IntRect>& rects, int /* width *
     nPen.setColor(color);
     p->setBrush(Qt::NoBrush);
     nPen.setStyle(Qt::DotLine);
-    p->setPen(nPen);
-#if 0
-    // FIXME How do we do a bounding outline with Qt?
-    QPainterPath path;
-    for (int i = 0; i < rectCount; ++i)
-        path.addRect(QRectF(rects[i]));
-    QPainterPathStroker stroker;
-    QPainterPath newPath = stroker.createStroke(path);
-    p->strokePath(newPath, nPen);
-#else
-    for (unsigned i = 0; i < rectCount; ++i)
-        p->drawRect(QRectF(rects[i]));
-#endif
-    p->setPen(oldPen);
+
+    p->strokePath(path, nPen);
     p->setBrush(oldBrush);
+    p->setPen(oldPen);
 
     p->setRenderHint(QPainter::Antialiasing, antiAlias);
 }
 
-void GraphicsContext::drawLineForText(const IntPoint& origin, int width, bool)
+void GraphicsContext::drawFocusRing(const Path& path, int /* width */, int offset, const Color& color)
+{
+    // FIXME: Use 'offset' for something? http://webkit.org/b/49909
+
+    if (paintingDisabled() || !color.isValid())
+        return;
+
+    drawFocusRingForPath(m_data->p(), path.platformPath(), color, m_data->antiAliasingForRectsAndLines);
+}
+
+/**
+ * Focus ring handling for form controls is not handled here. Qt style in
+ * RenderTheme handles drawing focus on widgets which 
+ * need it. It is still handled here for links.
+ */
+void GraphicsContext::drawFocusRing(const Vector<IntRect>& rects, int width, int offset, const Color& color)
+{
+    if (paintingDisabled() || !color.isValid())
+        return;
+
+    unsigned rectCount = rects.size();
+
+    if (!rects.size())
+        return;
+
+    int radius = (width - 1) / 2;
+    QPainterPath path;
+    for (unsigned i = 0; i < rectCount; ++i) {
+        QRect rect = QRect((rects[i])).adjusted(-offset - radius, -offset - radius, offset + radius, offset + radius);
+        // This is not the most efficient way to add a rect to a path, but if we don't create the tmpPath,
+        // we will end up with ugly lines in between rows of text on anchors with multiple lines.
+        QPainterPath tmpPath;
+        tmpPath.addRoundedRect(rect, radius, radius);
+        path = path.united(tmpPath);
+    }
+    drawFocusRingForPath(m_data->p(), path, color, m_data->antiAliasingForRectsAndLines);
+}
+
+void GraphicsContext::drawLineForText(const FloatPoint& origin, float width, bool)
 {
     if (paintingDisabled())
         return;
 
-    IntPoint endPoint = origin + IntSize(width, 0);
-    drawLine(origin, endPoint);
+    FloatPoint startPoint = origin;
+    FloatPoint endPoint = origin + FloatSize(width, 0);
+
+    // If paintengine type is X11 to avoid artifacts
+    // like bug https://bugs.webkit.org/show_bug.cgi?id=42248
+#if defined(Q_WS_X11)
+    QPainter* p = m_data->p();
+    if (p->paintEngine()->type() == QPaintEngine::X11) {
+        // If stroke thickness is odd we need decrease Y coordinate by 1 pixel,
+        // because inside method adjustLineToPixelBoundaries(...), which
+        // called from drawLine(...), Y coordinate will be increased by 0.5f
+        // and then inside Qt painting engine will be rounded to next greater
+        // integer value.
+        float strokeWidth = strokeThickness();
+        if (static_cast<int>(strokeWidth) % 2) {
+            startPoint.setY(startPoint.y() - 1);
+            endPoint.setY(endPoint.y() - 1);
+        }
+    }
+#endif // defined(Q_WS_X11)
+
+    // FIXME: Loss of precision here. Might consider rounding.
+    drawLine(IntPoint(startPoint.x(), startPoint.y()), IntPoint(endPoint.x(), endPoint.y()));
 }
 
-void GraphicsContext::drawLineForMisspellingOrBadGrammar(const IntPoint&, int, bool)
+
+/*
+ *   NOTE: This code is completely based upon the one from
+ *   Source/WebCore/platform/graphics/cairo/DrawErrorUnderline.{h|cpp}
+ *
+ *   Draws an error underline that looks like one of:
+ *
+ *               H       E                H
+ *      /\      /\      /\        /\      /\               -
+ *    A/  \    /  \    /  \     A/  \    /  \              |
+ *     \   \  /    \  /   /D     \   \  /    \             |
+ *      \   \/  C   \/   /        \   \/   C  \            | height = heightSquares * square
+ *       \      /\  F   /          \  F   /\   \           |
+ *        \    /  \    /            \    /  \   \G         |
+ *         \  /    \  /              \  /    \  /          |
+ *          \/      \/                \/      \/           -
+ *          B                         B
+ *          |---|
+ *        unitWidth = (heightSquares - 1) * square
+ *
+ *  The x, y, width, height passed in give the desired bounding box;
+ *  x/width are adjusted to make the underline a integer number of units wide.
+*/
+static void drawErrorUnderline(QPainter *painter, qreal x, qreal y, qreal width, qreal height)
+{
+    const qreal heightSquares = 2.5;
+
+    qreal square = height / heightSquares;
+    qreal halfSquare = 0.5 * square;
+
+    qreal unitWidth = (heightSquares - 1.0) * square;
+    int widthUnits = static_cast<int>((width + 0.5 * unitWidth) / unitWidth);
+
+    x += 0.5 * (width - widthUnits * unitWidth);
+    width = widthUnits * unitWidth;
+
+    qreal bottom = y + height;
+    qreal top = y;
+
+    QPainterPath path;
+
+    // Bottom of squiggle.
+    path.moveTo(x - halfSquare, top + halfSquare); // A
+
+    int i = 0;
+    for (i = 0; i < widthUnits; i += 2) {
+        qreal middle = x + (i + 1) * unitWidth;
+        qreal right = x + (i + 2) * unitWidth;
+
+        path.lineTo(middle, bottom); // B
+
+        if (i + 2 == widthUnits)
+            path.lineTo(right + halfSquare, top + halfSquare); // D
+        else if (i + 1 != widthUnits)
+            path.lineTo(right, top + square); // C
+    }
+
+    // Top of squiggle.
+    for (i -= 2; i >= 0; i -= 2) {
+        qreal left = x + i * unitWidth;
+        qreal middle = x + (i + 1) * unitWidth;
+        qreal right = x + (i + 2) * unitWidth;
+
+        if (i + 1 == widthUnits)
+            path.lineTo(middle + halfSquare, bottom - halfSquare); // G
+        else {
+            if (i + 2 == widthUnits)
+                path.lineTo(right, top); // E
+
+            path.lineTo(middle, bottom - halfSquare); // F
+        }
+
+        path.lineTo(left, top); // H
+    }
+
+    painter->drawPath(path);
+}
+
+
+void GraphicsContext::drawLineForDocumentMarker(const FloatPoint& origin, float width, DocumentMarkerLineStyle style)
 {
     if (paintingDisabled())
         return;
 
-    notImplemented();
+    QPainter* painter = platformContext();
+    const QPen originalPen = painter->pen();
+
+    switch (style) {
+    case DocumentMarkerSpellingLineStyle:
+        painter->setPen(Qt::red);
+        break;
+    case DocumentMarkerGrammarLineStyle:
+        painter->setPen(Qt::green);
+        break;
+    default:
+        return;
+    }
+
+    drawErrorUnderline(painter, origin.x(), origin.y(), width, cMisspellingLineThickness);
+    painter->setPen(originalPen);
 }
 
-FloatRect GraphicsContext::roundToDevicePixels(const FloatRect& frect)
+FloatRect GraphicsContext::roundToDevicePixels(const FloatRect& frect, RoundingMode)
 {
-    QRectF rect(frect);
-    rect = m_data->p()->deviceMatrix().mapRect(rect);
+    // It is not enough just to round to pixels in device space. The rotation part of the
+    // affine transform matrix to device space can mess with this conversion if we have a
+    // rotating image like the hands of the world clock widget. We just need the scale, so
+    // we get the affine transform matrix and extract the scale.
+    QPainter* painter = platformContext();
+    QTransform deviceTransform = painter->deviceTransform();
+    if (deviceTransform.isIdentity())
+        return frect;
 
-    QRect result = rect.toRect(); //round it
-    return FloatRect(QRectF(result));
+    qreal deviceScaleX = sqrtf(deviceTransform.m11() * deviceTransform.m11() + deviceTransform.m12() * deviceTransform.m12());
+    qreal deviceScaleY = sqrtf(deviceTransform.m21() * deviceTransform.m21() + deviceTransform.m22() * deviceTransform.m22());
+
+    QPoint deviceOrigin(frect.x() * deviceScaleX, frect.y() * deviceScaleY);
+    QPoint deviceLowerRight(frect.maxX() * deviceScaleX, frect.maxY() * deviceScaleY);
+
+    // Don't let the height or width round to 0 unless either was originally 0
+    if (deviceOrigin.y() == deviceLowerRight.y() && frect.height())
+        deviceLowerRight.setY(deviceLowerRight.y() + 1);
+    if (deviceOrigin.x() == deviceLowerRight.x() && frect.width())
+        deviceLowerRight.setX(deviceLowerRight.x() + 1);
+
+    FloatPoint roundedOrigin = FloatPoint(deviceOrigin.x() / deviceScaleX, deviceOrigin.y() / deviceScaleY);
+    FloatPoint roundedLowerRight = FloatPoint(deviceLowerRight.x() / deviceScaleX, deviceLowerRight.y() / deviceScaleY);
+    return FloatRect(roundedOrigin, roundedLowerRight - roundedOrigin);
 }
 
-void GraphicsContext::setPlatformShadow(const IntSize& size, int, const Color&, ColorSpace)
+void GraphicsContext::setPlatformShadow(const FloatSize& size, float blur, const Color& color, ColorSpace colorSpace)
 {
     // Qt doesn't support shadows natively, they are drawn manually in the draw*
     // functions
 
-    if (m_common->state.shadowsIgnoreTransforms) {
+    if (m_state.shadowsIgnoreTransforms) {
         // Meaning that this graphics context is associated with a CanvasRenderingContext
         // We flip the height since CG and HTML5 Canvas have opposite Y axis
-        m_common->state.shadowSize = IntSize(size.width(), -size.height());
+        m_state.shadowOffset = FloatSize(size.width(), -size.height());
     }
+
+    m_data->shadow->setShadowValues(FloatSize(m_state.shadowBlur, m_state.shadowBlur), m_state.shadowOffset, color, colorSpace, m_state.shadowsIgnoreTransforms);
 }
 
 void GraphicsContext::clearPlatformShadow()
 {
-    // Qt doesn't support shadows natively, they are drawn manually in the draw*
-    // functions
+    m_data->shadow->clear();
 }
 
-void GraphicsContext::beginTransparencyLayer(float opacity)
+void GraphicsContext::pushTransparencyLayerInternal(const QRect &rect, qreal opacity, QPixmap& alphaMask)
+{
+    QPainter* p = m_data->p();
+
+    QRect deviceClip = p->transform().mapRect(rect);
+    if (alphaMask.width() != deviceClip.width() || alphaMask.height() != deviceClip.height())
+        alphaMask = alphaMask.scaled(deviceClip.width(), deviceClip.height());
+
+    m_data->layers.push(new TransparencyLayer(p, deviceClip, 1.0, alphaMask));
+}
+
+void GraphicsContext::beginPlatformTransparencyLayer(float opacity)
 {
     if (paintingDisabled())
         return;
@@ -901,25 +1068,32 @@ void GraphicsContext::beginTransparencyLayer(float opacity)
     w = device->width();
     h = device->height();
 
-    QRectF clip = p->clipPath().boundingRect();
-    QRectF deviceClip = p->transform().mapRect(clip);
-    x = int(qBound(qreal(0), deviceClip.x(), (qreal)w));
-    y = int(qBound(qreal(0), deviceClip.y(), (qreal)h));
-    w = int(qBound(qreal(0), deviceClip.width(), (qreal)w) + 2);
-    h = int(qBound(qreal(0), deviceClip.height(), (qreal)h) + 2);
+    if (p->hasClipping()) {
+        QRectF clip = m_data->clipBoundingRect();
+        QRectF deviceClip = p->transform().mapRect(clip);
+        x = int(qBound(qreal(0), deviceClip.x(), (qreal)w));
+        y = int(qBound(qreal(0), deviceClip.y(), (qreal)h));
+        w = int(qBound(qreal(0), deviceClip.width(), (qreal)w) + 2);
+        h = int(qBound(qreal(0), deviceClip.height(), (qreal)h) + 2);
+    }
 
-    TransparencyLayer * layer = new TransparencyLayer(m_data->p(), QRect(x, y, w, h));
-
-    layer->opacity = opacity;
-    m_data->layers.push(layer);
+    QPixmap emptyAlphaMask;
+    m_data->layers.push(new TransparencyLayer(p, QRect(x, y, w, h), opacity, emptyAlphaMask));
+    ++m_data->layerCount;
 }
 
-void GraphicsContext::endTransparencyLayer()
+void GraphicsContext::endPlatformTransparencyLayer()
 {
     if (paintingDisabled())
         return;
 
     TransparencyLayer* layer = m_data->layers.pop();
+    if (!layer->alphaMask.isNull()) {
+        layer->painter.resetTransform();
+        layer->painter.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        layer->painter.drawPixmap(QPoint(), layer->alphaMask);
+    } else
+        --m_data->layerCount; // see the comment for layerCount
     layer->painter.end();
 
     QPainter* p = m_data->p();
@@ -932,6 +1106,11 @@ void GraphicsContext::endTransparencyLayer()
     delete layer;
 }
 
+bool GraphicsContext::supportsTransparencyLayers()
+{
+    return true;
+}
+
 void GraphicsContext::clearRect(const FloatRect& rect)
 {
     if (paintingDisabled())
@@ -939,24 +1118,28 @@ void GraphicsContext::clearRect(const FloatRect& rect)
 
     QPainter* p = m_data->p();
     QPainter::CompositionMode currentCompositionMode = p->compositionMode();
-    if (p->paintEngine()->hasFeature(QPaintEngine::PorterDuff))
-        p->setCompositionMode(QPainter::CompositionMode_Source);
+    p->setCompositionMode(QPainter::CompositionMode_Source);
     p->fillRect(rect, Qt::transparent);
-    if (p->paintEngine()->hasFeature(QPaintEngine::PorterDuff))
-        p->setCompositionMode(currentCompositionMode);
+    p->setCompositionMode(currentCompositionMode);
 }
 
-void GraphicsContext::strokeRect(const FloatRect& rect, float width)
+void GraphicsContext::strokeRect(const FloatRect& rect, float lineWidth)
 {
     if (paintingDisabled())
         return;
 
-    QPainterPath path;
+    Path path;
     path.addRect(rect);
-    setStrokeThickness(width);
-    m_data->currentPath = path;
 
-    strokePath();
+    float previousStrokeThickness = strokeThickness();
+
+    if (lineWidth != previousStrokeThickness)
+        setStrokeThickness(lineWidth);
+
+    strokePath(path);
+
+    if (lineWidth != previousStrokeThickness)
+        setStrokeThickness(previousStrokeThickness);
 }
 
 void GraphicsContext::setLineCap(LineCap lc)
@@ -986,8 +1169,9 @@ void GraphicsContext::setLineDash(const DashArray& dashes, float dashOffset)
             pattern.append(dashes[i % dashLength] / penWidth);
 
         pen.setDashPattern(pattern);
-        pen.setDashOffset(dashOffset);
-    }
+        pen.setDashOffset(dashOffset / penWidth);
+    } else
+        pen.setStyle(Qt::SolidLine);
     p->setPen(pen);
 }
 
@@ -1021,13 +1205,12 @@ void GraphicsContext::setAlpha(float opacity)
     p->setOpacity(opacity);
 }
 
-void GraphicsContext::setCompositeOperation(CompositeOperator op)
+void GraphicsContext::setPlatformCompositeOperation(CompositeOperator op)
 {
     if (paintingDisabled())
         return;
 
-    if (m_data->p()->paintEngine()->hasFeature(QPaintEngine::PorterDuff))
-        m_data->p()->setCompositionMode(toQtCompositionMode(op));
+    m_data->p()->setCompositionMode(toQtCompositionMode(op));
 }
 
 void GraphicsContext::clip(const Path& path)
@@ -1035,7 +1218,9 @@ void GraphicsContext::clip(const Path& path)
     if (paintingDisabled())
         return;
 
-    m_data->p()->setClipPath(path.platformPath(), Qt::IntersectClip);
+    QPainterPath clipPath = path.platformPath();
+    clipPath.setFillRule(Qt::WindingFill);
+    m_data->p()->setClipPath(clipPath, Qt::IntersectClip);
 }
 
 void GraphicsContext::canvasClip(const Path& path)
@@ -1053,11 +1238,12 @@ void GraphicsContext::clipOut(const Path& path)
     QPainterPath newClip;
     newClip.setFillRule(Qt::OddEvenFill);
     if (p->hasClipping()) {
-        newClip.addRect(p->clipPath().boundingRect());
+        newClip.addRect(m_data->clipBoundingRect());
         newClip.addPath(clippedOut);
         p->setClipPath(newClip, Qt::IntersectClip);
     } else {
-        newClip.addRect(p->window());
+        QRect windowRect = p->transform().inverted().mapRect(p->window());
+        newClip.addRect(windowRect);
         newClip.addPath(clippedOut.intersected(newClip));
         p->setClipPath(newClip);
     }
@@ -1069,20 +1255,6 @@ void GraphicsContext::translate(float x, float y)
         return;
 
     m_data->p()->translate(x, y);
-
-    if (!m_data->currentPath.isEmpty()) {
-        QTransform matrix;
-        m_data->currentPath = m_data->currentPath * matrix.translate(-x, -y);
-        m_common->state.pathTransform.translate(x, y);
-    }
-}
-
-IntPoint GraphicsContext::origin()
-{
-    if (paintingDisabled())
-        return IntPoint();
-    const QTransform &transform = m_data->p()->transform();
-    return IntPoint(qRound(transform.dx()), qRound(transform.dy()));
 }
 
 void GraphicsContext::rotate(float radians)
@@ -1090,13 +1262,7 @@ void GraphicsContext::rotate(float radians)
     if (paintingDisabled())
         return;
 
-    m_data->p()->rotate(180/M_PI*radians);
-
-    if (!m_data->currentPath.isEmpty()) {
-        QTransform matrix;
-        m_data->currentPath = m_data->currentPath * matrix.rotate(-180/M_PI*radians);
-        m_common->state.pathTransform.rotate(radians);
-    }
+    m_data->p()->rotate(rad2deg(qreal(radians)));
 }
 
 void GraphicsContext::scale(const FloatSize& s)
@@ -1105,12 +1271,6 @@ void GraphicsContext::scale(const FloatSize& s)
         return;
 
     m_data->p()->scale(s.width(), s.height());
-
-    if (!m_data->currentPath.isEmpty()) {
-        QTransform matrix;
-        m_data->currentPath = m_data->currentPath * matrix.scale(1 / s.width(), 1 / s.height());
-        m_common->state.pathTransform.scaleNonUniform(s.width(), s.height());
-    }
 }
 
 void GraphicsContext::clipOut(const IntRect& rect)
@@ -1122,44 +1282,17 @@ void GraphicsContext::clipOut(const IntRect& rect)
     QPainterPath newClip;
     newClip.setFillRule(Qt::OddEvenFill);
     if (p->hasClipping()) {
-        newClip.addRect(p->clipPath().boundingRect());
+        newClip.addRect(m_data->clipBoundingRect());
         newClip.addRect(QRect(rect));
         p->setClipPath(newClip, Qt::IntersectClip);
     } else {
         QRect clipOutRect(rect);
-        QRect window(p->window());
+        QRect window = p->transform().inverted().mapRect(p->window());
         clipOutRect &= window;
         newClip.addRect(window);
         newClip.addRect(clipOutRect);
         p->setClipPath(newClip);
     }
-}
-
-void GraphicsContext::clipOutEllipseInRect(const IntRect& rect)
-{
-    if (paintingDisabled())
-        return;
-
-    QPainter* p = m_data->p();
-    QPainterPath newClip;
-    newClip.setFillRule(Qt::OddEvenFill);
-    if (p->hasClipping()) {
-        newClip.addRect(p->clipPath().boundingRect());
-        newClip.addEllipse(QRect(rect));
-        p->setClipPath(newClip, Qt::IntersectClip);
-    } else {
-        QRect clipOutRect(rect);
-        QRect window(p->window());
-        clipOutRect &= window;
-        newClip.addRect(window);
-        newClip.addEllipse(clipOutRect);
-        p->setClipPath(newClip);
-    }
-}
-
-void GraphicsContext::clipToImageBuffer(const FloatRect&, const ImageBuffer*)
-{
-    notImplemented();
 }
 
 void GraphicsContext::addInnerRoundedRectClip(const IntRect& rect,
@@ -1188,22 +1321,47 @@ void GraphicsContext::addInnerRoundedRectClip(const IntRect& rect,
     p->setRenderHint(QPainter::Antialiasing, antiAlias);
 }
 
-void GraphicsContext::concatCTM(const TransformationMatrix& transform)
+void GraphicsContext::concatCTM(const AffineTransform& transform)
 {
     if (paintingDisabled())
         return;
 
     m_data->p()->setWorldTransform(transform, true);
-
-    // Transformations to the context shouldn't transform the currentPath.
-    // We have to undo every change made to the context from the currentPath
-    // to avoid wrong drawings.
-    if (!m_data->currentPath.isEmpty() && transform.isInvertible()) {
-        QTransform matrix = transform.inverse();
-        m_data->currentPath = m_data->currentPath * matrix;
-        m_common->state.pathTransform.multiply(transform);
-    }
 }
+
+void GraphicsContext::setCTM(const AffineTransform& transform)
+{
+    if (paintingDisabled())
+        return;
+
+    m_data->p()->setWorldTransform(transform);
+}
+
+#if ENABLE(3D_RENDERING) && USE(TEXTURE_MAPPER)
+TransformationMatrix GraphicsContext::get3DTransform() const
+{
+    if (paintingDisabled())
+        return TransformationMatrix();
+
+    return platformContext()->combinedTransform();
+}
+
+void GraphicsContext::concat3DTransform(const TransformationMatrix& transform)
+{
+    if (paintingDisabled())
+        return;
+
+    m_data->p()->setWorldTransform(transform, true);
+}
+
+void GraphicsContext::set3DTransform(const TransformationMatrix& transform)
+{
+    if (paintingDisabled())
+        return;
+
+    m_data->p()->setWorldTransform(transform, false);
+}
+#endif
 
 void GraphicsContext::setURLForRect(const KURL&, const IntRect&)
 {
@@ -1212,15 +1370,17 @@ void GraphicsContext::setURLForRect(const KURL&, const IntRect&)
 
 void GraphicsContext::setPlatformStrokeColor(const Color& color, ColorSpace colorSpace)
 {
-    if (paintingDisabled())
+    if (paintingDisabled() || !color.isValid())
         return;
+
     QPainter* p = m_data->p();
     QPen newPen(p->pen());
-    newPen.setColor(color);
+    m_data->solidColor.setColor(color);
+    newPen.setBrush(m_data->solidColor);
     p->setPen(newPen);
 }
 
-void GraphicsContext::setPlatformStrokeStyle(const StrokeStyle& strokeStyle)
+void GraphicsContext::setPlatformStrokeStyle(StrokeStyle strokeStyle)
 {
     if (paintingDisabled())
         return;
@@ -1242,9 +1402,11 @@ void GraphicsContext::setPlatformStrokeThickness(float thickness)
 
 void GraphicsContext::setPlatformFillColor(const Color& color, ColorSpace colorSpace)
 {
-    if (paintingDisabled())
+    if (paintingDisabled() || !color.isValid())
         return;
-    m_data->p()->setBrush(QBrush(color));
+
+    m_data->solidColor.setColor(color);
+    m_data->p()->setBrush(m_data->solidColor);
 }
 
 void GraphicsContext::setPlatformShouldAntialias(bool enable)
@@ -1340,13 +1502,38 @@ void GraphicsContext::releaseWindowsContext(HDC hdc, const IntRect& dstRect, boo
 }
 #endif
 
-void GraphicsContext::setImageInterpolationQuality(InterpolationQuality)
+void GraphicsContext::setImageInterpolationQuality(InterpolationQuality quality)
 {
+    m_data->imageInterpolationQuality = quality;
+
+    switch (quality) {
+    case InterpolationNone:
+    case InterpolationLow:
+        // use nearest-neigbor
+        m_data->p()->setRenderHint(QPainter::SmoothPixmapTransform, false);
+        break;
+
+    case InterpolationMedium:
+    case InterpolationHigh:
+        // use the filter
+        m_data->p()->setRenderHint(QPainter::SmoothPixmapTransform, true);
+        break;
+
+    case InterpolationDefault:
+    default:
+        m_data->p()->setRenderHint(QPainter::SmoothPixmapTransform, m_data->initialSmoothPixmapTransformHint);
+        break;
+    };
 }
 
 InterpolationQuality GraphicsContext::imageInterpolationQuality() const
 {
-    return InterpolationDefault;
+    return m_data->imageInterpolationQuality;
+}
+
+void GraphicsContext::takeOwnershipOfPlatformContext()
+{
+    m_data->takeOwnershipOfPlatformContext();
 }
 
 }

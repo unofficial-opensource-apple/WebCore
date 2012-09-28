@@ -31,51 +31,71 @@
 #ifndef ChromiumDataObject_h
 #define ChromiumDataObject_h
 
-#include "KURL.h"
+#include "ChromiumDataObjectItem.h"
 #include "PlatformString.h"
+#include "Supplementable.h"
+#include <wtf/HashSet.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
-    // A data object for holding data that would be in a clipboard or moved
-    // during a drag-n-drop operation.  This is the data that WebCore is aware
-    // of and is not specific to a platform.
-    class ChromiumDataObject : public RefCounted<ChromiumDataObject> {
-    public:
-        static PassRefPtr<ChromiumDataObject> create()
-        {
-            return adoptRef(new ChromiumDataObject);
-        }
+class KURL;
+class SharedBuffer;
 
-        PassRefPtr<ChromiumDataObject> copy() const
-        {
-            return adoptRef(new ChromiumDataObject(*this));
-        }
+typedef int ExceptionCode;
 
-        void clear();
-        bool hasData() const;
+// A data object for holding data that would be in a clipboard or moved
+// during a drag-n-drop operation.  This is the data that WebCore is aware
+// of and is not specific to a platform.
+class ChromiumDataObject : public RefCounted<ChromiumDataObject>, public Supplementable<ChromiumDataObject> {
+public:
+    static PassRefPtr<ChromiumDataObject> createFromPasteboard();
+    static PassRefPtr<ChromiumDataObject> create();
 
-        KURL url;
-        String urlTitle;
+    PassRefPtr<ChromiumDataObject> copy() const;
 
-        KURL downloadURL;
+    // DataTransferItemList support.
+    size_t length() const;
+    PassRefPtr<ChromiumDataObjectItem> item(unsigned long index);
+    // FIXME: Implement V8DataTransferItemList::indexedPropertyDeleter to get this called.
+    void deleteItem(unsigned long index);
+    void clearAll();
+    void add(const String& data, const String& type, ExceptionCode&);
+    void add(PassRefPtr<File>, ScriptExecutionContext*);
 
-        String fileExtension;
-        Vector<String> filenames;
+    // WebCore helpers.
+    void clearData(const String& type);
+    void clearAllExceptFiles();
 
-        String plainText;
+    HashSet<String> types() const;
+    String getData(const String& type) const;
+    bool setData(const String& type, const String& data);
 
-        String textHtml;
-        KURL htmlBaseUrl;
+    void urlAndTitle(String& url, String* title = 0) const;
+    void setURLAndTitle(const String& url, const String& title);
+    void htmlAndBaseURL(String& html, KURL& baseURL) const;
+    void setHTMLAndBaseURL(const String& html, const KURL& baseURL);
 
-        String fileContentFilename;
-        RefPtr<SharedBuffer> fileContent;
+    // Used for dragging in files from the desktop.
+    bool containsFilenames() const;
+    Vector<String> filenames() const;
+    void addFilename(const String& filename, const String& displayName);
 
-    private:
-        ChromiumDataObject() {}
-        ChromiumDataObject(const ChromiumDataObject&);
-    };
+    // Used to handle files (images) being dragged out.
+    void addSharedBuffer(const String& name, PassRefPtr<SharedBuffer>);
+
+private:
+    ChromiumDataObject();
+    explicit ChromiumDataObject(const ChromiumDataObject&);
+
+    PassRefPtr<ChromiumDataObjectItem> findStringItem(const String& type) const;
+    bool internalAddStringItem(PassRefPtr<ChromiumDataObjectItem>);
+    void internalAddFileItem(PassRefPtr<ChromiumDataObjectItem>);
+
+    Vector<RefPtr<ChromiumDataObjectItem> > m_itemList;
+};
 
 } // namespace WebCore
 

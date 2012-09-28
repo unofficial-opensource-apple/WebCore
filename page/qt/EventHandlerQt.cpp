@@ -43,37 +43,34 @@
 #include "HitTestResult.h"
 #include "KeyboardEvent.h"
 #include "MouseEventWithHitTestResults.h"
+#include "NotImplemented.h"
 #include "Page.h"
 #include "PlatformKeyboardEvent.h"
 #include "PlatformWheelEvent.h"
 #include "RenderWidget.h"
 #include "Scrollbar.h"
-#include "NotImplemented.h"
 
+#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
 QT_BEGIN_NAMESPACE
-extern Q_GUI_EXPORT bool qt_tab_all_widgets; // from qapplication.cpp
+Q_GUI_EXPORT extern bool qt_tab_all_widgets; // from qapplication.cpp
 QT_END_NAMESPACE
+#endif
 
 namespace WebCore {
 
+#if defined(Q_WS_MAC)
+const double EventHandler::TextDragDelay = 0.15;
+#else
 const double EventHandler::TextDragDelay = 0.0;
+#endif
 
-static bool isKeyboardOptionTab(KeyboardEvent* event)
+bool EventHandler::tabsToAllFormControls(KeyboardEvent* event) const
 {
-    return event
-        && (event->type() == eventNames().keydownEvent || event->type() == eventNames().keypressEvent)
-        && event->altKey()
-        && event->keyIdentifier() == "U+0009";
-}
-
-bool EventHandler::invertSenseOfTabsToLinks(KeyboardEvent* event) const
-{
-    return isKeyboardOptionTab(event);
-}
-
-bool EventHandler::tabsToAllControls(KeyboardEvent* event) const
-{
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+    return !isKeyboardOptionTab(event);
+#else
     return (isKeyboardOptionTab(event) ? !qt_tab_all_widgets : qt_tab_all_widgets);
+#endif
 }
 
 void EventHandler::focusDocumentView()
@@ -92,13 +89,13 @@ bool EventHandler::passWidgetMouseDownEventToWidget(const MouseEventWithHitTestR
 
 bool EventHandler::eventActivatedView(const PlatformMouseEvent&) const
 {
-    //Qt has an activation event which is sent independently
+    // Qt has an activation event which is sent independently
     //   of mouse event so this thing will be a snafu to implement
     //   correctly
     return false;
 }
 
-bool EventHandler::passWheelEventToWidget(PlatformWheelEvent& event, Widget* widget)
+bool EventHandler::passWheelEventToWidget(const PlatformWheelEvent& event, Widget* widget)
 {
     Q_ASSERT(widget);
     if (!widget->isFrameView())
@@ -109,7 +106,7 @@ bool EventHandler::passWheelEventToWidget(PlatformWheelEvent& event, Widget* wid
 
 PassRefPtr<Clipboard> EventHandler::createDraggingClipboard() const
 {
-    return ClipboardQt::create(ClipboardWritable, true);
+    return ClipboardQt::create(ClipboardWritable, m_frame, Clipboard::DragAndDrop);
 }
 
 bool EventHandler::passMousePressEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe)
@@ -132,7 +129,11 @@ bool EventHandler::passMouseReleaseEventToSubframe(MouseEventWithHitTestResults&
 
 unsigned EventHandler::accessKeyModifiers()
 {
-    return PlatformKeyboardEvent::CtrlKey;
+#if OS(DARWIN)
+    return PlatformEvent::CtrlKey | PlatformEvent::AltKey;
+#else
+    return PlatformEvent::AltKey;
+#endif
 }
 
 }

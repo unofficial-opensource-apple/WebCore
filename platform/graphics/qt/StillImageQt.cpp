@@ -30,36 +30,62 @@
 
 #include "GraphicsContext.h"
 #include "IntSize.h"
+#include "ShadowBlur.h"
 
 #include <QPainter>
 
 namespace WebCore {
 
 StillImage::StillImage(const QPixmap& pixmap)
-    : m_pixmap(pixmap)
+    : m_pixmap(new QPixmap(pixmap))
+    , m_ownsPixmap(true)
 {}
+
+StillImage::StillImage(const QPixmap* pixmap)
+    : m_pixmap(pixmap)
+    , m_ownsPixmap(false)
+{}
+
+StillImage::~StillImage()
+{
+    if (m_ownsPixmap)
+        delete m_pixmap;
+}
 
 IntSize StillImage::size() const
 {
-    return IntSize(m_pixmap.width(), m_pixmap.height());
+    return IntSize(m_pixmap->width(), m_pixmap->height());
 }
 
 NativeImagePtr StillImage::nativeImageForCurrentFrame()
 {
-    return const_cast<NativeImagePtr>(&m_pixmap);
+    return const_cast<NativeImagePtr>(m_pixmap);
 }
 
 void StillImage::draw(GraphicsContext* ctxt, const FloatRect& dst,
                       const FloatRect& src, ColorSpace, CompositeOperator op)
 {
-    if (m_pixmap.isNull())
+    if (m_pixmap->isNull())
         return;
 
-    ctxt->save();
+    FloatRect normalizedSrc = src.normalized();
+    FloatRect normalizedDst = dst.normalized();
+
+    CompositeOperator previousOperator = ctxt->compositeOperation();
     ctxt->setCompositeOperation(op);
-    QPainter* painter(ctxt->platformContext());
-    painter->drawPixmap(dst, m_pixmap, src);
-    ctxt->restore();
+
+    if (ctxt->hasShadow()) {
+        ShadowBlur* shadow = ctxt->shadowBlur();
+        GraphicsContext* shadowContext = shadow->beginShadowLayer(ctxt, normalizedDst);
+        if (shadowContext) {
+            QPainter* shadowPainter = shadowContext->platformContext();
+            shadowPainter->drawPixmap(normalizedDst, *m_pixmap, normalizedSrc);
+            shadow->endShadowLayer(ctxt);
+        }
+    }
+
+    ctxt->platformContext()->drawPixmap(normalizedDst, *m_pixmap, normalizedSrc);
+    ctxt->setCompositeOperation(previousOperator);
 }
 
 }

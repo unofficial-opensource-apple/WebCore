@@ -51,7 +51,7 @@ static IMLangFontLink2* langFontLink = 0;
 static IMLangFontLink* langFontLink = 0;
 #endif
 
-IMultiLanguage* getMultiLanguageInterface()
+IMultiLanguage* FontCache::getMultiLanguageInterface()
 {
     if (!multiLanguage)
         CoCreateInstance(CLSID_CMultiLanguage, 0, CLSCTX_INPROC_SERVER, IID_IMultiLanguage, (void**)&multiLanguage);
@@ -308,7 +308,7 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
 
         FontPlatformData* result = getCachedFontPlatformData(fontDescription, familyName);
         if (result && result->hash() != origFont.hash()) {
-            if (SimpleFontData* fontData = getCachedFontData(result))
+            if (SimpleFontData* fontData = getCachedFontData(result, DoNotRetain))
                 return fontData;
         }
     }
@@ -316,16 +316,16 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
     return 0;
 }
 
-FontPlatformData* FontCache::getSimilarFontPlatformData(const Font& font)
+SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
 {
     return 0;
 }
 
-FontPlatformData* FontCache::getLastResortFallbackFont(const FontDescription& fontDesc)
+SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& fontDesc, ShouldRetain shouldRetain)
 {
     // FIXME: Would be even better to somehow get the user's default font here.  For now we'll pick
     // the default that the user would get without changing any prefs.
-    return getCachedFontPlatformData(fontDesc, FontPlatformData::defaultFontFamily());
+    return getCachedFontData(fontDesc, FontPlatformData::defaultFontFamily(), false, shouldRetain);
 }
 
 FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontDescription, const AtomicString& family)
@@ -348,5 +348,4 @@ void FontCache::getTraitsInFamily(const AtomicString& familyName, Vector<unsigne
     copyToVector(procData.m_traitsMasks, traitsMasks);
 }
 
-}
-
+} // namespace WebCore

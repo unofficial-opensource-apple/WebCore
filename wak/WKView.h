@@ -10,12 +10,6 @@
 #import "WKUtilities.h"
 #import <CoreGraphics/CoreGraphics.h>
 
-#ifdef __OBJC__
-@class WebEvent;
-#else
-typedef void* WebEvent;
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -43,27 +37,16 @@ typedef enum {
 } WKViewResponderCallbackType;
 
 typedef void (*WKViewDrawCallback)(WKViewRef view, CGRect dirtyRect, void *userInfo); 
-typedef bool (*WKViewEventCallback)(WKViewRef view, WebEvent *event, void *userInfo);
 typedef void (*WKViewNotificationCallback)(WKViewRef view, WKViewNotificationType type, void *userInfo);
-typedef void (*WKViewLayoutCallback)(WKViewRef view, void *userInfo, bool force);
 typedef bool (*WKViewResponderCallback)(WKViewRef view, WKViewResponderCallbackType type, void *userInfo);
-typedef WKViewRef (*WKViewHitTestCallback)(WKViewRef view, CGPoint point, void *userInfo);
 typedef void (*WKViewWillRemoveSubviewCallback)(WKViewRef view, WKViewRef subview);
 typedef void (*WKViewInvalidateGStateCallback)(WKViewRef view);
 
 typedef struct _WKViewContext {
-    WKViewDrawCallback drawCallback;
-    void *drawUserInfo;
-    WKViewEventCallback eventCallback;
-    void *eventUserInfo;    
     WKViewNotificationCallback notificationCallback;
     void *notificationUserInfo;
-    WKViewLayoutCallback layoutCallback;
-    void *layoutUserInfo;
     WKViewResponderCallback responderCallback;
     void *responderUserInfo;
-    WKViewHitTestCallback hitTestCallback;
-    void *hitTestUserInfo;
     WKViewWillRemoveSubviewCallback willRemoveSubviewCallback;
     WKViewInvalidateGStateCallback invalidateGStateCallback;
 } WKViewContext;
@@ -81,16 +64,13 @@ struct WKView {
     CGPoint origin;
     CGRect bounds;
     
-    unsigned int isHidden:1;
-    
     unsigned int autoresizingMask;
     
     float scale;
-    
-    bool drawsOwnDescendants;
-};
 
-WKViewRef WKViewGetFocusView (void);
+    // This is really a WAKView.
+    void *wrapper;
+};
 
 extern WKClassInfo WKViewClassInfo;
 
@@ -104,12 +84,14 @@ CGRect WKViewGetBounds (WKViewRef view);
 
 void WKViewSetFrameOrigin (WKViewRef view, CGPoint newPoint);
 void WKViewSetFrameSize (WKViewRef view, CGSize newSize);
+void WKViewSetBoundsOrigin(WKViewRef view, CGPoint newOrigin);
 void WKViewSetBoundsSize (WKViewRef view, CGSize newSize);
 
 CGRect WKViewGetFrame (WKViewRef view);
 
 void WKViewSetScale (WKViewRef view, float scale);
 float WKViewGetScale (WKViewRef view);
+CGAffineTransform _WKViewGetTransform(WKViewRef view);
 
 WKWindowRef WKViewGetWindow (WKViewRef view);
 
@@ -119,18 +101,6 @@ WKViewRef WKViewGetSuperview (WKViewRef view);
 
 void WKViewAddSubview (WKViewRef view, WKViewRef subview);
 void WKViewRemoveFromSuperview (WKViewRef view);
-
-void WKViewSetNeedsDisplay (WKViewRef view);
-void WKViewSetNeedsDisplayInRect (WKViewRef view, CGRect invalidRect);
-void WKViewDisplay (WKViewRef view);
-void WKViewDisplayRect (WKViewRef view, CGRect rectToDraw);
-void WKViewDisplayRectInContext (WKViewRef view, CGRect rectToDraw, CGContextRef context);
-
-void WKViewLockFocus (WKViewRef view);
-void WKViewUnlockFocus (WKViewRef view);
-
-bool WKViewGetIsHidden (WKViewRef view);
-void WKViewSetIsHidden (WKViewRef view, bool flag);
 
 CGPoint WKViewConvertPointToSuperview (WKViewRef view, CGPoint aPoint);
 CGPoint WKViewConvertPointFromSuperview (WKViewRef view, CGPoint aPoint);
@@ -155,11 +125,7 @@ bool WKViewResignFirstResponder (WKViewRef view);
 unsigned int WKViewGetAutoresizingMask(WKViewRef view);
 void WKViewSetAutoresizingMask (WKViewRef view, unsigned int mask);
 
-WKViewRef WKViewHitTest(WKViewRef view, CGPoint superviewPoint);
-void WKViewScrollToPoint(WKViewRef view, CGPoint point);
 void WKViewScrollToRect(WKViewRef view, CGRect rect);
-
-void WKViewLayout(WKViewRef view, bool force);
 
 #ifdef __cplusplus
 }

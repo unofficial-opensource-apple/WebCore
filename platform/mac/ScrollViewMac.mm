@@ -32,6 +32,7 @@
 #import "Logging.h"
 #import "NotImplemented.h"
 #import "WebCoreFrameView.h"
+#import <wtf/UnusedParam.h>
 
 using namespace std;
 
@@ -116,15 +117,6 @@ IntRect ScrollView::platformVisibleContentRect(bool includeScrollbars) const
     return IntRect();
 }
 
-IntSize ScrollView::platformContentsSize() const
-{
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    if (NSView* documentView = this->documentView())
-        return enclosingIntRect([documentView bounds]).size();
-    END_BLOCK_OBJC_EXCEPTIONS;
-    return IntSize();
-}
-
 void ScrollView::platformSetContentsSize()
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
@@ -147,7 +139,8 @@ void ScrollView::platformSetScrollbarsSuppressed(bool repaintOnUnsuppress)
 void ScrollView::platformSetScrollPosition(const IntPoint& scrollPoint)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    NSPoint tempPoint = { max(0, scrollPoint.x()), max(0, scrollPoint.y()) }; // Don't use NSMakePoint to work around 4213314.
+    NSPoint floatPoint = scrollPoint;
+    NSPoint tempPoint = { max(-[scrollView() scrollOrigin].x, floatPoint.x), max(-[scrollView() scrollOrigin].y, floatPoint.y) };  // Don't use NSMakePoint to work around 4213314.
     [documentView() scrollPoint:tempPoint];
     END_BLOCK_OBJC_EXCEPTIONS;
 }
@@ -200,6 +193,36 @@ IntPoint ScrollView::platformScreenToContents(const IntPoint& point) const
 bool ScrollView::platformIsOffscreen() const
 {
     return ![platformWidget() window] || ![[platformWidget() window] isVisible];
+}
+
+#if USE(SCROLLBAR_PAINTER)
+static inline NSScrollerKnobStyle toNSScrollerKnobStyle(ScrollbarOverlayStyle style)
+{
+    switch (style) {
+    case ScrollbarOverlayStyleDark:
+        return NSScrollerKnobStyleDark;
+    case ScrollbarOverlayStyleLight:
+        return NSScrollerKnobStyleLight;
+    default:
+        return NSScrollerKnobStyleDefault;
+    }
+}
+#endif
+
+void ScrollView::platformSetScrollbarOverlayStyle(ScrollbarOverlayStyle overlayStyle)
+{
+#if USE(SCROLLBAR_PAINTER)
+    [scrollView() setScrollerKnobStyle:toNSScrollerKnobStyle(overlayStyle)];
+#else
+    UNUSED_PARAM(overlayStyle);
+#endif
+}
+
+void ScrollView::platformSetScrollOrigin(const IntPoint& origin, bool updatePositionAtAll, bool updatePositionSynchronously)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    [scrollView() setScrollOrigin:origin updatePositionAtAll:updatePositionAtAll immediately:updatePositionSynchronously];
+    END_BLOCK_OBJC_EXCEPTIONS;
 }
 
 } // namespace WebCore

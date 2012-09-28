@@ -26,12 +26,12 @@
 #include "config.h"
 #include "ApplicationCache.h"
 
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-
 #include "ApplicationCacheGroup.h"
 #include "ApplicationCacheResource.h"
 #include "ApplicationCacheStorage.h"
 #include "ResourceRequest.h"
+#include "SecurityOrigin.h"
+#include <wtf/text/CString.h>
 #include <stdio.h>
 
 namespace WebCore {
@@ -117,7 +117,7 @@ ApplicationCacheResource* ApplicationCache::resourceForURL(const String& url)
 
 bool ApplicationCache::requestIsHTTPOrHTTPSGet(const ResourceRequest& request)
 {
-    if (!request.url().protocolInHTTPFamily())
+    if (!request.url().protocolIsInHTTPFamily())
         return false;
     
     if (!equalIgnoringCase(request.httpMethod(), "GET"))
@@ -130,7 +130,7 @@ ApplicationCacheResource* ApplicationCache::resourceForRequest(const ResourceReq
 {
     // We only care about HTTP/HTTPS GET requests.
     if (!requestIsHTTPOrHTTPSGet(request))
-        return false;
+        return 0;
 
     KURL url(request.url());
     if (url.hasFragmentIdentifier())
@@ -147,9 +147,6 @@ void ApplicationCache::setOnlineWhitelist(const Vector<KURL>& onlineWhitelist)
 
 bool ApplicationCache::isURLInOnlineWhitelist(const KURL& url)
 {
-    if (m_allowAllNetworkRequests)
-        return true;
-
     size_t whitelistSize = m_onlineWhitelist.size();
     for (size_t i = 0; i < whitelistSize; ++i) {
         if (protocolHostAndPortAreEqual(url, m_onlineWhitelist[i]) && url.string().startsWith(m_onlineWhitelist[i].string()))
@@ -184,8 +181,37 @@ void ApplicationCache::clearStorageID()
     ResourceMap::const_iterator end = m_resources.end();
     for (ResourceMap::const_iterator it = m_resources.begin(); it != end; ++it)
         it->second->clearStorageID();
-}    
+}
     
+void ApplicationCache::deleteCacheForOrigin(SecurityOrigin* origin)
+{
+    Vector<KURL> urls;
+    if (!cacheStorage().manifestURLs(&urls)) {
+        LOG_ERROR("Failed to retrieve ApplicationCache manifest URLs");
+        return;
+    }
+
+    KURL originURL(KURL(), origin->toString());
+
+    size_t count = urls.size();
+    for (size_t i = 0; i < count; ++i) {
+        if (protocolHostAndPortAreEqual(urls[i], originURL)) {
+            ApplicationCacheGroup* group = cacheStorage().findInMemoryCacheGroup(urls[i]);
+            if (group)
+                group->makeObsolete();
+            else
+                cacheStorage().deleteCacheGroup(urls[i]);
+        }
+    }
+}
+
+int64_t ApplicationCache::diskUsageForOrigin(SecurityOrigin* origin)
+{
+    int64_t usage = 0;
+    cacheStorage().calculateUsageForOrigin(origin, usage);
+    return usage;
+}
+
 #ifndef NDEBUG
 void ApplicationCache::dump()
 {
@@ -199,5 +225,3 @@ void ApplicationCache::dump()
 #endif
 
 }
-
-#endif // ENABLE(OFFLINE_WEB_APPLICATIONS)

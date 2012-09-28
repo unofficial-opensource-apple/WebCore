@@ -26,6 +26,10 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * @constructor
+ * @extends {WebInspector.Object}
+ */
 WebInspector.SidebarPane = function(title)
 {
     this.element = document.createElement("div");
@@ -125,7 +129,7 @@ WebInspector.SidebarPane.prototype = {
 
     _onTitleKeyDown: function(event)
     {
-        if (isEnterKey(event) || event.keyCode === WebInspector.KeyboardShortcut.KeyCodes.Space)
+        if (isEnterKey(event) || event.keyCode === WebInspector.KeyboardShortcut.Keys.Space.code)
             this.toggleExpanded();
     }
 }

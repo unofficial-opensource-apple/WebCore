@@ -22,15 +22,28 @@
 
 namespace WebCore {
 
-class JSTouchListConstructor : public DOMConstructorObject {
+class JSTouchListConstructor : public DOMConstructorWithDocument {
 public:
-    JSTouchListConstructor(JSC::ExecState*, JSDOMGlobalObject*);
+    typedef DOMConstructorWithDocument Base;
+
+    static JSTouchListConstructor* create(JSC::ExecState* exec, JSC::Structure* structure, JSDOMGlobalObject* globalObject)
+    {
+        JSTouchListConstructor* constructor = new (JSC::allocateCell<JSTouchListConstructor>(*exec->heap())) JSTouchListConstructor(structure, globalObject);
+        constructor->finishCreation(exec, globalObject);
+        return constructor;
+    }
+
+    static JSC::Structure* createStructure(JSC::JSGlobalData& globalData, JSC::JSGlobalObject* globalObject, JSC::JSValue prototype)
+    {
+        return JSC::Structure::create(globalData, globalObject, prototype, JSC::TypeInfo(JSC::ObjectType, StructureFlags), &s_info);
+    }
 
     static const JSC::ClassInfo s_info;
 
 private:
-    virtual JSC::ConstructType getConstructData(JSC::ConstructData&);
-    virtual const JSC::ClassInfo* classInfo() const { return &s_info; }
+    JSTouchListConstructor(JSC::Structure*, JSDOMGlobalObject*);
+    void finishCreation(JSC::ExecState*, JSDOMGlobalObject*);
+    static JSC::ConstructType getConstructData(JSC::JSCell*, JSC::ConstructData&);
 };
 
 }

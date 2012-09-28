@@ -26,11 +26,9 @@
 #ifndef IntSize_h
 #define IntSize_h
 
-#include <wtf/Platform.h>
-
 #include <CoreGraphics/CoreGraphics.h>
 
-#if PLATFORM(CG)
+#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM)
 typedef struct CGSize CGSize;
 #endif
 
@@ -47,8 +45,12 @@ typedef struct tagSIZE SIZE;
 QT_BEGIN_NAMESPACE
 class QSize;
 QT_END_NAMESPACE
-#elif PLATFORM(HAIKU)
-class BSize;
+#elif PLATFORM(BLACKBERRY)
+namespace BlackBerry {
+namespace Platform {
+class IntSize;
+}
+}
 #endif
 
 #if PLATFORM(WX)
@@ -70,19 +72,26 @@ public:
 
     bool isEmpty() const { return m_width <= 0 || m_height <= 0; }
     bool isZero() const { return !m_width && !m_height; }
+
+    float aspectRatio() const { return static_cast<float>(m_width) / static_cast<float>(m_height); }
     
     void expand(int width, int height)
     {
         m_width += width;
         m_height += height;
     }
+
+    void scale(float widthScale, float heightScale)
+    {
+        m_width = static_cast<int>(static_cast<float>(m_width) * widthScale);
+        m_height = static_cast<int>(static_cast<float>(m_height) * heightScale);
+    }
     
     void scale(float scale)
     {
-        m_width = static_cast<int>(static_cast<float>(m_width) * scale);
-        m_height = static_cast<int>(static_cast<float>(m_height) * scale);
+        this->scale(scale, scale);
     }
-    
+
     IntSize expandedTo(const IntSize& other) const
     {
         return IntSize(m_width > other.m_width ? m_width : other.m_width,
@@ -100,7 +109,30 @@ public:
         *this = expandedTo(IntSize());
     }
 
-#if PLATFORM(CG)
+    void clampToMinimumSize(const IntSize& minimumSize)
+    {
+        if (m_width < minimumSize.width())
+            m_width = minimumSize.width();
+        if (m_height < minimumSize.height())
+            m_height = minimumSize.height();
+    }
+
+    int area() const
+    {
+        return m_width * m_height;
+    }
+
+    int diagonalLengthSquared() const
+    {
+        return m_width * m_width + m_height * m_height;
+    }
+
+    IntSize transposedSize() const
+    {
+        return IntSize(m_height, m_width);
+    }
+
+#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM)
     explicit IntSize(const CGSize&); // don't do this implicitly since it's lossy
     operator CGSize() const;
 #endif
@@ -116,14 +148,14 @@ public:
     operator QSize() const;
 #endif
 
-#if PLATFORM(HAIKU)
-    explicit IntSize(const BSize&);
-    operator BSize() const;
-#endif
-
 #if PLATFORM(WX)
     IntSize(const wxSize&);
     operator wxSize() const;
+#endif
+
+#if PLATFORM(BLACKBERRY)
+    IntSize(const BlackBerry::Platform::IntSize&);
+    operator BlackBerry::Platform::IntSize() const;
 #endif
 
 private:

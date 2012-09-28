@@ -27,21 +27,76 @@
 #include "config.h"
 #include "TextEvent.h"
 
+#include "DocumentFragment.h"
 #include "EventNames.h"
 
 namespace WebCore {
 
+PassRefPtr<TextEvent> TextEvent::create()
+{
+    return adoptRef(new TextEvent);
+}
+
+PassRefPtr<TextEvent> TextEvent::create(PassRefPtr<AbstractView> view, const String& data, TextEventInputType inputType)
+{
+    return adoptRef(new TextEvent(view, data, inputType));
+}
+
+PassRefPtr<TextEvent> TextEvent::createForPlainTextPaste(PassRefPtr<AbstractView> view, const String& data, bool shouldSmartReplace)
+{
+    return adoptRef(new TextEvent(view, data, 0, shouldSmartReplace, false));
+}
+
+PassRefPtr<TextEvent> TextEvent::createForFragmentPaste(PassRefPtr<AbstractView> view, PassRefPtr<DocumentFragment> data, bool shouldSmartReplace, bool shouldMatchStyle)
+{
+    return adoptRef(new TextEvent(view, "", data, shouldSmartReplace, shouldMatchStyle));
+}
+
+PassRefPtr<TextEvent> TextEvent::createForDrop(PassRefPtr<AbstractView> view, const String& data)
+{
+    return adoptRef(new TextEvent(view, data, TextEventInputDrop));
+}
+
+PassRefPtr<TextEvent> TextEvent::createForDictation(PassRefPtr<AbstractView> view, const String& data, const Vector<DictationAlternative>& dictationAlternatives)
+{
+    return adoptRef(new TextEvent(view, data, dictationAlternatives));
+}
+
 TextEvent::TextEvent()
-    : m_isLineBreak(false)
-    , m_isBackTab(false)
+    : m_inputType(TextEventInputKeyboard)
+    , m_shouldSmartReplace(false)
+    , m_shouldMatchStyle(false)
 {
 }
 
-TextEvent::TextEvent(PassRefPtr<AbstractView> view, const String& data)
+TextEvent::TextEvent(PassRefPtr<AbstractView> view, const String& data, TextEventInputType inputType)
     : UIEvent(eventNames().textInputEvent, true, true, view, 0)
+    , m_inputType(inputType)
     , m_data(data)
-    , m_isLineBreak(false)
-    , m_isBackTab(false)
+    , m_pastingFragment(0)
+    , m_shouldSmartReplace(false)
+    , m_shouldMatchStyle(false)
+{
+}
+
+TextEvent::TextEvent(PassRefPtr<AbstractView> view, const String& data, PassRefPtr<DocumentFragment> pastingFragment,
+                     bool shouldSmartReplace, bool shouldMatchStyle)
+    : UIEvent(eventNames().textInputEvent, true, true, view, 0)
+    , m_inputType(TextEventInputPaste)
+    , m_data(data)
+    , m_pastingFragment(pastingFragment)
+    , m_shouldSmartReplace(shouldSmartReplace)
+    , m_shouldMatchStyle(shouldMatchStyle)
+{
+}
+
+TextEvent::TextEvent(PassRefPtr<AbstractView> view, const String& data, const Vector<DictationAlternative>& dictationAlternatives)
+    : UIEvent(eventNames().textInputEvent, true, true, view, 0)
+    , m_inputType(TextEventInputDictation)
+    , m_data(data)
+    , m_shouldSmartReplace(false)
+    , m_shouldMatchStyle(false)
+    , m_dictationAlternatives(dictationAlternatives)
 {
 }
 
@@ -59,9 +114,9 @@ void TextEvent::initTextEvent(const AtomicString& type, bool canBubble, bool can
     m_data = data;
 }
 
-bool TextEvent::isTextEvent() const
+const AtomicString& TextEvent::interfaceName() const
 {
-    return true;
+    return eventNames().interfaceForTextEvent;
 }
 
 } // namespace WebCore

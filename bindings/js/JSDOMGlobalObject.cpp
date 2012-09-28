@@ -40,52 +40,82 @@ using namespace JSC;
 
 namespace WebCore {
 
-const ClassInfo JSDOMGlobalObject::s_info = { "DOMGlobalObject", 0, 0, 0 };
+const ClassInfo JSDOMGlobalObject::s_info = { "DOMGlobalObject", &JSGlobalObject::s_info, 0, 0, CREATE_METHOD_TABLE(JSDOMGlobalObject) };
 
-JSDOMGlobalObject::JSDOMGlobalObject(NonNullPassRefPtr<Structure> structure, JSDOMGlobalObject::JSDOMGlobalObjectData* data, JSObject* thisValue)
-    : JSGlobalObject(structure, data, thisValue)
+JSDOMGlobalObject::JSDOMGlobalObject(JSGlobalData& globalData, Structure* structure, PassRefPtr<DOMWrapperWorld> world, const GlobalObjectMethodTable* globalObjectMethodTable)
+    : JSGlobalObject(globalData, structure, globalObjectMethodTable)
+    , m_currentEvent(0)
+    , m_world(world)
 {
 }
 
-void JSDOMGlobalObject::markChildren(MarkStack& markStack)
+void JSDOMGlobalObject::destroy(JSCell* cell)
 {
-    Base::markChildren(markStack);
-
-    JSDOMStructureMap::iterator end = structures().end();
-    for (JSDOMStructureMap::iterator it = structures().begin(); it != end; ++it)
-        markStack.append(it->second->storedPrototype());
-
-    JSDOMConstructorMap::iterator end2 = constructors().end();
-    for (JSDOMConstructorMap::iterator it2 = constructors().begin(); it2 != end2; ++it2)
-        markStack.append(it2->second);
-
-    if (d()->m_injectedScript)
-        markStack.append(d()->m_injectedScript);
+    jsCast<JSDOMGlobalObject*>(cell)->JSDOMGlobalObject::~JSDOMGlobalObject();
 }
 
-void JSDOMGlobalObject::setCurrentEvent(Event* evt)
+void JSDOMGlobalObject::finishCreation(JSGlobalData& globalData)
 {
-    d()->evt = evt;
+    Base::finishCreation(globalData);
+    ASSERT(inherits(&s_info));
+}
+
+void JSDOMGlobalObject::finishCreation(JSGlobalData& globalData, JSGlobalThis* thisValue)
+{
+    Base::finishCreation(globalData, thisValue);
+    ASSERT(inherits(&s_info));
+}
+
+ScriptExecutionContext* JSDOMGlobalObject::scriptExecutionContext() const
+{
+    if (inherits(&JSDOMWindowBase::s_info))
+        return jsCast<const JSDOMWindowBase*>(this)->scriptExecutionContext();
+#if ENABLE(WORKERS)
+    if (inherits(&JSWorkerContextBase::s_info))
+        return jsCast<const JSWorkerContextBase*>(this)->scriptExecutionContext();
+#endif
+    ASSERT_NOT_REACHED();
+    return 0;
+}
+
+void JSDOMGlobalObject::visitChildren(JSCell* cell, SlotVisitor& visitor)
+{
+    JSDOMGlobalObject* thisObject = jsCast<JSDOMGlobalObject*>(cell);
+    ASSERT_GC_OBJECT_INHERITS(thisObject, &s_info);
+    COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
+    ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
+    Base::visitChildren(thisObject, visitor);
+
+    JSDOMStructureMap::iterator end = thisObject->structures().end();
+    for (JSDOMStructureMap::iterator it = thisObject->structures().begin(); it != end; ++it)
+        visitor.append(&it->second);
+
+    JSDOMConstructorMap::iterator end2 = thisObject->constructors().end();
+    for (JSDOMConstructorMap::iterator it2 = thisObject->constructors().begin(); it2 != end2; ++it2)
+        visitor.append(&it2->second);
+
+    if (thisObject->m_injectedScript)
+        visitor.append(&thisObject->m_injectedScript);
+}
+
+void JSDOMGlobalObject::setCurrentEvent(Event* currentEvent)
+{
+    m_currentEvent = currentEvent;
 }
 
 Event* JSDOMGlobalObject::currentEvent() const
 {
-    return d()->evt;
+    return m_currentEvent;
 }
 
 void JSDOMGlobalObject::setInjectedScript(JSObject* injectedScript)
 {
-    d()->m_injectedScript = injectedScript;
+    m_injectedScript.setMayBeNull(globalData(), this, injectedScript);
 }
 
 JSObject* JSDOMGlobalObject::injectedScript() const
 {
-    return d()->m_injectedScript;
-}
-
-void JSDOMGlobalObject::destroyJSDOMGlobalObjectData(void* jsDOMGlobalObjectData)
-{
-    delete static_cast<JSDOMGlobalObjectData*>(jsDOMGlobalObjectData);
+    return m_injectedScript.get();
 }
 
 JSDOMGlobalObject* toJSDOMGlobalObject(Document* document, JSC::ExecState* exec)

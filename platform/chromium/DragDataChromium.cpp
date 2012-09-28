@@ -30,74 +30,66 @@
 #include "config.h"
 #include "DragData.h"
 
-#include "ChromiumBridge.h"
 #include "ChromiumDataObject.h"
-#include "Clipboard.h"
-#include "ClipboardChromium.h"
+#include "ClipboardMimeTypes.h"
 #include "DocumentFragment.h"
 #include "FileSystem.h"
+#include "Frame.h"
 #include "KURL.h"
-#include "markup.h"
 #include "NotImplemented.h"
 #include "PlatformString.h"
+#include "PlatformSupport.h"
+#include "markup.h"
 
 namespace WebCore {
 
 static bool containsHTML(const ChromiumDataObject* dropData)
 {
-    return dropData->textHtml.length() > 0;
+    return dropData->types().contains(mimeTypeTextHTML);
 }
 
-PassRefPtr<Clipboard> DragData::createClipboard(ClipboardAccessPolicy policy) const
+bool DragData::containsURL(Frame*, FilenameConversionPolicy filenamePolicy) const
 {
-    RefPtr<ClipboardChromium> clipboard = ClipboardChromium::create(true,
-        m_platformDragData, policy);
-
-    return clipboard.release();
+    return m_platformDragData->types().contains(mimeTypeTextURIList)
+        || (filenamePolicy == ConvertFilenames && m_platformDragData->containsFilenames());
 }
 
-bool DragData::containsURL() const
-{
-    return !asURL().isEmpty();
-}
-
-String DragData::asURL(String* title) const
+String DragData::asURL(Frame*, FilenameConversionPolicy filenamePolicy, String* title) const
 {
     String url;
-    if (m_platformDragData->url.isValid())
-        url = m_platformDragData->url.string();
-    else if (m_platformDragData->filenames.size() == 1) {
-        String fileName = m_platformDragData->filenames[0];
-        fileName = ChromiumBridge::getAbsolutePath(fileName);
-        if (fileExists(fileName) && !ChromiumBridge::isDirectory(fileName))
-            url = ChromiumBridge::filePathToURL(fileName).string();
+    if (m_platformDragData->types().contains(mimeTypeTextURIList))
+        m_platformDragData->urlAndTitle(url, title);
+    else if (filenamePolicy == ConvertFilenames && containsFiles()) {
+        url = PlatformSupport::filePathToURL(PlatformSupport::getAbsolutePath(m_platformDragData->filenames()[0]));
     }
- 
-    // |title| can be NULL
-    if (title)
-        *title = m_platformDragData->urlTitle;
     return url;
 }
 
 bool DragData::containsFiles() const
 {
-    return !m_platformDragData->filenames.isEmpty();
+    return m_platformDragData->containsFilenames();
+}
+
+unsigned DragData::numberOfFiles() const
+{
+    return m_platformDragData->filenames().size();
 }
 
 void DragData::asFilenames(Vector<String>& result) const
 {
-    for (size_t i = 0; i < m_platformDragData->filenames.size(); ++i)
-        result.append(m_platformDragData->filenames[i]);
+    const Vector<String>& filenames = m_platformDragData->filenames();
+    for (size_t i = 0; i < filenames.size(); ++i)
+        result.append(filenames[i]);
 }
 
 bool DragData::containsPlainText() const
 {
-    return !m_platformDragData->plainText.isEmpty();
+    return m_platformDragData->types().contains(mimeTypeTextPlain);
 }
 
-String DragData::asPlainText() const
+String DragData::asPlainText(Frame*) const
 {
-    return m_platformDragData->plainText;
+    return m_platformDragData->getData(mimeTypeTextPlain);
 }
 
 bool DragData::containsColor() const
@@ -112,20 +104,20 @@ bool DragData::canSmartReplace() const
     // This is allowed whenever the drag data contains a 'range' (ie.,
     // ClipboardWin::writeRange is called).  For example, dragging a link
     // should not result in a space being added.
-    return !m_platformDragData->plainText.isEmpty()
-        && !m_platformDragData->url.isValid();
+    return m_platformDragData->types().contains(mimeTypeTextPlain)
+        && !m_platformDragData->types().contains(mimeTypeTextURIList);
 }
 
 bool DragData::containsCompatibleContent() const
 {
     return containsPlainText()
-        || containsURL()
+        || containsURL(0)
         || containsHTML(m_platformDragData)
         || containsColor()
         || containsFiles();
 }
 
-PassRefPtr<DocumentFragment> DragData::asFragment(Document* doc) const
+PassRefPtr<DocumentFragment> DragData::asFragment(Frame* frame, PassRefPtr<Range>, bool, bool&) const
 {     
     /*
      * Order is richest format first. On OSX this is:
@@ -145,9 +137,11 @@ PassRefPtr<DocumentFragment> DragData::asFragment(Document* doc) const
         //    return fragment;
     }
 
-    if (!m_platformDragData->textHtml.isEmpty()) {
-        RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(doc,
-            m_platformDragData->textHtml, m_platformDragData->htmlBaseUrl, FragmentScriptingNotAllowed);
+    if (m_platformDragData->types().contains(mimeTypeTextHTML)) {
+        String html;
+        KURL baseURL;
+        m_platformDragData->htmlAndBaseURL(html, baseURL);
+        RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), html, baseURL, FragmentScriptingNotAllowed);
         return fragment.release();
     }
 

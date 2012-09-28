@@ -26,8 +26,6 @@
 #ifndef XPathNodeSet_h
 #define XPathNodeSet_h
 
-#if ENABLE(XPATH)
-
 #include <wtf/Vector.h>
 #include <wtf/Forward.h>
 
@@ -37,7 +35,8 @@ namespace WebCore {
 
     namespace XPath {
 
-        class NodeSet : public FastAllocBase {
+        class NodeSet {
+            WTF_MAKE_FAST_ALLOCATED;
         public:
             NodeSet() : m_isSorted(true), m_subtreesAreDisjoint(false) { }
             
@@ -72,6 +71,8 @@ namespace WebCore {
             void reverse();
         
         private:
+            void traversalSort() const;
+
             bool m_isSorted;
             bool m_subtreesAreDisjoint;
             Vector<RefPtr<Node> > m_nodes;
@@ -80,5 +81,4 @@ namespace WebCore {
     }
 }
 
-#endif // ENABLE(XPATH)
 #endif // XPathNodeSet_h

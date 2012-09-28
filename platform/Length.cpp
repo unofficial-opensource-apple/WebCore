@@ -25,10 +25,12 @@
 #include "config.h"
 #include "Length.h"
 
+#include "CalculationValue.h"
 #include "PlatformString.h"
-#include "StringBuffer.h"
 #include <wtf/ASCIICType.h>
 #include <wtf/Assertions.h>
+#include <wtf/OwnArrayPtr.h>
+#include <wtf/text/StringBuffer.h>
 
 using namespace WTF;
 
@@ -83,11 +85,11 @@ static int countCharacter(const UChar* data, unsigned length, UChar character)
     return count;
 }
 
-Length* newCoordsArray(const String& string, int& len)
+PassOwnArrayPtr<Length> newCoordsArray(const String& string, int& len)
 {
     unsigned length = string.length();
     const UChar* data = string.characters();
-    StringBuffer spacified(length);
+    StringBuffer<UChar> spacified(length);
     for (unsigned i = 0; i < length; i++) {
         UChar cc = data[i];
         if (cc > '9' || (cc < '0' && cc != '-' && cc != '*' && cc != '.'))
@@ -100,13 +102,13 @@ Length* newCoordsArray(const String& string, int& len)
     str = str->simplifyWhiteSpace();
 
     len = countCharacter(str->characters(), str->length(), ' ') + 1;
-    Length* r = new Length[len];
+    OwnArrayPtr<Length> r = adoptArrayPtr(new Length[len]);
 
     int i = 0;
-    int pos = 0;
-    int pos2;
+    unsigned pos = 0;
+    size_t pos2;
 
-    while ((pos2 = str->find(' ', pos)) != -1) {
+    while ((pos2 = str->find(' ', pos)) != notFound) {
         r[i++] = parseLength(str->characters() + pos, pos2 - pos);
         pos = pos2+1;
     }
@@ -114,25 +116,25 @@ Length* newCoordsArray(const String& string, int& len)
 
     ASSERT(i == len - 1);
 
-    return r;
+    return r.release();
 }
 
-Length* newLengthArray(const String& string, int& len)
+PassOwnArrayPtr<Length> newLengthArray(const String& string, int& len)
 {
     RefPtr<StringImpl> str = string.impl()->simplifyWhiteSpace();
     if (!str->length()) {
         len = 1;
-        return 0;
+        return nullptr;
     }
 
     len = countCharacter(str->characters(), str->length(), ',') + 1;
-    Length* r = new Length[len];
+    OwnArrayPtr<Length> r = adoptArrayPtr(new Length[len]);
 
     int i = 0;
-    int pos = 0;
-    int pos2;
+    unsigned pos = 0;
+    size_t pos2;
 
-    while ((pos2 = str->find(',', pos)) != -1) {
+    while ((pos2 = str->find(',', pos)) != notFound) {
         r[i++] = parseLength(str->characters() + pos, pos2 - pos);
         pos = pos2+1;
     }
@@ -145,7 +147,95 @@ Length* newLengthArray(const String& string, int& len)
     else
         len--;
 
-    return r;
+    return r.release();
 }
+        
+class CalculationValueHandleMap {
+public:
+    CalculationValueHandleMap() 
+        : m_index(1) 
+    {
+    }
+    
+    int insert(PassRefPtr<CalculationValue> calcValue)
+    {
+        ASSERT(m_index);
+        // FIXME calc(): https://bugs.webkit.org/show_bug.cgi?id=80489
+        // This monotonically increasing handle generation scheme is potentially wasteful
+        // of the handle space. Consider reusing empty handles.
+        while (m_map.contains(m_index))
+            m_index++;
+        
+        m_map.set(m_index, calcValue);       
+        
+        return m_index;
+    }
+
+    void remove(int index)
+    {
+        ASSERT(m_map.contains(index));
+        m_map.remove(index);
+    }
+    
+    PassRefPtr<CalculationValue> get(int index)
+    {
+        ASSERT(m_map.contains(index));
+        return m_map.get(index);
+    }
+    
+private:        
+    int m_index;
+    HashMap<int, RefPtr<CalculationValue> > m_map;
+};
+    
+static CalculationValueHandleMap& calcHandles()
+{
+    DEFINE_STATIC_LOCAL(CalculationValueHandleMap, handleMap, ());
+    return handleMap;
+}
+
+Length::Length(PassRefPtr<CalculationValue> calc)
+    : m_quirk(false)
+    , m_type(Calculated)
+    , m_isFloat(false)
+{
+    m_intValue = calcHandles().insert(calc);
+}
+    
+PassRefPtr<CalculationValue> Length::calculationValue() const
+{
+    ASSERT(isCalculated());
+    return calcHandles().get(calculationHandle());
+}
+    
+void Length::incrementCalculatedRef() const
+{
+    ASSERT(isCalculated());
+    calculationValue()->ref();
+}
+
+void Length::decrementCalculatedRef() const
+{
+    ASSERT(isCalculated());
+    RefPtr<CalculationValue> calcLength = calculationValue();
+    if (calcLength->hasOneRef())
+        calcHandles().remove(calculationHandle());
+    calcLength->deref();
+}    
+
+float Length::nonNanCalculatedValue(int maxValue) const
+{
+    ASSERT(isCalculated());
+    float result = calculationValue()->evaluate(maxValue);
+    if (isnan(result))
+        return 0;
+    return result;
+}
+
+class SameSizeAsLength {
+    int32_t value;
+    int32_t metaData;
+};
+COMPILE_ASSERT(sizeof(Length) == sizeof(SameSizeAsLength), length_should_stay_small);
 
 } // namespace WebCore

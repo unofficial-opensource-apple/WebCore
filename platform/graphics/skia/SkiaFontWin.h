@@ -28,34 +28,24 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef SkiaWinOutlineCache_h
-#define SkiaWinOutlineCache_h
+#ifndef SkiaFontWin_h
+#define SkiaFontWin_h
 
 #include <windows.h>
 #include <usp10.h>
 
-class GraphicsContext;
-class SkPath;
-class SkPoint;
-class PlatformContextSkia;
+struct SkPoint;
 
 namespace WebCore {
 
-// FIXME: Rename file to SkiaWinOutlineCache
-class SkiaWinOutlineCache {
-public:
-    static const SkPath* lookupOrCreatePathForGlyph(HDC, HFONT, WORD);
-    // Removes any cached glyphs from the outline cache corresponding to the
-    // given font handle.
-    static void removePathsForFont(HFONT);
+class FontPlatformData;
+class GraphicsContext;
+class PlatformContextSkia;
 
-private:
-    SkiaWinOutlineCache();
-};
-
+#if !USE(SKIA_TEXT)
 // The functions below are used for more complex font drawing (effects such as
-// stroking and more complex transforms) than Windows supports directly.  Since 
-// Windows drawing is faster you should use windowsCanHandleTextDrawing first to 
+// stroking and more complex transforms) than Windows supports directly. Since
+// Windows drawing is faster you should use windowsCanHandleTextDrawing first to
 // check if using Skia is required at all.
 // Note that the text will look different (no ClearType) so this should only be
 // used when necessary.
@@ -75,13 +65,27 @@ bool windowsCanHandleDrawTextShadow(GraphicsContext*);
 // Returns true if advanced font rendering is recommended.
 bool windowsCanHandleTextDrawing(GraphicsContext*);
 
-// Note that the offsets parameter is optional.  If not NULL it represents a
+// Returns true if advanced font rendering is recommended if shadows are
+// disregarded.
+bool windowsCanHandleTextDrawingWithoutShadow(GraphicsContext*);
+#endif
+
+// Note that the offsets parameter is optional. If not null it represents a
 // per glyph offset (such as returned by ScriptPlace Windows API function).
-//
-// Returns true of the text was drawn successfully. False indicates an error
-// from Windows.
-bool paintSkiaText(GraphicsContext* graphicsContext,
-                   HFONT hfont,
+void paintSkiaText(GraphicsContext*,
+                   const FontPlatformData&,
+                   int numGlyphs,
+                   const WORD* glyphs,
+                   const int* advances,
+                   const GOFFSET* offsets,
+                   const SkPoint* origin);
+
+// Note that the offsets parameter is optional. If not null it represents a
+// per glyph offset (such as returned by ScriptPlace Windows API function).
+// Note: this is less efficient than calling the version with FontPlatformData,
+// as that caches the SkTypeface object.
+void paintSkiaText(GraphicsContext*,
+                   HFONT,
                    int numGlyphs,
                    const WORD* glyphs,
                    const int* advances,
@@ -90,4 +94,4 @@ bool paintSkiaText(GraphicsContext* graphicsContext,
 
 }  // namespace WebCore
 
-#endif  // SkiaWinOutlineCache_h
+#endif  // SkiaFontWin_h

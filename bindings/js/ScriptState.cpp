@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2009, 2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -35,8 +35,61 @@
 #include "JSDOMWindowBase.h"
 #include "Node.h"
 #include "Page.h"
+#include "WorkerContext.h"
+#include "WorkerScriptController.h"
+#include <heap/StrongInlines.h>
+#include <interpreter/CallFrame.h>
+#include <runtime/JSGlobalObject.h>
+
+#if ENABLE(WORKERS)
+#include "JSWorkerContext.h"
+#endif
 
 namespace WebCore {
+
+ScriptStateProtectedPtr::~ScriptStateProtectedPtr()
+{
+}
+
+ScriptStateProtectedPtr::ScriptStateProtectedPtr(ScriptState* scriptState)
+    : m_globalObject(scriptState->globalData(), scriptState->lexicalGlobalObject())
+{
+}
+
+ScriptState* ScriptStateProtectedPtr::get() const
+{
+    if (m_globalObject)
+        return const_cast<JSC::JSGlobalObject*>(m_globalObject.get())->globalExec();
+    return 0;
+}
+
+DOMWindow* domWindowFromScriptState(ScriptState* scriptState)
+{
+    JSC::JSGlobalObject* globalObject = scriptState->lexicalGlobalObject();
+    if (!globalObject->inherits(&JSDOMWindowBase::s_info))
+        return 0;
+    return JSC::jsCast<JSDOMWindowBase*>(globalObject)->impl();
+}
+
+ScriptExecutionContext* scriptExecutionContextFromScriptState(ScriptState* scriptState)
+{
+    JSC::JSGlobalObject* globalObject = scriptState->lexicalGlobalObject();
+    if (!globalObject->inherits(&JSDOMGlobalObject::s_info))
+        return 0;
+    return JSC::jsCast<JSDOMGlobalObject*>(globalObject)->scriptExecutionContext();
+}
+
+bool evalEnabled(ScriptState* scriptState)
+{
+    JSC::JSGlobalObject* globalObject = scriptState->lexicalGlobalObject();
+    return globalObject->evalEnabled();
+}
+
+void setEvalEnabled(ScriptState* scriptState, bool enabled)
+{
+    JSC::JSGlobalObject* globalObject = scriptState->lexicalGlobalObject();
+    return globalObject->setEvalEnabled(enabled);
+}
 
 ScriptState* mainWorldScriptState(Frame* frame)
 {
@@ -54,7 +107,7 @@ ScriptState* scriptStateFromNode(DOMWrapperWorld* world, Node* node)
     Frame* frame = document->frame();
     if (!frame)
         return 0;
-    if (!frame->script()->canExecuteScripts())
+    if (!frame->script()->canExecuteScripts(NotAboutToExecuteScript))
         return 0;
     return frame->script()->globalObject(world)->globalExec();
 }
@@ -63,5 +116,12 @@ ScriptState* scriptStateFromPage(DOMWrapperWorld* world, Page* page)
 {
     return page->mainFrame()->script()->globalObject(world)->globalExec();
 }
+
+#if ENABLE(WORKERS)
+ScriptState* scriptStateFromWorkerContext(WorkerContext* workerContext)
+{
+    return workerContext->script()->workerContextWrapper()->globalExec();
+}
+#endif
 
 }

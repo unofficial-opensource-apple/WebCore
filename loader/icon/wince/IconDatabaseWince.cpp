@@ -22,17 +22,24 @@
 #include "IconDatabase.h"
 
 #include "AutodrainedPool.h"
-#include "CString.h"
 #include "DocumentLoader.h"
 #include "FileSystem.h"
 #include "IconDatabaseClient.h"
 #include "IconRecord.h"
 #include "Image.h"
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
+static IconDatabase* sharedIconDatabase = 0;
+
 // Function to obtain the global icon database.
-IconDatabase* iconDatabase() { return 0; }
+IconDatabase& iconDatabase()
+{
+    if (!sharedIconDatabase)
+        sharedIconDatabase = new IconDatabase;
+    return *sharedIconDatabase;
+}
 
 IconDatabase::IconDatabase() {}
 IconDatabase::~IconDatabase() {}

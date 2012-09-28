@@ -26,27 +26,28 @@
 #ifndef ResourceHandleClient_h
 #define ResourceHandleClient_h
 
+#include <wtf/CurrentTime.h>
 #include <wtf/RefCounted.h>
-#include <wtf/Platform.h>
 #include <wtf/RefPtr.h>
 
 #if USE(CFNETWORK)
-#include <ConditionalMacros.h>
 #include <CFNetwork/CFURLCachePriv.h>
 #include <CFNetwork/CFURLResponsePriv.h>
 #endif
 
-#if PLATFORM(MAC)
-#ifdef __OBJC__
-@class NSCachedURLResponse;
-#else
-class NSCachedURLResponse;
+#if PLATFORM(WIN) && USE(CFNETWORK)
+#include <ConditionalMacros.h>
 #endif
+
+#if PLATFORM(MAC)
+OBJC_CLASS NSCachedURLResponse;
 #endif
 
 namespace WebCore {
+    class AsyncFileStream;
     class AuthenticationChallenge;
     class Credential;
+    class FileStreamClient;
     class KURL;
     class ProtectionSpace;
     class ResourceHandle;
@@ -57,7 +58,7 @@ namespace WebCore {
     enum CacheStoragePolicy {
         StorageAllowed,
         StorageAllowedInMemoryOnly,
-        StorageNotAllowed,
+        StorageNotAllowed
     };
     
     class ResourceHandleClient {
@@ -69,28 +70,46 @@ namespace WebCore {
         virtual void didSendData(ResourceHandle*, unsigned long long /*bytesSent*/, unsigned long long /*totalBytesToBeSent*/) { }
 
         virtual void didReceiveResponse(ResourceHandle*, const ResourceResponse&) { }
-        virtual void didReceiveData(ResourceHandle*, const char*, int, int /*lengthReceived*/) { }
-        virtual void didFinishLoading(ResourceHandle*) { }
+        virtual void didReceiveData(ResourceHandle*, const char*, int, int /*encodedDataLength*/) { }
+        virtual void didReceiveCachedMetadata(ResourceHandle*, const char*, int) { }
+        virtual void didFinishLoading(ResourceHandle*, double /*finishTime*/) { }
         virtual void didFail(ResourceHandle*, const ResourceError&) { }
         virtual void wasBlocked(ResourceHandle*) { }
         virtual void cannotShowURL(ResourceHandle*) { }
+
+#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
+        virtual bool supportsDataArray() { return false; }
+        virtual void didReceiveDataArray(ResourceHandle*, CFArrayRef) { }
+#endif
 
         virtual void willCacheResponse(ResourceHandle*, CacheStoragePolicy&) { }
 
         virtual bool shouldUseCredentialStorage(ResourceHandle*) { return false; }
         virtual void didReceiveAuthenticationChallenge(ResourceHandle*, const AuthenticationChallenge&) { }
         virtual void didCancelAuthenticationChallenge(ResourceHandle*, const AuthenticationChallenge&) { }
+#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
+        virtual bool canAuthenticateAgainstProtectionSpace(ResourceHandle*, const ProtectionSpace&) { return false; }
+#endif
         virtual void receivedCancellation(ResourceHandle*, const AuthenticationChallenge&) { }
 
-        virtual bool canAuthenticateAgainstProtectionSpace(ResourceHandle*, const ProtectionSpace&) { return false; }
         virtual CFDictionaryRef connectionProperties(ResourceHandle*) { return 0; }
 
-#if PLATFORM(MAC)        
-        virtual NSCachedURLResponse* willCacheResponse(ResourceHandle*, NSCachedURLResponse* response) { return response; }
-        virtual void willStopBufferingData(ResourceHandle*, const char*, int) { } 
-#endif
+#if PLATFORM(MAC)
 #if USE(CFNETWORK)
-        virtual bool shouldCacheResponse(ResourceHandle*, CFCachedURLResponseRef response) { return true; }
+        virtual CFCachedURLResponseRef willCacheResponse(ResourceHandle*, CFCachedURLResponseRef response) { return response; }
+#else
+        virtual NSCachedURLResponse* willCacheResponse(ResourceHandle*, NSCachedURLResponse* response) { return response; }
+#endif
+        virtual void willStopBufferingData(ResourceHandle*, const char*, int) { }
+#endif // PLATFORM(MAC)
+#if PLATFORM(WIN) && USE(CFNETWORK)
+        virtual bool shouldCacheResponse(ResourceHandle*, CFCachedURLResponseRef) { return true; }
+#endif
+#if PLATFORM(CHROMIUM)
+        virtual void didDownloadData(ResourceHandle*, int /*dataLength*/) { }
+#endif
+#if ENABLE(BLOB)
+        virtual AsyncFileStream* createAsyncFileStream(FileStreamClient*) { return 0; }
 #endif
     };
 

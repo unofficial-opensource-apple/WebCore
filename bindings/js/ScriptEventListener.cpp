@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2011 Research In Motion Limited. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -36,7 +37,8 @@
 #include "EventListener.h"
 #include "JSNode.h"
 #include "Frame.h"
-#include "XSSAuditor.h"
+#include <runtime/Executable.h>
+#include <runtime/JSFunction.h>
 #include <runtime/JSLock.h>
 
 using namespace JSC;
@@ -57,25 +59,20 @@ PassRefPtr<JSLazyEventListener> createAttributeEventListener(Node* node, Attribu
     if (attr->isNull())
         return 0;
 
-    int lineNumber = 1;
+    TextPosition position = TextPosition::minimumPosition();
     String sourceURL;
     
     // FIXME: We should be able to provide accurate source information for frameless documents, too (e.g. for importing nodes from XMLHttpRequest.responseXML).
     if (Frame* frame = node->document()->frame()) {
         ScriptController* scriptController = frame->script();
-        if (!scriptController->canExecuteScripts())
+        if (!scriptController->canExecuteScripts(AboutToExecuteScript))
             return 0;
 
-        if (!scriptController->xssAuditor()->canCreateInlineEventListener(attr->localName().string(), attr->value())) {
-            // This script is not safe to execute.
-            return 0;
-        }
-
-        lineNumber = scriptController->eventHandlerLineNumber();
+        position = scriptController->eventHandlerPosition();
         sourceURL = node->document()->url().string();
     }
 
-    return JSLazyEventListener::create(attr->localName().string(), eventParameterName(node->isSVGElement()), attr->value(), node, sourceURL, lineNumber, 0, mainThreadNormalWorld());
+    return JSLazyEventListener::create(attr->localName().string(), eventParameterName(node->isSVGElement()), attr->value(), node, sourceURL, position, 0, mainThreadNormalWorld());
 }
 
 PassRefPtr<JSLazyEventListener> createAttributeEventListener(Frame* frame, Attribute* attr)
@@ -87,33 +84,49 @@ PassRefPtr<JSLazyEventListener> createAttributeEventListener(Frame* frame, Attri
     if (attr->isNull())
         return 0;
 
-    int lineNumber = 1;
-    String sourceURL;
-    
     ScriptController* scriptController = frame->script();
-    if (!scriptController->canExecuteScripts())
+    if (!scriptController->canExecuteScripts(AboutToExecuteScript))
         return 0;
 
-    if (!scriptController->xssAuditor()->canCreateInlineEventListener(attr->localName().string(), attr->value())) {
-        // This script is not safe to execute.
-        return 0;
-    }
-
-    lineNumber = scriptController->eventHandlerLineNumber();
-    sourceURL = frame->document()->url().string();
+    TextPosition position = scriptController->eventHandlerPosition();
+    String sourceURL = frame->document()->url().string();
     JSObject* wrapper = toJSDOMWindow(frame, mainThreadNormalWorld());
-    return JSLazyEventListener::create(attr->localName().string(), eventParameterName(frame->document()->isSVGDocument()), attr->value(), 0, sourceURL, lineNumber, wrapper, mainThreadNormalWorld());
+    return JSLazyEventListener::create(attr->localName().string(), eventParameterName(frame->document()->isSVGDocument()), attr->value(), 0, sourceURL, position, wrapper, mainThreadNormalWorld());
 }
 
-String getEventListenerHandlerBody(ScriptExecutionContext* context, ScriptState* scriptState, EventListener* eventListener)
+String eventListenerHandlerBody(Document* document, EventListener* eventListener)
 {
     const JSEventListener* jsListener = JSEventListener::cast(eventListener);
+    ASSERT(jsListener);
     if (!jsListener)
         return "";
-    JSC::JSObject* jsFunction = jsListener->jsFunction(context);
+    JSLockHolder lock(jsListener->isolatedWorld()->globalData());
+    JSC::JSObject* jsFunction = jsListener->jsFunction(document);
     if (!jsFunction)
         return "";
-    return jsFunction->toString(scriptState);
+    ScriptState* scriptState = scriptStateFromNode(jsListener->isolatedWorld(), document);
+    return ustringToString(jsFunction->toString(scriptState)->value(scriptState));
+}
+
+bool eventListenerHandlerLocation(Document* document, EventListener* eventListener, String& sourceName, int& lineNumber)
+{
+    const JSEventListener* jsListener = JSEventListener::cast(eventListener);
+    ASSERT(jsListener);
+    if (!jsListener)
+        return false;
+    JSLockHolder lock(jsListener->isolatedWorld()->globalData());
+    JSC::JSObject* jsObject = jsListener->jsFunction(document);
+    if (!jsObject)
+        return false;
+    JSC::JSFunction* jsFunction = jsDynamicCast<JSFunction*>(jsObject);
+    if (!jsFunction || jsFunction->isHostFunction())
+        return false;
+    JSC::FunctionExecutable* funcExecutable = jsFunction->jsExecutable();
+    if (!funcExecutable)
+        return false;
+    lineNumber = funcExecutable->lineNo();
+    sourceName = ustringToString(funcExecutable->sourceURL());
+    return true;
 }
 
 } // namespace WebCore

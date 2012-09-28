@@ -28,18 +28,20 @@
 #ifndef Pattern_h
 #define Pattern_h
 
+#include "AffineTransform.h"
+#include "Image.h"
+
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
-#include "TransformationMatrix.h"
 
-#if PLATFORM(CG)
+#if USE(CG)
 typedef struct CGPattern* CGPatternRef;
 typedef CGPatternRef PlatformPatternPtr;
-#elif PLATFORM(CAIRO)
+#elif USE(CAIRO)
 #include <cairo.h>
 typedef cairo_pattern_t* PlatformPatternPtr;
-#elif PLATFORM(SKIA)
+#elif USE(SKIA)
 class SkShader;
 typedef SkShader* PlatformPatternPtr;
 #elif PLATFORM(QT)
@@ -53,39 +55,50 @@ typedef wxGraphicsBrush* PlatformPatternPtr;
 class wxBrush;
 typedef wxBrush* PlatformPatternPtr;
 #endif // USE(WXGC)
-#elif PLATFORM(HAIKU)
-#include <interface/GraphicsDefs.h>
-typedef pattern* PlatformPatternPtr;
 #elif OS(WINCE)
 typedef void* PlatformPatternPtr;
 #endif
 
 namespace WebCore {
-    class TransformationMatrix;
-    class Image;
 
-    class Pattern : public RefCounted<Pattern> {
-    public:
-        static PassRefPtr<Pattern> create(Image* tileImage, bool repeatX, bool repeatY)
-        {
-            return adoptRef(new Pattern(tileImage, repeatX, repeatY));
-        }
-        virtual ~Pattern();
+class AffineTransform;
 
-        Image* tileImage() const { return m_tileImage.get(); }
+class Pattern : public RefCounted<Pattern> {
+public:
+    static PassRefPtr<Pattern> create(PassRefPtr<Image> tileImage, bool repeatX, bool repeatY)
+    {
+        return adoptRef(new Pattern(tileImage, repeatX, repeatY));
+    }
+    virtual ~Pattern();
 
-        // Pattern space is an abstract space that maps to the default user space by the transformation 'userSpaceTransformation' 
-        PlatformPatternPtr createPlatformPattern(const TransformationMatrix& userSpaceTransformation) const;
-        void setPatternSpaceTransform(const TransformationMatrix& patternSpaceTransformation) { m_patternSpaceTransformation = patternSpaceTransformation; }
+    Image* tileImage() const { return m_tileImage.get(); }
 
-    private:
-        Pattern(Image*, bool repeatX, bool repeatY);
+    void platformDestroy();
 
-        RefPtr<Image> m_tileImage;
-        bool m_repeatX;
-        bool m_repeatY;
-        TransformationMatrix m_patternSpaceTransformation;
-    };
+    // Pattern space is an abstract space that maps to the default user space by the transformation 'userSpaceTransformation' 
+#if USE(SKIA)
+    PlatformPatternPtr platformPattern(const AffineTransform& userSpaceTransformation);
+#else
+    PlatformPatternPtr createPlatformPattern(const AffineTransform& userSpaceTransformation) const;
+#endif
+    void setPatternSpaceTransform(const AffineTransform& patternSpaceTransformation);
+    void setPlatformPatternSpaceTransform();
+
+    bool repeatX() const { return m_repeatX; }
+    bool repeatY() const { return m_repeatY; }
+
+private:
+    Pattern(PassRefPtr<Image>, bool repeatX, bool repeatY);
+
+    RefPtr<Image> m_tileImage;
+    bool m_repeatX;
+    bool m_repeatY;
+    AffineTransform m_patternSpaceTransformation;
+    PlatformPatternPtr m_pattern;
+#if USE(SKIA)
+    int m_externalMemoryAllocated;
+#endif
+};
 
 } //namespace
 

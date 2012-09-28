@@ -31,10 +31,10 @@
 
 QT_BEGIN_NAMESPACE
 class QNetworkRequest;
-class QObject;
 QT_END_NAMESPACE
 
 namespace WebCore {
+class NetworkingContext;
 
     class ResourceRequest : public ResourceRequestBase {
     public:
@@ -59,13 +59,19 @@ namespace WebCore {
         {
         }
 
-        QNetworkRequest toNetworkRequest(QObject* originatingObject) const;
+        QNetworkRequest toNetworkRequest(NetworkingContext* = 0) const;
 
     private:
         friend class ResourceRequestBase;
 
         void doUpdatePlatformRequest() {}
         void doUpdateResourceRequest() {}
+
+        PassOwnPtr<CrossThreadResourceRequestData> doPlatformCopyData(PassOwnPtr<CrossThreadResourceRequestData> data) const { return data; }
+        void doPlatformAdopt(PassOwnPtr<CrossThreadResourceRequestData>) { }
+    };
+
+    struct CrossThreadResourceRequestData : public CrossThreadResourceRequestDataBase {
     };
 
 } // namespace WebCore

@@ -30,14 +30,17 @@
 #define AccessibilityTable_h
 
 #include "AccessibilityRenderObject.h"
+#include <wtf/Forward.h>
 
+#if PLATFORM(MAC) && defined(BUILDING_ON_LEOPARD)
 #define ACCESSIBILITY_TABLES 0
+#else
+#define ACCESSIBILITY_TABLES 1
+#endif
 
 namespace WebCore {
 
-class String;
 class AccessibilityTableCell;
-class AccessibilityTableHeaderContainer;
     
 class AccessibilityTable : public AccessibilityRenderObject {
 
@@ -46,9 +49,11 @@ protected:
 public:
     static PassRefPtr<AccessibilityTable> create(RenderObject*);
     virtual ~AccessibilityTable();
-    
-    virtual bool isTable() const { return true; }
+
+    virtual bool isTable() const OVERRIDE { return true; }
+    virtual bool isAccessibilityTable() const;
     virtual bool isDataTable() const;
+
     virtual AccessibilityRole roleValue() const;
     virtual bool isAriaTable() const { return false; }
     
@@ -63,6 +68,7 @@ public:
     virtual bool supportsSelectedRows() { return false; }
     unsigned columnCount();
     unsigned rowCount();
+    virtual int tableLevel() const;
     
     virtual String title() const;
     
@@ -75,17 +81,23 @@ public:
 
     // an object that contains, as children, all the objects that act as headers
     AccessibilityObject* headerContainer();
-    
-protected:    
+
+protected:
     AccessibilityChildrenVector m_rows;
     AccessibilityChildrenVector m_columns;
-    
-    AccessibilityTableHeaderContainer* m_headerContainer;
+
+    RefPtr<AccessibilityObject> m_headerContainer;
     mutable bool m_isAccessibilityTable;
-    
-public:
-    bool isTableExposableThroughAccessibility();
+
+    bool hasARIARole() const;
+    bool isTableExposableThroughAccessibility() const;
 };
+    
+inline AccessibilityTable* toAccessibilityTable(AccessibilityObject* object)
+{
+    ASSERT(!object || object->isAccessibilityTable());
+    return static_cast<AccessibilityTable*>(object);
+}
     
 } // namespace WebCore 
 

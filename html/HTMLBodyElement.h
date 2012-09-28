@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2004, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,13 +25,15 @@
 #define HTMLBodyElement_h
 
 #include "HTMLElement.h"
-#include "Document.h"
 
 namespace WebCore {
 
+class Document;
+
 class HTMLBodyElement : public HTMLElement {
 public:
-    HTMLBodyElement(const QualifiedName&, Document*);
+    static PassRefPtr<HTMLBodyElement> create(Document*);
+    static PassRefPtr<HTMLBodyElement> create(const QualifiedName&, Document*);
     virtual ~HTMLBodyElement();
 
     String aLink() const;
@@ -66,32 +68,29 @@ public:
 #endif
 
 private:
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
-    virtual int tagPriority() const { return 10; }
-    
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(MappedAttribute*);
+    HTMLBodyElement(const QualifiedName&, Document*);
 
-    virtual void insertedIntoDocument();
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
 
-    void createLinkDecl();
+    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void didNotifyDescendantInseretions(Node*) OVERRIDE;
     
     virtual bool isURLAttribute(Attribute*) const;
+    
+    virtual bool supportsFocus() const;
 
-    virtual int scrollLeft() const;
+    virtual int scrollLeft();
     virtual void setScrollLeft(int scrollLeft);
     
-    virtual int scrollTop() const;
+    virtual int scrollTop();
     virtual void setScrollTop(int scrollTop);
     
-    virtual int scrollHeight() const;
-    virtual int scrollWidth() const;
+    virtual int scrollHeight();
+    virtual int scrollWidth();
     
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
-    
-    virtual void didMoveToNewOwnerDocument();
-
-    RefPtr<CSSMutableStyleDeclaration> m_linkDecl;
 };
 
 } //namespace

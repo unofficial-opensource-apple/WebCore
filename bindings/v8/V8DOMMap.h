@@ -36,25 +36,28 @@
 #include <v8.h>
 
 namespace WebCore {
+    class DOMDataStore;
     class Node;
-#if ENABLE(SVG)
-    class SVGElementInstance;
-#endif
 
     template <class KeyType, class ValueType> class AbstractWeakReferenceMap {
     public:
         AbstractWeakReferenceMap(v8::WeakReferenceCallback callback) : m_weakReferenceCallback(callback) { }
+        virtual ~AbstractWeakReferenceMap() { }
 
         class Visitor {
         public:
-            virtual void visitDOMWrapper(KeyType* key, v8::Persistent<ValueType> object) = 0;
+            virtual void startMap() { }
+            virtual void endMap() { }
+            virtual void visitDOMWrapper(DOMDataStore* store, KeyType* key, v8::Persistent<ValueType> object) = 0;
+        protected:
+            virtual ~Visitor() { }
         };
 
         virtual v8::Persistent<ValueType> get(KeyType* obj) = 0;
         virtual void set(KeyType* obj, v8::Persistent<ValueType> wrapper) = 0;
         virtual bool contains(KeyType* obj) = 0;
-        virtual void visit(Visitor* visitor) = 0;
-        virtual bool removeIfPresent(KeyType* key, v8::Persistent<v8::Data> value) = 0;
+        virtual void visit(DOMDataStore* store, Visitor* visitor) = 0;
+        virtual bool removeIfPresent(KeyType*, v8::Persistent<ValueType>) = 0;
         virtual void clear() = 0;
 
         v8::WeakReferenceCallback weakReferenceCallback() { return m_weakReferenceCallback; }
@@ -71,13 +74,7 @@ namespace WebCore {
     public:
         typedef AbstractWeakReferenceMap<KeyType, ValueType> Parent;
         WeakReferenceMap(v8::WeakReferenceCallback callback) : Parent(callback) { }
-        virtual ~WeakReferenceMap()
-        {
-    #ifndef NDEBUG
-            if (m_map.size() > 0)
-                fprintf(stderr, "Leak %d JS wrappers.\n", m_map.size());
-    #endif
-        }
+        virtual ~WeakReferenceMap() { }
 
         // Get the JS wrapper object of an object.
         virtual v8::Persistent<ValueType> get(KeyType* obj)
@@ -105,7 +102,7 @@ namespace WebCore {
             handle.Clear();
         }
 
-        bool removeIfPresent(KeyType* key, v8::Persistent<v8::Data> value)
+        bool removeIfPresent(KeyType* key, v8::Persistent<ValueType> value)
         {
             typename HashMap<KeyType*, ValueType*>::iterator it = m_map.find(key);
             if (it == m_map.end() || it->second != *value)
@@ -123,25 +120,23 @@ namespace WebCore {
 
         bool contains(KeyType* obj) { return m_map.contains(obj); }
 
-        virtual void visit(typename Parent::Visitor* visitor)
+        virtual void visit(DOMDataStore* store, typename Parent::Visitor* visitor)
         {
+            visitor->startMap();
             typename HashMap<KeyType*, ValueType*>::iterator it = m_map.begin();
             for (; it != m_map.end(); ++it)
-                visitor->visitDOMWrapper(it->first, v8::Persistent<ValueType>(it->second));
+                visitor->visitDOMWrapper(store, it->first, v8::Persistent<ValueType>(it->second));
+            visitor->endMap();
         }
 
     protected:
         HashMap<KeyType*, ValueType*> m_map;
-        v8::WeakReferenceCallback m_weakReferenceCallback;
     };
 
     template <class KeyType> class DOMWrapperMap : public WeakReferenceMap<KeyType, v8::Object> {
     public:
         DOMWrapperMap(v8::WeakReferenceCallback callback) : WeakReferenceMap<KeyType, v8::Object>(callback) { }
     };
-
-    // An opaque class that represents a set of DOM wrappers.
-    class DOMDataStore;
 
     // A utility class to manage the lifetime of set of DOM wrappers.
     class DOMDataStoreHandle {
@@ -156,29 +151,21 @@ namespace WebCore {
     };
 
     // A map from DOM node to its JS wrapper.
-    DOMNodeMapping& getDOMNodeMap();
-    void visitDOMNodesInCurrentThread(DOMWrapperMap<Node>::Visitor*);
+    DOMNodeMapping& getDOMNodeMap(v8::Isolate* = 0);
+    DOMNodeMapping& getActiveDOMNodeMap(v8::Isolate* = 0);
+    void visitDOMNodes(DOMWrapperMap<Node>::Visitor*);
+    void visitActiveDOMNodes(DOMWrapperMap<Node>::Visitor*);
 
     // A map from a DOM object (non-node) to its JS wrapper. This map does not contain the DOM objects which can have pending activity (active dom objects).
-    DOMWrapperMap<void>& getDOMObjectMap();
-    void visitDOMObjectsInCurrentThread(DOMWrapperMap<void>::Visitor*);
+    DOMWrapperMap<void>& getDOMObjectMap(v8::Isolate* = 0);
+    void visitDOMObjects(DOMWrapperMap<void>::Visitor*);
 
     // A map from a DOM object to its JS wrapper for DOM objects which can have pending activity.
-    DOMWrapperMap<void>& getActiveDOMObjectMap();
-    void visitActiveDOMObjectsInCurrentThread(DOMWrapperMap<void>::Visitor*);
+    DOMWrapperMap<void>& getActiveDOMObjectMap(v8::Isolate* = 0);
+    void visitActiveDOMObjects(DOMWrapperMap<void>::Visitor*);
 
     // This should be called to remove all DOM objects associated with the current thread when it is tearing down.
-    void removeAllDOMObjectsInCurrentThread();
-
-#if ENABLE(SVG)
-    // A map for SVGElementInstances to its JS wrapper.
-    DOMWrapperMap<SVGElementInstance>& getDOMSVGElementInstanceMap();
-    void visitSVGElementInstancesInCurrentThread(DOMWrapperMap<SVGElementInstance>::Visitor*);
-
-    // Map of SVG objects with contexts to V8 objects.
-    DOMWrapperMap<void>& getDOMSVGObjectWithContextMap();
-    void visitDOMSVGObjectsInCurrentThread(DOMWrapperMap<void>::Visitor*);
-#endif
+    void removeAllDOMObjects();
 
     void enableFasterDOMStoreAccess();
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2010 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -20,46 +20,33 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "config.h"
 #include "CSSFunctionValue.h"
+
+#include "CSSParserValues.h"
 #include "CSSValueList.h"
+#include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
 CSSFunctionValue::CSSFunctionValue(CSSParserFunction* function)
+    : CSSValue(FunctionClass)
+    , m_name(function->name)
 {
-    m_name = function->name;
     if (function->args)
-        m_args = CSSValueList::createFromParserValueList(function->args);
+        m_args = CSSValueList::createFromParserValueList(function->args.get());
 }
 
-CSSFunctionValue::~CSSFunctionValue()
-{
-}
-
-String CSSFunctionValue::cssText() const
+String CSSFunctionValue::customCssText() const
 {
     String result = m_name; // Includes the '('
     if (m_args)
         result += m_args->cssText();
     result += ")";
     return result;
-}
-
-CSSParserValue CSSFunctionValue::parserValue() const
-{
-    CSSParserValue val;
-    val.id = 0;
-    val.isInt = false;
-    val.unit = CSSParserValue::Function;
-    val.function = new CSSParserFunction;
-    val.function->name.characters = const_cast<UChar*>(m_name.characters());
-    val.function->name.length = m_name.length();
-    val.function->args = m_args ? m_args->createParserValueList() : 0;
-    return val;
 }
 
 }

@@ -83,9 +83,18 @@ bool AccessibilityListBoxOption::isSelected() const
     return static_cast<HTMLOptionElement*>(m_optionElement)->selected();
 }
 
-IntRect AccessibilityListBoxOption::elementRect() const
+bool AccessibilityListBoxOption::isSelectedOptionActive() const
 {
-    IntRect rect;
+    HTMLSelectElement* listBoxParentNode = listBoxOptionParentNode();
+    if (!listBoxParentNode)
+        return false;
+
+    return listBoxParentNode->activeSelectionEndListIndex() == listBoxOptionIndex();
+}
+
+LayoutRect AccessibilityListBoxOption::elementRect() const
+{
+    LayoutRect rect;
     if (!m_optionElement)
         return rect;
     
@@ -97,14 +106,25 @@ IntRect AccessibilityListBoxOption::elementRect() const
     if (!listBoxRenderer)
         return rect;
     
-    IntRect parentRect = listBoxRenderer->document()->axObjectCache()->getOrCreate(listBoxRenderer)->boundingBoxRect();
+    LayoutRect parentRect = listBoxRenderer->document()->axObjectCache()->getOrCreate(listBoxRenderer)->boundingBoxRect();
     int index = listBoxOptionIndex();
     if (index != -1)
-        rect = toRenderListBox(listBoxRenderer)->itemBoundingBoxRect(parentRect.x(), parentRect.y(), index);
+        rect = toRenderListBox(listBoxRenderer)->itemBoundingBoxRect(parentRect.location(), index);
     
     return rect;
 }
 
+bool AccessibilityListBoxOption::accessibilityIsIgnored() const
+{
+    if (!m_optionElement)
+        return true;
+    
+    if (equalIgnoringCase(getAttribute(aria_hiddenAttr), "true"))
+        return true;
+    
+    return parentObject()->accessibilityIsIgnored();
+}
+    
 bool AccessibilityListBoxOption::canSetSelectedAttribute() const
 {
     if (!m_optionElement)
@@ -128,6 +148,10 @@ String AccessibilityListBoxOption::stringValue() const
     if (!m_optionElement)
         return String();
     
+    const AtomicString& ariaLabel = getAttribute(aria_labelAttr);
+    if (!ariaLabel.isNull())
+        return ariaLabel;
+    
     if (m_optionElement->hasTagName(optionTag))
         return static_cast<HTMLOptionElement*>(m_optionElement)->text();
     
@@ -135,11 +159,6 @@ String AccessibilityListBoxOption::stringValue() const
         return static_cast<HTMLOptGroupElement*>(m_optionElement)->groupLabelText();
     
     return String();
-}
-
-IntSize AccessibilityListBoxOption::size() const
-{
-    return elementRect().size();
 }
 
 Element* AccessibilityListBoxOption::actionElement() const
@@ -169,7 +188,9 @@ void AccessibilityListBoxOption::setSelected(bool selected)
     if ((isOptionSelected && selected) || (!isOptionSelected && !selected))
         return;
     
-    selectElement->accessKeySetSelectedIndex(listBoxOptionIndex());
+    // Convert from the entire list index to the option index.
+    int optionIndex = selectElement->listToOptionIndex(listBoxOptionIndex());
+    selectElement->accessKeySetSelectedIndex(optionIndex);
 }
 
 HTMLSelectElement* AccessibilityListBoxOption::listBoxOptionParentNode() const
@@ -195,7 +216,7 @@ int AccessibilityListBoxOption::listBoxOptionIndex() const
     if (!selectElement) 
         return -1;
     
-    const Vector<Element*>& listItems = selectElement->listItems();
+    const Vector<HTMLElement*>& listItems = selectElement->listItems();
     unsigned length = listItems.size();
     for (unsigned i = 0; i < length; i++)
         if (listItems[i] == m_optionElement)

@@ -25,84 +25,117 @@
 #ifndef RenderTableCell_h
 #define RenderTableCell_h
 
+#include "RenderTableRow.h"
 #include "RenderTableSection.h"
 
 namespace WebCore {
 
+static const unsigned unsetColumnIndex = 0x3FFFFFFF;
+static const unsigned maxColumnIndex = 0x3FFFFFFE; // 1,073,741,823
+
+enum IncludeBorderColorOrNot { DoNotIncludeBorderColor, IncludeBorderColor };
+
 class RenderTableCell : public RenderBlock {
 public:
-    RenderTableCell(Node*);
+    explicit RenderTableCell(Node*);
 
     // FIXME: need to implement cellIndex
     int cellIndex() const { return 0; }
     void setCellIndex(int) { }
 
-    int colSpan() const { return m_columnSpan; }
-    void setColSpan(int c) { m_columnSpan = c; }
+    unsigned colSpan() const;
+    unsigned rowSpan() const;
 
-    int rowSpan() const { return m_rowSpan; }
-    void setRowSpan(int r) { m_rowSpan = r; }
+    // Called from HTMLTableCellElement.
+    void colSpanOrRowSpanChanged();
 
-    int col() const { return m_column; }
-    void setCol(int col) { m_column = col; }
-    int row() const { return m_row; }
-    void setRow(int row) { m_row = row; }
+    void setCol(unsigned column)
+    {
+        if (UNLIKELY(column > maxColumnIndex))
+            CRASH();
 
+        m_column = column;
+    }
+
+    unsigned col() const
+    {
+        ASSERT(m_column != unsetColumnIndex);
+        return m_column;
+    }
+
+    RenderTableRow* row() const { return toRenderTableRow(parent()); }
     RenderTableSection* section() const { return toRenderTableSection(parent()->parent()); }
     RenderTable* table() const { return toRenderTable(parent()->parent()->parent()); }
 
-    Length styleOrColWidth() const;
+    unsigned rowIndex() const
+    {
+        // This function shouldn't be called on a detached cell.
+        ASSERT(row());
+        return row()->rowIndex();
+    }
 
-    virtual void calcPrefWidths();
+    Length styleOrColLogicalWidth() const;
 
-    void updateWidth(int);
+    LayoutUnit logicalHeightForRowSizing() const;
 
-    int borderLeft() const;
-    int borderRight() const;
-    int borderTop() const;
-    int borderBottom() const;
+    virtual void computePreferredLogicalWidths();
 
-    int borderHalfLeft(bool outer) const;
-    int borderHalfRight(bool outer) const;
-    int borderHalfTop(bool outer) const;
-    int borderHalfBottom(bool outer) const;
+    void updateLogicalWidth(LayoutUnit);
 
-    CollapsedBorderValue collapsedLeftBorder(bool rtl) const;
-    CollapsedBorderValue collapsedRightBorder(bool rtl) const;
-    CollapsedBorderValue collapsedTopBorder() const;
-    CollapsedBorderValue collapsedBottomBorder() const;
+    virtual int borderLeft() const;
+    virtual int borderRight() const;
+    virtual int borderTop() const;
+    virtual int borderBottom() const;
+    virtual int borderStart() const;
+    virtual int borderEnd() const;
+    virtual int borderBefore() const;
+    virtual int borderAfter() const;
 
-    typedef Vector<CollapsedBorderValue, 100> CollapsedBorderStyles;
-    void collectBorderStyles(CollapsedBorderStyles&) const;
-    static void sortBorderStyles(CollapsedBorderStyles&);
-
-    virtual void updateFromElement();
+    void collectBorderValues(RenderTable::CollapsedBorderValues&) const;
+    static void sortBorderValues(RenderTable::CollapsedBorderValues&);
 
     virtual void layout();
 
-    virtual void paint(PaintInfo&, int tx, int ty);
+    virtual void paint(PaintInfo&, const LayoutPoint&);
 
-    void paintBackgroundsBehindCell(PaintInfo&, int tx, int ty, RenderObject* backgroundObject);
+    void paintCollapsedBorders(PaintInfo&, const LayoutPoint&);
+    void paintBackgroundsBehindCell(PaintInfo&, const LayoutPoint&, RenderObject* backgroundObject);
 
-    virtual int baselinePosition(bool firstLine = false, bool isRootLineBox = false) const;
+    LayoutUnit cellBaselinePosition() const;
 
-    void setIntrinsicPaddingTop(int p) { m_intrinsicPaddingTop = p; }
-    void setIntrinsicPaddingBottom(int p) { m_intrinsicPaddingBottom = p; }
-    void setIntrinsicPadding(int top, int bottom) { setIntrinsicPaddingTop(top); setIntrinsicPaddingBottom(bottom); }
+    void setIntrinsicPaddingBefore(int p) { m_intrinsicPaddingBefore = p; }
+    void setIntrinsicPaddingAfter(int p) { m_intrinsicPaddingAfter = p; }
+    void setIntrinsicPadding(int before, int after) { setIntrinsicPaddingBefore(before); setIntrinsicPaddingAfter(after); }
     void clearIntrinsicPadding() { setIntrinsicPadding(0, 0); }
 
-    int intrinsicPaddingTop() const { return m_intrinsicPaddingTop; }
-    int intrinsicPaddingBottom() const { return m_intrinsicPaddingBottom; }
+    int intrinsicPaddingBefore() const { return m_intrinsicPaddingBefore; }
+    int intrinsicPaddingAfter() const { return m_intrinsicPaddingAfter; }
 
-    virtual int paddingTop(bool includeIntrinsicPadding = true) const;
-    virtual int paddingBottom(bool includeIntrinsicPadding = true) const;
+    virtual LayoutUnit paddingTop() const OVERRIDE;
+    virtual LayoutUnit paddingBottom() const OVERRIDE;
+    virtual LayoutUnit paddingLeft() const OVERRIDE;
+    virtual LayoutUnit paddingRight() const OVERRIDE;
+    
+    // FIXME: For now we just assume the cell has the same block flow direction as the table.  It's likely we'll
+    // create an extra anonymous RenderBlock to handle mixing directionality anyway, in which case we can lock
+    // the block flow directionality of the cells to the table's directionality.
+    virtual LayoutUnit paddingBefore() const OVERRIDE;
+    virtual LayoutUnit paddingAfter() const OVERRIDE;
 
-    virtual void setOverrideSize(int);
+    void setOverrideHeightFromRowHeight(LayoutUnit);
 
-    bool hasVisibleOverflow() const { return m_overflow; }
+    virtual void scrollbarsChanged(bool horizontalScrollbarChanged, bool verticalScrollbarChanged);
+
+    bool cellWidthChanged() const { return m_cellWidthChanged; }
+    void setCellWidthChanged(bool b = true) { m_cellWidthChanged = b; }
+
+    static RenderTableCell* createAnonymousWithParentRenderer(const RenderObject*);
+    virtual RenderBox* createAnonymousBoxWithSameTypeAs(const RenderObject* parent) const OVERRIDE
+    {
+        return createAnonymousWithParentRenderer(parent);
+    }
 
 protected:
-    virtual void styleWillChange(StyleDifference, const RenderStyle* newStyle);
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
 private:
@@ -110,28 +143,49 @@ private:
 
     virtual bool isTableCell() const { return true; }
 
-    virtual void destroy();
+    virtual void willBeDestroyed();
 
-    virtual bool requiresLayer() const { return isPositioned() || isTransparent() || hasOverflowClip() || hasTransform() || hasMask() || hasReflection(); }
+    virtual void computeLogicalWidth();
 
-    virtual void calcWidth();
+    virtual void paintBoxDecorations(PaintInfo&, const LayoutPoint&);
+    virtual void paintMask(PaintInfo&, const LayoutPoint&);
 
-    virtual void paintBoxDecorations(PaintInfo&, int tx, int ty);
-    virtual void paintMask(PaintInfo&, int tx, int ty);
+    virtual bool boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance, InlineFlowBox*) const OVERRIDE;
 
-    virtual IntSize offsetFromContainer(RenderObject*, const IntPoint&) const;
-    virtual IntRect clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer);
-    virtual void computeRectForRepaint(RenderBoxModelObject* repaintContainer, IntRect&, bool fixed = false);
+    virtual LayoutSize offsetFromContainer(RenderObject*, const LayoutPoint&, bool* offsetDependsOnPoint = 0) const;
+    virtual LayoutRect clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const;
+    virtual void computeRectForRepaint(RenderBoxModelObject* repaintContainer, LayoutRect&, bool fixed = false) const;
 
-    void paintCollapsedBorder(GraphicsContext*, int x, int y, int w, int h);
+    int borderHalfLeft(bool outer) const;
+    int borderHalfRight(bool outer) const;
+    int borderHalfTop(bool outer) const;
+    int borderHalfBottom(bool outer) const;
 
-    int m_row;
-    int m_column;
-    int m_rowSpan;
-    int m_columnSpan;
-    int m_intrinsicPaddingTop;
-    int m_intrinsicPaddingBottom;
-    int m_percentageHeight;
+    int borderHalfStart(bool outer) const;
+    int borderHalfEnd(bool outer) const;
+    int borderHalfBefore(bool outer) const;
+    int borderHalfAfter(bool outer) const;
+
+    CollapsedBorderValue collapsedStartBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
+    CollapsedBorderValue collapsedEndBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
+    CollapsedBorderValue collapsedBeforeBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
+    CollapsedBorderValue collapsedAfterBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
+
+    CollapsedBorderValue cachedCollapsedLeftBorder(RenderStyle*) const;
+    CollapsedBorderValue cachedCollapsedRightBorder(RenderStyle*) const;
+    CollapsedBorderValue cachedCollapsedTopBorder(RenderStyle*) const;
+    CollapsedBorderValue cachedCollapsedBottomBorder(RenderStyle*) const;
+
+    CollapsedBorderValue computeCollapsedStartBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
+    CollapsedBorderValue computeCollapsedEndBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
+    CollapsedBorderValue computeCollapsedBeforeBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
+    CollapsedBorderValue computeCollapsedAfterBorder(IncludeBorderColorOrNot = IncludeBorderColor) const;
+
+    unsigned m_column : 30;
+    bool m_cellWidthChanged : 1;
+    bool m_hasAssociatedTableCellElement : 1;
+    int m_intrinsicPaddingBefore;
+    int m_intrinsicPaddingAfter;
 };
 
 inline RenderTableCell* toRenderTableCell(RenderObject* object)

@@ -21,66 +21,78 @@
 #include "config.h"
 #include "ScriptController.h"
 
+#include "ContentSecurityPolicy.h"
+#include "Document.h"
+#include "DocumentLoader.h"
 #include "Frame.h"
 #include "FrameLoaderClient.h"
 #include "Page.h"
 #include "ScriptSourceCode.h"
 #include "ScriptValue.h"
+#include "SecurityOrigin.h"
 #include "Settings.h"
-#include "XSSAuditor.h"
+#include "UserGestureIndicator.h"
 
 namespace WebCore {
 
-bool ScriptController::canExecuteScripts()
+bool ScriptController::canExecuteScripts(ReasonForCallingCanExecuteScripts reason)
 {
-    if (m_frame->loader()->isSandboxed(SandboxScripts))
+    if (m_frame->document() && m_frame->document()->isSandboxed(SandboxScripts))
         return false;
 
+    if (m_frame->document() && m_frame->document()->isViewSource()) {
+        ASSERT(m_frame->document()->securityOrigin()->isUnique());
+        return true;
+    }
+
     Settings* settings = m_frame->settings();
-    return m_frame->loader()->client()->allowJavaScript(settings && settings->isJavaScriptEnabled());
+    const bool allowed = m_frame->loader()->client()->allowScript(settings && settings->isScriptEnabled());
+    if (!allowed && reason == AboutToExecuteScript)
+        m_frame->loader()->client()->didNotAllowScript();
+    return allowed;
 }
 
 ScriptValue ScriptController::executeScript(const String& script, bool forceUserGesture)
 {
-    return executeScript(ScriptSourceCode(script, forceUserGesture ? KURL() : m_frame->loader()->url()));
+    UserGestureIndicator gestureIndicator(forceUserGesture ? DefinitelyProcessingUserGesture : PossiblyProcessingUserGesture);
+    return executeScript(ScriptSourceCode(script, m_frame->document()->url()));
 }
 
 ScriptValue ScriptController::executeScript(const ScriptSourceCode& sourceCode)
 {
-    if (!canExecuteScripts() || isPaused())
+    if (!canExecuteScripts(AboutToExecuteScript) || isPaused())
         return ScriptValue();
 
-    bool wasInExecuteScript = m_inExecuteScript;
-    m_inExecuteScript = true;
+    RefPtr<Frame> protect(m_frame); // Script execution can destroy the frame, and thus the ScriptController.
 
-    ScriptValue result = evaluate(sourceCode);
-
-    if (!wasInExecuteScript) {
-        m_inExecuteScript = false;
-        Document::updateStyleForAllDocuments();
-    }
-
-    return result;
+    return evaluate(sourceCode);
 }
 
-
-bool ScriptController::executeIfJavaScriptURL(const KURL& url, bool userGesture, bool replaceDocument)
+bool ScriptController::executeIfJavaScriptURL(const KURL& url, ShouldReplaceDocumentIfJavaScriptURL shouldReplaceDocumentIfJavaScriptURL)
 {
     if (!protocolIsJavaScript(url))
         return false;
 
-    if (m_frame->page() && !m_frame->page()->javaScriptURLsAreAllowed())
+    if (!m_frame->page()
+        || !m_frame->page()->javaScriptURLsAreAllowed()
+        || !m_frame->document()->contentSecurityPolicy()->allowJavaScriptURLs()
+        || m_frame->inViewSourceMode())
         return true;
 
-    if (m_frame->inViewSourceMode())
-        return true;
+    // We need to hold onto the Frame here because executing script can
+    // destroy the frame.
+    RefPtr<Frame> protector(m_frame);
+    RefPtr<Document> ownerDocument(m_frame->document());
 
     const int javascriptSchemeLength = sizeof("javascript:") - 1;
 
-    String script = decodeURLEscapeSequences(url.string().substring(javascriptSchemeLength));
-    ScriptValue result;
-    if (xssAuditor()->canEvaluateJavaScriptURL(script))
-        result = executeScript(script, userGesture);
+    String decodedURL = decodeURLEscapeSequences(url.string());
+    ScriptValue result = executeScript(decodedURL.substring(javascriptSchemeLength));
+
+    // If executing script caused this frame to be removed from the page, we
+    // don't want to try to replace its document!
+    if (!m_frame->page())
+        return true;
 
     String scriptResult;
 #if USE(JSC)
@@ -96,9 +108,15 @@ bool ScriptController::executeIfJavaScriptURL(const KURL& url, bool userGesture,
     // FIXME: We should always replace the document, but doing so
     //        synchronously can cause crashes:
     //        http://bugs.webkit.org/show_bug.cgi?id=16782
-    if (replaceDocument) 
-        m_frame->loader()->replaceDocument(scriptResult);
-
+    if (shouldReplaceDocumentIfJavaScriptURL == ReplaceDocumentIfJavaScriptURL) {
+        // We're still in a frame, so there should be a DocumentLoader.
+        ASSERT(m_frame->document()->loader());
+        
+        // DocumentWriter::replaceDocument can cause the DocumentLoader to get deref'ed and possible destroyed,
+        // so protect it with a RefPtr.
+        if (RefPtr<DocumentLoader> loader = m_frame->document()->loader())
+            loader->writer()->replaceDocument(scriptResult, ownerDocument.get());
+    }
     return true;
 }
 

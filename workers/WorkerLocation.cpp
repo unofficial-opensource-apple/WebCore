@@ -36,7 +36,7 @@ namespace WebCore {
 
 String WorkerLocation::href() const
 {
-    return m_url.hasPath() ? m_url.prettyURL() : m_url.prettyURL() + "/";
+    return m_url.string();
 }
 
 String WorkerLocation::protocol() const
@@ -46,7 +46,7 @@ String WorkerLocation::protocol() const
 
 String WorkerLocation::host() const
 {
-    return m_url.port() ? m_url.host() + ":" + String::number((static_cast<int>(m_url.port()))) : m_url.host();
+    return m_url.port() ? m_url.host() + ":" + String::number(m_url.port()) : m_url.host();
 }
 
 String WorkerLocation::hostname() const
@@ -56,7 +56,7 @@ String WorkerLocation::hostname() const
 
 String WorkerLocation::port() const
 {
-    return m_url.port() ? String::number(static_cast<int>(m_url.port())) : "";
+    return m_url.port() ? String::number(m_url.port()) : "";
 }
 
 String WorkerLocation::pathname() const
@@ -66,17 +66,12 @@ String WorkerLocation::pathname() const
 
 String WorkerLocation::search() const
 {
-    return m_url.query().isEmpty() ? "" : "?" + m_url.query();
+    return m_url.query().isEmpty() ? emptyString() : "?" + m_url.query();
 }
 
 String WorkerLocation::hash() const
 {
-    return m_url.fragmentIdentifier().isEmpty() ? "" : "#" + m_url.fragmentIdentifier();
-}
-
-String WorkerLocation::toString() const
-{
-    return m_url.hasPath() ? m_url.prettyURL() : m_url.prettyURL() + "/";
+    return m_url.fragmentIdentifier().isEmpty() ? emptyString() : "#" + m_url.fragmentIdentifier();
 }
 
 

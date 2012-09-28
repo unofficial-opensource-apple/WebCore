@@ -28,11 +28,13 @@
 
 #include <wtf/Assertions.h>
 #include <wtf/FastAllocBase.h>
+#include <wtf/StringExtras.h>
 #include <string.h>
 
 namespace WebCore {
     
-class IdentifierRep : public FastAllocBase {
+class IdentifierRep {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     static IdentifierRep* get(int);
     static IdentifierRep* get(const char*);
@@ -54,14 +56,10 @@ private:
     IdentifierRep(const char* name)
         : m_isString(true)
     {
-        m_value.m_string = strdup(name);
+        m_value.m_string = fastStrDup(name);
     }
     
-    ~IdentifierRep()
-    {
-        // IdentifierReps should never be deleted.
-        ASSERT_NOT_REACHED();
-    }
+    ~IdentifierRep(); // Not implemented
     
     union {
         const char* m_string;

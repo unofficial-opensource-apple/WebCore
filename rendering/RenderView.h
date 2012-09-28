@@ -24,11 +24,13 @@
 
 #include "FrameView.h"
 #include "LayoutState.h"
+#include "PODFreeListArena.h"
 #include "RenderBlock.h"
 #include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
+class FlowThreadController;
 class RenderWidget;
 
 #if USE(ACCELERATED_COMPOSITING)
@@ -40,55 +42,57 @@ public:
     RenderView(Node*, FrameView*);
     virtual ~RenderView();
 
-    virtual const char* renderName() const { return "RenderView"; }
+    bool hitTest(const HitTestRequest&, HitTestResult&);
 
-    virtual bool isRenderView() const { return true; }
+    virtual const char* renderName() const OVERRIDE { return "RenderView"; }
 
-    virtual bool requiresLayer() const { return true; }
+    virtual bool isRenderView() const OVERRIDE { return true; }
 
-    virtual void layout();
-    virtual void calcWidth();
-    virtual void calcHeight();
-    virtual void calcPrefWidths();
+    virtual bool requiresLayer() const OVERRIDE { return true; }
+
+    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const OVERRIDE;
+
+    virtual void layout() OVERRIDE;
+    virtual void computeLogicalWidth() OVERRIDE;
+    virtual void computeLogicalHeight() OVERRIDE;
+    // FIXME: This override is not needed and should be removed
+    // it only exists to make computePreferredLogicalWidths public.
+    virtual void computePreferredLogicalWidths() OVERRIDE;
+
+    virtual LayoutUnit availableLogicalHeight() const OVERRIDE;
 
     // The same as the FrameView's layoutHeight/layoutWidth but with null check guards.
     int viewHeight() const;
     int viewWidth() const;
+    int viewLogicalWidth() const { return style()->isHorizontalWritingMode() ? viewWidth() : viewHeight(); }
+    int viewLogicalHeight() const;
 
     float zoomFactor() const;
 
     FrameView* frameView() const { return m_frameView; }
 
-    virtual void computeRectForRepaint(RenderBoxModelObject* repaintContainer, IntRect&, bool fixed = false);
-    virtual void repaintViewRectangle(const IntRect&, bool immediate = false);
+    virtual void computeRectForRepaint(RenderBoxModelObject* repaintContainer, LayoutRect&, bool fixed = false) const;
+    virtual void repaintViewRectangle(const LayoutRect&, bool immediate = false);
     // Repaint the view, and all composited layers that intersect the given absolute rectangle.
     // FIXME: ideally we'd never have to do this, if all repaints are container-relative.
-    virtual void repaintRectangleInViewAndCompositedLayers(const IntRect&, bool immediate = false);
+    virtual void repaintRectangleInViewAndCompositedLayers(const LayoutRect&, bool immediate = false);
 
-    virtual void paint(PaintInfo&, int tx, int ty);
-    virtual void paintBoxDecorations(PaintInfo&, int tx, int ty);
+    virtual void paint(PaintInfo&, const LayoutPoint&);
+    virtual void paintBoxDecorations(PaintInfo&, const LayoutPoint&) OVERRIDE;
 
-    enum SelectionRepaintMode { RepaintNewXOROld, RepaintNewMinusOld };
+    enum SelectionRepaintMode { RepaintNewXOROld, RepaintNewMinusOld, RepaintNothing };
     void setSelection(RenderObject* start, int startPos, RenderObject* end, int endPos, SelectionRepaintMode = RepaintNewXOROld);
+    void getSelection(RenderObject*& startRenderer, int& startOffset, RenderObject*& endRenderer, int& endOffset) const;
     void clearSelection();
-    virtual RenderObject* selectionStart() const { return m_selectionStart; }
-    virtual RenderObject* selectionEnd() const { return m_selectionEnd; }
+    RenderObject* selectionStart() const { return m_selectionStart; }
+    RenderObject* selectionEnd() const { return m_selectionEnd; }
+    IntRect selectionBounds(bool clipToVisibleContent = true) const;
+    void selectionStartEnd(int& startPos, int& endPos) const;
 
     bool printing() const;
-    void setPrintImages(bool enable) { m_printImages = enable; }
-    bool printImages() const { return m_printImages; }
-    void setTruncatedAt(int y) { m_truncatedAt = y; m_bestTruncatedAt = m_truncatorWidth = 0; m_minimumColumnHeight = 0; m_forcedPageBreak = false; }
-    void setBestTruncatedAt(int y, RenderBoxModelObject* forRenderer, bool forcedBreak = false);
-    void setMinimumColumnHeight(int height) { m_minimumColumnHeight = height; }
-    int bestTruncatedAt() const { return m_bestTruncatedAt; }
-    int minimumColumnHeight() const { return m_minimumColumnHeight; }
 
-    int truncatedAt() const { return m_truncatedAt; }
-
-    virtual void absoluteRects(Vector<IntRect>&, int tx, int ty);
-    virtual void absoluteQuads(Vector<FloatQuad>&);
-
-    IntRect selectionBounds(bool clipToVisibleContent = true) const;
+    virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const;
+    virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const;
 
 #if USE(ACCELERATED_COMPOSITING)
     void setMaximalOutlineSize(int o);
@@ -97,25 +101,22 @@ public:
 #endif
     int maximalOutlineSize() const { return m_maximalOutlineSize; }
 
-    virtual IntRect viewRect() const;
-
-    void selectionStartEnd(int& startPos, int& endPos) const;
-
-    IntRect printRect() const { return m_printRect; }
-    void setPrintRect(const IntRect& r) { m_printRect = r; }
+    virtual LayoutRect viewRect() const OVERRIDE;
 
     void updateWidgetPositions();
     void addWidget(RenderWidget*);
     void removeWidget(RenderWidget*);
+    
+    void notifyWidgets(WidgetNotification);
 
     // layoutDelta is used transiently during layout to store how far an object has moved from its
     // last layout location, in order to repaint correctly.
     // If we're doing a full repaint m_layoutState will be 0, but in that case layoutDelta doesn't matter.
-    IntSize layoutDelta() const
+    LayoutSize layoutDelta() const
     {
-        return m_layoutState ? m_layoutState->m_layoutDelta : IntSize();
+        return m_layoutState ? m_layoutState->m_layoutDelta : LayoutSize();
     }
-    void addLayoutDelta(const IntSize& delta) 
+    void addLayoutDelta(const LayoutSize& delta) 
     {
         if (m_layoutState)
             m_layoutState->m_layoutDelta += delta;
@@ -123,24 +124,9 @@ public:
 
     bool doingFullRepaint() const { return m_frameView->needsFullRepaint(); }
 
-    void pushLayoutState(RenderBox* renderer, const IntSize& offset)
-    {
-        if (doingFullRepaint())
-            return;
-        // We push LayoutState even if layoutState is disabled because it stores layoutDelta too.
-        m_layoutState = new (renderArena()) LayoutState(m_layoutState, renderer, offset);
-    }
-
+    // Subtree push/pop
     void pushLayoutState(RenderObject*);
-
-    void popLayoutState()
-    {
-        if (doingFullRepaint())
-            return;
-        LayoutState* state = m_layoutState;
-        m_layoutState = state->m_next;
-        state->destroy(renderArena());
-    }
+    void popLayoutState(RenderObject*) { return popLayoutState(); } // Just doing this to keep popLayoutState() private and to make the subtree calls symmetrical.
 
     bool shouldDisableLayoutStateForSubtree(RenderObject*) const;
 
@@ -148,14 +134,31 @@ public:
     bool layoutStateEnabled() const { return m_layoutStateDisableCount == 0 && m_layoutState; }
     LayoutState* layoutState() const { return m_layoutState; }
 
-    // Suspends the LayoutState optimization. Used under transforms that cannot be represented by
-    // LayoutState (common in SVG) and when manipulating the render tree during layout in ways
-    // that can trigger repaint of a non-child (e.g. when a list item moves its list marker around).
-    // Note that even when disabled, LayoutState is still used to store layoutDelta.
-    void disableLayoutState() { m_layoutStateDisableCount++; }
-    void enableLayoutState() { ASSERT(m_layoutStateDisableCount > 0); m_layoutStateDisableCount--; }
+    virtual void updateHitTestResult(HitTestResult&, const LayoutPoint&);
 
-    virtual void updateHitTestResult(HitTestResult&, const IntPoint&);
+    unsigned pageLogicalHeight() const { return m_pageLogicalHeight; }
+    void setPageLogicalHeight(unsigned height)
+    {
+        if (m_pageLogicalHeight != height) {
+            m_pageLogicalHeight = height;
+            m_pageLogicalHeightChanged = true;
+        }
+    }
+
+    // FIXME: These functions are deprecated. No code should be added that uses these.
+    int bestTruncatedAt() const { return m_legacyPrinting.m_bestTruncatedAt; }
+    void setBestTruncatedAt(int y, RenderBoxModelObject* forRenderer, bool forcedBreak = false);
+    int truncatedAt() const { return m_legacyPrinting.m_truncatedAt; }
+    void setTruncatedAt(int y)
+    { 
+        m_legacyPrinting.m_truncatedAt = y;
+        m_legacyPrinting.m_bestTruncatedAt = 0;
+        m_legacyPrinting.m_truncatorWidth = 0;
+        m_legacyPrinting.m_forcedPageBreak = false;
+    }
+    const IntRect& printRect() const { return m_legacyPrinting.m_printRect; }
+    void setPrintRect(const IntRect& r) { m_legacyPrinting.m_printRect = r; }
+    // End deprecated functions.
 
     // Notifications that this view became visible in a window, or will be
     // removed from the window.
@@ -167,15 +170,74 @@ public:
     bool usesCompositing() const;
 #endif
 
+    IntRect unscaledDocumentRect() const;
+    LayoutRect backgroundRect(RenderBox* backgroundRenderer) const;
+
+    IntRect documentRect() const;
+
+    bool hasRenderNamedFlowThreads() const;
+    FlowThreadController* flowThreadController();
+
+    void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
+
+    enum ContainingBlockCheck { CheckContainingBlock, DontCheckContainingBlock };
+    bool hasCustomFixedPosition(const RenderObject*, ContainingBlockCheck = CheckContainingBlock) const;
+    // Returns true if there are fixed position elements.
+    bool setCustomFixedPositionedObjectsNeedLayout();
+
+    IntervalArena* intervalArena();
+
+    IntSize viewportSize() const { return document()->viewportSize(); }
+
+    void setFixedPositionedObjectsNeedLayout();
+    void insertFixedPositionedObject(RenderBox*);
+    void removeFixedPositionedObject(RenderBox*);
+
 protected:
-    virtual void mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool useTransforms, bool fixed, TransformState&) const;
+    virtual void mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool useTransforms, bool fixed, TransformState&, ApplyContainerFlipOrNot = ApplyContainerFlip, bool* wasFixed = 0) const;
+    virtual const RenderObject* pushMappingToContainer(const RenderBoxModelObject* ancestorToStopAt, RenderGeometryMap&) const;
     virtual void mapAbsoluteToLocalPoint(bool fixed, bool useTransforms, TransformState&) const;
+    virtual bool requiresColumns(int desiredColumnCount) const OVERRIDE;
 
 private:
-    bool shouldRepaint(const IntRect& r) const;
-        
-    int docHeight() const;
-    int docWidth() const;
+    virtual void calcColumnWidth() OVERRIDE;
+    virtual ColumnInfo::PaginationUnit paginationUnit() const OVERRIDE;
+
+    bool shouldRepaint(const LayoutRect&) const;
+
+    // These functions may only be accessed by LayoutStateMaintainer.
+    void pushLayoutState(RenderFlowThread*, bool regionsChanged);
+    bool pushLayoutState(RenderBox* renderer, const LayoutSize& offset, LayoutUnit pageHeight = 0, bool pageHeightChanged = false, ColumnInfo* colInfo = 0)
+    {
+        // We push LayoutState even if layoutState is disabled because it stores layoutDelta too.
+        if (!doingFullRepaint() || m_layoutState->isPaginated() || renderer->hasColumns() || renderer->inRenderFlowThread()
+            || m_layoutState->lineGrid() || (renderer->style()->lineGrid() != RenderStyle::initialLineGrid() && renderer->isBlockFlow())) {
+            m_layoutState = new (renderArena()) LayoutState(m_layoutState, renderer, offset, pageHeight, pageHeightChanged, colInfo);
+            return true;
+        }
+        return false;
+    }
+
+    void popLayoutState()
+    {
+        LayoutState* state = m_layoutState;
+        m_layoutState = state->m_next;
+        state->destroy(renderArena());
+    }
+
+    // Suspends the LayoutState optimization. Used under transforms that cannot be represented by
+    // LayoutState (common in SVG) and when manipulating the render tree during layout in ways
+    // that can trigger repaint of a non-child (e.g. when a list item moves its list marker around).
+    // Note that even when disabled, LayoutState is still used to store layoutDelta.
+    // These functions may only be accessed by LayoutStateMaintainer or LayoutStateDisabler.
+    void disableLayoutState() { m_layoutStateDisableCount++; }
+    void enableLayoutState() { ASSERT(m_layoutStateDisableCount > 0); m_layoutStateDisableCount--; }
+
+    size_t getRetainedWidgets(Vector<RenderWidget*>&);
+    void releaseWidgets(Vector<RenderWidget*>&);
+    
+    friend class LayoutStateMaintainer;
+    friend class LayoutStateDisabler;
 
 protected:
     FrameView* m_frameView;
@@ -185,27 +247,44 @@ protected:
     int m_selectionStartPos;
     int m_selectionEndPos;
 
-    // used to ignore viewport width when printing to the printer
-    bool m_printImages;
-    int m_truncatedAt;
+    // FIXME: Only used by embedded WebViews inside AppKit NSViews.  Find a way to remove.
+    struct LegacyPrinting {
+        LegacyPrinting()
+            : m_bestTruncatedAt(0)
+            , m_truncatedAt(0)
+            , m_truncatorWidth(0)
+            , m_forcedPageBreak(false)
+        { }
+
+        int m_bestTruncatedAt;
+        int m_truncatedAt;
+        int m_truncatorWidth;
+        IntRect m_printRect;
+        bool m_forcedPageBreak;
+    };
+    LegacyPrinting m_legacyPrinting;
+    // End deprecated members.
 
     int m_maximalOutlineSize; // Used to apply a fudge factor to dirty-rect checks on blocks/tables.
-    IntRect m_printRect; // Used when printing.
 
     typedef HashSet<RenderWidget*> RenderWidgetSet;
-
     RenderWidgetSet m_widgets;
 
+    typedef HashSet<RenderBox*> RenderBoxSet;
+    OwnPtr<RenderBoxSet> m_fixedPositionedElements;
+
 private:
-    int m_bestTruncatedAt;
-    int m_truncatorWidth;
-    int m_minimumColumnHeight;
-    bool m_forcedPageBreak;
+    bool shouldUsePrintingLayout() const;
+
+    unsigned m_pageLogicalHeight;
+    bool m_pageLogicalHeightChanged;
     LayoutState* m_layoutState;
     unsigned m_layoutStateDisableCount;
 #if USE(ACCELERATED_COMPOSITING)
     OwnPtr<RenderLayerCompositor> m_compositor;
 #endif
+    OwnPtr<FlowThreadController> m_flowThreadController;
+    RefPtr<IntervalArena> m_intervalArena;
 };
 
 inline RenderView* toRenderView(RenderObject* object)
@@ -224,17 +303,24 @@ inline const RenderView* toRenderView(const RenderObject* object)
 void toRenderView(const RenderView*);
 
 
+ALWAYS_INLINE RenderView* RenderObject::view() const
+{
+    return toRenderView(document()->renderer());
+}
+
 // Stack-based class to assist with LayoutState push/pop
-class LayoutStateMaintainer : public Noncopyable {
+class LayoutStateMaintainer {
+    WTF_MAKE_NONCOPYABLE(LayoutStateMaintainer);
 public:
     // ctor to push now
-    LayoutStateMaintainer(RenderView* view, RenderBox* root, IntSize offset, bool disableState = false)
+    LayoutStateMaintainer(RenderView* view, RenderBox* root, LayoutSize offset, bool disableState = false, LayoutUnit pageHeight = 0, bool pageHeightChanged = false, ColumnInfo* colInfo = 0)
         : m_view(view)
         , m_disabled(disableState)
         , m_didStart(false)
         , m_didEnd(false)
+        , m_didCreateLayoutState(false)
     {
-        push(root, offset);
+        push(root, offset, pageHeight, pageHeightChanged, colInfo);
     }
     
     // ctor to maybe push later
@@ -243,7 +329,18 @@ public:
         , m_disabled(false)
         , m_didStart(false)
         , m_didEnd(false)
+        , m_didCreateLayoutState(false)
     {
+    }
+    
+    LayoutStateMaintainer(RenderView* view, RenderFlowThread* flowThread, bool regionsChanged)
+        : m_view(view)
+        , m_disabled(false)
+        , m_didStart(false)
+        , m_didEnd(false)
+        , m_didCreateLayoutState(false)
+    {
+        push(flowThread, regionsChanged);
     }
     
     ~LayoutStateMaintainer()
@@ -251,13 +348,21 @@ public:
         ASSERT(m_didStart == m_didEnd);   // if this fires, it means that someone did a push(), but forgot to pop().
     }
 
-    void push(RenderBox* root, IntSize offset)
+    void push(RenderBox* root, LayoutSize offset, LayoutUnit pageHeight = 0, bool pageHeightChanged = false, ColumnInfo* colInfo = 0)
     {
         ASSERT(!m_didStart);
         // We push state even if disabled, because we still need to store layoutDelta
-        m_view->pushLayoutState(root, offset);
-        if (m_disabled)
+        m_didCreateLayoutState = m_view->pushLayoutState(root, offset, pageHeight, pageHeightChanged, colInfo);
+        if (m_disabled && m_didCreateLayoutState)
             m_view->disableLayoutState();
+        m_didStart = true;
+    }
+    
+    void push(RenderFlowThread* flowThread, bool regionsChanged)
+    {
+        ASSERT(!m_didStart);
+        m_view->pushLayoutState(flowThread, regionsChanged);
+        m_didCreateLayoutState = true;
         m_didStart = true;
     }
 
@@ -265,9 +370,12 @@ public:
     {
         if (m_didStart) {
             ASSERT(!m_didEnd);
-            m_view->popLayoutState();
-            if (m_disabled)
-                m_view->enableLayoutState();
+            if (m_didCreateLayoutState) {
+                m_view->popLayoutState();
+                if (m_disabled)
+                    m_view->enableLayoutState();
+            }
+            
             m_didEnd = true;
         }
     }
@@ -279,6 +387,26 @@ private:
     bool m_disabled : 1;        // true if the offset and clip part of layoutState is disabled
     bool m_didStart : 1;        // true if we did a push or disable
     bool m_didEnd : 1;          // true if we popped or re-enabled
+    bool m_didCreateLayoutState : 1; // true if we actually made a layout state.
+};
+
+class LayoutStateDisabler {
+    WTF_MAKE_NONCOPYABLE(LayoutStateDisabler);
+public:
+    LayoutStateDisabler(RenderView* view)
+        : m_view(view)
+    {
+        if (m_view)
+            m_view->disableLayoutState();
+    }
+
+    ~LayoutStateDisabler()
+    {
+        if (m_view)
+            m_view->enableLayoutState();
+    }
+private:
+    RenderView* m_view;
 };
 
 } // namespace WebCore

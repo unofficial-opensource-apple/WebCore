@@ -27,10 +27,14 @@
 #include "config.h"
 #include "ThreadGlobalData.h"
 
+#include "DOMImplementation.h"
 #include "EventNames.h"
-#include "StringImpl.h"
+#include "InspectorCounters.h"
 #include "ThreadTimers.h"
+#include <wtf/MainThread.h>
 #include <wtf/UnusedParam.h>
+#include <wtf/WTFThreadData.h>
+#include <wtf/text/StringImpl.h>
 
 #if USE(ICU_UNICODE)
 #include "TextCodecICU.h"
@@ -50,41 +54,64 @@ namespace WebCore {
 
 #if ENABLE(WORKERS)
 ThreadSpecific<ThreadGlobalData>* ThreadGlobalData::staticData;
-#error Need a separate ThreadGlobalData::staticData that is shared by the main thread and the Web Thread.
+ThreadGlobalData* ThreadGlobalData::sharedMainThreadStaticData;
 #else
 ThreadGlobalData* ThreadGlobalData::staticData;
 #endif
 
 ThreadGlobalData::ThreadGlobalData()
-    : m_emptyString(new StringImpl)
-    , m_atomicStringTable(new HashSet<StringImpl*>)
-    , m_eventNames(new EventNames)
-    , m_threadTimers(new ThreadTimers)
+    : m_eventNames(adoptPtr(new EventNames))
+    , m_threadTimers(adoptPtr(new ThreadTimers))
+    , m_xmlTypeRegExp(adoptPtr(new XMLMIMETypeRegExp))
 #ifndef NDEBUG
-    , m_isMainThread(isMainThread())
+    , m_isMainThread(pthread_main_np() || isMainThread())
 #endif
 #if USE(ICU_UNICODE)
-    , m_cachedConverterICU(new ICUConverterWrapper)
+    , m_cachedConverterICU(adoptPtr(new ICUConverterWrapper))
+#endif
+#if ENABLE(INSPECTOR)
+    , m_inspectorCounters(adoptPtr(new ThreadLocalInspectorCounters()))
 #endif
 {
+    // This constructor will have been called on the main thread before being called on
+    // any other thread, and is only called once per thread - this makes this a convenient
+    // point to call methods that internally perform a one-time initialization that is not
+    // threadsafe.
+    wtfThreadData();
+    StringImpl::empty();
 }
 
 ThreadGlobalData::~ThreadGlobalData()
 {
-#if USE(ICU_UNICODE)
-    delete m_cachedConverterICU;
-#endif
-    delete m_eventNames;
-    delete m_atomicStringTable;
-    delete m_threadTimers;
-
-    // Using member variable m_isMainThread instead of calling WTF::isMainThread() directly
-    // to avoid issues described in https://bugs.webkit.org/show_bug.cgi?id=25973.
-    // In short, some pthread-based platforms and ports can not use WTF::CurrentThread() and WTF::isMainThread()
-    // in destructors of thread-specific data.
-    ASSERT(m_isMainThread || m_emptyString->hasOneRef()); // We intentionally don't clean up static data on application quit, so there will be many strings remaining on the main thread.
-
-    delete m_emptyString;
 }
+
+void ThreadGlobalData::destroy()
+{
+
+#if USE(ICU_UNICODE)
+    m_cachedConverterICU.clear();
+#endif
+
+#if ENABLE(INSPECTOR)
+    m_inspectorCounters.clear();
+#endif
+
+    m_eventNames.clear();
+    m_threadTimers.clear();
+    m_xmlTypeRegExp.clear();
+}
+
+#if ENABLE(WORKERS)
+void ThreadGlobalData::setWebCoreThreadData()
+{
+    ASSERT(isWebThread());
+    ASSERT(&threadGlobalData() != ThreadGlobalData::sharedMainThreadStaticData);
+
+    // Set WebThread's ThreadGlobalData object to be the same as the main UI thread.
+    ThreadGlobalData::staticData->replace(ThreadGlobalData::sharedMainThreadStaticData);
+
+    ASSERT(&threadGlobalData() == ThreadGlobalData::sharedMainThreadStaticData);
+}
+#endif
 
 } // namespace WebCore

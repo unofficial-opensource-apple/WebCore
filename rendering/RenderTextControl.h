@@ -26,55 +26,34 @@
 
 namespace WebCore {
 
-class VisibleSelection;
-class TextControlInnerElement;
-class TextControlInnerTextElement;
+class HTMLTextFormControlElement;
 
 class RenderTextControl : public RenderBlock {
 public:
     virtual ~RenderTextControl();
 
-    bool wasChangedSinceLastChangeEvent() const { return m_wasChangedSinceLastChangeEvent; }
-    void setChangedSinceLastChangeEvent(bool wasChangedSinceLastChangeEvent) { m_wasChangedSinceLastChangeEvent = wasChangedSinceLastChangeEvent; }
-
-    bool lastChangeWasUserEdit() const { return m_lastChangeWasUserEdit; }
-    void setLastChangeWasUserEdit(bool lastChangeWasUserEdit);
-
-    int selectionStart();
-    int selectionEnd();
-    void setSelectionStart(int);
-    void setSelectionEnd(int);
-    void select();
-    void setSelectionRange(int start, int end);
-    VisibleSelection selection(int start, int end) const;
-
-    virtual void subtreeHasChanged();
-    String text();
-    String textWithHardLineBreaks();
-    void selectionChanged(bool userTriggered);
+    HTMLTextFormControlElement* textFormControlElement() const;
+    virtual PassRefPtr<RenderStyle> createInnerTextStyle(const RenderStyle* startStyle) const = 0;
 
     bool canScroll() const;
 
     // Returns the line height of the inner renderer.
-    virtual int innerLineHeight() const;
+    virtual int innerLineHeight() const OVERRIDE;
 
-    VisiblePosition visiblePositionForIndex(int index);
-    int indexForVisiblePosition(const VisiblePosition&);
-
-    void updatePlaceholderVisibility(bool, bool);
+    VisiblePosition visiblePositionForIndex(int index) const;
 
 protected:
-    RenderTextControl(Node*, bool);
+    RenderTextControl(Node*);
+
+    // This convenience function should not be made public because innerTextElement may outlive the render tree.
+    HTMLElement* innerTextElement() const;
 
     int scrollbarThickness() const;
     void adjustInnerTextStyle(const RenderStyle* startStyle, RenderStyle* textBlockStyle) const;
-    void setInnerTextValue(const String&);
 
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
-    void createSubtreeIfNeeded(TextControlInnerElement* innerBlock);
-    void hitInnerTextElement(HitTestResult&, int x, int y, int tx, int ty);
-    void forwardEvent(Event*);
+    void hitInnerTextElement(HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset);
 
     int textBlockWidth() const;
     int textBlockHeight() const;
@@ -83,38 +62,28 @@ protected:
 
     static bool hasValidAvgCharWidth(AtomicString family);
     virtual float getAvgCharWidth(AtomicString family);
-    virtual int preferredContentWidth(float charWidth) const = 0;
-    virtual void adjustControlHeightBasedOnLineHeight(int lineHeight) = 0;
-    virtual void cacheSelection(int start, int end) = 0;
-    virtual PassRefPtr<RenderStyle> createInnerTextStyle(const RenderStyle* startStyle) const = 0;
+    virtual LayoutUnit preferredContentWidth(float charWidth) const = 0;
+    virtual LayoutUnit computeControlHeight(LayoutUnit lineHeight, LayoutUnit nonContentHeight) const = 0;
     virtual RenderStyle* textBaseStyle() const = 0;
 
     virtual void updateFromElement();
-    virtual void calcHeight();
-
-    friend class TextIterator;
-    HTMLElement* innerTextElement() const;
-
-    bool m_placeholderVisible;
+    virtual void computeLogicalHeight();
+    virtual RenderObject* layoutSpecialExcludedChild(bool relayoutChildren);
 
 private:
     virtual const char* renderName() const { return "RenderTextControl"; }
     virtual bool isTextControl() const { return true; }
-    virtual void calcPrefWidths();
+    virtual void computePreferredLogicalWidths();
     virtual void removeLeftoverAnonymousBlock(RenderBlock*) { }
-    virtual bool canHaveChildren() const { return false; }
     virtual bool avoidsFloats() const { return true; }
-    void setInnerTextStyle(PassRefPtr<RenderStyle>);
     
-    virtual void addFocusRingRects(Vector<IntRect>&, int tx, int ty);
+    virtual void addFocusRingRects(Vector<IntRect>&, const LayoutPoint&);
 
-    virtual bool canBeProgramaticallyScrolled(bool) const { return true; }
+    virtual bool canBeProgramaticallyScrolled() const { return true; }
 
-    String finishText(Vector<UChar>&) const;
+    virtual bool requiresForcedStyleRecalcPropagation() const { return true; }
 
-    bool m_wasChangedSinceLastChangeEvent;
-    bool m_lastChangeWasUserEdit;
-    RefPtr<TextControlInnerTextElement> m_innerText;
+    static bool isSelectableElement(HTMLElement*, Node*);
 };
 
 inline RenderTextControl* toRenderTextControl(RenderObject* object)

@@ -28,9 +28,8 @@
 #define SQLiteDatabase_h
 
 #include "PlatformString.h"
+#include <wtf/text/CString.h>
 #include <wtf/Threading.h>
-
-#include "WebCoreThread.h"
 
 #if COMPILER(MSVC)
 #pragma warning(disable: 4800)
@@ -50,23 +49,28 @@ extern const int SQLResultOk;
 extern const int SQLResultRow;
 extern const int SQLResultSchema;
 extern const int SQLResultFull;
+extern const int SQLResultInterrupt;
 
-class SQLiteDatabase : public Noncopyable {
+class SQLiteDatabase {
+    WTF_MAKE_NONCOPYABLE(SQLiteDatabase);
     friend class SQLiteTransaction;
 public:
     SQLiteDatabase();
     ~SQLiteDatabase();
 
-    bool open(const String& filename);
+    bool open(const String& filename, bool forWebSQLDatabase = false);
     bool isOpen() const { return m_db; }
     void close();
+    void interrupt();
+    bool isInterrupted();
 
     bool executeCommand(const String&);
     bool returnsAtLeastOneResult(const String&);
     
     bool tableExists(const String&);
     void clearAllTables();
-    void runVacuumCommand();
+    int runVacuumCommand();
+    int runIncrementalVacuumCommand();
     
     bool transactionInProgress() const { return m_transactionInProgress; }
     
@@ -87,6 +91,7 @@ public:
     
     // Gets the number of unused bytes in the database file.
     int64_t freeSpaceSize();
+    int64_t totalSize();
 
     // The SQLite SYNCHRONOUS pragma can be either FULL, NORMAL, or OFF
     // FULL - Any writing calls to the DB block until the data is actually on the disk surface
@@ -104,9 +109,28 @@ public:
     
     void setAuthorizer(PassRefPtr<DatabaseAuthorizer>);
 
-    // (un)locks the database like a mutex
-    void lock();
-    void unlock();
+    Mutex& databaseMutex() { return m_lockingMutex; }
+    bool isAutoCommitOn() const;
+
+    // The SQLite AUTO_VACUUM pragma can be either NONE, FULL, or INCREMENTAL.
+    // NONE - SQLite does not do any vacuuming
+    // FULL - SQLite moves all empty pages to the end of the DB file and truncates
+    //        the file to remove those pages after every transaction. This option
+    //        requires SQLite to store additional information about each page in
+    //        the database file.
+    // INCREMENTAL - SQLite stores extra information for each page in the database
+    //               file, but removes the empty pages only when PRAGMA INCREMANTAL_VACUUM
+    //               is called.
+    enum AutoVacuumPragma { AutoVacuumNone = 0, AutoVacuumFull = 1, AutoVacuumIncremental = 2 };
+    bool turnOnIncrementalAutoVacuum();
+
+    // Set this flag to allow access from multiple threads.  Not all multi-threaded accesses are safe!
+    // See http://www.sqlite.org/cvstrac/wiki?p=MultiThreading for more info.
+#ifndef NDEBUG
+    void disableThreadingChecks();
+#else
+    void disableThreadingChecks() {}
+#endif
 
 private:
     static int authorizerFunction(void*, int, const char*, const char*, const char*, const char*);
@@ -116,18 +140,23 @@ private:
     int pageSize();
     
     sqlite3* m_db;
-    int m_lastError;
     int m_pageSize;
     
     bool m_transactionInProgress;
+    bool m_sharable;
     
     Mutex m_authorizerLock;
     RefPtr<DatabaseAuthorizer> m_authorizer;
 
     Mutex m_lockingMutex;
     ThreadIdentifier m_openingThread;
-    
-}; // class SQLiteDatabase
+
+    Mutex m_databaseClosingMutex;
+    bool m_interrupted;
+
+    int m_openError;
+    CString m_openErrorMessage;
+};
 
 } // namespace WebCore
 

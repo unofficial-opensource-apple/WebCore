@@ -32,6 +32,16 @@
 #include "IntRect.h"
 #include "NotImplemented.h"
 #include "SimpleFontData.h"
+#include "TextRun.h"
+
+#if OS(WINDOWS)
+#include "UniscribeController.h"
+typedef WebCore::UniscribeController ComplexTextController;
+#endif
+
+#if OS(DARWIN)
+#include "mac/ComplexTextController.h"
+#endif
 
 #include <wx/dcclient.h>
 #include "fontprops.h"
@@ -41,7 +51,20 @@ namespace WebCore {
 
 bool Font::canReturnFallbackFontsForComplexText()
 {
+#if OS(WINDOWS) || OS(DARWIN)
+    return true;
+#else
     return false;
+#endif
+}
+
+bool Font::canExpandAroundIdeographsInComplexText()
+{
+#if OS(DARWIN)
+    return true;
+#else
+    return false;
+#endif
 }
 
 void Font::drawGlyphs(GraphicsContext* graphicsContext, const SimpleFontData* font, const GlyphBuffer& glyphBuffer, 
@@ -54,30 +77,120 @@ void Font::drawGlyphs(GraphicsContext* graphicsContext, const SimpleFontData* fo
     // so we've created a function with platform dependent drawing implementations that
     // will hopefully be folded into wx once the API has solidified.
     // see platform/wx/wxcode/<platform> for the implementations.
+    graphicsContext->save();
     drawTextWithSpacing(graphicsContext, font, color, glyphBuffer, from, numGlyphs, point);
+    graphicsContext->restore();
 }
 
-FloatRect Font::selectionRectForComplexText(const TextRun& run, const IntPoint& point, int h, int from, int to) const
+FloatRect Font::selectionRectForComplexText(const TextRun& run, const FloatPoint& point, int h, int from, int to) const
 {
+#if OS(WINDOWS) || OS(DARWIN)
+    ComplexTextController it(this, run);
+    it.advance(from);
+    float beforeWidth = it.runWidthSoFar();
+    it.advance(to);
+    float afterWidth = it.runWidthSoFar();
+
+    // Using roundf() rather than ceilf() for the right edge as a compromise to ensure correct caret positioning
+    if (run.rtl()) {
+#if OS(WINDOWS)
+        it.advance(run.length());
+        float totalWidth = it.runWidthSoFar();
+        return FloatRect(point.x() + floorf(totalWidth - afterWidth), point.y(), roundf(totalWidth - beforeWidth) - floorf(totalWidth - afterWidth), h);
+#else
+        float totalWidth = it.totalWidth();
+        return FloatRect(point.x() + floorf(totalWidth - afterWidth), point.y(), roundf(totalWidth - beforeWidth) - floorf(totalWidth - afterWidth), h);
+#endif
+    } 
+    
+    return FloatRect(point.x() + floorf(beforeWidth), point.y(), roundf(afterWidth) - floorf(beforeWidth), h);
+#else
     notImplemented();
     return FloatRect();
+#endif
 }
 
-void Font::drawComplexText(GraphicsContext* graphicsContext, const TextRun& run, const FloatPoint& point, int from, int to) const
+float Font::getGlyphsAndAdvancesForComplexText(const TextRun& /* run */, int /* from */, int /* to */, GlyphBuffer& /* glyphBuffer */, ForTextEmphasisOrNot /* forTextEmphasis */) const
 {
-    notImplemented();
-}
-
-float Font::floatWidthForComplexText(const TextRun& run, HashSet<const SimpleFontData*>* /* fallbackFonts */, GlyphOverflow*) const
-{
+    // FIXME: Implement this by moving most of the drawComplexText() implementation in here. Set up the
+    // ComplexTextController according to forTextEmphasis.
     notImplemented();
     return 0;
 }
 
-int Font::offsetForPositionForComplexText(const TextRun& run, int x, bool includePartialGlyphs) const
+void Font::drawComplexText(GraphicsContext* context, const TextRun& run, const FloatPoint& point, int from, int to) const
 {
+#if OS(WINDOWS) || OS(DARWIN)
+    // This glyph buffer holds our glyphs + advances + font data for each glyph.
+    GlyphBuffer glyphBuffer;
+
+    float startX = point.x();
+    ComplexTextController controller(this, run);
+    controller.advance(from);
+    float beforeWidth = controller.runWidthSoFar();
+    controller.advance(to, &glyphBuffer);
+    
+    // We couldn't generate any glyphs for the run.  Give up.
+    if (glyphBuffer.isEmpty())
+        return;
+    
+    float afterWidth = controller.runWidthSoFar();
+
+    if (run.rtl()) {
+#if OS(WINDOWS)
+        controller.advance(run.length());
+        startX += controller.runWidthSoFar() - afterWidth;
+#else
+        startX += controller.totalWidth() - afterWidth;
+        for (int i = 0, end = glyphBuffer.size() - 1; i < glyphBuffer.size() / 2; ++i, --end)
+            glyphBuffer.swap(i, end);
+#endif
+    } else
+        startX += beforeWidth;
+
+    // Draw the glyph buffer now at the starting point returned in startX.
+    FloatPoint startPoint(startX, point.y());
+    drawGlyphBuffer(context, run, glyphBuffer, startPoint);
+#else
     notImplemented();
-    return 0;
+#endif
 }
 
+void Font::drawEmphasisMarksForComplexText(GraphicsContext* context, const TextRun& run, const AtomicString& mark, const FloatPoint& point, int from, int to) const
+{
+    GlyphBuffer glyphBuffer;
+    float initialAdvance = getGlyphsAndAdvancesForComplexText(run, from, to, glyphBuffer, ForTextEmphasis);
+
+    if (glyphBuffer.isEmpty())
+        return;
+
+    drawEmphasisMarks(context, run, glyphBuffer, mark, FloatPoint(point.x() + initialAdvance, point.y()));
+}
+
+float Font::floatWidthForComplexText(const TextRun& run, HashSet<const SimpleFontData*>* fallbackFonts, GlyphOverflow*) const
+{
+#if OS(WINDOWS) || OS(DARWIN)
+    ComplexTextController controller(this, run, fallbackFonts);
+#if OS(WINDOWS)
+    controller.advance(run.length());
+    return controller.runWidthSoFar();
+#else
+    return controller.totalWidth();
+#endif
+#else
+    notImplemented();
+    return 0;
+#endif
+}
+
+int Font::offsetForPositionForComplexText(const TextRun& run, float x, bool includePartialGlyphs) const
+{
+#if OS(WINDOWS) || OS(DARWIN)
+    ComplexTextController controller(this, run);
+    return controller.offsetForPosition(x, includePartialGlyphs);
+#else
+    notImplemented();
+    return 0;
+#endif
+}
 }

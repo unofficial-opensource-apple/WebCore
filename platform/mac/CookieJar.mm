@@ -26,15 +26,17 @@
 #import "config.h"
 #import "CookieJar.h"
 
+#if !USE(CFNETWORK)
+
 #import "BlockExceptions.h"
 #import "Cookie.h"
+#import "CookieStorage.h"
+#import "CookieStorageCFNet.h"
 #import "Document.h"
 #import "KURL.h"
+#import "WebCoreSystemInterface.h"
 #import <wtf/RetainPtr.h>
 
-#ifdef BUILDING_ON_TIGER
-typedef unsigned NSUInteger;
-#endif
 
 @interface NSHTTPCookie (WebCoreHTTPOnlyCookies)
 - (BOOL)isHTTPOnly;
@@ -79,8 +81,34 @@ String cookies(const Document*, const KURL& url)
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
 
     NSURL *cookieURL = url;
-    NSArray *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:cookieURL];
+    NSArray *cookies;
+#if USE(CFURLSTORAGESESSIONS)
+    if (RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage())
+        cookies = wkHTTPCookiesForURL(cfCookieStorage.get(), cookieURL);
+    else
+#endif
+        cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:cookieURL];
+
     return [[NSHTTPCookie requestHeaderFieldsWithCookies:filterCookies(cookies).get()] objectForKey:@"Cookie"];
+
+    END_BLOCK_OBJC_EXCEPTIONS;
+    return String();
+}
+
+String cookieRequestHeaderFieldValue(const Document*, const KURL& url)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+
+    NSURL *cookieURL = url;
+    NSArray *cookies;
+#if USE(CFURLSTORAGESESSIONS)
+    if (RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage())
+        cookies = wkHTTPCookiesForURL(cfCookieStorage.get(), cookieURL);
+    else
+#endif
+        cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:cookieURL];
+
+    return [[NSHTTPCookie requestHeaderFieldsWithCookies:cookies] objectForKey:@"Cookie"];
 
     END_BLOCK_OBJC_EXCEPTIONS;
     return String();
@@ -100,10 +128,14 @@ void setCookies(Document* document, const KURL& url, const String& cookieStr)
     String cookieString = cookieStr.contains('=') ? cookieStr : cookieStr + "=";
 
     NSURL *cookieURL = url;    
-    if (![[cookieURL scheme] isEqualToString:@"file"]) {
-    NSArray *cookies = [NSHTTPCookie cookiesWithResponseHeaderFields:[NSDictionary dictionaryWithObject:cookieString forKey:@"Set-Cookie"] forURL:cookieURL];
-    [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookies:filterCookies(cookies).get() forURL:cookieURL mainDocumentURL:document->firstPartyForCookies()];
-    }
+    RetainPtr<NSArray> filteredCookies = filterCookies([NSHTTPCookie cookiesWithResponseHeaderFields:[NSDictionary dictionaryWithObject:cookieString forKey:@"Set-Cookie"] forURL:cookieURL]);
+
+#if USE(CFURLSTORAGESESSIONS)
+    if (RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage())
+        wkSetHTTPCookiesForURL(cfCookieStorage.get(), filteredCookies.get(), cookieURL, document->firstPartyForCookies());
+    else
+#endif
+        [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookies:filteredCookies.get() forURL:cookieURL mainDocumentURL:document->firstPartyForCookies()];
 
     END_BLOCK_OBJC_EXCEPTIONS;
 }
@@ -112,7 +144,14 @@ bool cookiesEnabled(const Document*)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
 
-    NSHTTPCookieAcceptPolicy cookieAcceptPolicy = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookieAcceptPolicy];
+    NSHTTPCookieAcceptPolicy cookieAcceptPolicy;
+#if USE(CFURLSTORAGESESSIONS)
+    if (RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage())
+        cookieAcceptPolicy = wkGetHTTPCookieAcceptPolicy(cfCookieStorage.get());
+    else
+#endif
+        cookieAcceptPolicy = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookieAcceptPolicy];
+
     return cookieAcceptPolicy == NSHTTPCookieAcceptPolicyAlways || cookieAcceptPolicy == NSHTTPCookieAcceptPolicyOnlyFromMainDocumentDomain;
 
     END_BLOCK_OBJC_EXCEPTIONS;
@@ -125,7 +164,13 @@ bool getRawCookies(const Document*, const KURL& url, Vector<Cookie>& rawCookies)
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
 
     NSURL *cookieURL = url;
-    NSArray *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:cookieURL];
+    NSArray *cookies;
+#if USE(CFURLSTORAGESESSIONS)
+    if (RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage())
+        cookies = wkHTTPCookiesForURL(cfCookieStorage.get(), cookieURL);
+    else
+#endif
+        cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:cookieURL];
 
     NSUInteger count = [cookies count];
     rawCookies.reserveCapacity(count);
@@ -152,14 +197,27 @@ void deleteCookie(const Document*, const KURL& url, const String& cookieName)
 
     NSURL *cookieURL = url;
     NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-    NSArray *cookies = [cookieStorage cookiesForURL:cookieURL];
+    NSArray *cookies;
+#if USE(CFURLSTORAGESESSIONS)
+    RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage();
+    if (cfCookieStorage)
+        cookies = wkHTTPCookiesForURL(cfCookieStorage.get(), cookieURL);
+    else
+#endif
+        cookies = [cookieStorage cookiesForURL:cookieURL];
+
     NSString *cookieNameString = (NSString *) cookieName;
 
     NSUInteger count = [cookies count];
     for (NSUInteger i = 0; i < count; ++i) {
         NSHTTPCookie *cookie = (NSHTTPCookie *)[cookies objectAtIndex:i];
         if ([[cookie name] isEqualToString:cookieNameString]) {
-            [cookieStorage deleteCookie:cookie];
+#if USE(CFURLSTORAGESESSIONS)
+            if (cfCookieStorage)
+                wkDeleteHTTPCookie(cfCookieStorage.get(), cookie);
+            else
+#endif
+                [cookieStorage deleteCookie:cookie];
             break;
         }
     }
@@ -167,4 +225,51 @@ void deleteCookie(const Document*, const KURL& url, const String& cookieName)
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
+void getHostnamesWithCookies(HashSet<String>& hostnames)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    
+    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    NSArray *cookies = [cookieStorage cookies];
+    
+    for (NSHTTPCookie* cookie in cookies)
+        hostnames.add([cookie domain]);
+    
+    END_BLOCK_OBJC_EXCEPTIONS;
 }
+
+void deleteCookiesForHostname(const String& hostname)
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    
+    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    NSArray *cookies = [cookieStorage cookies];
+    if (!cookies)
+        return;
+    
+    for (NSHTTPCookie* cookie in cookies) {
+        if (hostname == String([cookie domain]))
+            [cookieStorage deleteCookie:cookie];
+    }
+    
+    END_BLOCK_OBJC_EXCEPTIONS;
+}
+
+void deleteAllCookies()
+{
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    
+    NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+    NSArray *cookies = [cookieStorage cookies];
+    if (!cookies)
+        return;
+    
+    for (NSHTTPCookie* cookie in cookies)
+        [cookieStorage deleteCookie:cookie];
+
+    END_BLOCK_OBJC_EXCEPTIONS;
+}
+
+}
+
+#endif // !USE(CFNETWORK)

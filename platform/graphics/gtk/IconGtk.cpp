@@ -30,12 +30,14 @@
 #include "config.h"
 #include "Icon.h"
 
-#include "CString.h"
 #include "GraphicsContext.h"
 #include "MIMETypeRegistry.h"
-#include "PassRefPtr.h"
+#include "PlatformContextCairo.h"
 
 #include <gtk/gtk.h>
+
+#include <wtf/PassRefPtr.h>
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -87,6 +89,7 @@ static String lookupIconName(String MIMEType)
     return GTK_STOCK_FILE;
 }
 
+// FIXME: Move the code to ChromeClient::iconForFiles().
 PassRefPtr<Icon> Icon::createIconForFiles(const Vector<String>& filenames)
 {
     if (filenames.isEmpty())
@@ -116,7 +119,7 @@ void Icon::paint(GraphicsContext* context, const IntRect& rect)
         return;
 
     // TODO: Scale/clip the image if necessary.
-    cairo_t* cr = context->platformContext();
+    cairo_t* cr = context->platformContext()->cr();
     cairo_save(cr);
     gdk_cairo_set_source_pixbuf(cr, m_icon, rect.x(), rect.y());
     cairo_paint(cr);

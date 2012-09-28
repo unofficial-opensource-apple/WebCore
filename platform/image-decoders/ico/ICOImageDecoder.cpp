@@ -35,6 +35,11 @@
 
 #include "BMPImageReader.h"
 #include "PNGImageDecoder.h"
+#include <wtf/PassOwnPtr.h>
+
+#if PLATFORM(CHROMIUM)
+#include "TraceEvent.h"
+#endif
 
 namespace WebCore {
 
@@ -44,10 +49,14 @@ namespace WebCore {
 static const size_t sizeOfDirectory = 6;
 static const size_t sizeOfDirEntry = 16;
 
-ICOImageDecoder::ICOImageDecoder()
-    : ImageDecoder()
-    , m_allDataReceived(false)
+ICOImageDecoder::ICOImageDecoder(ImageSource::AlphaOption alphaOption,
+                                 ImageSource::GammaAndColorProfileOption gammaAndColorProfileOption)
+    : ImageDecoder(alphaOption, gammaAndColorProfileOption)
     , m_decodedOffset(0)
+{
+}
+
+ICOImageDecoder::~ICOImageDecoder()
 {
 }
 
@@ -57,10 +66,8 @@ void ICOImageDecoder::setData(SharedBuffer* data, bool allDataReceived)
         return;
 
     ImageDecoder::setData(data, allDataReceived);
-    m_allDataReceived = allDataReceived;
 
-    for (BMPReaders::iterator i(m_bmpReaders.begin());
-         i != m_bmpReaders.end(); ++i) {
+    for (BMPReaders::iterator i(m_bmpReaders.begin()); i != m_bmpReaders.end(); ++i) {
         if (*i)
             (*i)->setData(data);
     }
@@ -71,7 +78,7 @@ void ICOImageDecoder::setData(SharedBuffer* data, bool allDataReceived)
 bool ICOImageDecoder::isSizeAvailable()
 {
     if (!ImageDecoder::isSizeAvailable())
-        decodeWithCheckForDataEnded(0, true);
+        decode(0, true);
 
     return ImageDecoder::isSizeAvailable();
 }
@@ -83,73 +90,56 @@ IntSize ICOImageDecoder::size() const
 
 IntSize ICOImageDecoder::frameSizeAtIndex(size_t index) const
 {
-    return (index && (index < m_dirEntries.size())) ?
-        m_dirEntries[index].m_size : size();
+    return (index && (index < m_dirEntries.size())) ? m_dirEntries[index].m_size : size();
 }
 
 bool ICOImageDecoder::setSize(unsigned width, unsigned height)
 {
-    if (m_frameSize.isEmpty())
-        return ImageDecoder::setSize(width, height);
-
     // The size calculated inside the BMPImageReader had better match the one in
     // the icon directory.
-    if (IntSize(width, height) != m_frameSize)
-        setFailed();
-    return !failed();
+    return m_frameSize.isEmpty() ? ImageDecoder::setSize(width, height) : ((IntSize(width, height) == m_frameSize) || setFailed());
 }
 
 size_t ICOImageDecoder::frameCount()
 {
-    decodeWithCheckForDataEnded(0, true);
-    if (m_frameBufferCache.isEmpty())
+    decode(0, true);
+    if (m_frameBufferCache.isEmpty()) {
         m_frameBufferCache.resize(m_dirEntries.size());
+        for (size_t i = 0; i < m_dirEntries.size(); ++i)
+            m_frameBufferCache[i].setPremultiplyAlpha(m_premultiplyAlpha);
+    }
     // CAUTION: We must not resize m_frameBufferCache again after this, as
     // decodeAtIndex() may give a BMPImageReader a pointer to one of the
     // entries.
     return m_frameBufferCache.size();
 }
 
-RGBA32Buffer* ICOImageDecoder::frameBufferAtIndex(size_t index)
+ImageFrame* ICOImageDecoder::frameBufferAtIndex(size_t index)
 {
     // Ensure |index| is valid.
     if (index >= frameCount())
         return 0;
 
-    // Determine the image type, and if this is a BMP, decode.
-    decodeWithCheckForDataEnded(index, false);
+    ImageFrame* buffer = &m_frameBufferCache[index];
+    if (buffer->status() != ImageFrame::FrameComplete)
+        decode(index, false);
+    return buffer;
+}
 
-    // PNGs decode into their own framebuffers, so only use our internal cache
-    // for non-PNGs (BMP or unknown).
-    if (!m_pngDecoders[index])
-        return &m_frameBufferCache[index];
-
-    // Fail if the size the PNGImageDecoder calculated does not match the size
-    // in the directory.
-    if (m_pngDecoders[index]->isSizeAvailable()) {
-        const IntSize pngSize(m_pngDecoders[index]->size());
-        const IconDirectoryEntry& dirEntry = m_dirEntries[index];
-        if (pngSize != dirEntry.m_size) {
-            setFailed();
-            m_pngDecoders[index]->setFailed();
-        }
-    }
-
-    return m_pngDecoders[index]->frameBufferAtIndex(0);
+bool ICOImageDecoder::setFailed()
+{
+    m_bmpReaders.clear();
+    m_pngDecoders.clear();
+    return ImageDecoder::setFailed();
 }
 
 // static
-bool ICOImageDecoder::compareEntries(const IconDirectoryEntry& a,
-                                     const IconDirectoryEntry& b)
+bool ICOImageDecoder::compareEntries(const IconDirectoryEntry& a, const IconDirectoryEntry& b)
 {
-    // Larger icons are better.
+    // Larger icons are better.  After that, higher bit-depth icons are better.
     const int aEntryArea = a.m_size.width() * a.m_size.height();
     const int bEntryArea = b.m_size.width() * b.m_size.height();
-    if (aEntryArea != bEntryArea)
-        return (aEntryArea > bEntryArea);
-
-    // Higher bit-depth icons are better.
-    return (a.m_bitCount > b.m_bitCount);
+    return (aEntryArea == bEntryArea) ? (a.m_bitCount > b.m_bitCount) : (aEntryArea > bEntryArea);
 }
 
 void ICOImageDecoder::setDataForPNGDecoderAtIndex(size_t index)
@@ -161,22 +151,29 @@ void ICOImageDecoder::setDataForPNGDecoderAtIndex(size_t index)
     // Copy out PNG data to a separate vector and send to the PNG decoder.
     // FIXME: Save this copy by making the PNG decoder able to take an
     // optional offset.
-    RefPtr<SharedBuffer> pngData(
-        SharedBuffer::create(&m_data->data()[dirEntry.m_imageOffset],
-                             m_data->size() - dirEntry.m_imageOffset));
-    m_pngDecoders[index]->setData(pngData.get(), m_allDataReceived);
+    RefPtr<SharedBuffer> pngData(SharedBuffer::create(&m_data->data()[dirEntry.m_imageOffset], m_data->size() - dirEntry.m_imageOffset));
+    m_pngDecoders[index]->setData(pngData.get(), isAllDataReceived());
 }
 
-void ICOImageDecoder::decodeWithCheckForDataEnded(size_t index, bool onlySize)
+void ICOImageDecoder::decode(size_t index, bool onlySize)
 {
+#if PLATFORM(CHROMIUM)
+    TRACE_EVENT("ICOImageDecoder::decode", this, 0);
+#endif
     if (failed())
         return;
 
     // If we couldn't decode the image but we've received all the data, decoding
     // has failed.
-    if ((!decodeDirectory() || (!onlySize && !decodeAtIndex(index)))
-        && m_allDataReceived)
+    if ((!decodeDirectory() || (!onlySize && !decodeAtIndex(index))) && isAllDataReceived())
         setFailed();
+    // If we're done decoding this frame, we don't need the BMPImageReader or
+    // PNGImageDecoder anymore.  (If we failed, these have already been
+    // cleared.)
+    else if ((m_frameBufferCache.size() > index) && (m_frameBufferCache[index].status() == ImageFrame::FrameComplete)) {
+        m_bmpReaders[index].clear();
+        m_pngDecoders[index].clear();
+    }
 }
 
 bool ICOImageDecoder::decodeDirectory()
@@ -186,45 +183,44 @@ bool ICOImageDecoder::decodeDirectory()
         return false;
 
     // Read and process directory entries.
-    return (m_decodedOffset >=
-            (sizeOfDirectory + (m_dirEntries.size() * sizeOfDirEntry)))
-        || processDirectoryEntries();
+    return (m_decodedOffset >= (sizeOfDirectory + (m_dirEntries.size() * sizeOfDirEntry))) || processDirectoryEntries();
 }
 
 bool ICOImageDecoder::decodeAtIndex(size_t index)
 {
     ASSERT(index < m_dirEntries.size());
     const IconDirectoryEntry& dirEntry = m_dirEntries[index];
-    if (!m_bmpReaders[index] && !m_pngDecoders[index]) {
-        // Image type unknown.
-        const ImageType imageType = imageTypeAtIndex(index);
-        if (imageType == BMP) {
+    const ImageType imageType = imageTypeAtIndex(index);
+    if (imageType == Unknown)
+        return false; // Not enough data to determine image type yet.
+
+    if (imageType == BMP) {
+        if (!m_bmpReaders[index]) {
             // We need to have already sized m_frameBufferCache before this, and
             // we must not resize it again later (see caution in frameCount()).
             ASSERT(m_frameBufferCache.size() == m_dirEntries.size());
-            m_bmpReaders[index].set(
-                new BMPImageReader(this, dirEntry.m_imageOffset, 0, true));
+            m_bmpReaders[index] = adoptPtr(new BMPImageReader(this, dirEntry.m_imageOffset, 0, true));
             m_bmpReaders[index]->setData(m_data.get());
             m_bmpReaders[index]->setBuffer(&m_frameBufferCache[index]);
-        } else if (imageType == PNG) {
-            m_pngDecoders[index].set(new PNGImageDecoder());
-            setDataForPNGDecoderAtIndex(index);
-        } else {
-            // Not enough data to determine image type yet.
-            return false;
         }
-    }
-
-    if (m_bmpReaders[index]) {
         m_frameSize = dirEntry.m_size;
         bool result = m_bmpReaders[index]->decodeBMP(false);
         m_frameSize = IntSize();
         return result;
     }
 
-    // For PNGs, we're now done; further decoding will happen when calling
-    // frameBufferAtIndex() on the PNG decoder.
-    return true;
+    if (!m_pngDecoders[index]) {
+        m_pngDecoders[index] = adoptPtr(
+            new PNGImageDecoder(m_premultiplyAlpha ? ImageSource::AlphaPremultiplied : ImageSource::AlphaNotPremultiplied,
+                                m_ignoreGammaAndColorProfile ? ImageSource::GammaAndColorProfileIgnored : ImageSource::GammaAndColorProfileApplied));
+        setDataForPNGDecoderAtIndex(index);
+    }
+    // Fail if the size the PNGImageDecoder calculated does not match the size
+    // in the directory.
+    if (m_pngDecoders[index]->isSizeAvailable() && (m_pngDecoders[index]->size() != dirEntry.m_size))
+        return setFailed();
+    m_frameBufferCache[index] = *m_pngDecoders[index]->frameBufferAtIndex(0);
+    return !m_pngDecoders[index]->failed() || setFailed();
 }
 
 bool ICOImageDecoder::processDirectory()
@@ -243,10 +239,8 @@ bool ICOImageDecoder::processDirectory()
         ICON = 1,
         CURSOR = 2,
     };
-    if (((fileType != ICON) && (fileType != CURSOR)) || (!idCount)) {
-        setFailed();
-        return false;
-    }
+    if (((fileType != ICON) && (fileType != CURSOR)) || (!idCount))
+        return setFailed();
 
     // Enlarge member vectors to hold all the entries.
     m_dirEntries.resize(idCount);
@@ -259,22 +253,16 @@ bool ICOImageDecoder::processDirectoryEntries()
 {
     // Read directory entries.
     ASSERT(m_decodedOffset == sizeOfDirectory);
-    if ((m_decodedOffset > m_data->size())
-        || ((m_data->size() - m_decodedOffset) <
-            (m_dirEntries.size() * sizeOfDirEntry)))
+    if ((m_decodedOffset > m_data->size()) || ((m_data->size() - m_decodedOffset) < (m_dirEntries.size() * sizeOfDirEntry)))
         return false;
-    for (IconDirectoryEntries::iterator i(m_dirEntries.begin());
-         i != m_dirEntries.end(); ++i)
+    for (IconDirectoryEntries::iterator i(m_dirEntries.begin()); i != m_dirEntries.end(); ++i)
         *i = readDirectoryEntry();  // Updates m_decodedOffset.
 
     // Make sure the specified image offsets are past the end of the directory
     // entries.
-    for (IconDirectoryEntries::iterator i(m_dirEntries.begin());
-         i != m_dirEntries.end(); ++i) {
-        if (i->m_imageOffset < m_decodedOffset) {
-            setFailed();
-            return false;
-        }
+    for (IconDirectoryEntries::iterator i(m_dirEntries.begin()); i != m_dirEntries.end(); ++i) {
+        if (i->m_imageOffset < m_decodedOffset)
+            return setFailed();
     }
 
     // Arrange frames in decreasing quality order.
@@ -282,8 +270,9 @@ bool ICOImageDecoder::processDirectoryEntries()
 
     // The image size is the size of the largest entry.
     const IconDirectoryEntry& dirEntry = m_dirEntries.first();
-    setSize(dirEntry.m_size.width(), dirEntry.m_size.height());
-    return true;
+    // Technically, this next call shouldn't be able to fail, since the width
+    // and height here are each <= 256, and |m_frameSize| is empty.
+    return setSize(dirEntry.m_size.width(), dirEntry.m_size.height());
 }
 
 ICOImageDecoder::IconDirectoryEntry ICOImageDecoder::readDirectoryEntry()
@@ -309,8 +298,7 @@ ICOImageDecoder::IconDirectoryEntry ICOImageDecoder::readDirectoryEntry()
     // this isn't quite what the bitmap info header says later, as we only use
     // this value to determine which icon entry is best.
     if (!entry.m_bitCount) {
-        int colorCount =
-            static_cast<uint8_t>(m_data->data()[m_decodedOffset + 2]);
+        int colorCount = static_cast<uint8_t>(m_data->data()[m_decodedOffset + 2]);
         if (!colorCount)
             colorCount = 256;  // Vague in the spec, needed by real-world icons.
         for (--colorCount; colorCount; colorCount >>= 1)

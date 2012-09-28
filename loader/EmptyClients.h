@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2006 Eric Seidel (eric@webkit.org)
- * Copyright (C) 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,19 +30,34 @@
 
 #include "ChromeClient.h"
 #include "ContextMenuClient.h"
-#include "Console.h"
+#include "DeviceMotionClient.h"
+#include "DeviceOrientationClient.h"
 #include "DocumentLoader.h"
 #include "DragClient.h"
 #include "EditCommand.h"
 #include "EditorClient.h"
+#include "TextCheckerClient.h"
 #include "FloatRect.h"
 #include "FocusDirection.h"
-#include "FormState.h"
 #include "FrameLoaderClient.h"
+#include "FrameNetworkingContext.h"
 #include "InspectorClient.h"
-#include "PluginHalterClient.h"
+#include "Page.h"
+#include "PopupMenu.h"
 #include "ResourceError.h"
-#include "SharedBuffer.h"
+#include "SearchPopupMenu.h"
+
+#if USE(V8)
+#include <v8.h>
+#endif
+
+#if ENABLE(INPUT_TYPE_COLOR)
+#include "ColorChooser.h"
+#endif
+
+#if ENABLE(WEB_INTENTS)
+#include "IntentRequest.h"
+#endif
 
 /*
  This file holds empty Client stubs for use by WebCore.
@@ -58,17 +74,37 @@
 
 namespace WebCore {
 
+class GraphicsContext3D;
+
+class EmptyPopupMenu : public PopupMenu {
+public:
+    virtual void show(const IntRect&, FrameView*, int) {}
+    virtual void hide() {}
+    virtual void updateFromElement() {}
+    virtual void disconnectClient() {}
+};
+
+class EmptySearchPopupMenu : public SearchPopupMenu {
+public:
+    virtual PopupMenu* popupMenu() { return m_popup.get(); }
+    virtual void saveRecentSearches(const AtomicString&, const Vector<String>&) {}
+    virtual void loadRecentSearches(const AtomicString&, Vector<String>&) {}
+    virtual bool enabled() { return false; }
+
+private:
+    RefPtr<EmptyPopupMenu> m_popup;
+};
+
 class EmptyChromeClient : public ChromeClient {
 public:
     virtual ~EmptyChromeClient() { }
     virtual void chromeDestroyed() { }
 
+    virtual void* webView() const { return 0; }
     virtual void setWindowRect(const FloatRect&) { }
     virtual FloatRect windowRect() { return FloatRect(); }
 
     virtual FloatRect pageRect() { return FloatRect(); }
-
-    virtual float scaleFactor() { return 1.f; }
 
     virtual void focus() { }
     virtual void unfocus() { }
@@ -77,8 +113,9 @@ public:
     virtual void takeFocus(FocusDirection) { }
 
     virtual void focusedNodeChanged(Node*) { }
+    virtual void focusedFrameChanged(Frame*) { }
 
-    virtual Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&) { return 0; }
+    virtual Page* createWindow(Frame*, const FrameLoadRequest&, const WindowFeatures&, const NavigationAction&) { return 0; }
     virtual void show() { }
 
     virtual bool canRunModal() { return false; }
@@ -110,19 +147,39 @@ public:
     virtual bool runJavaScriptPrompt(Frame*, const String&, const String&, String&) { return false; }
     virtual bool shouldInterruptJavaScript() { return false; }
 
+    virtual bool selectItemWritingDirectionIsNatural() { return false; }
+    virtual bool selectItemAlignmentFollowsMenuWritingDirection() { return false; }
+    virtual bool hasOpenedPopup() const OVERRIDE { return false; }
+    virtual PassRefPtr<PopupMenu> createPopupMenu(PopupMenuClient*) const { return adoptRef(new EmptyPopupMenu()); }
+    virtual PassRefPtr<SearchPopupMenu> createSearchPopupMenu(PopupMenuClient*) const { return adoptRef(new EmptySearchPopupMenu()); }
+#if ENABLE(PAGE_POPUP)
+    virtual PagePopup* openPagePopup(PagePopupClient*, const IntRect&) OVERRIDE { return 0; }
+    virtual void closePagePopup(PagePopup*) OVERRIDE { }
+#endif
+
+#if ENABLE(REGISTER_PROTOCOL_HANDLER)
+    virtual void registerProtocolHandler(const String&, const String&, const String&, const String&) { }
+#endif
+
     virtual void setStatusbarText(const String&) { }
 
-    virtual bool tabsToLinks() const { return false; }
+    virtual KeyboardUIMode keyboardUIMode() { return KeyboardAccessDefault; }
 
     virtual IntRect windowResizerRect() const { return IntRect(); }
-    virtual void addToDirtyRegion(const IntRect&) { }
-    virtual void scrollBackingStore(int, int, const IntRect&, const IntRect&) { }
-    virtual void updateBackingStore() { }
 
-    virtual void repaint(const IntRect&, bool, bool, bool) { }
+    virtual void invalidateRootView(const IntRect&, bool) OVERRIDE { }
+    virtual void invalidateContentsAndRootView(const IntRect&, bool) OVERRIDE { }
+    virtual void invalidateContentsForSlowScroll(const IntRect&, bool) OVERRIDE { }
     virtual void scroll(const IntSize&, const IntRect&, const IntRect&) { }
-    virtual IntPoint screenToWindow(const IntPoint& p) const { return p; }
-    virtual IntRect windowToScreen(const IntRect& r) const { return r; }
+#if USE(TILED_BACKING_STORE)
+    virtual void delegatedScrollRequested(const IntPoint&) { }
+#endif
+#if ENABLE(REQUEST_ANIMATION_FRAME) && !USE(REQUEST_ANIMATION_FRAME_TIMER)
+    virtual void scheduleAnimation() { }
+#endif
+
+    virtual IntPoint screenToRootView(const IntPoint& p) const OVERRIDE { return p; }
+    virtual IntRect rootViewToScreen(const IntRect& r) const OVERRIDE { return r; }
     virtual PlatformPageClient platformPageClient() const { return 0; }
     virtual void contentsSizeChanged(Frame*, const IntSize&) const { }
 
@@ -133,54 +190,78 @@ public:
 
     virtual void print(Frame*) { }
 
-#if ENABLE(DATABASE)
+#if ENABLE(SQL_DATABASE)
     virtual void exceededDatabaseQuota(Frame*, const String&) { }
 #endif
 
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
     virtual void reachedMaxAppCacheSize(int64_t) { }
+    virtual void reachedApplicationCacheOriginQuota(SecurityOrigin*, int64_t) { }
+
+#if ENABLE(DIRECTORY_UPLOAD)
+    virtual void enumerateChosenDirectory(FileChooser*) { }
 #endif
 
-#if ENABLE(NOTIFICATIONS)
-    virtual NotificationPresenter* notificationPresenter() const { return 0; }
+#if ENABLE(INPUT_TYPE_COLOR)
+    virtual PassOwnPtr<ColorChooser> createColorChooser(ColorChooserClient*, const Color&) { return nullptr; }
 #endif
 
     virtual void runOpenPanel(Frame*, PassRefPtr<FileChooser>) { }
+    virtual void loadIconForFiles(const Vector<String>&, FileIconLoader*) { }
 
     virtual void formStateDidChange(const Node*) { }
 
-    virtual void formDidFocus(const Node*) { }
-    virtual void formDidBlur(const Node*) { }
-
-    virtual PassOwnPtr<HTMLParserQuirks> createHTMLParserQuirks() { return 0; }
+    virtual void elementDidFocus(const Node*) { }
+    virtual void elementDidBlur(const Node*) { }
 
 
-    virtual void scrollRectIntoView(const IntRect&, const ScrollView*) const {}
-
-    virtual void requestGeolocationPermissionForFrame(Frame*, Geolocation*) {}
+    virtual void scrollRectIntoView(const IntRect&) const { }
 
 #if USE(ACCELERATED_COMPOSITING)
-    virtual void attachRootGraphicsLayer(Frame*, GraphicsLayer*) {};
-    virtual void setNeedsOneShotDrawingSynchronization() {};
-    virtual void scheduleCompositingLayerSync() {};
+    virtual void attachRootGraphicsLayer(Frame*, GraphicsLayer*) {}
+    virtual void setNeedsOneShotDrawingSynchronization() {}
+    virtual void scheduleCompositingLayerSync() {}
 #endif
 
-    virtual void didPreventDefaultForEvent() { }
-    virtual void didReceiveDocType(Frame*) { }
-    virtual void setNeedsScrollNotifications(Frame*, bool) { }
-    virtual void observedContentChange(Frame*) { }
-    virtual void clearContentChangeObservers(Frame*) { }
-    virtual void didReceiveViewportArguments(Frame*, const ViewportArguments&) { }
-    virtual void notifyRevealedSelectionByScrollingFrame(Frame*) { }
-    virtual bool isStopping() { return false; }
-    virtual void didLayout() { }
+#if PLATFORM(WIN)
+    virtual void setLastSetCursorToCurrentCursor() { }
+#endif
+    virtual void didPreventDefaultForEvent() OVERRIDE { }
+    virtual void didReceiveDocType(Frame*) OVERRIDE { }
+    virtual void setNeedsScrollNotifications(Frame*, bool) OVERRIDE { }
+    virtual void observedContentChange(Frame*) OVERRIDE { }
+    virtual void clearContentChangeObservers(Frame*) OVERRIDE { }
+    virtual void notifyRevealedSelectionByScrollingFrame(Frame*) OVERRIDE { }
+    virtual bool isStopping() OVERRIDE { return false; }
+    virtual void didLayout(LayoutType) OVERRIDE { }
+    virtual void didStartOverflowScroll() OVERRIDE { }
+    virtual void didEndOverflowScroll() OVERRIDE { }
 
-    virtual void suppressFormNotifications() { }
-    virtual void restoreFormNotifications() { }
+    virtual void suppressFormNotifications() OVERRIDE { }
+    virtual void restoreFormNotifications() OVERRIDE { }
+
+    virtual void willSyncCompositingLayers() OVERRIDE { }
+    virtual void didSyncCompositingLayers() OVERRIDE { }
+
+    virtual void addOrUpdateFixedPositionLayer(PlatformLayer*, ScrollingLayerSizing, const FloatRect&, const FloatSize&, bool) OVERRIDE { }
+    virtual void removeFixedPositionLayer(PlatformLayer*, bool) OVERRIDE { }
+    virtual void removeAllFixedPositionLayers() OVERRIDE { }
+
+    virtual void addOrUpdateScrollingLayer(Node*, PlatformLayer*, PlatformLayer*, const IntSize&, bool, bool) OVERRIDE { }
+    virtual void removeScrollingLayer(Node*, PlatformLayer*, PlatformLayer*) OVERRIDE { }
+
+    virtual void webAppOrientationsUpdated() OVERRIDE { };
+    virtual void needTouchEvents(bool) { }
+    
+    virtual void numWheelEventHandlersChanged(unsigned) OVERRIDE { }
+    virtual void numTouchEventHandlersChanged(unsigned) OVERRIDE { }
+    
+    virtual bool shouldRubberBandInDirection(WebCore::ScrollDirection) const { return false; }
 };
 
-class EmptyFrameLoaderClient : public FrameLoaderClient, public Noncopyable {
+class EmptyFrameLoaderClient : public FrameLoaderClient {
+    WTF_MAKE_NONCOPYABLE(EmptyFrameLoaderClient); WTF_MAKE_FAST_ALLOCATED;
 public:
+    EmptyFrameLoaderClient() { }
     virtual ~EmptyFrameLoaderClient() {  }
     virtual void frameLoaderDestroyed() { }
 
@@ -188,7 +269,7 @@ public:
 
     virtual void makeRepresentation(DocumentLoader*) { }
     virtual void forceLayout() { }
-    virtual void forceLayoutWithoutRecalculatingStyles() { }
+    virtual void forceLayoutWithoutRecalculatingStyles() OVERRIDE { }
     virtual void forceLayoutForNonHTML() { }
 
     virtual void setCopiesOnScroll() { }
@@ -196,23 +277,24 @@ public:
     virtual void detachedFromParent2() { }
     virtual void detachedFromParent3() { }
 
-    virtual void download(ResourceHandle*, const ResourceRequest&, const ResourceRequest&, const ResourceResponse&) { }
+    virtual void download(ResourceHandle*, const ResourceRequest&, const ResourceResponse&) { }
 
     virtual void assignIdentifierToInitialRequest(unsigned long, DocumentLoader*, const ResourceRequest&) { }
     virtual bool shouldUseCredentialStorage(DocumentLoader*, unsigned long) { return false; }
     virtual void dispatchWillSendRequest(DocumentLoader*, unsigned long, ResourceRequest&, const ResourceResponse&) { }
     virtual void dispatchDidReceiveAuthenticationChallenge(DocumentLoader*, unsigned long, const AuthenticationChallenge&) { }
     virtual void dispatchDidCancelAuthenticationChallenge(DocumentLoader*, unsigned long, const AuthenticationChallenge&) { }
-
+#if USE(PROTECTION_SPACE_AUTH_CALLBACK)
     virtual bool canAuthenticateAgainstProtectionSpace(DocumentLoader*, unsigned long, const ProtectionSpace&) { return false; }
-    virtual CFDictionaryRef connectionProperties(DocumentLoader*, unsigned long) { return 0; }
+#endif
+
+    virtual CFDictionaryRef connectionProperties(DocumentLoader*, unsigned long) OVERRIDE { return 0; }
 
     virtual void dispatchDidReceiveResponse(DocumentLoader*, unsigned long, const ResourceResponse&) { }
     virtual void dispatchDidReceiveContentLength(DocumentLoader*, unsigned long, int) { }
     virtual void dispatchDidFinishLoading(DocumentLoader*, unsigned long) { }
     virtual void dispatchDidFailLoading(DocumentLoader*, unsigned long, const ResourceError&) { }
     virtual bool dispatchDidLoadResourceFromMemoryCache(DocumentLoader*, const ResourceRequest&, const ResourceResponse&, int) { return false; }
-    virtual void dispatchDidLoadResourceByXMLHttpRequest(unsigned long, const ScriptString&) { }
 
     virtual void dispatchDidHandleOnloadEvents() { }
     virtual void dispatchDidReceiveServerRedirectForProvisionalLoad() { }
@@ -225,7 +307,8 @@ public:
     virtual void dispatchWillClose() { }
     virtual void dispatchDidReceiveIcon() { }
     virtual void dispatchDidStartProvisionalLoad() { }
-    virtual void dispatchDidReceiveTitle(const String&) { }
+    virtual void dispatchDidReceiveTitle(const StringWithDirection&) { }
+    virtual void dispatchDidChangeIcons(IconType) { }
     virtual void dispatchDidCommitLoad() { }
     virtual void dispatchDidFailProvisionalLoad(const ResourceError&) { }
     virtual void dispatchDidFailLoad(const ResourceError&) { }
@@ -233,20 +316,21 @@ public:
     virtual void dispatchDidFinishLoad() { }
     virtual void dispatchDidFirstLayout() { }
     virtual void dispatchDidFirstVisuallyNonEmptyLayout() { }
+    virtual void dispatchDidNewFirstVisuallyNonEmptyLayout() { }
 
-    virtual Frame* dispatchCreatePage() { return 0; }
+    virtual Frame* dispatchCreatePage(const NavigationAction&) { return 0; }
     virtual void dispatchShow() { }
 
-    virtual void dispatchDecidePolicyForMIMEType(FramePolicyFunction, const String&, const ResourceRequest&) { }
+    virtual void dispatchDecidePolicyForResponse(FramePolicyFunction, const ResourceResponse&, const ResourceRequest&) { }
     virtual void dispatchDecidePolicyForNewWindowAction(FramePolicyFunction, const NavigationAction&, const ResourceRequest&, PassRefPtr<FormState>, const String&) { }
     virtual void dispatchDecidePolicyForNavigationAction(FramePolicyFunction, const NavigationAction&, const ResourceRequest&, PassRefPtr<FormState>) { }
     virtual void cancelPolicyCheck() { }
 
     virtual void dispatchUnableToImplementPolicy(const ResourceError&) { }
 
+    virtual void dispatchWillSendSubmitEvent(PassRefPtr<FormState>) { }
     virtual void dispatchWillSubmitForm(FramePolicyFunction, PassRefPtr<FormState>) { }
 
-    virtual void dispatchDidLoadMainResource(DocumentLoader*) { }
     virtual void revertToProvisionalState(DocumentLoader*) { }
     virtual void setMainDocumentError(DocumentLoader*, const ResourceError&) { }
 
@@ -258,7 +342,7 @@ public:
 
     virtual void setMainFrameDocumentReady(bool) { }
 
-    virtual void startDownload(const ResourceRequest&) { }
+    virtual void startDownload(const ResourceRequest&, const String& suggestedName = String()) { UNUSED_PARAM(suggestedName); }
 
     virtual void willChangeTitle(DocumentLoader*) { }
     virtual void didChangeTitle(DocumentLoader*) { }
@@ -269,7 +353,7 @@ public:
     virtual ResourceError cancelledError(const ResourceRequest&) { ResourceError error("", 0, "", ""); error.setIsCancellation(true); return error; }
     virtual ResourceError blockedError(const ResourceRequest&) { return ResourceError("", 0, "", ""); }
     virtual ResourceError cannotShowURLError(const ResourceRequest&) { return ResourceError("", 0, "", ""); }
-    virtual ResourceError interruptForPolicyChangeError(const ResourceRequest&) { return ResourceError("", 0, "", ""); }
+    virtual ResourceError interruptedForPolicyChangeError(const ResourceRequest&) { return ResourceError("", 0, "", ""); }
 
     virtual ResourceError cannotShowMIMETypeError(const ResourceResponse&) { return ResourceError("", 0, "", ""); }
     virtual ResourceError fileDoesNotExistError(const ResourceResponse&) { return ResourceError("", 0, "", ""); }
@@ -279,6 +363,7 @@ public:
 
     virtual bool canHandleRequest(const ResourceRequest&) const { return false; }
     virtual bool canShowMIMEType(const String&) const { return false; }
+    virtual bool canShowMIMETypeAsHTML(const String&) const { return false; }
     virtual bool representationExistsForURLScheme(const String&) const { return false; }
     virtual String generatedMIMETypeForURLScheme(const String&) const { return ""; }
 
@@ -290,24 +375,30 @@ public:
     virtual void prepareForDataSourceReplacement() { }
 
     virtual PassRefPtr<DocumentLoader> createDocumentLoader(const ResourceRequest& request, const SubstituteData& substituteData) { return DocumentLoader::create(request, substituteData); }
-    virtual void setTitle(const String&, const KURL&) { }
+    virtual void setTitle(const StringWithDirection&, const KURL&) { }
 
     virtual String userAgent(const KURL&) { return ""; }
 
     virtual void savePlatformDataToCachedFrame(CachedFrame*) { }
     virtual void transitionToCommittedFromCachedFrame(CachedFrame*) { }
+    virtual void didRestoreFrameHierarchyForCachedFrame() OVERRIDE { }
     virtual void transitionToCommittedForNewPage() { }    
+
+    virtual void didSaveToPageCache() { }
+    virtual void didRestoreFromPageCache() { }
+
+    virtual void dispatchDidBecomeFrameset(bool) { }
 
     virtual void updateGlobalHistory() { }
     virtual void updateGlobalHistoryRedirectLinks() { }
     virtual bool shouldGoToHistoryItem(HistoryItem*) const { return false; }
-    virtual void dispatchDidAddBackForwardItem(HistoryItem*) const { }
-    virtual void dispatchDidRemoveBackForwardItem(HistoryItem*) const { };
-    virtual void dispatchDidChangeBackForwardIndex() const { }
+    virtual bool shouldStopLoadingForHistoryItem(HistoryItem*) const { return false; }
+    virtual void updateGlobalHistoryItemForPage() { }
     virtual void saveViewStateToItem(HistoryItem*) { }
     virtual bool canCachePage() const { return false; }
     virtual void didDisplayInsecureContent() { }
-    virtual void didRunInsecureContent(SecurityOrigin*) { }
+    virtual void didRunInsecureContent(SecurityOrigin*, const KURL&) { }
+    virtual void didDetectXSS(const KURL&, bool) { }
     virtual PassRefPtr<Frame> createFrame(const KURL&, const String&, HTMLFrameOwnerElement*, const String&, bool, int, int) { return 0; }
     virtual PassRefPtr<Widget> createPlugin(const IntSize&, HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool) { return 0; }
     virtual PassRefPtr<Widget> createJavaAppletWidget(const IntSize&, HTMLAppletElement*, const KURL&, const Vector<String>&, const Vector<String>&) { return 0; }
@@ -317,7 +408,7 @@ public:
     virtual void showMediaPlayerProxyPlugin(Widget*) { }
 #endif
 
-    virtual ObjectContentType objectContentType(const KURL&, const String&) { return ObjectContentType(); }
+    virtual ObjectContentType objectContentType(const KURL&, const String&, bool) { return ObjectContentType(); }
     virtual String overrideMediaType() const { return String(); }
 
     virtual void redirectDataToPlugin(Widget*) { }
@@ -328,22 +419,47 @@ public:
     virtual void registerForIconNotification(bool) { }
 
 #if USE(V8)
-    virtual void didCreateScriptContextForFrame() { }
-    virtual void didDestroyScriptContextForFrame() { }
-    virtual void didCreateIsolatedScriptContext() { }
+    virtual void didCreateScriptContext(v8::Handle<v8::Context>, int extensionGroup, int worldId) { }
+    virtual void willReleaseScriptContext(v8::Handle<v8::Context>, int worldId) { }
+    virtual bool allowScriptExtension(const String& extensionName, int extensionGroup, int worldId) { return false; }
 #endif
 
 #if PLATFORM(MAC)
+    virtual RemoteAXObjectRef accessibilityRemoteObject() { return 0; }
     virtual NSCachedURLResponse* willCacheResponse(DocumentLoader*, unsigned long, NSCachedURLResponse* response) const { return response; }
 #endif
-#if USE(CFNETWORK)
+#if PLATFORM(WIN) && USE(CFNETWORK)
+    // FIXME: Windows should use willCacheResponse - <https://bugs.webkit.org/show_bug.cgi?id=57257>.
     virtual bool shouldCacheResponse(DocumentLoader*, unsigned long, const ResourceResponse&, const unsigned char*, unsigned long long) { return true; }
 #endif
 
+    virtual PassRefPtr<FrameNetworkingContext> createNetworkingContext() { return PassRefPtr<FrameNetworkingContext>(); }
+
+#if ENABLE(WEB_INTENTS)
+    virtual void dispatchIntent(PassRefPtr<IntentRequest>) { }
+#endif
 };
 
-class EmptyEditorClient : public EditorClient, public Noncopyable {
+class EmptyTextCheckerClient : public TextCheckerClient {
 public:
+    virtual void ignoreWordInSpellDocument(const String&) { }
+    virtual void learnWord(const String&) { }
+    virtual void checkSpellingOfString(const UChar*, int, int*, int*) { }
+    virtual String getAutoCorrectSuggestionForMisspelledWord(const String&) { return String(); }
+    virtual void checkGrammarOfString(const UChar*, int, Vector<GrammarDetail>&, int*, int*) { }
+
+#if USE(UNIFIED_TEXT_CHECKING)
+    virtual void checkTextOfParagraph(const UChar*, int, TextCheckingTypeMask, Vector<TextCheckingResult>&) { };
+#endif
+
+    virtual void getGuessesForWord(const String&, const String&, Vector<String>&) { }
+    virtual void requestCheckingOfString(SpellChecker*, const TextCheckingRequest&) { }
+};
+
+class EmptyEditorClient : public EditorClient {
+    WTF_MAKE_NONCOPYABLE(EmptyEditorClient); WTF_MAKE_FAST_ALLOCATED;
+public:
+    EmptyEditorClient() { }
     virtual ~EmptyEditorClient() { }
     virtual void pageDestroyed() { }
 
@@ -363,29 +479,25 @@ public:
     virtual bool shouldBeginEditing(Range*) { return false; }
     virtual bool shouldEndEditing(Range*) { return false; }
     virtual bool shouldInsertNode(Node*, Range*, EditorInsertAction) { return false; }
-    //  virtual bool shouldInsertNode(Node*, Range* replacingRange, WebViewInsertAction) { return false; }
     virtual bool shouldInsertText(const String&, Range*, EditorInsertAction) { return false; }
     virtual bool shouldChangeSelectedRange(Range*, Range*, EAffinity, bool) { return false; }
 
-    virtual bool shouldApplyStyle(CSSStyleDeclaration*, Range*) { return false; }
+    virtual bool shouldApplyStyle(StylePropertySet*, Range*) { return false; }
     virtual bool shouldMoveRangeAfterDelete(Range*, Range*) { return false; }
-    //  virtual bool shouldChangeTypingStyle(CSSStyleDeclaration* fromStyle, CSSStyleDeclaration* toStyle) { return false; }
-    //  virtual bool doCommandBySelector(SEL selector) { return false; }
-    //
+
     virtual void didBeginEditing() { }
     virtual void respondToChangedContents() { }
-    virtual void respondToChangedSelection() { }
+    virtual void respondToChangedSelection(Frame*) { }
     virtual void didEndEditing() { }
     virtual void didWriteSelectionToPasteboard() { }
     virtual void didSetSelectionTypesForPasteboard() { }
-    //  virtual void webViewDidChangeTypingStyle:(NSNotification *)notification { }
-    //  virtual void webViewDidChangeSelection:(NSNotification *)notification { }
-    //  virtual NSUndoManager* undoManagerForWebView:(WebView *)webView { return 0; }
 
-    virtual void registerCommandForUndo(PassRefPtr<EditCommand>) { }
-    virtual void registerCommandForRedo(PassRefPtr<EditCommand>) { }
+    virtual void registerUndoStep(PassRefPtr<UndoStep>) { }
+    virtual void registerRedoStep(PassRefPtr<UndoStep>) { }
     virtual void clearUndoRedoOperations() { }
 
+    virtual bool canCopyCut(Frame*, bool defaultValue) const { return defaultValue; }
+    virtual bool canPaste(Frame*, bool defaultValue) const { return defaultValue; }
     virtual bool canUndo() const { return false; }
     virtual bool canRedo() const { return false; }
 
@@ -401,23 +513,35 @@ public:
     virtual bool doTextFieldCommandFromEvent(Element*, KeyboardEvent*) { return false; }
     virtual void textWillBeDeletedInTextField(Element*) { }
     virtual void textDidChangeInTextArea(Element*) { }
-    virtual void suppressSelectionNotifications() { }
-    virtual void restoreSelectionNotifications() { }
-    virtual void startDelayingAndCoalescingContentChangeNotifications() { }
-    virtual void stopDelayingAndCoalescingContentChangeNotifications() { }
+    virtual void suppressSelectionNotifications() OVERRIDE { }
+    virtual void restoreSelectionNotifications() OVERRIDE { }
+    virtual void startDelayingAndCoalescingContentChangeNotifications() OVERRIDE { }
+    virtual void stopDelayingAndCoalescingContentChangeNotifications() OVERRIDE { }
+    virtual void writeDataToPasteboard(NSDictionary*) OVERRIDE { }
+    virtual NSArray* supportedPasteboardTypesForCurrentSelection() OVERRIDE { return 0; }
+    virtual NSArray* readDataFromPasteboard(NSString*, int) OVERRIDE { return 0; }
+    virtual bool hasRichlyEditableSelection() OVERRIDE { return false; }
+    virtual int getPasteboardItemsCount() OVERRIDE { return 0; }
+    virtual DocumentFragment* documentFragmentFromDelegate(int) OVERRIDE { return 0; }
+    virtual bool performsTwoStepPaste(DocumentFragment*) OVERRIDE { return false; }
+    virtual int pasteboardChangeCount() OVERRIDE { return 0; }
 
 #if PLATFORM(MAC)
     virtual void markedTextAbandoned(Frame*) { }
 
     virtual NSString* userVisibleString(NSURL*) { return 0; }
-#ifdef BUILDING_ON_TIGER
-    virtual NSArray* pasteboardTypesForSelection(Frame*) { return 0; }
+    virtual DocumentFragment* documentFragmentFromAttributedString(NSAttributedString*, Vector<RefPtr<ArchiveResource> >&) { return 0; };
+    virtual void setInsertionPasteboard(const String&) { };
+    virtual NSURL* canonicalizeURL(NSURL*) { return 0; }
+    virtual NSURL* canonicalizeURLString(NSString*) { return 0; }
 #endif
-#endif
-#if PLATFORM(MAC) && !defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD)
+
+#if USE(APPKIT)
     virtual void uppercaseWord() { }
     virtual void lowercaseWord() { }
     virtual void capitalizeWord() { }
+#endif
+#if USE(AUTOMATIC_TEXT_REPLACEMENT)
     virtual void showSubstitutionsPanel(bool) { }
     virtual bool substitutionsPanelIsShowing() { return false; }
     virtual void toggleSmartInsertDelete() { }
@@ -432,31 +556,36 @@ public:
     virtual bool isAutomaticSpellingCorrectionEnabled() { return false; }
     virtual void toggleAutomaticSpellingCorrection() { }
 #endif
-    virtual void ignoreWordInSpellDocument(const String&) { }
-    virtual void learnWord(const String&) { }
-    virtual void checkSpellingOfString(const UChar*, int, int*, int*) { }
-    virtual String getAutoCorrectSuggestionForMisspelledWord(const String&) { return String(); }
-    virtual void checkGrammarOfString(const UChar*, int, Vector<GrammarDetail>&, int*, int*) { }
-#if PLATFORM(MAC) && !defined(BUILDING_ON_TIGER) && !defined(BUILDING_ON_LEOPARD)
-    virtual void checkTextOfParagraph(const UChar*, int, uint64_t, Vector<TextCheckingResult>&) { };
+#if PLATFORM(GTK)
+    virtual bool shouldShowUnicodeMenu() { return false; }
 #endif
+    TextCheckerClient* textChecker() { return &m_textCheckerClient; }
+
     virtual void updateSpellingUIWithGrammarString(const String&, const GrammarDetail&) { }
     virtual void updateSpellingUIWithMisspelledWord(const String&) { }
     virtual void showSpellingUI(bool) { }
     virtual bool spellingUIIsShowing() { return false; }
-    virtual void getGuessesForWord(const String&, Vector<String>&) { }
+
+    virtual void willSetInputMethodState() { }
     virtual void setInputMethodState(bool) { }
 
-
+private:
+    EmptyTextCheckerClient m_textCheckerClient;
 };
 
 #if ENABLE(CONTEXT_MENUS)
-class EmptyContextMenuClient : public ContextMenuClient, public Noncopyable {
+class EmptyContextMenuClient : public ContextMenuClient {
+    WTF_MAKE_NONCOPYABLE(EmptyContextMenuClient); WTF_MAKE_FAST_ALLOCATED;
 public:
+    EmptyContextMenuClient() { }
     virtual ~EmptyContextMenuClient() {  }
     virtual void contextMenuDestroyed() { }
 
+#if USE(CROSS_PLATFORM_CONTEXT_MENUS)
+    virtual PassOwnPtr<ContextMenu> customizeMenu(PassOwnPtr<ContextMenu>) { return nullptr; }
+#else
     virtual PlatformMenuDescription getCustomMenuFromDefaultItems(ContextMenu*) { return 0; }
+#endif
     virtual void contextMenuItemSelected(ContextMenuItem*, const ContextMenu*) { }
 
     virtual void downloadURL(const KURL&) { }
@@ -470,56 +599,66 @@ public:
 #if PLATFORM(MAC)
     virtual void searchWithSpotlight() { }
 #endif
+
+#if USE(ACCESSIBILITY_CONTEXT_MENUS)
+    virtual void showContextMenu() { }
+#endif
 };
 #endif // ENABLE(CONTEXT_MENUS)
 
 #if ENABLE(DRAG_SUPPORT)
-class EmptyDragClient : public DragClient, public Noncopyable {
+class EmptyDragClient : public DragClient {
+    WTF_MAKE_NONCOPYABLE(EmptyDragClient); WTF_MAKE_FAST_ALLOCATED;
 public:
+    EmptyDragClient() { }
     virtual ~EmptyDragClient() {}
     virtual void willPerformDragDestinationAction(DragDestinationAction, DragData*) { }
     virtual void willPerformDragSourceAction(DragSourceAction, const IntPoint&, Clipboard*) { }
     virtual DragDestinationAction actionMaskForDrag(DragData*) { return DragDestinationActionNone; }
     virtual DragSourceAction dragSourceActionMaskForPoint(const IntPoint&) { return DragSourceActionNone; }
     virtual void startDrag(DragImageRef, const IntPoint&, const IntPoint&, Clipboard*, Frame*, bool) { }
-    virtual DragImageRef createDragImageForLink(KURL&, const String&, Frame*) { return 0; }
     virtual void dragControllerDestroyed() { }
 };
 #endif // ENABLE(DRAG_SUPPORT)
 
-#if ENABLE(INSPECTOR)
-class EmptyInspectorClient : public InspectorClient, public Noncopyable {
+class EmptyInspectorClient : public InspectorClient {
+    WTF_MAKE_NONCOPYABLE(EmptyInspectorClient); WTF_MAKE_FAST_ALLOCATED;
 public:
+    EmptyInspectorClient() { }
     virtual ~EmptyInspectorClient() { }
 
     virtual void inspectorDestroyed() { }
+    
+    virtual void openInspectorFrontend(InspectorController*) { }
+    virtual void closeInspectorFrontend() { }
+    virtual void bringFrontendToFront() { }
 
-    virtual Page* createPage() { return 0; };
-
-    virtual String localizedStringsURL() { return String(); }
-
-    virtual String hiddenPanels() { return String(); }
-
-    virtual void showWindow() { }
-    virtual void closeWindow() { }
-
-    virtual void attachWindow() { }
-    virtual void detachWindow() { }
-
-    virtual void setAttachedWindowHeight(unsigned) { }
-
-    virtual void highlight(Node*) { }
+    virtual void highlight() { }
     virtual void hideHighlight() { }
-    virtual void inspectedURLChanged(const String&) { }
 
-    virtual void populateSetting(const String&, String*) { }
-    virtual void storeSetting(const String&, const String&) { }
-
-    virtual void inspectorWindowObjectCleared() { }
+    virtual bool sendMessageToFrontend(const String&) { return false; }
 };
-#endif // ENABLE(INSPECTOR)
+
+class EmptyDeviceMotionClient : public DeviceMotionClient {
+public:
+    virtual void setController(DeviceMotionController*) { }
+    virtual void startUpdating() { }
+    virtual void stopUpdating() { }
+    virtual DeviceMotionData* currentDeviceMotion() const { return 0; }
+    virtual void deviceMotionControllerDestroyed() { }
+};
+
+class EmptyDeviceOrientationClient : public DeviceOrientationClient {
+public:
+    virtual void setController(DeviceOrientationController*) { }
+    virtual void startUpdating() { }
+    virtual void stopUpdating() { }
+    virtual DeviceOrientation* lastOrientation() const { return 0; }
+    virtual void deviceOrientationControllerDestroyed() { }
+};
+
+void fillWithEmptyClients(Page::PageClients&);
 
 }
 
 #endif // EmptyClients_h
-

@@ -28,32 +28,37 @@
 #ifndef Path_h
 #define Path_h
 
-#include <algorithm>
+#include "RoundedRect.h"
+#include "WindRule.h"
 #include <wtf/FastAllocBase.h>
+#include <wtf/Forward.h>
 
-#if PLATFORM(CG)
+#if USE(CG)
 typedef struct CGPath PlatformPath;
+#elif PLATFORM(OPENVG)
+namespace WebCore {
+class PlatformPathOpenVG;
+}
+typedef WebCore::PlatformPathOpenVG PlatformPath;
 #elif PLATFORM(QT)
 #include <qpainterpath.h>
 typedef QPainterPath PlatformPath;
 #elif PLATFORM(WX) && USE(WXGC)
 class wxGraphicsPath;
 typedef wxGraphicsPath PlatformPath;
-#elif PLATFORM(CAIRO)
+#elif USE(CAIRO)
 namespace WebCore {
-    struct CairoPath;
+class CairoPath;
 }
 typedef WebCore::CairoPath PlatformPath;
-#elif PLATFORM(SKIA)
+#elif USE(SKIA)
 class SkPath;
 typedef SkPath PlatformPath;
-#elif PLATFORM(HAIKU)
-class BRegion;
-typedef BRegion PlatformPath;
 #elif OS(WINCE)
 namespace WebCore {
     class PlatformPath;
 }
+typedef WebCore::PlatformPath PlatformPath;
 #else
 typedef void PlatformPath;
 #endif
@@ -67,27 +72,24 @@ typedef PlatformPath* PlatformPathPtr;
 
 namespace WebCore {
 
+    class AffineTransform;
     class FloatPoint;
     class FloatRect;
     class FloatSize;
     class GraphicsContext;
-    class String;
     class StrokeStyleApplier;
-    class TransformationMatrix;
-
-    enum WindRule {
-        RULE_NONZERO = 0,
-        RULE_EVENODD = 1
-    };
 
     enum PathElementType {
-        PathElementMoveToPoint,
-        PathElementAddLineToPoint,
-        PathElementAddQuadCurveToPoint,
-        PathElementAddCurveToPoint,
-        PathElementCloseSubpath
+        PathElementMoveToPoint, // The points member will contain 1 value.
+        PathElementAddLineToPoint, // The points member will contain 1 value.
+        PathElementAddQuadCurveToPoint, // The points member will contain 2 values.
+        PathElementAddCurveToPoint, // The points member will contain 3 values.
+        PathElementCloseSubpath // The points member will contain no values.
     };
 
+    // The points in the sturcture are the same as those that would be used with the
+    // add... method. For example, a line returns the endpoint, while a cubic returns
+    // two tangent points and the endpoint.
     struct PathElement {
         PathElementType type;
         FloatPoint* points;
@@ -95,7 +97,8 @@ namespace WebCore {
 
     typedef void (*PathApplierFunction)(void* info, const PathElement*);
 
-    class Path : public FastAllocBase {
+    class Path {
+        WTF_MAKE_FAST_ALLOCATED;
     public:
         Path();
         ~Path();
@@ -103,22 +106,24 @@ namespace WebCore {
         Path(const Path&);
         Path& operator=(const Path&);
 
-        void swap(Path& other) { std::swap(m_path, other.m_path); }
-
         bool contains(const FloatPoint&, WindRule rule = RULE_NONZERO) const;
         bool strokeContains(StrokeStyleApplier*, const FloatPoint&) const;
+        // fastBoundingRect() should equal or contain boundingRect(); boundingRect()
+        // should perfectly bound the points within the path.
         FloatRect boundingRect() const;
-        FloatRect strokeBoundingRect(StrokeStyleApplier* = 0);
+        FloatRect fastBoundingRect() const;
+        FloatRect strokeBoundingRect(StrokeStyleApplier* = 0) const;
         
-        float length();
-        FloatPoint pointAtLength(float length, bool& ok);
-        float normalAngleAtLength(float length, bool& ok);
+        float length() const;
+        FloatPoint pointAtLength(float length, bool& ok) const;
+        float normalAngleAtLength(float length, bool& ok) const;
 
         void clear();
         bool isEmpty() const;
         // Gets the current point of the current path, which is conceptually the final point reached by the path so far.
         // Note the Path can be empty (isEmpty() == true) and still have a current point.
         bool hasCurrentPoint() const;
+        FloatPoint currentPoint() const;
 
         void moveTo(const FloatPoint&);
         void addLineTo(const FloatPoint&);
@@ -131,21 +136,28 @@ namespace WebCore {
         void addRect(const FloatRect&);
         void addEllipse(const FloatRect&);
 
-        void translate(const FloatSize&);
+        enum RoundedRectStrategy {
+            PreferNativeRoundedRect,
+            PreferBezierRoundedRect
+        };
 
-        String debugString() const;
+        void addRoundedRect(const FloatRect&, const FloatSize& roundingRadii, RoundedRectStrategy = PreferNativeRoundedRect);
+        void addRoundedRect(const FloatRect&, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius, RoundedRectStrategy = PreferNativeRoundedRect);
+        void addRoundedRect(const RoundedRect&);
+
+        void translate(const FloatSize&);
 
         PlatformPathPtr platformPath() const { return m_path; }
 
-        static Path createRoundedRectangle(const FloatRect&, const FloatSize& roundingRadii);
-        static Path createRoundedRectangle(const FloatRect&, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius);
-        static Path createRectangle(const FloatRect&);
-        static Path createEllipse(const FloatPoint& center, float rx, float ry);
-        static Path createCircle(const FloatPoint& center, float r);
-        static Path createLine(const FloatPoint&, const FloatPoint&);
-
         void apply(void* info, PathApplierFunction) const;
-        void transform(const TransformationMatrix&);
+        void transform(const AffineTransform&);
+
+        void addPathForRoundedRect(const FloatRect&, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius, RoundedRectStrategy = PreferNativeRoundedRect);
+        void addBeziersForRoundedRect(const FloatRect&, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius);
+
+#if USE(CG)
+        void platformAddPathForRoundedRect(const FloatRect&, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius);
+#endif
 
     private:
         PlatformPathPtr m_path;

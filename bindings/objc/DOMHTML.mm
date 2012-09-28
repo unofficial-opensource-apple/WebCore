@@ -40,6 +40,7 @@
 #import "HTMLCollection.h"
 #import "HTMLDocument.h"
 #import "HTMLInputElement.h"
+#import "HTMLParserIdioms.h"
 #import "HTMLSelectElement.h"
 #import "HTMLTextAreaElement.h"
 #import "Page.h"
@@ -48,11 +49,13 @@
 #import "Settings.h"
 #import "markup.h"
 
+#import "Autocapitalize.h"
 #import "DOMHTMLElementInternal.h"
+#import "HTMLTextFormControlElement.h"
+#import "JSMainThreadExecState.h"
 #import "RenderLayer.h"
 #import "WAKWindow.h"
 #import "WebCoreThreadMessage.h"
-#import "WKWindowPrivate.h"
 
 
 using namespace WebCore;
@@ -61,28 +64,33 @@ using namespace WebCore;
 
 - (int)scrollXOffset
 {
-    int result = 0;
     RenderObject *renderer = core(self)->renderer();
-    if (renderer) {
-        if (!renderer->isBlockFlow())
-            renderer = renderer->containingBlock();
-        if (renderer->isBox())
-            result = renderer->hasOverflowClip() ? toRenderBox(renderer)->layer()->scrollXOffset() : 0;
-    }
-    return result;
+    if (!renderer)
+        return 0;
+
+    if (!renderer->isBlockFlow())
+        renderer = renderer->containingBlock();
+
+    if (!renderer->isBox() || !renderer->hasOverflowClip())
+        return 0;
+
+    RenderBox *renderBox = toRenderBox(renderer);
+    return renderBox->layer()->scrollXOffset();
 }
 
 - (int)scrollYOffset
 {
-    int result = 0;
     RenderObject *renderer = core(self)->renderer();
-    if (renderer) {
-        if (!renderer->isBlockFlow())
-            renderer = renderer->containingBlock();
-        if (renderer->isBox())
-            result = renderer->hasOverflowClip() ? toRenderBox(renderer)->layer()->scrollYOffset() : 0;
-    }
-    return result;
+    if (!renderer)
+        return 0;
+
+    if (!renderer->isBlockFlow())
+        renderer = renderer->containingBlock();
+    if (!renderer->isBox() || !renderer->hasOverflowClip())
+        return 0;
+
+    RenderBox *renderBox = toRenderBox(renderer);
+    return renderBox->layer()->scrollYOffset();
 }
 
 - (void)setScrollXOffset:(int)x scrollYOffset:(int)y
@@ -93,18 +101,21 @@ using namespace WebCore;
 - (void)setScrollXOffset:(int)x scrollYOffset:(int)y adjustForPurpleCaret:(BOOL)adjustForPurpleCaret
 {
     RenderObject *renderer = core(self)->renderer();
-    if (renderer) {
-        if (!renderer->isBlockFlow())
-            renderer = renderer->containingBlock();
-        if (renderer->hasOverflowClip() && renderer->isBox()) {
-            RenderLayer *layer = toRenderBox(renderer)->layer();
-            if (adjustForPurpleCaret)
-                layer->setAdjustForPurpleCaretWhenScrolling(true);
-            layer->scrollToOffset(x, y);
-            if (adjustForPurpleCaret)
-                layer->setAdjustForPurpleCaretWhenScrolling(false);
-        }
-    }
+    if (!renderer)
+        return;
+
+    if (!renderer->isBlockFlow())
+        renderer = renderer->containingBlock();
+    if (!renderer->hasOverflowClip() || !renderer->isBox())
+        return;
+
+    RenderBox *renderBox = toRenderBox(renderer);
+    RenderLayer *layer = renderBox->layer();
+    if (adjustForPurpleCaret)
+        layer->setAdjustForPurpleCaretWhenScrolling(true);
+    layer->scrollToOffset(x, y);
+    if (adjustForPurpleCaret)
+        layer->setAdjustForPurpleCaretWhenScrolling(false);
 }
 
 - (void)absolutePosition:(int *)x :(int *)y :(int *)w :(int *)h {
@@ -149,7 +160,7 @@ using namespace WebCore;
 
 - (DOMDocumentFragment *)_createDocumentFragmentWithMarkupString:(NSString *)markupString baseURLString:(NSString *)baseURLString
 {
-    NSURL *baseURL = core(self)->completeURL(WebCore::deprecatedParseURL(baseURLString));
+    NSURL *baseURL = core(self)->completeURL(WebCore::stripLeadingAndTrailingHTMLSpaces(baseURLString));
     return [self createDocumentFragmentWithMarkupString:markupString baseURL:baseURL];
 }
 
@@ -160,24 +171,6 @@ using namespace WebCore;
 
 @end
 
-#ifdef BUILDING_ON_TIGER
-@implementation DOMHTMLDocument (DOMHTMLDocumentOverrides)
-
-- (DOMNode *)firstChild
-{
-    WebCore::HTMLDocument* coreHTMLDocument = core(self);
-    if (!coreHTMLDocument->page() || !coreHTMLDocument->page()->settings()->needsTigerMailQuirks())
-        return kit(coreHTMLDocument->firstChild());
-
-    WebCore::Node* child = coreHTMLDocument->firstChild();
-    while (child && child->nodeType() == WebCore::Node::DOCUMENT_TYPE_NODE)
-        child = child->nextSibling();
-    
-    return kit(child);
-}
-
-@end
-#endif
 
 @implementation DOMHTMLInputElement (FormAutoFillTransition)
 
@@ -191,7 +184,7 @@ using namespace WebCore;
 {
     WebCore::HTMLInputElement* inputElement = core(self);
     if (inputElement) {
-        WebCore::String newValue = inputElement->value();
+        WTF::String newValue = inputElement->value();
         newValue.replace(targetRange.location, targetRange.length, replacementString);
         inputElement->setValue(newValue);
         inputElement->setSelectionRange(index, newValue.length());
@@ -230,7 +223,16 @@ using namespace WebCore;
 {
     // Use the setSelectedIndexByUser function so a change event will be fired. <rdar://problem/6760590>
     if (WebCore::HTMLSelectElement* select = core(self))
-        select->setSelectedIndexByUser(index, true, true);
+        select->optionSelectedByUser(index, true);
+}
+
+- (void)_activateItemAtIndex:(int)index allowMultipleSelection:(BOOL)allowMultipleSelection
+{
+    // Use the setSelectedIndexByUser function so a change event will be fired. <rdar://problem/6760590>
+    // If this is a <select multiple> the allowMultipleSelection flag will allow setting multiple
+    // selections without clearing the other selections.
+    if (WebCore::HTMLSelectElement* select = core(self))
+        select->optionSelectedByUser(index, true, allowMultipleSelection);
 }
 
 @end
@@ -239,8 +241,7 @@ using namespace WebCore;
 
 - (BOOL)_isEdited
 {
-    WebCore::RenderObject *renderer = core(self)->renderer();
-    return renderer && [self _isTextField] && static_cast<WebCore::RenderTextControl *>(renderer)->lastChangeWasUserEdit();
+    return core(self)->lastChangeWasUserEdit();
 }
 
 @end
@@ -249,8 +250,44 @@ using namespace WebCore;
 
 - (BOOL)_isEdited
 {
-    WebCore::RenderObject* renderer = core(self)->renderer();
-    return renderer && static_cast<WebCore::RenderTextControl*>(renderer)->lastChangeWasUserEdit();
+    return core(self)->lastChangeWasUserEdit();
+}
+
+@end
+
+@implementation DOMHTMLInputElement (AutocapitalizeAdditions)
+
+- (WebAutocapitalizeType)_autocapitalizeType
+{
+    WebCore::HTMLInputElement* inputElement = core(self);
+    return static_cast<WebAutocapitalizeType>(inputElement->autocapitalizeType());
+}
+
+@end
+
+@implementation DOMHTMLTextAreaElement (AutocapitalizeAdditions)
+
+- (WebAutocapitalizeType)_autocapitalizeType
+{
+    WebCore::HTMLTextAreaElement* textareaElement = core(self);
+    return static_cast<WebAutocapitalizeType>(textareaElement->autocapitalizeType());
+}
+
+@end
+
+@implementation DOMHTMLInputElement (WebInputChangeEventAdditions)
+
+- (void)setValueWithChangeEvent:(NSString *)newValue
+{
+    WebCore::JSMainThreadNullState state;
+    core(self)->setValue(newValue, DispatchInputAndChangeEvent);
+}
+
+- (void)setValueAsNumberWithChangeEvent:(double)newValueAsNumber
+{
+    WebCore::JSMainThreadNullState state;
+    WebCore::ExceptionCode ec = 0;
+    core(self)->setValueAsNumber(newValueAsNumber, ec, DispatchInputAndChangeEvent);
 }
 
 @end

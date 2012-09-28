@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
- * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,74 +31,163 @@
 
 #include "config.h"
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 
 #include "Notification.h"
-#include "NotificationContents.h"
 
+#include "DOMWindow.h"
+#include "DOMWindowNotifications.h"
+#include "Dictionary.h"
 #include "Document.h"
+#include "ErrorEvent.h"
 #include "EventNames.h"
+#include "NotificationCenter.h"
+#include "NotificationClient.h"
+#include "NotificationController.h"
+#include "NotificationPermissionCallback.h"
+#include "ResourceRequest.h"
+#include "ResourceResponse.h"
+#include "ThreadableLoader.h"
 #include "WorkerContext.h"
 
 namespace WebCore {
 
-Notification::Notification(const String& url, ScriptExecutionContext* context, ExceptionCode& ec, NotificationPresenter* provider)
+Notification::Notification()
+    : ActiveDOMObject(0, this)
+{
+}
+
+#if ENABLE(LEGACY_NOTIFICATIONS)
+Notification::Notification(const KURL& url, ScriptExecutionContext* context, ExceptionCode& ec, PassRefPtr<NotificationCenter> provider)
     : ActiveDOMObject(context, this)
     , m_isHTML(true)
-    , m_isShowing(false)
-    , m_presenter(provider)
+    , m_state(Idle)
+    , m_notificationCenter(provider)
 {
-    ASSERT(m_presenter);
-    Document* document = context->isDocument() ? static_cast<Document*>(context) : 0;
-    if (m_presenter->checkPermission(context->url(), document) != NotificationPresenter::PermissionAllowed) {
+    if (m_notificationCenter->checkPermission() != NotificationClient::PermissionAllowed) {
         ec = SECURITY_ERR;
         return;
     }
 
-    m_notificationURL = context->completeURL(url);
-    if (url.isEmpty() || !m_notificationURL.isValid()) {
+    if (url.isEmpty() || !url.isValid()) {
         ec = SYNTAX_ERR;
         return;
     }
-}
 
-Notification::Notification(const NotificationContents& contents, ScriptExecutionContext* context, ExceptionCode& ec, NotificationPresenter* provider)
+    m_notificationURL = url;
+}
+#endif
+
+#if ENABLE(LEGACY_NOTIFICATIONS)
+Notification::Notification(const String& title, const String& body, const String& iconURI, ScriptExecutionContext* context, ExceptionCode& ec, PassRefPtr<NotificationCenter> provider)
     : ActiveDOMObject(context, this)
     , m_isHTML(false)
-    , m_contents(contents)
-    , m_isShowing(false)
-    , m_presenter(provider)
+    , m_title(title)
+    , m_body(body)
+    , m_state(Idle)
+    , m_notificationCenter(provider)
 {
-    ASSERT(m_presenter);
-    Document* document = context->isDocument() ? static_cast<Document*>(context) : 0;
-    if (m_presenter->checkPermission(context->url(), document) != NotificationPresenter::PermissionAllowed) {
+    if (m_notificationCenter->checkPermission() != NotificationClient::PermissionAllowed) {
         ec = SECURITY_ERR;
         return;
     }
-    
-    KURL icon = context->completeURL(contents.icon());
-    if (!icon.isEmpty() && !icon.isValid()) {
+
+    m_icon = iconURI.isEmpty() ? KURL() : scriptExecutionContext()->completeURL(iconURI);
+    if (!m_icon.isEmpty() && !m_icon.isValid()) {
         ec = SYNTAX_ERR;
         return;
     }
 }
+#endif
+
+#if ENABLE(NOTIFICATIONS)
+Notification::Notification(ScriptExecutionContext* context, const String& title)
+    : ActiveDOMObject(context, this)
+    , m_isHTML(false)
+    , m_title(title)
+    , m_state(Idle)
+    , m_taskTimer(adoptPtr(new Timer<Notification>(this, &Notification::taskTimerFired)))
+{
+    ASSERT(context->isDocument());
+    m_notificationCenter = DOMWindowNotifications::webkitNotifications(static_cast<Document*>(context)->domWindow());
+    
+    ASSERT(m_notificationCenter->client());
+    m_taskTimer->startOneShot(0);
+}
+#endif
 
 Notification::~Notification() 
 {
-    m_presenter->notificationObjectDestroyed(this);
+}
+
+#if ENABLE(LEGACY_NOTIFICATIONS)
+PassRefPtr<Notification> Notification::create(const KURL& url, ScriptExecutionContext* context, ExceptionCode& ec, PassRefPtr<NotificationCenter> provider) 
+{ 
+    RefPtr<Notification> notification(adoptRef(new Notification(url, context, ec, provider)));
+    notification->suspendIfNeeded();
+    return notification.release();
+}
+
+PassRefPtr<Notification> Notification::create(const String& title, const String& body, const String& iconURI, ScriptExecutionContext* context, ExceptionCode& ec, PassRefPtr<NotificationCenter> provider) 
+{ 
+    RefPtr<Notification> notification(adoptRef(new Notification(title, body, iconURI, context, ec, provider)));
+    notification->suspendIfNeeded();
+    return notification.release();
+}
+#endif
+
+#if ENABLE(NOTIFICATIONS)
+static void getAndAddEventListener(const AtomicString& eventName, const char* property, const Dictionary& options, Notification* notification)
+{
+    RefPtr<EventListener> listener = options.getEventListener(property, notification);
+    if (listener)
+        notification->addEventListener(eventName, listener.release(), false);
+}
+
+PassRefPtr<Notification> Notification::create(ScriptExecutionContext* context, const String& title, const Dictionary& options)
+{
+    RefPtr<Notification> notification(adoptRef(new Notification(context, title)));
+    String argument;
+    if (options.get("body", argument))
+        notification->setBody(argument);
+    if (options.get("tag", argument))
+        notification->setTag(argument);
+    getAndAddEventListener(eventNames().showEvent, "onshow", options, notification.get());
+    getAndAddEventListener(eventNames().closeEvent, "onclose", options, notification.get());
+    getAndAddEventListener(eventNames().errorEvent, "onerror", options, notification.get());
+    getAndAddEventListener(eventNames().clickEvent, "onclick", options, notification.get());
+
+    notification->suspendIfNeeded();
+    return notification.release();
+}
+#endif
+
+const AtomicString& Notification::interfaceName() const
+{
+    return eventNames().interfaceForNotification;
 }
 
 void Notification::show() 
 {
     // prevent double-showing
-    if (!m_isShowing)
-        m_isShowing = m_presenter->show(this);
+    if (m_state == Idle && m_notificationCenter->client() && m_notificationCenter->client()->show(this)) {
+        m_state = Showing;
+        setPendingActivity(this);
+    }
 }
 
-void Notification::cancel() 
+void Notification::close()
 {
-    if (m_isShowing)
-        m_presenter->cancel(this);
+    switch (m_state) {
+    case Idle:
+        break;
+    case Showing:
+        if (m_notificationCenter->client())
+            m_notificationCenter->client()->cancel(this);
+        break;
+    case Closed:
+        break;
+    }
 }
 
 EventTargetData* Notification::eventTargetData()
@@ -111,6 +200,91 @@ EventTargetData* Notification::ensureEventTargetData()
     return &m_eventTargetData;
 }
 
+void Notification::contextDestroyed()
+{
+    ActiveDOMObject::contextDestroyed();
+    if (m_notificationCenter->client())
+        m_notificationCenter->client()->notificationObjectDestroyed(this);
+}
+
+void Notification::finalize()
+{
+    if (m_state == Closed)
+        return;
+    m_state = Closed;
+    unsetPendingActivity(this);
+}
+
+void Notification::dispatchShowEvent()
+{
+    dispatchEvent(Event::create(eventNames().showEvent, false, false));
+}
+
+void Notification::dispatchClickEvent()
+{
+    dispatchEvent(Event::create(eventNames().clickEvent, false, false));
+}
+
+void Notification::dispatchCloseEvent()
+{
+    dispatchEvent(Event::create(eventNames().closeEvent, false, false));
+    finalize();
+}
+
+void Notification::dispatchErrorEvent()
+{
+    dispatchEvent(Event::create(eventNames().errorEvent, false, false));
+}
+
+#if ENABLE(NOTIFICATIONS)
+void Notification::taskTimerFired(Timer<Notification>* timer)
+{
+    ASSERT(scriptExecutionContext()->isDocument());
+    ASSERT(static_cast<Document*>(scriptExecutionContext())->page());
+    ASSERT_UNUSED(timer, timer == m_taskTimer.get());
+    if (NotificationController::from(static_cast<Document*>(scriptExecutionContext())->page())->client()->checkPermission(scriptExecutionContext()) != NotificationClient::PermissionAllowed) {
+        dispatchErrorEvent();
+        return;
+    }
+    show();
+}
+#endif
+
+
+#if ENABLE(NOTIFICATIONS)
+const String& Notification::permissionLevel(ScriptExecutionContext* context)
+{
+    ASSERT(context->isDocument());
+    ASSERT(static_cast<Document*>(context)->page());
+    return permissionString(NotificationController::from(static_cast<Document*>(context)->page())->client()->checkPermission(context));
+}
+
+const String& Notification::permissionString(NotificationClient::Permission permission)
+{
+    DEFINE_STATIC_LOCAL(const String, allowedPermission, ("granted"));
+    DEFINE_STATIC_LOCAL(const String, deniedPermission, ("denied"));
+    DEFINE_STATIC_LOCAL(const String, defaultPermission, ("default"));
+    switch (permission) {
+    case NotificationClient::PermissionAllowed:
+        return allowedPermission;
+    case NotificationClient::PermissionDenied:
+        return deniedPermission;
+    case NotificationClient::PermissionNotAllowed:
+        return defaultPermission;
+    }
+    
+    ASSERT_NOT_REACHED();
+    return deniedPermission;
+}
+
+void Notification::requestPermission(ScriptExecutionContext* context, PassRefPtr<NotificationPermissionCallback> callback)
+{
+    ASSERT(context->isDocument());
+    ASSERT(static_cast<Document*>(context)->page());
+    NotificationController::from(static_cast<Document*>(context)->page())->client()->requestPermission(context, callback);
+}
+#endif
+
 } // namespace WebCore
 
-#endif // ENABLE(NOTIFICATIONS)
+#endif // ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)

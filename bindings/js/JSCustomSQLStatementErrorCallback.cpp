@@ -27,47 +27,34 @@
  */
 
 #include "config.h"
-#include "JSCustomSQLStatementErrorCallback.h"
 
-#if ENABLE(DATABASE)
+#if ENABLE(SQL_DATABASE)
 
-#include "Frame.h"
-#include "JSCallbackData.h"
+#include "JSSQLStatementErrorCallback.h"
+
 #include "JSSQLError.h"
 #include "JSSQLTransaction.h"
-#include "ScriptController.h"
+#include "ScriptExecutionContext.h"
 #include <runtime/JSLock.h>
-#include <wtf/MainThread.h>
 
 namespace WebCore {
-    
+
 using namespace JSC;
-    
-JSCustomSQLStatementErrorCallback::JSCustomSQLStatementErrorCallback(JSObject* callback, JSDOMGlobalObject* globalObject)
-    : m_data(new JSCallbackData(callback, globalObject))
-{
-}
 
-JSCustomSQLStatementErrorCallback::~JSCustomSQLStatementErrorCallback()
+bool JSSQLStatementErrorCallback::handleEvent(SQLTransaction* transaction, SQLError* error)
 {
-    callOnMainThread(JSCallbackData::deleteData, m_data);
-#ifndef NDEBUG
-    m_data = 0;
-#endif
-}
+    if (!m_data || !m_data->globalObject() || !canInvokeCallback())
+        return true;
 
-bool JSCustomSQLStatementErrorCallback::handleEvent(SQLTransaction* transaction, SQLError* error)
-{
-    ASSERT(m_data);
-        
-    RefPtr<JSCustomSQLStatementErrorCallback> protect(this);
-        
-    JSC::JSLock lock(SilenceAssertionsOnly);
+    RefPtr<JSSQLStatementErrorCallback> protect(this);
+
+    JSC::JSLockHolder lock(m_data->globalObject()->globalData());
+
     ExecState* exec = m_data->globalObject()->globalExec();
     MarkedArgumentBuffer args;
-    args.append(toJS(exec, deprecatedGlobalObjectForPrototype(exec), transaction));
-    args.append(toJS(exec, deprecatedGlobalObjectForPrototype(exec), error));
-    
+    args.append(toJS(exec, m_data->globalObject(), transaction));
+    args.append(toJS(exec, m_data->globalObject(), error));
+
     bool raisedException = false;
     JSValue result = m_data->invokeCallback(args, &raisedException);
     if (raisedException) {
@@ -82,4 +69,4 @@ bool JSCustomSQLStatementErrorCallback::handleEvent(SQLTransaction* transaction,
 
 }
 
-#endif // ENABLE(DATABASE)
+#endif // ENABLE(SQL_DATABASE)

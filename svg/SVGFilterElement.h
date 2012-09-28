@@ -1,83 +1,83 @@
 /*
-    Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
-    Copyright (C) 2004, 2005, 2006 Rob Buis <buis@kde.org>
-    Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006 Rob Buis <buis@kde.org>
+ * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) Research In Motion Limited 2010. All rights reserved.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #ifndef SVGFilterElement_h
 #define SVGFilterElement_h
 
 #if ENABLE(SVG) && ENABLE(FILTERS)
-#include "RenderObject.h"
-#include "SVGResourceFilter.h"
+#include "SVGAnimatedBoolean.h"
+#include "SVGAnimatedEnumeration.h"
+#include "SVGAnimatedInteger.h"
+#include "SVGAnimatedLength.h"
 #include "SVGExternalResourcesRequired.h"
 #include "SVGLangSpace.h"
 #include "SVGStyledElement.h"
 #include "SVGURIReference.h"
+#include "SVGUnitTypes.h"
 
 namespace WebCore {
 
-    extern char SVGFilterResXIdentifier[];
-    extern char SVGFilterResYIdentifier[];
+class SVGFilterElement : public SVGStyledElement,
+                         public SVGURIReference,
+                         public SVGLangSpace,
+                         public SVGExternalResourcesRequired {
+public:
+    static PassRefPtr<SVGFilterElement> create(const QualifiedName&, Document*);
 
-    class SVGResourceFilter;
+    void setFilterRes(unsigned filterResX, unsigned filterResY);
 
-    class SVGFilterElement : public SVGStyledElement,
-                             public SVGURIReference,
-                             public SVGLangSpace,
-                             public SVGExternalResourcesRequired {
-    public:
-        SVGFilterElement(const QualifiedName&, Document*);
-        virtual ~SVGFilterElement();
+private:
+    SVGFilterElement(const QualifiedName&, Document*);
 
-        virtual SVGResource* canvasResource(const RenderObject*);
+    virtual bool needsPendingResourceHandling() const { return false; }
 
-        void setFilterRes(unsigned long filterResX, unsigned long filterResY) const;
+    bool isSupportedAttribute(const QualifiedName&);
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual void svgAttributeChanged(const QualifiedName&);
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
-        virtual void parseMappedAttribute(MappedAttribute*);
-        virtual void synchronizeProperty(const QualifiedName&);
-        virtual bool rendererIsNeeded(RenderStyle*) { return false; }
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*) OVERRIDE;
+    virtual bool childShouldCreateRenderer(const NodeRenderingContext&) const OVERRIDE;
 
-    private:
-        DECLARE_ANIMATED_PROPERTY(SVGFilterElement, SVGNames::filterUnitsAttr, int, FilterUnits, filterUnits)
-        DECLARE_ANIMATED_PROPERTY(SVGFilterElement, SVGNames::primitiveUnitsAttr, int, PrimitiveUnits, primitiveUnits)
-        DECLARE_ANIMATED_PROPERTY(SVGFilterElement, SVGNames::xAttr, SVGLength, X, x)
-        DECLARE_ANIMATED_PROPERTY(SVGFilterElement, SVGNames::yAttr, SVGLength, Y, y)
-        DECLARE_ANIMATED_PROPERTY(SVGFilterElement, SVGNames::widthAttr, SVGLength, Width, width)
-        DECLARE_ANIMATED_PROPERTY(SVGFilterElement, SVGNames::heightAttr, SVGLength, Height, height)
-        DECLARE_ANIMATED_PROPERTY_MULTIPLE_WRAPPERS(SVGFilterElement, SVGNames::filterResAttr, SVGFilterResXIdentifier, long, FilterResX, filterResX)
-        DECLARE_ANIMATED_PROPERTY_MULTIPLE_WRAPPERS(SVGFilterElement, SVGNames::filterResAttr, SVGFilterResYIdentifier, long, FilterResY, filterResY)
+    virtual bool selfHasRelativeLengths() const;
 
-        // SVGURIReference
-        DECLARE_ANIMATED_PROPERTY(SVGFilterElement, XLinkNames::hrefAttr, String, Href, href)
+    static const AtomicString& filterResXIdentifier();
+    static const AtomicString& filterResYIdentifier();
 
-        // SVGExternalResourcesRequired
-        DECLARE_ANIMATED_PROPERTY(SVGFilterElement, SVGNames::externalResourcesRequiredAttr, bool, ExternalResourcesRequired, externalResourcesRequired)
+    BEGIN_DECLARE_ANIMATED_PROPERTIES(SVGFilterElement)
+        DECLARE_ANIMATED_ENUMERATION(FilterUnits, filterUnits, SVGUnitTypes::SVGUnitType)
+        DECLARE_ANIMATED_ENUMERATION(PrimitiveUnits, primitiveUnits, SVGUnitTypes::SVGUnitType)
+        DECLARE_ANIMATED_LENGTH(X, x)
+        DECLARE_ANIMATED_LENGTH(Y, y)
+        DECLARE_ANIMATED_LENGTH(Width, width)
+        DECLARE_ANIMATED_LENGTH(Height, height)
+        DECLARE_ANIMATED_INTEGER(FilterResX, filterResX)
+        DECLARE_ANIMATED_INTEGER(FilterResY, filterResY)
+        DECLARE_ANIMATED_STRING(Href, href)
+        DECLARE_ANIMATED_BOOLEAN(ExternalResourcesRequired, externalResourcesRequired)
+    END_DECLARE_ANIMATED_PROPERTIES
+};
 
-        mutable RefPtr<SVGResourceFilter> m_filter;
+}
 
-    private:
-        friend class SVGResourceFilter;
-        FloatRect filterBoundingBox(const FloatRect&) const;
-        void buildFilter(const FloatRect& targetRect) const;
-    };
-
-} // namespace WebCore
-
-#endif // ENABLE(SVG)
+#endif
 #endif

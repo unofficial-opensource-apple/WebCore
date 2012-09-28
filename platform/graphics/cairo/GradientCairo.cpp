@@ -29,6 +29,7 @@
 
 #include "CSSParser.h"
 #include "GraphicsContext.h"
+#include "PlatformContextCairo.h"
 #include <cairo.h>
 
 namespace WebCore {
@@ -43,8 +44,16 @@ void Gradient::platformDestroy()
 
 cairo_pattern_t* Gradient::platformGradient()
 {
-    if (m_gradient)
+    return platformGradient(1);
+}
+
+cairo_pattern_t* Gradient::platformGradient(float globalAlpha)
+{
+    if (m_gradient && m_platformGradientAlpha == globalAlpha)
         return m_gradient;
+
+    platformDestroy();
+    m_platformGradientAlpha = globalAlpha;
 
     if (m_radial)
         m_gradient = cairo_pattern_create_radial(m_p0.x(), m_p0.y(), m_r0, m_p1.x(), m_p1.y(), m_r1);
@@ -53,7 +62,9 @@ cairo_pattern_t* Gradient::platformGradient()
 
     Vector<ColorStop>::iterator stopIterator = m_stops.begin();
     while (stopIterator != m_stops.end()) {
-        cairo_pattern_add_color_stop_rgba(m_gradient, stopIterator->stop, stopIterator->red, stopIterator->green, stopIterator->blue, stopIterator->alpha);
+        cairo_pattern_add_color_stop_rgba(m_gradient, stopIterator->stop,
+                                          stopIterator->red, stopIterator->green, stopIterator->blue,
+                                          stopIterator->alpha * globalAlpha);
         ++stopIterator;
     }
 
@@ -76,9 +87,18 @@ cairo_pattern_t* Gradient::platformGradient()
     return m_gradient;
 }
 
+void Gradient::setPlatformGradientSpaceTransform(const AffineTransform& gradientSpaceTransformation)
+{
+    if (m_gradient) {
+        cairo_matrix_t matrix = gradientSpaceTransformation;
+        cairo_matrix_invert(&matrix);
+        cairo_pattern_set_matrix(m_gradient, &matrix);
+    }
+}
+
 void Gradient::fill(GraphicsContext* context, const FloatRect& rect)
 {
-    cairo_t* cr = context->platformContext();
+    cairo_t* cr = context->platformContext()->cr();
 
     context->save();
     cairo_set_source(cr, platformGradient());

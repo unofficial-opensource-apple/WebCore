@@ -35,12 +35,25 @@
 #include "ScriptState.h"
 
 #include <v8.h>
+#include <wtf/PassRefPtr.h>
+#include <wtf/RefPtr.h>
+#include <wtf/Vector.h>
 
 #ifndef NDEBUG
-#include "V8Proxy.h"  // for register and unregister global handles.
+#include "V8GCController.h"
 #endif
 
+namespace WTF {
+class ArrayBuffer;
+}
+
 namespace WebCore {
+
+class InspectorValue;
+class MessagePort;
+class SerializedScriptValue;
+typedef Vector<RefPtr<MessagePort>, 1> MessagePortArray;
+typedef Vector<RefPtr<WTF::ArrayBuffer>, 1> ArrayBufferArray;
 
 class ScriptValue {
 public:
@@ -96,6 +109,11 @@ public:
         return m_value == value.m_value;
     }
 
+    bool isFunction() const
+    {
+        return m_value->IsFunction();
+    }
+
     bool operator!=(const ScriptValue value) const
     {
         return !operator==(value);
@@ -121,6 +139,10 @@ public:
         return m_value.IsEmpty();
     }
 
+    PassRefPtr<SerializedScriptValue> serialize(ScriptState*);
+    PassRefPtr<SerializedScriptValue> serialize(ScriptState*, MessagePortArray*, ArrayBufferArray*, bool&);
+    static ScriptValue deserialize(ScriptState*, SerializedScriptValue*);
+
     void clear()
     {
         if (m_value.IsEmpty())
@@ -142,6 +164,8 @@ public:
     bool getString(ScriptState*, String& result) const { return getString(result); }
     bool getString(String& result) const;
     String toString(ScriptState*) const;
+
+    PassRefPtr<InspectorValue> toInspectorValue(ScriptState*) const;
 
 private:
     mutable v8::Persistent<v8::Value> m_value;

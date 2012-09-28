@@ -27,19 +27,23 @@
 #include "config.h"
 #include "Gradient.h"
 
-#include "CSSParser.h"
-#include "GraphicsContext.h"
-
+#include "GraphicsContextCG.h"
 #include <CoreGraphics/CoreGraphics.h>
+#include <wtf/RetainPtr.h>
 
 namespace WebCore {
 
 void Gradient::platformDestroy()
 {
+#if USE_CG_SHADING
     CGShadingRelease(m_gradient);
+#else
+    CGGradientRelease(m_gradient);
+#endif
     m_gradient = 0;
 }
 
+#if USE_CG_SHADING
 static void gradientCallback(void* info, const CGFloat* in, CGFloat* out)
 {
     float r, g, b, a;
@@ -60,7 +64,7 @@ CGShadingRef Gradient::platformGradient()
     const CGFunctionCallbacks gradientCallbacks = { 0, gradientCallback, 0 };
     RetainPtr<CGFunctionRef> colorFunction(AdoptCF, CGFunctionCreate(this, 1, intervalRanges, 4, colorComponentRanges, &gradientCallbacks));
 
-    static CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGColorSpaceRef colorSpace = deviceRGBColorSpaceRef();
 
     if (m_radial)
         m_gradient = CGShadingCreateRadial(colorSpace, m_p0, m_r0, m_p1, m_r1, colorFunction.get(), true, true);
@@ -69,11 +73,73 @@ CGShadingRef Gradient::platformGradient()
 
     return m_gradient;
 }
+#else
+CGGradientRef Gradient::platformGradient()
+{
+    if (m_gradient)
+        return m_gradient;
+
+    sortStopsIfNecessary();
+    
+    const int cReservedStops = 3;
+    Vector<CGFloat, 4 * cReservedStops> colorComponents;
+    colorComponents.reserveCapacity(m_stops.size() * 4); // RGBA components per stop
+
+    Vector<CGFloat, cReservedStops> locations;
+    locations.reserveCapacity(m_stops.size());
+
+    for (size_t i = 0; i < m_stops.size(); ++i) {
+        colorComponents.uncheckedAppend(m_stops[i].red);
+        colorComponents.uncheckedAppend(m_stops[i].green);
+        colorComponents.uncheckedAppend(m_stops[i].blue);
+        colorComponents.uncheckedAppend(m_stops[i].alpha);
+
+        locations.uncheckedAppend(m_stops[i].stop);
+    }
+    
+    m_gradient = CGGradientCreateWithColorComponents(deviceRGBColorSpaceRef(), colorComponents.data(), locations.data(), m_stops.size());
+
+    return m_gradient;
+}
+#endif
 
 void Gradient::fill(GraphicsContext* context, const FloatRect& rect)
 {
     context->clip(rect);
-    CGContextDrawShading(context->platformContext(), platformGradient());
+    paint(context);
+}
+
+void Gradient::paint(GraphicsContext* context)
+{
+    CGContextRef ctx = context->platformContext();
+    paint(ctx);
+}
+
+void Gradient::paint(CGContextRef context)
+{
+#if USE_CG_SHADING
+    CGContextDrawShading(context, platformGradient());
+#else
+    CGGradientDrawingOptions extendOptions = kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation;
+    if (m_radial) {
+        bool needScaling = aspectRatio() != 1;
+        if (needScaling) {
+            CGContextSaveGState(context);
+            // Scale from the center of the gradient. We only ever scale non-deprecated gradients,
+            // for which m_p0 == m_p1.
+            ASSERT(m_p0 == m_p1);
+            CGContextTranslateCTM(context, m_p0.x(), m_p0.y());
+            CGContextScaleCTM(context, 1, 1 / aspectRatio());
+            CGContextTranslateCTM(context, -m_p0.x(), -m_p0.y());
+        }
+
+        CGContextDrawRadialGradient(context, platformGradient(), m_p0, m_r0, m_p1, m_r1, extendOptions);
+
+        if (needScaling)
+            CGContextRestoreGState(context);
+    } else
+        CGContextDrawLinearGradient(context, platformGradient(), m_p0, m_p1, extendOptions);
+#endif
 }
 
 } //namespace

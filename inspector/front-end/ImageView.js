@@ -26,50 +26,121 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * @extends {WebInspector.ResourceView}
+ * @constructor
+ */
 WebInspector.ImageView = function(resource)
 {
     WebInspector.ResourceView.call(this, resource);
 
     this.element.addStyleClass("image");
-
-    var container = document.createElement("div");
-    container.className = "image";
-    this.contentElement.appendChild(container);
-
-    this.imagePreviewElement = document.createElement("img");
-    this.imagePreviewElement.addStyleClass("resource-image-view");
-    this.imagePreviewElement.setAttribute("src", this.resource.url);
-
-    container.appendChild(this.imagePreviewElement);
-
-    container = document.createElement("div");
-    container.className = "info";
-    this.contentElement.appendChild(container);
-
-    var imageNameElement = document.createElement("h1");
-    imageNameElement.className = "title";
-    imageNameElement.textContent = this.resource.displayName;
-    container.appendChild(imageNameElement);
-
-    var infoListElement = document.createElement("dl");
-    infoListElement.className = "infoList";
-
-    var imageProperties = [
-        { name: WebInspector.UIString("Dimensions"), value: WebInspector.UIString("%d × %d", this.imagePreviewElement.naturalWidth, this.imagePreviewElement.height) },
-        { name: WebInspector.UIString("File size"), value: Number.bytesToString(this.resource.contentLength, WebInspector.UIString.bind(WebInspector)) },
-        { name: WebInspector.UIString("MIME type"), value: this.resource.mimeType }
-    ];
-
-    var listHTML = '';
-    for (var i = 0; i < imageProperties.length; ++i)
-        listHTML += "<dt>" + imageProperties[i].name + "</dt><dd>" + imageProperties[i].value + "</dd>";
-
-    infoListElement.innerHTML = listHTML;
-    container.appendChild(infoListElement);
 }
 
 WebInspector.ImageView.prototype = {
-    
+    hasContent: function()
+    {
+        return true;
+    },
+
+    wasShown: function()
+    {
+        this._createContentIfNeeded();
+    },
+
+    _createContentIfNeeded: function()
+    {
+        if (this._container)
+            return;
+
+        var imageContainer = document.createElement("div");
+        imageContainer.className = "image";
+        this.element.appendChild(imageContainer);
+
+        var imagePreviewElement = document.createElement("img");
+        imagePreviewElement.addStyleClass("resource-image-view");
+        imageContainer.appendChild(imagePreviewElement);
+        imagePreviewElement.addEventListener("contextmenu", this._contextMenu.bind(this), true);
+
+        this._container = document.createElement("div");
+        this._container.className = "info";
+        this.element.appendChild(this._container);
+
+        var imageNameElement = document.createElement("h1");
+        imageNameElement.className = "title";
+        imageNameElement.textContent = this.resource.displayName;
+        this._container.appendChild(imageNameElement);
+
+        var infoListElement = document.createElement("dl");
+        infoListElement.className = "infoList";
+
+        this.resource.populateImageSource(imagePreviewElement);
+
+        function onImageLoad()
+        {
+            var content = this.resource.content;
+            if (content)
+                var resourceSize = this._base64ToSize(content);
+            else
+                var resourceSize = this.resource.resourceSize;
+
+            var imageProperties = [
+                { name: WebInspector.UIString("Dimensions"), value: WebInspector.UIString("%d × %d", imagePreviewElement.naturalWidth, imagePreviewElement.naturalHeight) },
+                { name: WebInspector.UIString("File size"), value: Number.bytesToString(resourceSize) },
+                { name: WebInspector.UIString("MIME type"), value: this.resource.mimeType }
+            ];
+
+            infoListElement.removeChildren();
+            for (var i = 0; i < imageProperties.length; ++i) {
+                var dt = document.createElement("dt");
+                dt.textContent = imageProperties[i].name;
+                infoListElement.appendChild(dt);
+                var dd = document.createElement("dd");
+                dd.textContent = imageProperties[i].value;
+                infoListElement.appendChild(dd);
+            }
+            var dt = document.createElement("dt");
+            dt.textContent = WebInspector.UIString("URL");
+            infoListElement.appendChild(dt);
+            var dd = document.createElement("dd");
+            var externalResource = true;
+            dd.appendChild(WebInspector.linkifyURLAsNode(this.resource.url, undefined, undefined, externalResource));
+            infoListElement.appendChild(dd);
+
+            this._container.appendChild(infoListElement);
+        }
+        imagePreviewElement.addEventListener("load", onImageLoad.bind(this), false);
+    },
+
+    _base64ToSize: function(content)
+    {
+        if (!content.length)
+            return 0;
+        var size = (content.length || 0) * 3 / 4;
+        if (content.length > 0 && content[content.length - 1] === "=")
+            size--;
+        if (content.length > 1 && content[content.length - 2] === "=")
+            size--;
+        return size;
+    },
+
+    _contextMenu: function(event)
+    {
+        var contextMenu = new WebInspector.ContextMenu();
+        contextMenu.appendItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Copy image URL" : "Copy Image URL"), this._copyImageURL.bind(this));
+        contextMenu.appendItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Open image in new tab" : "Open Image in New Tab"), this._openInNewTab.bind(this));
+        contextMenu.show(event);
+    },
+
+    _copyImageURL: function(event)
+    {
+        InspectorFrontendHost.copyText(this.resource.url);
+    },
+
+    _openInNewTab: function(event)
+    {
+        InspectorFrontendHost.openInNewTab(this.resource.url);
+    }
 }
 
 WebInspector.ImageView.prototype.__proto__ = WebInspector.ResourceView.prototype;

@@ -26,16 +26,17 @@
 #ifndef JAVASCRIPTCORE_BINDINGS_JNI_JSOBJECT_H
 #define JAVASCRIPTCORE_BINDINGS_JNI_JSOBJECT_H
 
-#if ENABLE(MAC_JAVA_BRIDGE)
+#if ENABLE(JAVA_BRIDGE)
 
-#include <CoreFoundation/CoreFoundation.h>
-#include <JavaVM/jni.h>
+#include "JNIUtility.h"
 #include <runtime/JSValue.h>
 #include <wtf/RefPtr.h>
 
 #define jlong_to_ptr(a) ((void*)(uintptr_t)(a))
-#define jlong_to_impptr(a) (static_cast<JSC::JSObject*>(((void*)(uintptr_t)(a))))
+#define jlong_to_impptr(a) (JSC::jsCast<JSC::JSObject*>((static_cast<JSCell*>((void*)(uintptr_t)(a)))))
 #define ptr_to_jlong(a) ((jlong)(uintptr_t)(a))
+
+#if PLATFORM(MAC)
 
 namespace JSC {
 
@@ -125,6 +126,8 @@ jstring KJS_JSObject_JSObjectToString(JNIEnv*, jclass, jlong nativeJSObject);
 
 }
 
-#endif // ENABLE(MAC_JAVA_BRIDGE)
+#endif // PLATFORM(MAC)
+
+#endif // ENABLE(JAVA_BRIDGE)
 
 #endif // JAVASCRIPTCORE_BINDINGS_JNI_JSOBJECT_H

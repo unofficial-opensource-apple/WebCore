@@ -39,10 +39,11 @@ FontFallbackList::FontFallbackList()
     : m_pageZero(0)
     , m_cachedPrimarySimpleFontData(0)
     , m_fontSelector(0)
+    , m_fontSelectorVersion(0)
     , m_familyIndex(0)
+    , m_generation(fontCache()->generation())
     , m_pitch(UnknownPitch)
     , m_loadingCustomFonts(false)
-    , m_generation(fontCache()->generation())
 {
 }
 
@@ -57,6 +58,7 @@ void FontFallbackList::invalidate(PassRefPtr<FontSelector> fontSelector)
     m_pitch = UnknownPitch;
     m_loadingCustomFonts = false;
     m_fontSelector = fontSelector;
+    m_fontSelectorVersion = m_fontSelector ? m_fontSelector->version() : 0;
     m_generation = fontCache()->generation();
 }
 
@@ -94,9 +96,19 @@ const FontData* FontFallbackList::fontDataAt(const Font* font, unsigned realized
     // Make sure we're not passing in some crazy value here.
     ASSERT(realizedFontIndex == m_fontList.size());
 
-    if (m_familyIndex == cAllFamiliesScanned)
-        return 0;
+    if (m_familyIndex <= cAllFamiliesScanned) {
+        if (!m_fontSelector)
+            return 0;
 
+        size_t index = cAllFamiliesScanned - m_familyIndex;
+        if (index == m_fontSelector->fallbackFontDataCount())
+            return 0;
+
+        m_familyIndex--;
+        const FontData* fallback = m_fontSelector->getFallbackFontData(font->fontDescription(), index);
+        m_fontList.append(pair<const FontData*, bool>(fallback, false));
+        return fallback;
+    }
     // Ask the font cache for the font data.
     // We are obtaining this font for the first time.  We keep track of the families we've looked at before
     // in |m_familyIndex|, so that we never scan the same spot in the list twice.  getFontData will adjust our
@@ -108,24 +120,8 @@ const FontData* FontFallbackList::fontDataAt(const Font* font, unsigned realized
         if (result->isLoading())
             m_loadingCustomFonts = true;
     }
+
     return result;
-}
-
-const FontData* FontFallbackList::fontDataForCharacters(const Font* font, const UChar* characters, int length) const
-{
-    // This method is only called when the primary font does not contain the characters we need.
-    // Begin our search at position 1.
-    unsigned realizedFontIndex = 1;
-    const FontData* fontData = fontDataAt(font, realizedFontIndex);
-    while (fontData && !fontData->containsCharacters(characters, length))
-        fontData = fontDataAt(font, ++realizedFontIndex);
-    
-    if (!fontData) {
-        ASSERT(fontCache()->generation() == m_generation);
-        fontData = fontCache()->getFontDataForCharacters(*font, characters, length);
-    }
-
-    return fontData;
 }
 
 void FontFallbackList::setPlatformFont(const FontPlatformData& platformData)

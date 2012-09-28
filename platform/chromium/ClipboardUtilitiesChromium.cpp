@@ -32,9 +32,17 @@
 #include "ClipboardUtilitiesChromium.h"
 
 #include "KURL.h"
+#include "Pasteboard.h"
 #include "PlatformString.h"
 
 namespace WebCore {
+
+PasteboardPrivate::ClipboardBuffer currentPasteboardBuffer()
+{
+    return Pasteboard::generalPasteboard()->isSelectionMode() ?
+        PasteboardPrivate::SelectionBuffer :
+        PasteboardPrivate::StandardBuffer;
+}
 
 #if OS(WINDOWS)
 void replaceNewlinesWithWindowsStyleNewlines(String& str)
@@ -52,16 +60,26 @@ void replaceNBSPWithSpace(String& str)
     str.replace(NonBreakingSpaceCharacter, SpaceCharacter);
 }
 
-String urlToMarkup(const KURL& url, const String& title)
+String convertURIListToURL(const String& uriList)
 {
-    String markup("<a href=\"");
-    markup.append(url.string());
-    markup.append("\">");
-    // FIXME: HTML escape this, possibly by moving into the glue layer so we
-    // can use net/base/escape.h.
-    markup.append(title);
-    markup.append("</a>");
-    return markup;
+    Vector<String> items;
+    // Line separator is \r\n per RFC 2483 - however, for compatibility
+    // reasons we allow just \n here.
+    uriList.split('\n', items);
+    // Process the input and return the first valid URL. In case no URLs can
+    // be found, return an empty string. This is in line with the HTML5 spec.
+    for (size_t i = 0; i < items.size(); ++i) {
+        String& line = items[i];
+        line = line.stripWhiteSpace();
+        if (line.isEmpty())
+            continue;
+        if (line[0] == '#')
+            continue;
+        KURL url = KURL(ParsedURLString, line);
+        if (url.isValid())
+            return url;
+    }
+    return String();
 }
 
 } // namespace WebCore

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,14 +22,20 @@
 #include "config.h"
 #include "StyleRareInheritedData.h"
 
+#include "CursorList.h"
+#include "QuotesData.h"
 #include "RenderStyle.h"
 #include "RenderStyleConstants.h"
+#include "ShadowData.h"
 
 namespace WebCore {
 
 StyleRareInheritedData::StyleRareInheritedData()
     : textStrokeWidth(RenderStyle::initialTextStrokeWidth())
-    , textShadow(0)
+    , indent(RenderStyle::initialTextIndent())
+    , m_effectiveZoom(RenderStyle::initialZoom())
+    , widows(RenderStyle::initialWidows())
+    , orphans(RenderStyle::initialOrphans())
     , textSecurity(RenderStyle::initialTextSecurity())
     , userModify(READ_ONLY)
     , wordBreak(RenderStyle::initialWordBreak())
@@ -38,12 +44,29 @@ StyleRareInheritedData::StyleRareInheritedData()
     , khtmlLineBreak(LBNORMAL)
     , resize(RenderStyle::initialResize())
     , userSelect(RenderStyle::initialUserSelect())
-    , colorSpace(DeviceColorSpace)
+    , colorSpace(ColorSpaceDeviceRGB)
+    , speak(SpeakNormal)
+    , hyphens(HyphensManual)
+    , textEmphasisFill(TextEmphasisFillFilled)
+    , textEmphasisMark(TextEmphasisMarkNone)
+    , textEmphasisPosition(TextEmphasisPositionOver)
+    , m_lineBoxContain(RenderStyle::initialLineBoxContain())
+    , m_imageRendering(RenderStyle::initialImageRendering())
+    , m_lineSnap(RenderStyle::initialLineSnap())
+    , m_lineAlign(RenderStyle::initialLineAlign())
     , touchCalloutEnabled(RenderStyle::initialTouchCalloutEnabled())
-    , tapHighlightColor(RenderStyle::initialTapHighlightColor())
+    , useTouchOverflowScrolling(RenderStyle::initialUseTouchOverflowScrolling())
     , compositionFillColor(RenderStyle::initialCompositionFillColor())
     , compositionFrameColor(RenderStyle::initialCompositionFrameColor())
     , textSizeAdjust(RenderStyle::initialTextSizeAdjust())
+#if ENABLE(OVERFLOW_SCROLLING)
+    , useTouchOverflowScrolling(RenderStyle::initialUseTouchOverflowScrolling())
+#endif
+    , hyphenationLimitBefore(-1)
+    , hyphenationLimitAfter(-1)
+    , hyphenationLimitLines(-1)
+    , m_lineGrid(RenderStyle::initialLineGrid())
+    , tapHighlightColor(RenderStyle::initialTapHighlightColor())
 {
 }
 
@@ -52,8 +75,17 @@ StyleRareInheritedData::StyleRareInheritedData(const StyleRareInheritedData& o)
     , textStrokeColor(o.textStrokeColor)
     , textStrokeWidth(o.textStrokeWidth)
     , textFillColor(o.textFillColor)
-    , textShadow(o.textShadow ? new ShadowData(*o.textShadow) : 0)
+    , textEmphasisColor(o.textEmphasisColor)
+    , visitedLinkTextStrokeColor(o.visitedLinkTextStrokeColor)
+    , visitedLinkTextFillColor(o.visitedLinkTextFillColor)
+    , visitedLinkTextEmphasisColor(o.visitedLinkTextEmphasisColor)
+    , textShadow(o.textShadow ? adoptPtr(new ShadowData(*o.textShadow)) : nullptr)
     , highlight(o.highlight)
+    , cursorData(o.cursorData)
+    , indent(o.indent)
+    , m_effectiveZoom(o.m_effectiveZoom)
+    , widows(o.widows)
+    , orphans(o.orphans)
     , textSecurity(o.textSecurity)
     , userModify(o.userModify)
     , wordBreak(o.wordBreak)
@@ -63,17 +95,45 @@ StyleRareInheritedData::StyleRareInheritedData(const StyleRareInheritedData& o)
     , resize(o.resize)
     , userSelect(o.userSelect)
     , colorSpace(o.colorSpace)
+    , speak(o.speak)
+    , hyphens(o.hyphens)
+    , textEmphasisFill(o.textEmphasisFill)
+    , textEmphasisMark(o.textEmphasisMark)
+    , textEmphasisPosition(o.textEmphasisPosition)
+    , m_lineBoxContain(o.m_lineBoxContain)
+    , m_imageRendering(o.m_imageRendering)
+    , m_lineSnap(o.m_lineSnap)
+    , m_lineAlign(o.m_lineAlign)
     , touchCalloutEnabled(o.touchCalloutEnabled)
-    , tapHighlightColor(o.tapHighlightColor)
+    , useTouchOverflowScrolling(o.useTouchOverflowScrolling)
     , compositionFillColor(o.compositionFillColor)
     , compositionFrameColor(o.compositionFrameColor)
     , textSizeAdjust(o.textSizeAdjust)
+#if ENABLE(OVERFLOW_SCROLLING)
+    , useTouchOverflowScrolling(o.useTouchOverflowScrolling)
+#endif
+    , hyphenationString(o.hyphenationString)
+    , hyphenationLimitBefore(o.hyphenationLimitBefore)
+    , hyphenationLimitAfter(o.hyphenationLimitAfter)
+    , hyphenationLimitLines(o.hyphenationLimitLines)
+    , locale(o.locale)
+    , textEmphasisCustomMark(o.textEmphasisCustomMark)
+    , m_lineGrid(o.m_lineGrid)
+    , tapHighlightColor(o.tapHighlightColor)
 {
 }
 
 StyleRareInheritedData::~StyleRareInheritedData()
 {
-    delete textShadow;
+}
+
+static bool cursorDataEquivalent(const CursorList* c1, const CursorList* c2)
+{
+    if (c1 == c2)
+        return true;
+    if ((!c1 && c2) || (c1 && !c2))
+        return false;
+    return (*c1 == *c2);
 }
 
 bool StyleRareInheritedData::operator==(const StyleRareInheritedData& o) const
@@ -81,23 +141,52 @@ bool StyleRareInheritedData::operator==(const StyleRareInheritedData& o) const
     return textStrokeColor == o.textStrokeColor
         && textStrokeWidth == o.textStrokeWidth
         && textFillColor == o.textFillColor
+        && textEmphasisColor == o.textEmphasisColor
+        && visitedLinkTextStrokeColor == o.visitedLinkTextStrokeColor
+        && visitedLinkTextFillColor == o.visitedLinkTextFillColor
+        && visitedLinkTextEmphasisColor == o.visitedLinkTextEmphasisColor
+        && tapHighlightColor == o.tapHighlightColor
         && shadowDataEquivalent(o)
         && highlight == o.highlight
+        && cursorDataEquivalent(cursorData.get(), o.cursorData.get())
+        && indent == o.indent
+        && m_effectiveZoom == o.m_effectiveZoom
+        && widows == o.widows
+        && orphans == o.orphans
         && textSecurity == o.textSecurity
         && userModify == o.userModify
         && wordBreak == o.wordBreak
         && wordWrap == o.wordWrap
         && nbspMode == o.nbspMode
         && khtmlLineBreak == o.khtmlLineBreak
+#if ENABLE(OVERFLOW_SCROLLING)
+        && useTouchOverflowScrolling == o.useTouchOverflowScrolling
+#endif
         && textSizeAdjust == o.textSizeAdjust
         && resize == o.resize
         && userSelect == o.userSelect
         && colorSpace == o.colorSpace
-        && tapHighlightColor == o.tapHighlightColor
+        && speak == o.speak
+        && hyphens == o.hyphens
+        && hyphenationLimitBefore == o.hyphenationLimitBefore
+        && hyphenationLimitAfter == o.hyphenationLimitAfter
+        && hyphenationLimitLines == o.hyphenationLimitLines
+        && textEmphasisFill == o.textEmphasisFill
+        && textEmphasisMark == o.textEmphasisMark
+        && textEmphasisPosition == o.textEmphasisPosition
+        && m_lineBoxContain == o.m_lineBoxContain
         && touchCalloutEnabled == o.touchCalloutEnabled
+        && useTouchOverflowScrolling == o.useTouchOverflowScrolling
         && compositionFillColor == o.compositionFillColor
         && compositionFrameColor == o.compositionFrameColor
-    ;
+        && hyphenationString == o.hyphenationString
+        && locale == o.locale
+        && textEmphasisCustomMark == o.textEmphasisCustomMark
+        && QuotesData::equal(quotes.get(), o.quotes.get())
+        && m_lineGrid == o.m_lineGrid
+        && m_imageRendering == o.m_imageRendering
+        && m_lineSnap == o.m_lineSnap
+        && m_lineAlign == o.m_lineAlign;
 }
 
 bool StyleRareInheritedData::shadowDataEquivalent(const StyleRareInheritedData& o) const

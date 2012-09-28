@@ -38,72 +38,66 @@
 #include "HTMLIFrameElement.h"
 #include "HTMLNames.h"
 #include "V8Binding.h"
+#include "V8DOMWindow.h"
+#include "V8HTMLAllCollection.h"
+#include "V8HTMLCollection.h"
+#include "V8IsolatedContext.h"
+#include "V8Node.h"
 #include "V8Proxy.h"
+#include "V8RecursionScope.h"
+#include <wtf/OwnArrayPtr.h>
 #include <wtf/RefPtr.h>
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
-v8::Handle<v8::Boolean> V8HTMLDocument::namedPropertyDeleter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
+v8::Local<v8::Object> V8HTMLDocument::WrapInShadowObject(v8::Local<v8::Object> wrapper, Node* impl)
 {
-    // Only handle document.all.  Insert the marker object into the
-    // shadow internal field to signal that document.all is no longer
-    // shadowed.
-    AtomicString key = v8StringToAtomicWebCoreString(name);
-    DEFINE_STATIC_LOCAL(const AtomicString, all, ("all"));
-    if (key != all)
-        return deletionNotHandledByInterceptor();
-
-    ASSERT(info.Holder()->InternalFieldCount() == V8HTMLDocument::internalFieldCount);
-    v8::Local<v8::Value> marker = info.Holder()->GetInternalField(V8HTMLDocument::markerIndex);
-    info.Holder()->SetInternalField(V8HTMLDocument::shadowIndex, marker);
-    return v8::True();
-}
-
-v8::Handle<v8::Value> V8HTMLDocument::namedPropertyGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
-{
-    INC_STATS("DOM.HTMLDocument.NamedPropertyGetter");
-    AtomicString key = v8StringToAtomicWebCoreString(name);
-
-    // Special case for document.all.  If the value in the shadow
-    // internal field is not the marker object, then document.all has
-    // been temporarily shadowed and we return the value.
-    DEFINE_STATIC_LOCAL(const AtomicString, all, ("all"));
-    if (key == all) {
-        ASSERT(info.Holder()->InternalFieldCount() == V8HTMLDocument::internalFieldCount);
-        v8::Local<v8::Value> marker = info.Holder()->GetInternalField(V8HTMLDocument::markerIndex);
-        v8::Local<v8::Value> value = info.Holder()->GetInternalField(V8HTMLDocument::shadowIndex);
-        if (marker != value)
-            return value;
+    DEFINE_STATIC_LOCAL(v8::Persistent<v8::FunctionTemplate>, shadowTemplate, ());
+    if (shadowTemplate.IsEmpty()) {
+        shadowTemplate = v8::Persistent<v8::FunctionTemplate>::New(v8::FunctionTemplate::New());
+        if (shadowTemplate.IsEmpty())
+            return v8::Local<v8::Object>();
+        shadowTemplate->SetClassName(v8::String::New("HTMLDocument"));
+        shadowTemplate->Inherit(V8HTMLDocument::GetTemplate());
+        shadowTemplate->InstanceTemplate()->SetInternalFieldCount(V8HTMLDocument::internalFieldCount);
     }
 
-    HTMLDocument* htmlDocument = V8HTMLDocument::toNative(info.Holder());
+    v8::Local<v8::Function> shadowConstructor = shadowTemplate->GetFunction();
+    if (shadowConstructor.IsEmpty())
+        return v8::Local<v8::Object>();
 
-    // Fast case for named elements that are not there.
+    v8::Local<v8::Object> shadow;
+    {
+        V8RecursionScope::MicrotaskSuppression scope;
+        shadow = shadowConstructor->NewInstance();
+    }
+    if (shadow.IsEmpty())
+        return v8::Local<v8::Object>();
+    V8DOMWrapper::setDOMWrapper(shadow, &V8HTMLDocument::info, impl);
+    shadow->SetPrototype(wrapper);
+    return shadow;
+}
+
+v8::Handle<v8::Value> V8HTMLDocument::GetNamedProperty(HTMLDocument* htmlDocument, const AtomicString& key, v8::Isolate* isolate)
+{
     if (!htmlDocument->hasNamedItem(key.impl()) && !htmlDocument->hasExtraNamedItem(key.impl()))
         return v8::Handle<v8::Value>();
 
-    RefPtr<HTMLCollection> items = htmlDocument->documentNamedItems(key);
+    HTMLCollection* items = htmlDocument->documentNamedItems(key);
     if (!items->length())
-        return notHandledByInterceptor();
+        return v8::Handle<v8::Value>();
 
     if (items->length() == 1) {
         Node* node = items->firstItem();
         Frame* frame = 0;
         if (node->hasTagName(HTMLNames::iframeTag) && (frame = static_cast<HTMLIFrameElement*>(node)->contentFrame()))
-            return V8DOMWrapper::convertToV8Object(V8ClassIndex::DOMWINDOW, frame->domWindow());
+            return toV8(frame->domWindow(), isolate);
 
-        return V8DOMWrapper::convertNodeToV8Object(node);
+        return toV8(node, isolate);
     }
 
-    return V8DOMWrapper::convertToV8Object(V8ClassIndex::HTMLCOLLECTION, items.release());
-}
-
-v8::Handle<v8::Value> V8HTMLDocument::indexedPropertyGetter(uint32_t index, const v8::AccessorInfo &info) 
-{
-    INC_STATS("DOM.HTMLDocument.IndexedPropertyGetter");
-    v8::Local<v8::Integer> indexV8 = v8::Integer::NewFromUnsigned(index);
-    return namedPropertyGetter(indexV8->ToString(), info);
+    return toV8(items, isolate);
 }
 
 // HTMLDocument ----------------------------------------------------------------
@@ -144,9 +138,9 @@ v8::Handle<v8::Value> V8HTMLDocument::openCallback(const v8::Arguments& args)
     HTMLDocument* htmlDocument = V8HTMLDocument::toNative(args.Holder());
 
     if (args.Length() > 2) {
-        if (Frame* frame = htmlDocument->frame()) {
+        if (RefPtr<Frame> frame = htmlDocument->frame()) {
             // Fetch the global object for the frame.
-            v8::Local<v8::Context> context = V8Proxy::context(frame);
+            v8::Local<v8::Context> context = V8Proxy::context(frame.get());
             // Bail out if we cannot get the context.
             if (context.IsEmpty())
                 return v8::Undefined();
@@ -159,15 +153,15 @@ v8::Handle<v8::Value> V8HTMLDocument::openCallback(const v8::Arguments& args)
                 return v8::Undefined();
             }
             // Wrap up the arguments and call the function.
-            v8::Local<v8::Value>* params = new v8::Local<v8::Value>[args.Length()];
+            OwnArrayPtr<v8::Local<v8::Value> > params = adoptArrayPtr(new v8::Local<v8::Value>[args.Length()]);
             for (int i = 0; i < args.Length(); i++)
                 params[i] = args[i];
 
-            V8Proxy* proxy = V8Proxy::retrieve(frame);
-            ASSERT(proxy);
+            V8Proxy* proxy = V8Proxy::retrieve(frame.get());
+            if (!proxy)
+                return v8::Undefined();
 
-            v8::Local<v8::Value> result = proxy->callFunction(v8::Local<v8::Function>::Cast(function), global, args.Length(), params);
-            delete[] params;
+            v8::Local<v8::Value> result = proxy->callFunction(v8::Local<v8::Function>::Cast(function), global, args.Length(), params.get());
             return result;
         }
     }
@@ -181,18 +175,29 @@ v8::Handle<v8::Value> V8HTMLDocument::openCallback(const v8::Arguments& args)
 v8::Handle<v8::Value> V8HTMLDocument::allAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
 {
     INC_STATS("DOM.HTMLDocument.all._get");
-    v8::HandleScope scope;
     v8::Handle<v8::Object> holder = info.Holder();
     HTMLDocument* htmlDocument = V8HTMLDocument::toNative(holder);
-    return V8DOMWrapper::convertToV8Object(V8ClassIndex::HTMLCOLLECTION, htmlDocument->all());
+    return toV8(htmlDocument->all(), info.GetIsolate());
 }
 
 void V8HTMLDocument::allAccessorSetter(v8::Local<v8::String> name, v8::Local<v8::Value> value, const v8::AccessorInfo& info)
 {
-    INC_STATS("DOM.HTMLDocument.all._set");
-    v8::Handle<v8::Object> holder = info.Holder();
-    ASSERT(info.Holder()->InternalFieldCount() == V8HTMLDocument::internalFieldCount);
-    info.Holder()->SetInternalField(V8HTMLDocument::shadowIndex, value);
+    // Just emulate a normal JS behaviour---install a property on this.
+    info.This()->ForceSet(name, value);
+}
+
+v8::Handle<v8::Value> toV8(HTMLDocument* impl, v8::Isolate* isolate, bool forceNewObject)
+{
+    if (!impl)
+        return v8::Null();
+    v8::Handle<v8::Object> wrapper = V8HTMLDocument::wrap(impl, isolate, forceNewObject);
+    if (wrapper.IsEmpty())
+        return wrapper;
+    if (!V8IsolatedContext::getEntered()) {
+        if (V8Proxy* proxy = V8Proxy::retrieve(impl->frame()))
+            proxy->windowShell()->updateDocumentWrapper(wrapper);
+    }
+    return wrapper;
 }
 
 } // namespace WebCore

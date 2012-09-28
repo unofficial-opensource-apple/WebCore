@@ -43,9 +43,9 @@ public:
     virtual bool requiresLayer() const { return true; }
 
     virtual void layout();
-    virtual void calcPrefWidths();
+    virtual void computePreferredLogicalWidths();
     
-    virtual void paint(PaintInfo&, int tx, int ty);
+    virtual void paint(PaintInfo&, const LayoutPoint&);
 
 private:
     virtual bool isReplica() const { return true; }

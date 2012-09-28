@@ -34,36 +34,37 @@ class RenderTable;
 
 class RenderTableCol : public RenderBox {
 public:
-    RenderTableCol(Node*);
+    explicit RenderTableCol(Node*);
 
     const RenderObjectChildList* children() const { return &m_children; }
     RenderObjectChildList* children() { return &m_children; }
 
-    virtual void calcPrefWidths();
+    virtual void computePreferredLogicalWidths();
 
-    int span() const { return m_span; }
-    void setSpan(int span) { m_span = span; }
-
+    unsigned span() const { return m_span; }
+    void setSpan(unsigned span) { m_span = span; }
+    bool isTableColGroup() { return firstChild() ? true : false; }
 private:
     virtual RenderObjectChildList* virtualChildren() { return children(); }
     virtual const RenderObjectChildList* virtualChildren() const { return children(); }
 
     virtual const char* renderName() const { return "RenderTableCol"; }
     virtual bool isTableCol() const { return true; }
-    virtual int lineHeight(bool) const { return 0; }
     virtual void updateFromElement();
 
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
     virtual bool canHaveChildren() const;
     virtual bool requiresLayer() const { return false; }
 
-    virtual IntRect clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer);
+    virtual LayoutRect clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const;
     virtual void imageChanged(WrappedImagePtr, const IntRect* = 0);
+
+    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
     RenderTable* table() const;
 
     RenderObjectChildList m_children;
-    int m_span;
+    unsigned m_span;
 };
 
 inline RenderTableCol* toRenderTableCol(RenderObject* object)

@@ -27,16 +27,25 @@
 #include "config.h"
 #include "Pattern.h"
 
-#include "TransformationMatrix.h"
+#include "AffineTransform.h"
 #include "GraphicsContext.h"
 
 #include <CoreGraphics/CoreGraphics.h>
+#include <wtf/MainThread.h>
+
+#if PLATFORM(MAC) || PLATFORM(CHROMIUM)
+#include "WebCoreSystemInterface.h"
+#endif
+
+#if PLATFORM(WIN)
+#include <WebKitSystemInterface/WebKitSystemInterface.h>
+#endif
 
 namespace WebCore {
 
 static void patternCallback(void* info, CGContextRef context)
 {
-    CGImageRef platformImage = static_cast<Image*>(info)->getCGImageRef();
+    CGImageRef platformImage = static_cast<CGImageRef>(info);
     if (!platformImage)
         return;
 
@@ -45,19 +54,28 @@ static void patternCallback(void* info, CGContextRef context)
     CGContextDrawImage(context, rect, platformImage);
 }
 
-static void patternReleaseCallback(void* info)
+static void patternReleaseOnMainThreadCallback(void* info)
 {
-    static_cast<Image*>(info)->deref();
+    CGImageRelease(static_cast<CGImageRef>(info));
 }
 
-CGPatternRef Pattern::createPlatformPattern(const TransformationMatrix& userSpaceTransformation) const
+static void patternReleaseCallback(void* info)
+{
+    callOnMainThread(patternReleaseOnMainThreadCallback, info);
+}
+
+CGPatternRef Pattern::createPlatformPattern(const AffineTransform& userSpaceTransformation) const
 {
     IntRect tileRect = tileImage()->rect();
 
-    TransformationMatrix patternTransform = m_patternSpaceTransformation;
-    patternTransform.multiply(userSpaceTransformation);
+    AffineTransform patternTransform = userSpaceTransformation * m_patternSpaceTransformation;
     patternTransform.scaleNonUniform(1, -1);
     patternTransform.translate(0, -tileRect.height());
+
+    // If we're repeating in both directions, we can use image-backed patterns
+    // instead of custom patterns, and avoid tiling-edge pixel cracks.
+    if (m_repeatX && m_repeatY)
+        return wkCGPatternCreateWithImageAndTransform(tileImage()->getCGImageRef(), patternTransform, wkPatternTilingConstantSpacing);
 
     // If FLT_MAX should also be used for xStep or yStep, nothing is rendered. Using fractions of FLT_MAX also
     // result in nothing being rendered.
@@ -67,12 +85,11 @@ CGPatternRef Pattern::createPlatformPattern(const TransformationMatrix& userSpac
     CGFloat xStep = m_repeatX ? tileRect.width() : (1 << 22);
     CGFloat yStep = m_repeatY ? tileRect.height() : (1 << 22);
 
-    // The pattern will release the tile when it's done rendering in patternReleaseCallback
-    tileImage()->ref();
+    // The pattern will release the CGImageRef when it's done rendering in patternReleaseCallback
+    CGImageRef platformImage = CGImageRetain(tileImage()->getCGImageRef());
 
     const CGPatternCallbacks patternCallbacks = { 0, patternCallback, patternReleaseCallback };
-    return CGPatternCreate(tileImage(), tileRect, patternTransform, xStep, yStep,
-        kCGPatternTilingConstantSpacing, TRUE, &patternCallbacks);
+    return CGPatternCreate(platformImage, tileRect, patternTransform, xStep, yStep, kCGPatternTilingConstantSpacing, TRUE, &patternCallbacks);
 }
 
 }

@@ -37,6 +37,10 @@
 
 namespace WebCore {
 
+#if OS(WINDOWS)
+static const unsigned short HIGH_BIT_MASK_SHORT = 0x8000;
+#endif
+
 void PlatformKeyboardEvent::disambiguateKeyDownEvent(Type type, bool backwardCompatibilityMode)
 {
 #if OS(WINDOWS)
@@ -44,8 +48,8 @@ void PlatformKeyboardEvent::disambiguateKeyDownEvent(Type type, bool backwardCom
     ASSERT_NOT_REACHED();
 #else
     // Can only change type from KeyDown to RawKeyDown or Char, as we lack information for other conversions.
-    ASSERT(m_type == KeyDown);
-    ASSERT(type == RawKeyDown || type == Char);
+    ASSERT(m_type == PlatformEvent::KeyDown);
+    ASSERT(type == PlatformEvent::RawKeyDown || type == PlatformEvent::Char);
     m_type = type;
     if (backwardCompatibilityMode)
         return;
@@ -79,6 +83,28 @@ bool PlatformKeyboardEvent::currentCapsLockState()
 #else
     notImplemented();
     return false;
+#endif
+}
+
+void PlatformKeyboardEvent::getCurrentModifierState(bool& shiftKey, bool& ctrlKey, bool& altKey, bool& metaKey)
+{
+#if OS(WINDOWS)
+    shiftKey = GetKeyState(VK_SHIFT) & HIGH_BIT_MASK_SHORT;
+    ctrlKey = GetKeyState(VK_CONTROL) & HIGH_BIT_MASK_SHORT;
+    altKey = GetKeyState(VK_MENU) & HIGH_BIT_MASK_SHORT;
+    metaKey = false;
+#elif OS(DARWIN)
+    UInt32 currentModifiers = GetCurrentKeyModifiers();
+    shiftKey = currentModifiers & ::shiftKey;
+    ctrlKey = currentModifiers & ::controlKey;
+    altKey = currentModifiers & ::optionKey;
+    metaKey = currentModifiers & ::cmdKey;
+#else
+    shiftKey = false;
+    ctrlKey = false;
+    altKey = false;
+    metaKey = false;
+    notImplemented();
 #endif
 }
 

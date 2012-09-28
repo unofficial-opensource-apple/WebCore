@@ -26,20 +26,19 @@
 #include "config.h"
 #include "Pattern.h"
 
+#include "AffineTransform.h"
 #include "GraphicsContext.h"
-#include "TransformationMatrix.h"
-
 #include <cairo.h>
 
 namespace WebCore {
 
-cairo_pattern_t* Pattern::createPlatformPattern(const TransformationMatrix&) const
+cairo_pattern_t* Pattern::createPlatformPattern(const AffineTransform&) const
 {
-    cairo_surface_t* surface = tileImage()->nativeImageForCurrentFrame();
-    if (!surface)
+    NativeImageCairo* image = tileImage()->nativeImageForCurrentFrame();
+    if (!image)
         return 0;
 
-    cairo_pattern_t* pattern = cairo_pattern_create_for_surface(surface);
+    cairo_pattern_t* pattern = cairo_pattern_create_for_surface(image->surface());
 
     // cairo merges patter space and user space itself
     cairo_matrix_t matrix = m_patternSpaceTransformation;

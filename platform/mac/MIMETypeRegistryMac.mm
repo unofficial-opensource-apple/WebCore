@@ -28,12 +28,15 @@
 #include "MIMETypeRegistry.h"
 
 #include "WebCoreSystemInterface.h"
+#include <wtf/Assertions.h>
+#include <wtf/MainThread.h>
 
 namespace WebCore 
 {
 
 String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
 {
+    ASSERT(isMainThread());
     return wkGetMIMETypeForExtension(ext);
 }
 
@@ -54,6 +57,11 @@ Vector<String> MIMETypeRegistry::getExtensionsForMIMEType(const String& type)
 String MIMETypeRegistry::getPreferredExtensionForMIMEType(const String& type)
 {
     return wkGetPreferredExtensionForMIMEType(type);
+}
+
+bool MIMETypeRegistry::isApplicationPluginMIMEType(const String&)
+{
+    return false;
 }
 
 }

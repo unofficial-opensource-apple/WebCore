@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,11 +25,13 @@
 #include "config.h"
 #include "ComplexTextController.h"
 
-#include "CharacterNames.h"
+#include "FloatSize.h"
 #include "Font.h"
 #include "TextBreakIterator.h"
-
+#include "TextRun.h"
+#include <CoreText/CoreText.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/unicode/CharacterNames.h>
 
 #if defined(BUILDING_ON_LEOPARD)
 // Undefined when compiling agains the 10.5 SDK.
@@ -54,10 +56,11 @@ static inline CGFloat ceilCGFloat(CGFloat f)
     return static_cast<CGFloat>(ceil(f));
 }
 
-ComplexTextController::ComplexTextController(const Font* font, const TextRun& run, bool mayUseNaturalWritingDirection, HashSet<const SimpleFontData*>* fallbackFonts)
+ComplexTextController::ComplexTextController(const Font* font, const TextRun& run, bool mayUseNaturalWritingDirection, HashSet<const SimpleFontData*>* fallbackFonts, bool forTextEmphasis)
     : m_font(*font)
     , m_run(run)
     , m_mayUseNaturalWritingDirection(mayUseNaturalWritingDirection)
+    , m_forTextEmphasis(forTextEmphasis)
     , m_currentCharacter(0)
     , m_end(run.length())
     , m_totalWidth(0)
@@ -67,6 +70,9 @@ ComplexTextController::ComplexTextController(const Font* font, const TextRun& ru
     , m_glyphInCurrentRun(0)
     , m_characterInCurrentGlyph(0)
     , m_finalRoundingWidth(0)
+    , m_expansion(run.expansion())
+    , m_leadingExpansion(0)
+    , m_afterExpansion(!run.allowsLeadingExpansion())
     , m_fallbackFonts(fallbackFonts)
     , m_minGlyphBoundingBoxX(numeric_limits<float>::max())
     , m_maxGlyphBoundingBoxX(numeric_limits<float>::min())
@@ -74,29 +80,32 @@ ComplexTextController::ComplexTextController(const Font* font, const TextRun& ru
     , m_maxGlyphBoundingBoxY(numeric_limits<float>::min())
     , m_lastRoundingGlyph(0)
 {
-    m_padding = m_run.padding();
-    if (!m_padding)
-        m_padPerSpace = 0;
+    if (!m_expansion)
+        m_expansionPerOpportunity = 0;
     else {
-        float numSpaces = 0;
-        for (int s = 0; s < m_run.length(); s++)
-            if (Font::treatAsSpace(m_run[s]))
-                numSpaces++;
+        bool isAfterExpansion = m_afterExpansion;
+        unsigned expansionOpportunityCount = Font::expansionOpportunityCount(m_run.characters(), m_end, m_run.ltr() ? LTR : RTL, isAfterExpansion);
+        if (isAfterExpansion && !m_run.allowsTrailingExpansion())
+            expansionOpportunityCount--;
 
-        if (numSpaces == 0)
-            m_padPerSpace = 0;
+        if (!expansionOpportunityCount)
+            m_expansionPerOpportunity = 0;
         else
-            m_padPerSpace = ceilf(m_run.padding() / numSpaces);
+            m_expansionPerOpportunity = m_expansion / expansionOpportunityCount;
     }
 
     collectComplexTextRuns();
     adjustGlyphsAndAdvances();
+
+    m_runWidthSoFar = m_leadingExpansion;
 }
 
-int ComplexTextController::offsetForPosition(int h, bool includePartialGlyphs)
+int ComplexTextController::offsetForPosition(float h, bool includePartialGlyphs)
 {
     if (h >= m_totalWidth)
         return m_run.ltr() ? m_end : 0;
+
+    h -= m_leadingExpansion;
     if (h < 0)
         return m_run.ltr() ? 0 : m_end;
 
@@ -113,9 +122,9 @@ int ComplexTextController::offsetForPosition(int h, bool includePartialGlyphs)
                 CFIndex hitGlyphStart = complexTextRun.indexAt(j);
                 CFIndex hitGlyphEnd;
                 if (m_run.ltr())
-                    hitGlyphEnd = max<CFIndex>(hitGlyphStart, j + 1 < complexTextRun.glyphCount() ? complexTextRun.indexAt(j + 1) : complexTextRun.stringLength());
+                    hitGlyphEnd = max<CFIndex>(hitGlyphStart, j + 1 < complexTextRun.glyphCount() ? complexTextRun.indexAt(j + 1) : static_cast<CFIndex>(complexTextRun.indexEnd()));
                 else
-                    hitGlyphEnd = max<CFIndex>(hitGlyphStart, j > 0 ? complexTextRun.indexAt(j - 1) : complexTextRun.stringLength());
+                    hitGlyphEnd = max<CFIndex>(hitGlyphStart, j > 0 ? complexTextRun.indexAt(j - 1) : static_cast<CFIndex>(complexTextRun.indexEnd()));
 
                 // FIXME: Instead of dividing the glyph's advance equally between the characters, this
                 // could use the glyph's "ligature carets". However, there is no Core Text API to get the
@@ -142,7 +151,7 @@ int ComplexTextController::offsetForPosition(int h, bool includePartialGlyphs)
                 CGFloat clusterWidth;
                 // FIXME: The search stops at the boundaries of complexTextRun. In theory, it should go on into neighboring ComplexTextRuns
                 // derived from the same CTLine. In practice, we do not expect there to be more than one CTRun in a CTLine, as no
-                // reordering and on font fallback should occur within a CTLine.
+                // reordering and no font fallback should occur within a CTLine.
                 if (clusterEnd - clusterStart > 1) {
                     clusterWidth = adjustedAdvance;
                     int firstGlyphBeforeCluster = j - 1;
@@ -175,110 +184,143 @@ int ComplexTextController::offsetForPosition(int h, bool includePartialGlyphs)
     return 0;
 }
 
+static bool advanceByCombiningCharacterSequence(const UChar*& iterator, const UChar* end, UChar32& baseCharacter, unsigned& markCount)
+{
+    ASSERT(iterator < end);
+
+    markCount = 0;
+
+    baseCharacter = *iterator++;
+
+    if (U16_IS_SURROGATE(baseCharacter)) {
+        if (!U16_IS_LEAD(baseCharacter))
+            return false;
+        if (iterator == end)
+            return false;
+        UChar trail = *iterator++;
+        if (!U16_IS_TRAIL(trail))
+            return false;
+        baseCharacter = U16_GET_SUPPLEMENTARY(baseCharacter, trail);
+    }
+
+    // Consume marks.
+    while (iterator < end) {
+        UChar32 nextCharacter;
+        int markLength = 0;
+        U16_NEXT(iterator, markLength, end - iterator, nextCharacter);
+        if (!(U_GET_GC_MASK(nextCharacter) & U_GC_M_MASK))
+            break;
+        markCount += markLength;
+        iterator += markLength;
+    }
+
+    return true;
+}
+
 void ComplexTextController::collectComplexTextRuns()
 {
     if (!m_end)
         return;
 
-    // We break up glyph run generation for the string by FontData and (if needed) the use of small caps.
+    // We break up glyph run generation for the string by FontData.
     const UChar* cp = m_run.characters();
-    bool hasTrailingSoftHyphen = m_run[m_end - 1] == softHyphen;
 
-    if (m_font.isSmallCaps() || hasTrailingSoftHyphen)
+    if (m_font.isSmallCaps())
         m_smallCapsBuffer.resize(m_end);
 
-    unsigned indexOfFontTransition = m_run.rtl() ? m_end - 1 : 0;
-    const UChar* curr = m_run.rtl() ? cp + m_end  - 1 : cp;
-    const UChar* end = m_run.rtl() ? cp - 1 : cp + m_end;
+    unsigned indexOfFontTransition = 0;
+    const UChar* curr = cp;
+    const UChar* end = cp + m_end;
 
-    // FIXME: Using HYPHEN-MINUS rather than HYPHEN because Times has a HYPHEN-MINUS glyph that looks like its
-    // SOFT-HYPHEN glyph, and has no HYPHEN glyph.
-    static const UChar hyphen = '-';
+    const SimpleFontData* fontData;
+    bool isMissingGlyph;
+    const SimpleFontData* nextFontData;
+    bool nextIsMissingGlyph;
 
-    if (hasTrailingSoftHyphen && m_run.rtl()) {
-        collectComplexTextRunsForCharacters(&hyphen, 1, m_end - 1, m_font.glyphDataForCharacter(hyphen, false).fontData);
-        indexOfFontTransition--;
-        curr--;
-    }
+    unsigned markCount;
+    const UChar* sequenceStart = curr;
+    UChar32 baseCharacter;
+    if (!advanceByCombiningCharacterSequence(curr, end, baseCharacter, markCount))
+        return;
 
-    GlyphData glyphData;
-    GlyphData nextGlyphData;
-
-    bool isSurrogate = U16_IS_SURROGATE(*curr);
-    if (isSurrogate) {
-        if (m_run.ltr()) {
-            if (!U16_IS_SURROGATE_LEAD(curr[0]) || curr + 1 == end || !U16_IS_TRAIL(curr[1]))
-                return;
-            nextGlyphData = m_font.glyphDataForCharacter(U16_GET_SUPPLEMENTARY(curr[0], curr[1]), false);
-        } else {
-            if (!U16_IS_TRAIL(curr[0]) || curr -1 == end || !U16_IS_SURROGATE_LEAD(curr[-1]))
-                return;
-            nextGlyphData = m_font.glyphDataForCharacter(U16_GET_SUPPLEMENTARY(curr[-1], curr[0]), false);
-        }
-    } else
-        nextGlyphData = m_font.glyphDataForCharacter(*curr, false);
-
-    UChar newC = 0;
+    UChar uppercaseCharacter = 0;
 
     bool isSmallCaps;
-    bool nextIsSmallCaps = !isSurrogate && m_font.isSmallCaps() && !(U_GET_GC_MASK(*curr) & U_GC_M_MASK) && (newC = u_toupper(*curr)) != *curr;
+    bool nextIsSmallCaps = m_font.isSmallCaps() && !(U_GET_GC_MASK(baseCharacter) & U_GC_M_MASK) && (uppercaseCharacter = u_toupper(baseCharacter)) != baseCharacter;
 
-    if (nextIsSmallCaps)
-        m_smallCapsBuffer[curr - cp] = newC;
+    if (nextIsSmallCaps) {
+        m_smallCapsBuffer[sequenceStart - cp] = uppercaseCharacter;
+        for (unsigned i = 0; i < markCount; ++i)
+            m_smallCapsBuffer[sequenceStart - cp + i + 1] = sequenceStart[i + 1];
+    }
 
-    while (true) {
-        curr = m_run.rtl() ? curr - (isSurrogate ? 2 : 1) : curr + (isSurrogate ? 2 : 1);
-        if (curr == end)
-            break;
+    nextIsMissingGlyph = false;
+#if !PLATFORM(WX)
+    nextFontData = m_font.fontDataForCombiningCharacterSequence(sequenceStart, curr - sequenceStart, nextIsSmallCaps ? SmallCapsVariant : NormalVariant);
+    if (!nextFontData) {
+        if (markCount)
+            nextFontData = systemFallbackFontData();
+        else
+            nextIsMissingGlyph = true;
+    }
+#endif
 
-        glyphData = nextGlyphData;
+    while (curr < end) {
+        fontData = nextFontData;
+        isMissingGlyph = nextIsMissingGlyph;
         isSmallCaps = nextIsSmallCaps;
         int index = curr - cp;
-        isSurrogate = U16_IS_SURROGATE(*curr);
-        UChar c = *curr;
-        bool forceSmallCaps = !isSurrogate && isSmallCaps && (U_GET_GC_MASK(c) & U_GC_M_MASK);
-        if (isSurrogate) {
-            if (m_run.ltr()) {
-                if (!U16_IS_SURROGATE_LEAD(curr[0]) || curr + 1 == end || !U16_IS_TRAIL(curr[1]))
-                    return;
-                nextGlyphData = m_font.glyphDataForCharacter(U16_GET_SUPPLEMENTARY(curr[0], curr[1]), false);
-            } else {
-                if (!U16_IS_TRAIL(curr[0]) || curr -1 == end || !U16_IS_SURROGATE_LEAD(curr[-1]))
-                    return;
-                nextGlyphData = m_font.glyphDataForCharacter(U16_GET_SUPPLEMENTARY(curr[-1], curr[0]), false);
-            }
-        } else
-            nextGlyphData = m_font.glyphDataForCharacter(*curr, false, forceSmallCaps);
 
-        if (!isSurrogate && m_font.isSmallCaps()) {
-            nextIsSmallCaps = forceSmallCaps || (newC = u_toupper(c)) != c;
-            if (nextIsSmallCaps)
-                m_smallCapsBuffer[index] = forceSmallCaps ? c : newC;
+        if (!advanceByCombiningCharacterSequence(curr, end, baseCharacter, markCount))
+            return;
+
+        if (m_font.isSmallCaps()) {
+            nextIsSmallCaps = (uppercaseCharacter = u_toupper(baseCharacter)) != baseCharacter;
+            if (nextIsSmallCaps) {
+                m_smallCapsBuffer[index] = uppercaseCharacter;
+                for (unsigned i = 0; i < markCount; ++i)
+                    m_smallCapsBuffer[index + i + 1] = cp[index + i + 1];
+            }
         }
 
-        if (nextGlyphData.fontData != glyphData.fontData || nextIsSmallCaps != isSmallCaps || !nextGlyphData.glyph != !glyphData.glyph) {
-            int itemStart = m_run.rtl() ? index + 1 : indexOfFontTransition;
-            int itemLength = m_run.rtl() ? indexOfFontTransition - index : index - indexOfFontTransition;
-            collectComplexTextRunsForCharacters((isSmallCaps ? m_smallCapsBuffer.data() : cp) + itemStart, itemLength, itemStart, glyphData.glyph ? glyphData.fontData : 0);
+        nextIsMissingGlyph = false;
+        if (baseCharacter == zeroWidthJoiner)
+            nextFontData = fontData;
+#if !PLATFORM(WX)
+        else {
+            nextFontData = m_font.fontDataForCombiningCharacterSequence(cp + index, curr - cp - index, nextIsSmallCaps ? SmallCapsVariant : NormalVariant);
+            if (!nextFontData) {
+                if (markCount)
+                    nextFontData = systemFallbackFontData();
+                else
+                    nextIsMissingGlyph = true;
+            }
+        }
+#endif
+
+        if (nextFontData != fontData || nextIsMissingGlyph != isMissingGlyph) {
+            int itemStart = static_cast<int>(indexOfFontTransition);
+            int itemLength = index - indexOfFontTransition;
+            collectComplexTextRunsForCharacters((isSmallCaps ? m_smallCapsBuffer.data() : cp) + itemStart, itemLength, itemStart, !isMissingGlyph ? fontData : 0);
             indexOfFontTransition = index;
         }
     }
 
-    int itemLength = m_run.rtl() ? indexOfFontTransition + 1 : m_end - indexOfFontTransition - (hasTrailingSoftHyphen ? 1 : 0);
+    int itemLength = m_end - indexOfFontTransition;
     if (itemLength) {
-        int itemStart = m_run.rtl() ? 0 : indexOfFontTransition;
-        collectComplexTextRunsForCharacters((nextIsSmallCaps ? m_smallCapsBuffer.data() : cp) + itemStart, itemLength, itemStart, nextGlyphData.glyph ? nextGlyphData.fontData : 0);
+        int itemStart = indexOfFontTransition;
+        collectComplexTextRunsForCharacters((nextIsSmallCaps ? m_smallCapsBuffer.data() : cp) + itemStart, itemLength, itemStart, !nextIsMissingGlyph ? nextFontData : 0);
     }
 
-    if (hasTrailingSoftHyphen && m_run.ltr())
-        collectComplexTextRunsForCharacters(&hyphen, 1, m_end - 1, m_font.glyphDataForCharacter(hyphen, false).fontData);
+    if (!m_run.ltr())
+        m_complexTextRuns.reverse();
 }
 
 #if USE(CORE_TEXT) && USE(ATSUI)
 static inline bool shouldUseATSUIAPI()
 {
     enum TypeRenderingAPIToUse { UnInitialized, UseATSUI, UseCoreText };
-    DEFINE_STATIC_LOCAL(TypeRenderingAPIToUse, apiToUse, (UnInitialized));
+    static TypeRenderingAPIToUse apiToUse = UnInitialized;
 
     if (UNLIKELY(apiToUse == UnInitialized)) {
         if (&CTGetCoreTextVersion != 0 && CTGetCoreTextVersion() >= kCTVersionNumber10_6)
@@ -304,6 +346,12 @@ CFIndex ComplexTextController::ComplexTextRun::indexAt(size_t i) const
 
 void ComplexTextController::collectComplexTextRunsForCharacters(const UChar* cp, unsigned length, unsigned stringLocation, const SimpleFontData* fontData)
 {
+    if (!fontData) {
+        // Create a run of missing glyphs from the primary font.
+        m_complexTextRuns.append(ComplexTextRun::create(m_font.primaryFont(), cp, stringLocation, length, m_run.ltr()));
+        return;
+    }
+
 #if USE(CORE_TEXT) && USE(ATSUI)
     if (shouldUseATSUIAPI())
         return collectComplexTextRunsForCharactersATSUI(cp, length, stringLocation, fontData);
@@ -320,6 +368,7 @@ ComplexTextController::ComplexTextRun::ComplexTextRun(const SimpleFontData* font
     , m_characters(characters)
     , m_stringLocation(stringLocation)
     , m_stringLength(stringLength)
+    , m_indexEnd(stringLength)
     , m_isMonotonic(true)
 {
 #if USE(CORE_TEXT) && USE(ATSUI)
@@ -344,7 +393,7 @@ void ComplexTextController::ComplexTextRun::setIsNonMonotonic()
 
     m_glyphEndOffsets.grow(m_glyphCount);
     for (size_t i = 0; i < m_glyphCount; ++i) {
-        CFIndex nextMappedIndex = m_stringLength;
+        CFIndex nextMappedIndex = m_indexEnd;
         for (size_t j = indexAt(i) + 1; j < m_stringLength; ++j) {
             if (mappedIndices[j]) {
                 nextMappedIndex = j;
@@ -379,9 +428,9 @@ void ComplexTextController::advance(unsigned offset, GlyphBuffer* glyphBuffer)
             unsigned glyphEndOffset;
             if (complexTextRun.isMonotonic()) {
                 if (ltr)
-                    glyphEndOffset = max<unsigned>(glyphStartOffset, g + 1 < glyphCount ? complexTextRun.indexAt(g + 1) : complexTextRun.stringLength());
+                    glyphEndOffset = max<unsigned>(glyphStartOffset, static_cast<unsigned>(g + 1 < glyphCount ? complexTextRun.indexAt(g + 1) : complexTextRun.indexEnd()));
                 else
-                    glyphEndOffset = max<unsigned>(glyphStartOffset, g > 0 ? complexTextRun.indexAt(g - 1) : complexTextRun.stringLength());
+                    glyphEndOffset = max<unsigned>(glyphStartOffset, static_cast<unsigned>(g > 0 ? complexTextRun.indexAt(g - 1) : complexTextRun.indexEnd()));
             } else
                 glyphEndOffset = complexTextRun.endOffsetAt(g);
 
@@ -395,7 +444,7 @@ void ComplexTextController::advance(unsigned offset, GlyphBuffer* glyphBuffer)
 
             unsigned oldCharacterInCurrentGlyph = m_characterInCurrentGlyph;
             m_characterInCurrentGlyph = min(m_currentCharacter - complexTextRun.stringLocation(), glyphEndOffset) - glyphStartOffset;
-            // FIXME: Instead of dividing the glyph's advance equially between the characters, this
+            // FIXME: Instead of dividing the glyph's advance equally between the characters, this
             // could use the glyph's "ligature carets". However, there is no Core Text API to get the
             // ligature carets.
             if (glyphStartOffset == glyphEndOffset) {
@@ -428,20 +477,23 @@ void ComplexTextController::advance(unsigned offset, GlyphBuffer* glyphBuffer)
 
 void ComplexTextController::adjustGlyphsAndAdvances()
 {
+    CGFloat widthSinceLastCommit = 0;
     size_t runCount = m_complexTextRuns.size();
+    bool hasExtraSpacing = (m_font.letterSpacing() || m_font.wordSpacing() || m_expansion) && !m_run.spacingDisabled();
     for (size_t r = 0; r < runCount; ++r) {
         ComplexTextRun& complexTextRun = *m_complexTextRuns[r];
         unsigned glyphCount = complexTextRun.glyphCount();
         const SimpleFontData* fontData = complexTextRun.fontData();
+        bool isEmoji = fontData->platformData().m_isEmoji;
 
         const CGGlyph* glyphs = complexTextRun.glyphs();
         const CGSize* advances = complexTextRun.advances();
 
         bool lastRun = r + 1 == runCount;
-        const UChar* cp = complexTextRun.characters();
-        CGFloat roundedSpaceWidth = roundCGFloat(fontData->spaceWidth());
         bool roundsAdvances = !m_font.isPrinterFont() && fontData->platformData().roundsGlyphAdvances();
-        bool hasExtraSpacing = (m_font.letterSpacing() || m_font.wordSpacing() || m_padding) && !m_run.spacingDisabled();
+        float spaceWidth = fontData->spaceWidth() - fontData->syntheticBoldOffset();
+        CGFloat roundedSpaceWidth = roundCGFloat(spaceWidth);
+        const UChar* cp = complexTextRun.characters();
         CGPoint glyphOrigin = CGPointZero;
         CFIndex lastCharacterIndex = m_run.ltr() ? numeric_limits<CFIndex>::min() : numeric_limits<CFIndex>::max();
         bool isMonotonic = true;
@@ -467,19 +519,14 @@ void ComplexTextController::adjustGlyphsAndAdvances()
 
             bool treatAsSpace = Font::treatAsSpace(ch);
             CGGlyph glyph = treatAsSpace ? fontData->spaceGlyph() : glyphs[i];
-            CGSize advance = treatAsSpace ? CGSizeMake(fontData->spaceWidth(), advances[i].height) : advances[i];
-            // <rdar://7266253> If we have an emoji character, CoreText puts 7
-            // as the glyph code when it comes across emoji. In such cases,
-            // we replace it with the actual emoji character code.
-            if (glyph == 7 && fontData->isImageFont()) {
-                glyph = (CGGlyph) ch;
+            CGSize advance = treatAsSpace ? CGSizeMake(spaceWidth, advances[i].height) : advances[i];
+            if (isEmoji && advance.width)
                 advance.width = fontData->widthForGlyph(glyph);
-            }
 
             if (ch == '\t' && m_run.allowTabs()) {
-                float tabWidth = m_font.tabWidth();
-                advance.width = tabWidth - fmodf(m_run.xPos() + m_totalWidth, tabWidth);
-            } else if (ch == zeroWidthSpace || Font::treatAsZeroWidthSpace(ch) && !treatAsSpace) {
+                float tabWidth = m_font.tabWidth(*fontData);
+                advance.width = tabWidth - fmodf(m_run.xPos() + m_totalWidth + widthSinceLastCommit, tabWidth);
+            } else if (Font::treatAsZeroWidthSpace(ch) && !treatAsSpace) {
                 advance.width = 0;
                 glyph = fontData->spaceGlyph();
             }
@@ -490,11 +537,12 @@ void ComplexTextController::adjustGlyphsAndAdvances()
 
             advance.width += fontData->syntheticBoldOffset();
 
-            // We special case spaces in two ways when applying word rounding.
-            // First, we round spaces to an adjusted width in all fonts.
-            // Second, in fixed-pitch fonts we ensure that all glyphs that
-            // match the width of the space glyph have the same width as the space glyph.
-            if (roundedAdvanceWidth == roundedSpaceWidth && (fontData->pitch() == FixedPitch || glyph == fontData->spaceGlyph()) && m_run.applyWordRounding())
+ 
+            // We special case spaces in two ways when applying word rounding. 
+            // First, we round spaces to an adjusted width in all fonts. 
+            // Second, in fixed-pitch fonts we ensure that all glyphs that 
+            // match the width of the space glyph have the same width as the space glyph. 
+            if (m_run.applyWordRounding() && roundedAdvanceWidth == roundedSpaceWidth && (fontData->pitch() == FixedPitch || glyph == fontData->spaceGlyph()))
                 advance.width = fontData->adjustedSpaceWidth();
 
             if (hasExtraSpacing) {
@@ -504,52 +552,67 @@ void ComplexTextController::adjustGlyphsAndAdvances()
                     advance.width += m_font.letterSpacing();
 
                 // Handle justification and word-spacing.
-                if (glyph == fontData->spaceGlyph()) {
-                    // Account for padding. WebCore uses space padding to justify text.
-                    // We distribute the specified padding over the available spaces in the run.
-                    if (m_padding) {
-                        // Use leftover padding if not evenly divisible by number of spaces.
-                        if (m_padding < m_padPerSpace) {
-                            advance.width += m_padding;
-                            m_padding = 0;
-                        } else {
-                            advance.width += m_padPerSpace;
-                            m_padding -= m_padPerSpace;
+                if (treatAsSpace || Font::isCJKIdeographOrSymbol(ch)) {
+                    // Distribute the run's total expansion evenly over all expansion opportunities in the run.
+                    if (m_expansion) {
+                        float previousExpansion = m_expansion;
+                        if (!treatAsSpace && !m_afterExpansion) {
+                            // Take the expansion opportunity before this ideograph.
+                            m_expansion -= m_expansionPerOpportunity;
+                            float expansionAtThisOpportunity = !m_run.applyWordRounding() ? m_expansionPerOpportunity : roundf(previousExpansion) - roundf(m_expansion);
+                            m_totalWidth += expansionAtThisOpportunity;
+                            if (m_adjustedAdvances.isEmpty())
+                                m_leadingExpansion = expansionAtThisOpportunity;
+                            else
+                                m_adjustedAdvances.last().width += expansionAtThisOpportunity;
+                            previousExpansion = m_expansion;
                         }
-                    }
+                        if (!lastGlyph || m_run.allowsTrailingExpansion()) {
+                            m_expansion -= m_expansionPerOpportunity;
+                            advance.width += !m_run.applyWordRounding() ? m_expansionPerOpportunity : roundf(previousExpansion) - roundf(m_expansion);
+                            m_afterExpansion = true;
+                        }
+                    } else
+                        m_afterExpansion = false;
 
                     // Account for word-spacing.
                     if (treatAsSpace && characterIndex > 0 && !Font::treatAsSpace(*m_run.data(characterIndex - 1)) && m_font.wordSpacing())
                         advance.width += m_font.wordSpacing();
-                }
+                } else
+                    m_afterExpansion = false;
             }
 
-            // Deal with the float/integer impedance mismatch between CG and WebCore. "Words" (characters 
-            // followed by a character defined by isRoundingHackCharacter()) are always an integer width.
-            // We adjust the width of the last character of a "word" to ensure an integer width.
-            // Force characters that are used to determine word boundaries for the rounding hack
-            // to be integer width, so the following words will start on an integer boundary.
-            if (m_run.applyWordRounding() && Font::isRoundingHackCharacter(ch))
-                advance.width = ceilCGFloat(advance.width);
+            // Apply rounding hacks if needed.
+            // We adjust the width of the last character of a "word" to ensure an integer width. 
+            // Force characters that are used to determine word boundaries for the rounding hack 
+            // to be integer width, so the following words will start on an integer boundary. 
+            if (m_run.applyWordRounding() && Font::isRoundingHackCharacter(ch)) 
+                advance.width = ceilCGFloat(advance.width); 
 
-            // Check to see if the next character is a "rounding hack character", if so, adjust the
-            // width so that the total run width will be on an integer boundary.
-            if (m_run.applyWordRounding() && !lastGlyph && Font::isRoundingHackCharacter(nextCh) || m_run.applyRunRounding() && lastGlyph) {
-                CGFloat totalWidth = m_totalWidth + advance.width;
-                CGFloat extraWidth = ceilCGFloat(totalWidth) - totalWidth;
-                if (m_run.ltr())
-                    advance.width += extraWidth;
-                else {
-                    m_totalWidth += extraWidth;
-                    if (m_lastRoundingGlyph)
-                        m_adjustedAdvances[m_lastRoundingGlyph - 1].width += extraWidth;
-                    else
-                        m_finalRoundingWidth = extraWidth;
-                    m_lastRoundingGlyph = m_adjustedAdvances.size() + 1;
-                }
-            }
+            // Check to see if the next character is a "rounding hack character", if so, adjust the 
+            // width so that the total run width will be on an integer boundary. 
+            if ((m_run.applyWordRounding() && !lastGlyph && Font::isRoundingHackCharacter(nextCh)) || (m_run.applyRunRounding() && lastGlyph)) { 
+                CGFloat totalWidth = widthSinceLastCommit + advance.width; 
+                widthSinceLastCommit = ceilCGFloat(totalWidth); 
+                CGFloat extraWidth = widthSinceLastCommit - totalWidth; 
+                if (m_run.ltr()) 
+                    advance.width += extraWidth; 
+                else { 
+                    if (m_lastRoundingGlyph) 
+                        m_adjustedAdvances[m_lastRoundingGlyph - 1].width += extraWidth; 
+                    else 
+                        m_finalRoundingWidth = extraWidth; 
+                    m_lastRoundingGlyph = m_adjustedAdvances.size() + 1; 
+                } 
+                m_totalWidth += widthSinceLastCommit; 
+                widthSinceLastCommit = 0; 
+            } else 
+                widthSinceLastCommit += advance.width; 
 
-            m_totalWidth += advance.width;
+            // FIXME: Combining marks should receive a text emphasis mark if they are combine with a space.
+            if (m_forTextEmphasis && (!Font::canReceiveTextEmphasis(ch) || (U_GET_GC_MASK(ch) & U_GC_M_MASK)))
+                glyph = 0;
+
             advance.height *= -1;
             m_adjustedAdvances.append(advance);
             m_adjustedGlyphs.append(glyph);
@@ -557,9 +620,9 @@ void ComplexTextController::adjustGlyphsAndAdvances()
             FloatRect glyphBounds = fontData->boundsForGlyph(glyph);
             glyphBounds.move(glyphOrigin.x, glyphOrigin.y);
             m_minGlyphBoundingBoxX = min(m_minGlyphBoundingBoxX, glyphBounds.x());
-            m_maxGlyphBoundingBoxX = max(m_maxGlyphBoundingBoxX, glyphBounds.right());
+            m_maxGlyphBoundingBoxX = max(m_maxGlyphBoundingBoxX, glyphBounds.maxX());
             m_minGlyphBoundingBoxY = min(m_minGlyphBoundingBoxY, glyphBounds.y());
-            m_maxGlyphBoundingBoxY = max(m_maxGlyphBoundingBoxY, glyphBounds.bottom());
+            m_maxGlyphBoundingBoxY = max(m_maxGlyphBoundingBoxY, glyphBounds.maxY());
             glyphOrigin.x += advance.width;
             glyphOrigin.y += advance.height;
             
@@ -568,6 +631,7 @@ void ComplexTextController::adjustGlyphsAndAdvances()
         if (!isMonotonic)
             complexTextRun.setIsNonMonotonic();
     }
+    m_totalWidth += widthSinceLastCommit;
 }
 
 } // namespace WebCore

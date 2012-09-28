@@ -23,11 +23,11 @@
 #include "config.h"
 #include "HTMLScriptElement.h"
 
+#include "Attribute.h"
 #include "Document.h"
 #include "Event.h"
 #include "EventNames.h"
 #include "HTMLNames.h"
-#include "MappedAttribute.h"
 #include "ScriptEventListener.h"
 #include "Text.h"
 
@@ -35,78 +35,61 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLScriptElement::HTMLScriptElement(const QualifiedName& tagName, Document* doc, bool createdByParser)
-    : HTMLElement(tagName, doc)
-    , m_data(this, this)
+inline HTMLScriptElement::HTMLScriptElement(const QualifiedName& tagName, Document* document, bool wasInsertedByParser, bool alreadyStarted)
+    : HTMLElement(tagName, document)
+    , ScriptElement(this, wasInsertedByParser, alreadyStarted)
 {
     ASSERT(hasTagName(scriptTag));
-    m_data.setCreatedByParser(createdByParser);
 }
 
-HTMLScriptElement::~HTMLScriptElement()
+PassRefPtr<HTMLScriptElement> HTMLScriptElement::create(const QualifiedName& tagName, Document* document, bool wasInsertedByParser)
 {
+    return adoptRef(new HTMLScriptElement(tagName, document, wasInsertedByParser, false));
 }
 
 bool HTMLScriptElement::isURLAttribute(Attribute* attr) const
 {
-    return attr->name() == sourceAttributeValue();
-}
-
-bool HTMLScriptElement::shouldExecuteAsJavaScript() const
-{
-    return m_data.shouldExecuteAsJavaScript();
+    return attr->name() == srcAttr || HTMLElement::isURLAttribute(attr);
 }
 
 void HTMLScriptElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
-    ScriptElement::childrenChanged(m_data);
     HTMLElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+    ScriptElement::childrenChanged();
 }
 
-void HTMLScriptElement::parseMappedAttribute(MappedAttribute* attr)
+void HTMLScriptElement::parseAttribute(Attribute* attr)
 {
     const QualifiedName& attrName = attr->name();
 
     if (attrName == srcAttr)
-        handleSourceAttribute(m_data, attr->value());
+        handleSourceAttribute(attr->value());
+    else if (attr->name() == asyncAttr)
+        handleAsyncAttribute();
     else if (attrName == onloadAttr)
         setAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(this, attr));
     else if (attrName == onbeforeloadAttr)
         setAttributeEventListener(eventNames().beforeloadEvent, createAttributeEventListener(this, attr));
     else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::parseAttribute(attr);
 }
 
-void HTMLScriptElement::finishParsingChildren()
+Node::InsertionNotificationRequest HTMLScriptElement::insertedInto(Node* insertionPoint)
 {
-    ScriptElement::finishParsingChildren(m_data, sourceAttributeValue());
-    HTMLElement::finishParsingChildren();
-}
-
-void HTMLScriptElement::insertedIntoDocument()
-{
-    HTMLElement::insertedIntoDocument();
-    ScriptElement::insertedIntoDocument(m_data, sourceAttributeValue());
-}
-
-void HTMLScriptElement::removedFromDocument()
-{
-    HTMLElement::removedFromDocument();
-    ScriptElement::removedFromDocument(m_data);
-}
-
-String HTMLScriptElement::text() const
-{
-    return m_data.scriptContent();
+    HTMLElement::insertedInto(insertionPoint);
+    ScriptElement::insertedInto(insertionPoint);
+    return InsertionDone;
 }
 
 void HTMLScriptElement::setText(const String &value)
 {
+    RefPtr<Node> protectFromMutationEvents(this);
+
     ExceptionCode ec = 0;
     int numChildren = childNodeCount();
 
     if (numChildren == 1 && firstChild()->isTextNode()) {
-        static_cast<Text*>(firstChild())->setData(value, ec);
+        toText(firstChild())->setData(value, ec);
         return;
     }
 
@@ -116,76 +99,20 @@ void HTMLScriptElement::setText(const String &value)
     appendChild(document()->createTextNode(value.impl()), ec);
 }
 
-String HTMLScriptElement::htmlFor() const
+void HTMLScriptElement::setAsync(bool async)
 {
-    // DOM Level 1 says: reserved for future use.
-    return String();
+    setBooleanAttribute(asyncAttr, async);
+    handleAsyncAttribute();
 }
 
-void HTMLScriptElement::setHtmlFor(const String&)
+bool HTMLScriptElement::async() const
 {
-    // DOM Level 1 says: reserved for future use.
-}
-
-String HTMLScriptElement::event() const
-{
-    // DOM Level 1 says: reserved for future use.
-    return String();
-}
-
-void HTMLScriptElement::setEvent(const String&)
-{
-    // DOM Level 1 says: reserved for future use.
-}
-
-String HTMLScriptElement::charset() const
-{
-    return charsetAttributeValue();
-}
-
-void HTMLScriptElement::setCharset(const String &value)
-{
-    setAttribute(charsetAttr, value);
-}
-
-bool HTMLScriptElement::defer() const
-{
-    return !getAttribute(deferAttr).isNull();
-}
-
-void HTMLScriptElement::setDefer(bool defer)
-{
-    setAttribute(deferAttr, defer ? "" : 0);
+    return fastHasAttribute(asyncAttr) || forceAsync();
 }
 
 KURL HTMLScriptElement::src() const
 {
     return document()->completeURL(sourceAttributeValue());
-}
-
-void HTMLScriptElement::setSrc(const String &value)
-{
-    setAttribute(srcAttr, value);
-}
-
-String HTMLScriptElement::type() const
-{
-    return typeAttributeValue();
-}
-
-void HTMLScriptElement::setType(const String &value)
-{
-    setAttribute(typeAttr, value);
-}
-
-String HTMLScriptElement::scriptCharset() const
-{
-    return m_data.scriptCharset();
-}
-
-String HTMLScriptElement::scriptContent() const
-{
-    return m_data.scriptContent();
 }
 
 void HTMLScriptElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) const
@@ -220,17 +147,37 @@ String HTMLScriptElement::forAttributeValue() const
     return getAttribute(forAttr).string();
 }
 
+String HTMLScriptElement::eventAttributeValue() const
+{
+    return getAttribute(eventAttr).string();
+}
+
+bool HTMLScriptElement::asyncAttributeValue() const
+{
+    return fastHasAttribute(asyncAttr);
+}
+
+bool HTMLScriptElement::deferAttributeValue() const
+{
+    return fastHasAttribute(deferAttr);
+}
+
+bool HTMLScriptElement::hasSourceAttribute() const
+{
+    return fastHasAttribute(srcAttr);
+}
+
 void HTMLScriptElement::dispatchLoadEvent()
 {
-    ASSERT(!m_data.haveFiredLoadEvent());
-    m_data.setHaveFiredLoadEvent(true);
+    ASSERT(!haveFiredLoadEvent());
+    setHaveFiredLoadEvent(true);
 
     dispatchEvent(Event::create(eventNames().loadEvent, false, false));
 }
 
-void HTMLScriptElement::dispatchErrorEvent()
+PassRefPtr<Element> HTMLScriptElement::cloneElementWithoutAttributesAndChildren()
 {
-    dispatchEvent(Event::create(eventNames().errorEvent, true, false));
+    return adoptRef(new HTMLScriptElement(tagQName(), document(), false, alreadyStarted()));
 }
 
 }

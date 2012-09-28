@@ -1,6 +1,7 @@
-/**
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
+ * Copyright (C) 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,56 +23,43 @@
 #include "config.h"
 #include "HTMLUListElement.h"
 
+#include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "HTMLNames.h"
-#include "MappedAttribute.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLUListElement::HTMLUListElement(const QualifiedName& tagName, Document* doc)
-    : HTMLElement(tagName, doc)
+HTMLUListElement::HTMLUListElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(ulTag));
 }
 
-bool HTMLUListElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+PassRefPtr<HTMLUListElement> HTMLUListElement::create(Document* document)
 {
-    if (attrName == typeAttr) {
-        result = eUnorderedList;
-        return false;
-    }
-    
-    return HTMLElement::mapToEntry(attrName, result);
+    return adoptRef(new HTMLUListElement(ulTag, document));
 }
 
-void HTMLUListElement::parseMappedAttribute(MappedAttribute *attr)
+PassRefPtr<HTMLUListElement> HTMLUListElement::create(const QualifiedName& tagName, Document* document)
+{
+    return adoptRef(new HTMLUListElement(tagName, document));
+}
+
+bool HTMLUListElement::isPresentationAttribute(const QualifiedName& name) const
+{
+    if (name == typeAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
+}
+
+void HTMLUListElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
 {
     if (attr->name() == typeAttr)
-        addCSSProperty(attr, CSSPropertyListStyleType, attr->value());
+        addPropertyToAttributeStyle(style, CSSPropertyListStyleType, attr->value());
     else
-        HTMLElement::parseMappedAttribute(attr);
-}
-
-bool HTMLUListElement::compact() const
-{
-    return !getAttribute(compactAttr).isNull();
-}
-
-void HTMLUListElement::setCompact(bool b)
-{
-    setAttribute(compactAttr, b ? "" : 0);
-}
-
-String HTMLUListElement::type() const
-{
-    return getAttribute(typeAttr);
-}
-
-void HTMLUListElement::setType(const String &value)
-{
-    setAttribute(typeAttr, value);
+        HTMLElement::collectStyleForAttribute(attr, style);
 }
 
 }

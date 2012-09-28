@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
+ * Copyright (C) 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -28,25 +29,40 @@ namespace WebCore {
 
 class HTMLOListElement : public HTMLElement {
 public:
-    HTMLOListElement(const QualifiedName&, Document*);
-        
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
-    virtual int tagPriority() const { return 5; }
+    static PassRefPtr<HTMLOListElement> create(Document*);
+    static PassRefPtr<HTMLOListElement> create(const QualifiedName&, Document*);
 
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(MappedAttribute*);
-
-    bool compact() const;
-    void setCompact(bool);
-
-    int start() const { return m_start; }
+    int start() const { return m_hasExplicitStart ? m_start : (m_isReversed ? itemCount() : 1); }
     void setStart(int);
 
-    String type() const;
-    void setType(const String&);
+    bool isReversed() const { return m_isReversed; }
+
+    void itemCountChanged() { m_shouldRecalculateItemCount = true; }
 
 private:
+    HTMLOListElement(const QualifiedName&, Document*);
+        
+    void updateItemValues();
+
+    unsigned itemCount() const
+    {
+        if (m_shouldRecalculateItemCount)
+            const_cast<HTMLOListElement*>(this)->recalculateItemCount();
+        return m_itemCount;
+    }
+
+    void recalculateItemCount();
+
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+
     int m_start;
+    unsigned m_itemCount;
+
+    bool m_hasExplicitStart : 1;
+    bool m_isReversed : 1;
+    bool m_shouldRecalculateItemCount : 1;
 };
 
 

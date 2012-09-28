@@ -4,6 +4,7 @@
  * Copyright (C) 2007 Holger Hans Peter Freyther
  * Copyright (C) 2008 Christian Dywan <christian@imendio.com>
  * Copyright (C) 2008 Nuanti Ltd.
+ * Copyright (C) 2010 Igalia S.L
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,11 +31,11 @@
 #include "config.h"
 
 #include "LocalizedStrings.h"
-#include "CString.h"
-#include "GOwnPtr.h"
+#include <wtf/gobject/GOwnPtr.h>
 #include "IntSize.h"
 #include "NotImplemented.h"
 #include "PlatformString.h"
+#include <wtf/text/CString.h>
 
 #include <glib/gi18n-lib.h>
 #include <gtk/gtk.h>
@@ -65,9 +66,14 @@ String resetButtonDefaultLabel()
     return String::fromUTF8(_("Reset"));
 }
 
+String defaultDetailsSummaryText()
+{
+    return String::fromUTF8(_("Details"));
+}
+
 String searchableIndexIntroduction()
 {
-    return String::fromUTF8(_("_Searchable Index"));
+    return String::fromUTF8(_("This is a searchable index. Enter search keywords: "));
 }
 
 String fileButtonChooseFileLabel()
@@ -75,7 +81,17 @@ String fileButtonChooseFileLabel()
     return String::fromUTF8(_("Choose File"));
 }
 
+String fileButtonChooseMultipleFilesLabel()
+{
+    return String::fromUTF8(_("Choose Files"));
+}
+
 String fileButtonNoFileSelectedLabel()
+{
+    return String::fromUTF8(_("(None)"));
+}
+
+String fileButtonNoFilesSelectedLabel()
 {
     return String::fromUTF8(_("(None)"));
 }
@@ -108,6 +124,61 @@ String contextMenuItemTagDownloadImageToDisk()
 String contextMenuItemTagCopyImageToClipboard()
 {
     return String::fromUTF8(_("Cop_y Image"));
+}
+
+String contextMenuItemTagCopyImageUrlToClipboard()
+{
+    return String::fromUTF8(_("Copy Image _Address"));
+}
+
+String contextMenuItemTagOpenVideoInNewWindow()
+{
+    return String::fromUTF8(_("Open _Video in New Window"));
+}
+
+String contextMenuItemTagOpenAudioInNewWindow()
+{
+    return String::fromUTF8(_("Open _Audio in New Window"));
+}
+
+String contextMenuItemTagCopyVideoLinkToClipboard()
+{
+    return String::fromUTF8(_("Cop_y Video Link Location"));
+}
+
+String contextMenuItemTagCopyAudioLinkToClipboard()
+{
+    return String::fromUTF8(_("Cop_y Audio Link Location"));
+}
+
+String contextMenuItemTagToggleMediaControls()
+{
+    return String::fromUTF8(_("_Toggle Media Controls"));
+}
+
+String contextMenuItemTagToggleMediaLoop()
+{
+    return String::fromUTF8(_("Toggle Media _Loop Playback"));
+}
+
+String contextMenuItemTagEnterVideoFullscreen()
+{
+    return String::fromUTF8(_("Switch Video to _Fullscreen"));
+}
+
+String contextMenuItemTagMediaPlay()
+{
+    return String::fromUTF8(_("_Play"));
+}
+
+String contextMenuItemTagMediaPause()
+{
+    return String::fromUTF8(_("_Pause"));
+}
+
+String contextMenuItemTagMediaMute()
+{
+    return String::fromUTF8(_("_Mute"));
 }
 
 String contextMenuItemTagOpenFrameInNewWindow()
@@ -198,7 +269,7 @@ String contextMenuItemTagSearchWeb()
     return String::fromUTF8(_("_Search the Web"));
 }
 
-String contextMenuItemTagLookUpInDictionary()
+String contextMenuItemTagLookUpInDictionary(const String&)
 {
     return String::fromUTF8(_("_Look Up in Dictionary"));
 }
@@ -271,6 +342,56 @@ String contextMenuItemTagInspectElement()
     return String::fromUTF8(_("Inspect _Element"));
 }
 
+String contextMenuItemTagUnicodeInsertLRMMark()
+{
+    return String::fromUTF8(_("LRM _Left-to-right mark"));
+}
+
+String contextMenuItemTagUnicodeInsertRLMMark()
+{
+    return String::fromUTF8(_("RLM _Right-to-left mark"));
+}
+
+String contextMenuItemTagUnicodeInsertLREMark()
+{
+    return String::fromUTF8(_("LRE Left-to-right _embedding"));
+}
+
+String contextMenuItemTagUnicodeInsertRLEMark()
+{
+    return String::fromUTF8(_("RLE Right-to-left e_mbedding"));
+}
+
+String contextMenuItemTagUnicodeInsertLROMark()
+{
+    return String::fromUTF8(_("LRO Left-to-right _override"));
+}
+
+String contextMenuItemTagUnicodeInsertRLOMark()
+{
+    return String::fromUTF8(_("RLO Right-to-left o_verride"));
+}
+
+String contextMenuItemTagUnicodeInsertPDFMark()
+{
+    return String::fromUTF8(_("PDF _Pop directional formatting"));
+}
+
+String contextMenuItemTagUnicodeInsertZWSMark()
+{
+    return String::fromUTF8(_("ZWS _Zero width space"));
+}
+
+String contextMenuItemTagUnicodeInsertZWJMark()
+{
+    return String::fromUTF8(_("ZWJ Zero width _joiner"));
+}
+
+String contextMenuItemTagUnicodeInsertZWNJMark()
+{
+    return String::fromUTF8(_("ZWNJ Zero width _non-joiner"));
+}
+
 String searchMenuNoRecentSearchesText()
 {
     return String::fromUTF8(_("No recent searches"));
@@ -294,6 +415,11 @@ String AXDefinitionListTermText()
 String AXDefinitionListDefinitionText()
 {
     return String::fromUTF8(_("definition"));
+}
+
+String AXFooterRoleDescriptionText()
+{
+    return String::fromUTF8(_("footer"));
 }
 
 String AXButtonActionVerb()
@@ -334,6 +460,17 @@ String AXMenuListPopupActionVerb()
 String AXMenuListActionVerb()
 {
     return String();
+}
+    
+String missingPluginText()
+{
+    return String::fromUTF8(_("Missing Plug-in"));
+}
+
+String crashedPluginText()
+{
+    notImplemented();
+    return String::fromUTF8(_("Plug-in Failure"));
 }
 
 String multipleFileUploadText(unsigned numberOfFiles)
@@ -397,8 +534,10 @@ String localizedMediaControlElementString(const String& name)
         return String::fromUTF8(_("remaining time"));
     if (name == "StatusDisplay")
         return String::fromUTF8(_("status"));
-    if (name == "FullscreenButton")
-        return String::fromUTF8(_("fullscreen"));
+    if (name == "EnterFullscreenButton")
+        return String::fromUTF8(_("enter fullscreen"));
+    if (name == "ExitFullscreenButton")
+        return String::fromUTF8(_("exit fullscreen"));
     if (name == "SeekForwardButton")
         return String::fromUTF8(_("fast forward"));
     if (name == "SeekBackButton")
@@ -444,8 +583,10 @@ String localizedMediaControlElementHelpText(const String& name)
         return String::fromUTF8(_("seek quickly back"));
     if (name == "SeekForwardButton")
         return String::fromUTF8(_("seek quickly forward"));
-    if (name == "FullscreenButton")
+    if (name == "EnterFullscreenButton")
         return String::fromUTF8(_("Play movie in fullscreen mode"));
+    if (name == "EnterFullscreenButton")
+        return String::fromUTF8(_("Exit fullscreen mode"));
     if (name == "ShowClosedCaptionsButton")
         return String::fromUTF8(_("start displaying closed captions"));
     if (name == "HideClosedCaptionsButton")
@@ -491,10 +632,58 @@ String validationMessageValueMissingText()
     return String::fromUTF8(_("value missing"));
 }
 
+String validationMessageValueMissingForCheckboxText()
+{
+    notImplemented();
+    return validationMessageValueMissingText();
+}
+
+String validationMessageValueMissingForFileText()
+{
+    notImplemented();
+    return validationMessageValueMissingText();
+}
+
+String validationMessageValueMissingForMultipleFileText()
+{
+    notImplemented();
+    return validationMessageValueMissingText();
+}
+
+String validationMessageValueMissingForRadioText()
+{
+    notImplemented();
+    return validationMessageValueMissingText();
+}
+
+String validationMessageValueMissingForSelectText()
+{
+    notImplemented();
+    return validationMessageValueMissingText();
+}
+
 String validationMessageTypeMismatchText()
 {
     notImplemented();
     return String::fromUTF8(_("type mismatch"));
+}
+
+String validationMessageTypeMismatchForEmailText()
+{
+    notImplemented();
+    return validationMessageTypeMismatchText();
+}
+
+String validationMessageTypeMismatchForMultipleEmailText()
+{
+    notImplemented();
+    return validationMessageTypeMismatchText();
+}
+
+String validationMessageTypeMismatchForURLText()
+{
+    notImplemented();
+    return validationMessageTypeMismatchText();
 }
 
 String validationMessagePatternMismatchText()
@@ -502,24 +691,29 @@ String validationMessagePatternMismatchText()
     return String::fromUTF8(_("pattern mismatch"));
 }
 
-String validationMessageTooLongText()
+String validationMessageTooLongText(int, int)
 {
     return String::fromUTF8(_("too long"));
 }
 
-String validationMessageRangeUnderflowText()
+String validationMessageRangeUnderflowText(const String&)
 {
     return String::fromUTF8(_("range underflow"));
 }
 
-String validationMessageRangeOverflowText()
+String validationMessageRangeOverflowText(const String&)
 {
     return String::fromUTF8(_("range overflow"));
 }
 
-String validationMessageStepMismatchText()
+String validationMessageStepMismatchText(const String&, const String&)
 {
     return String::fromUTF8(_("step mismatch"));
+}
+
+String localizedString(const char* key)
+{
+    return String::fromUTF8(key, strlen(key));
 }
 
 }

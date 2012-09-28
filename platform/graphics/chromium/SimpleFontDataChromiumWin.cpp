@@ -32,11 +32,12 @@
 #include "config.h"
 #include "SimpleFontData.h"
 
-#include "ChromiumBridge.h"
+#include "FloatRect.h"
 #include "Font.h"
 #include "FontCache.h"
-#include "FloatRect.h"
 #include "FontDescription.h"
+#include "HWndDC.h"
+#include "PlatformSupport.h"
 #include <wtf/MathExtras.h>
 
 #include <unicode/uchar.h>
@@ -46,19 +47,21 @@
 
 namespace WebCore {
 
-static inline float scaleEmToUnits(float x, int unitsPerEm)
-{
-    return unitsPerEm ? x / static_cast<float>(unitsPerEm) : x;
-}
-
 void SimpleFontData::platformInit()
 {
-    HDC dc = GetDC(0);
+    if (!m_platformData.size()) {
+        m_fontMetrics.reset();
+        m_avgCharWidth = 0;
+        m_maxCharWidth = 0;
+        return;
+    }
+
+    HWndDC dc(0);
     HGDIOBJ oldFont = SelectObject(dc, m_platformData.hfont());
 
     TEXTMETRIC textMetric = {0};
     if (!GetTextMetrics(dc, &textMetric)) {
-        if (ChromiumBridge::ensureFontLoaded(m_platformData.hfont())) {
+        if (PlatformSupport::ensureFontLoaded(m_platformData.hfont())) {
             // Retry GetTextMetrics.
             // FIXME: Handle gracefully the error if this call also fails.
             // See http://crbug.com/6401.
@@ -70,10 +73,11 @@ void SimpleFontData::platformInit()
     m_avgCharWidth = textMetric.tmAveCharWidth;
     m_maxCharWidth = textMetric.tmMaxCharWidth;
 
-    m_ascent = textMetric.tmAscent;
-    m_descent = textMetric.tmDescent;
-    m_lineGap = textMetric.tmExternalLeading;
-    m_xHeight = m_ascent * 0.56f;  // Best guess for xHeight for non-Truetype fonts.
+    // FIXME: Access ascent/descent/lineGap with floating point precision.
+    float ascent = textMetric.tmAscent;
+    float descent = textMetric.tmDescent;
+    float lineGap = textMetric.tmExternalLeading;
+    float xHeight = ascent * 0.56f; // Best guess for xHeight for non-Truetype fonts.
 
     OUTLINETEXTMETRIC outlineTextMetric;
     if (GetOutlineTextMetrics(dc, sizeof(outlineTextMetric), &outlineTextMetric) > 0) {
@@ -82,13 +86,16 @@ void SimpleFontData::platformInit()
         MAT2 identityMatrix = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
         DWORD len = GetGlyphOutlineW(dc, 'x', GGO_METRICS, &glyphMetrics, 0, 0, &identityMatrix);
         if (len != GDI_ERROR && glyphMetrics.gmBlackBoxY > 0)
-            m_xHeight = static_cast<float>(glyphMetrics.gmBlackBoxY);
+            xHeight = static_cast<float>(glyphMetrics.gmBlackBoxY);
     }
 
-    m_lineSpacing = m_ascent + m_descent + m_lineGap;
+    m_fontMetrics.setAscent(ascent);
+    m_fontMetrics.setDescent(descent);
+    m_fontMetrics.setLineGap(lineGap);
+    m_fontMetrics.setXHeight(xHeight);
+    m_fontMetrics.setLineSpacing(ascent + descent + lineGap);
 
     SelectObject(dc, oldFont);
-    ReleaseDC(0, dc);
 }
 
 void SimpleFontData::platformCharWidthInit()
@@ -98,25 +105,36 @@ void SimpleFontData::platformCharWidthInit()
 
 void SimpleFontData::platformDestroy()
 {
-    // We don't hash this on Win32, so it's effectively owned by us.
-    delete m_smallCapsFontData;
-    m_smallCapsFontData = 0;
+}
+
+PassOwnPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
+{
+    LOGFONT winFont;
+    GetObject(m_platformData.hfont(), sizeof(LOGFONT), &winFont);
+    float scaledSize = scaleFactor * fontDescription.computedSize();
+    winFont.lfHeight = -lroundf(scaledSize);
+    HFONT hfont = CreateFontIndirect(&winFont);
+    return adoptPtr(new SimpleFontData(FontPlatformData(hfont, scaledSize), isCustomFont(), false));
 }
 
 SimpleFontData* SimpleFontData::smallCapsFontData(const FontDescription& fontDescription) const
 {
-    if (!m_smallCapsFontData) {
-        LOGFONT winFont;
-        GetObject(m_platformData.hfont(), sizeof(LOGFONT), &winFont);
-        float smallCapsSize = 0.70f * fontDescription.computedSize();
-        // Unlike WebKit trunk, we don't multiply the size by 32.  That seems
-        // to be some kind of artifact of their CG backend, or something.
-        winFont.lfHeight = -lroundf(smallCapsSize);
-        HFONT hfont = CreateFontIndirect(&winFont);
-        m_smallCapsFontData =
-            new SimpleFontData(FontPlatformData(hfont, smallCapsSize));
-    }
-    return m_smallCapsFontData;
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->smallCaps)
+        m_derivedFontData->smallCaps = createScaledFontData(fontDescription, .7);
+
+    return m_derivedFontData->smallCaps.get();
+}
+
+SimpleFontData* SimpleFontData::emphasisMarkFontData(const FontDescription& fontDescription) const
+{
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->emphasisMark)
+        m_derivedFontData->emphasisMark = createScaledFontData(fontDescription, .5);
+
+    return m_derivedFontData->emphasisMark.get();
 }
 
 bool SimpleFontData::containsCharacters(const UChar* characters, int length) const
@@ -129,14 +147,14 @@ bool SimpleFontData::containsCharacters(const UChar* characters, int length) con
 void SimpleFontData::determinePitch()
 {
     // TEXTMETRICS have this.  Set m_treatAsFixedPitch based off that.
-    HDC dc = GetDC(0);
+    HWndDC dc(0);
     HGDIOBJ oldFont = SelectObject(dc, m_platformData.hfont());
 
     // Yes, this looks backwards, but the fixed pitch bit is actually set if the font
     // is *not* fixed pitch.  Unbelievable but true.
     TEXTMETRIC textMetric = {0};
     if (!GetTextMetrics(dc, &textMetric)) {
-        if (ChromiumBridge::ensureFontLoaded(m_platformData.hfont())) {
+        if (PlatformSupport::ensureFontLoaded(m_platformData.hfont())) {
             // Retry GetTextMetrics.
             // FIXME: Handle gracefully the error if this call also fails.
             // See http://crbug.com/6401.
@@ -148,7 +166,6 @@ void SimpleFontData::determinePitch()
     m_treatAsFixedPitch = ((textMetric.tmPitchAndFamily & TMPF_FIXED_PITCH) == 0);
 
     SelectObject(dc, oldFont);
-    ReleaseDC(0, dc);
 }
 
 FloatRect SimpleFontData::platformBoundsForGlyph(Glyph) const
@@ -158,13 +175,16 @@ FloatRect SimpleFontData::platformBoundsForGlyph(Glyph) const
 
 float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
 {
-    HDC dc = GetDC(0);
+    if (!m_platformData.size())
+        return 0;
+
+    HWndDC dc(0);
     HGDIOBJ oldFont = SelectObject(dc, m_platformData.hfont());
 
     int width = 0;
     if (!GetCharWidthI(dc, glyph, 1, 0, &width)) {
         // Ask the browser to preload the font and retry.
-        if (ChromiumBridge::ensureFontLoaded(m_platformData.hfont())) {
+        if (PlatformSupport::ensureFontLoaded(m_platformData.hfont())) {
             // FIXME: Handle gracefully the error if this call also fails.
             // See http://crbug.com/6401.
             if (!GetCharWidthI(dc, glyph, 1, 0, &width))
@@ -173,7 +193,6 @@ float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
     }
 
     SelectObject(dc, oldFont);
-    ReleaseDC(0, dc);
 
     return static_cast<float>(width);
 }

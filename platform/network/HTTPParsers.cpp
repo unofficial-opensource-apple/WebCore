@@ -2,6 +2,8 @@
  * Copyright (C) 2006 Alexey Proskuryakov (ap@webkit.org)
  * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2009 Torch Mobile Inc. http://www.torchmobile.com/
+ * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2011 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,18 +33,20 @@
 #include "config.h"
 #include "HTTPParsers.h"
 
-#include "CString.h"
 #include "PlatformString.h"
 #include <wtf/DateMath.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/StringBuilder.h>
+#include <wtf/unicode/CharacterNames.h>
 
 using namespace WTF;
 
 namespace WebCore {
 
 // true if there is more to parse
-static inline bool skipWhiteSpace(const String& str, int& pos, bool fromHttpEquivMeta)
+static inline bool skipWhiteSpace(const String& str, unsigned& pos, bool fromHttpEquivMeta)
 {
-    int len = str.length();
+    unsigned len = str.length();
 
     if (fromHttpEquivMeta) {
         while (pos != len && str[pos] <= ' ')
@@ -55,10 +59,81 @@ static inline bool skipWhiteSpace(const String& str, int& pos, bool fromHttpEqui
     return pos != len;
 }
 
+// Returns true if the function can match the whole token (case insensitive).
+// Note: Might return pos == str.length()
+static inline bool skipToken(const String& str, unsigned& pos, const char* token)
+{
+    unsigned len = str.length();
+
+    while (pos != len && *token) {
+        if (toASCIILower(str[pos]) != *token++)
+            return false;
+        ++pos;
+    }
+
+    return true;
+}
+
+// See RFC 2616, Section 2.2.
+bool isRFC2616Token(const String& characters)
+{
+    if (characters.isEmpty())
+        return false;
+    for (unsigned i = 0; i < characters.length(); ++i) {
+        UChar c = characters[i];
+        if (c >= 0x80 || c <= 0x1F || c == 0x7F
+            || c == '(' || c == ')' || c == '<' || c == '>' || c == '@'
+            || c == ',' || c == ';' || c == ':' || c == '\\' || c == '"'
+            || c == '/' || c == '[' || c == ']' || c == '?' || c == '='
+            || c == '{' || c == '}' || c == ' ' || c == '\t')
+        return false;
+    }
+    return true;
+}
+
+static const size_t maxInputSampleSize = 128;
+static String trimInputSample(const char* p, size_t length)
+{
+    String s = String(p, std::min<size_t>(length, maxInputSampleSize));
+    if (length > maxInputSampleSize)
+        s.append(horizontalEllipsis);
+    return s;
+}
+
+ContentDispositionType contentDispositionType(const String& contentDisposition)
+{
+    if (contentDisposition.isEmpty())
+        return ContentDispositionNone;
+
+    Vector<String> parameters;
+    contentDisposition.split(';', parameters);
+
+    String dispositionType = parameters[0];
+    dispositionType.stripWhiteSpace();
+
+    if (equalIgnoringCase(dispositionType, "inline"))
+        return ContentDispositionInline;
+
+    // Some broken sites just send bogus headers like
+    //
+    //   Content-Disposition: ; filename="file"
+    //   Content-Disposition: filename="file"
+    //   Content-Disposition: name="file"
+    //
+    // without a disposition token... screen those out.
+    if (!isRFC2616Token(dispositionType))
+        return ContentDispositionNone;
+
+    // We have a content-disposition of "attachment" or unknown.
+    // RFC 2183, section 2.8 says that an unknown disposition
+    // value should be treated as "attachment"
+    return ContentDispositionAttachment;  
+}
+
 bool parseHTTPRefresh(const String& refresh, bool fromHttpEquivMeta, double& delay, String& url)
 {
-    int len = refresh.length();
-    int pos = 0;
+    unsigned len = refresh.length();
+    unsigned pos = 0;
     
     if (!skipWhiteSpace(refresh, pos, fromHttpEquivMeta))
         return false;
@@ -79,7 +154,7 @@ bool parseHTTPRefresh(const String& refresh, bool fromHttpEquivMeta, double& del
         
         ++pos;
         skipWhiteSpace(refresh, pos, fromHttpEquivMeta);
-        int urlStartPos = pos;
+        unsigned urlStartPos = pos;
         if (refresh.find("url", urlStartPos, false) == urlStartPos) {
             urlStartPos += 3;
             skipWhiteSpace(refresh, urlStartPos, fromHttpEquivMeta);
@@ -90,7 +165,7 @@ bool parseHTTPRefresh(const String& refresh, bool fromHttpEquivMeta, double& del
                 urlStartPos = pos;  // e.g. "Refresh: 0; url.html"
         }
 
-        int urlEndPos = len;
+        unsigned urlEndPos = len;
 
         if (refresh[urlStartPos] == '"' || refresh[urlStartPos] == '\'') {
             UChar quotationMark = refresh[urlStartPos];
@@ -119,6 +194,11 @@ double parseDate(const String& value)
     return parseDateFromNullTerminatedCharacters(value.utf8().data());
 }
 
+// FIXME: This function doesn't comply with RFC 6266.
+// For example, this function doesn't handle the interaction between " and ;
+// that arises from quoted-string, nor does this function properly unquote
+// attribute values. Further this function appears to process parameter names
+// in a case-sensitive manner. (There are likely other bugs as well.)
 String filenameFromHTTPContentDisposition(const String& value)
 {
     Vector<String> keyValuePairs;
@@ -126,8 +206,8 @@ String filenameFromHTTPContentDisposition(const String& value)
 
     unsigned length = keyValuePairs.size();
     for (unsigned i = 0; i < length; i++) {
-        int valueStartPos = keyValuePairs[i].find('=');
-        if (valueStartPos < 0)
+        size_t valueStartPos = keyValuePairs[i].find('=');
+        if (valueStartPos == notFound)
             continue;
 
         String key = keyValuePairs[i].left(valueStartPos).stripWhiteSpace();
@@ -149,7 +229,7 @@ String filenameFromHTTPContentDisposition(const String& value)
 
 String extractMIMETypeFromMediaType(const String& mediaType)
 {
-    Vector<UChar, 64> mimeType;
+    StringBuilder mimeType;
     unsigned length = mediaType.length();
     mimeType.reserveCapacity(length);
     for (unsigned i = 0; i < length; i++) {
@@ -177,20 +257,32 @@ String extractMIMETypeFromMediaType(const String& mediaType)
         mimeType.append(c);
     }
 
-    if (mimeType.size() == length)
+    if (mimeType.length() == length)
         return mediaType;
-    return String(mimeType.data(), mimeType.size());
+    return mimeType.toString();
 }
 
 String extractCharsetFromMediaType(const String& mediaType)
 {
-    int pos = 0;
-    int length = (int)mediaType.length();
+    unsigned int pos, len;
+    findCharsetInMediaType(mediaType, pos, len);
+    return mediaType.substring(pos, len);
+}
+
+void findCharsetInMediaType(const String& mediaType, unsigned int& charsetPos, unsigned int& charsetLen, unsigned int start)
+{
+    charsetPos = start;
+    charsetLen = 0;
+
+    size_t pos = start;
+    unsigned length = mediaType.length();
     
     while (pos < length) {
         pos = mediaType.find("charset", pos, false);
-        if (pos <= 0)
-            return String();
+        if (pos == notFound || pos == 0) {
+            charsetLen = 0;
+            return;
+        }
         
         // is what we found a beginning of a word?
         if (mediaType[pos-1] > ' ' && mediaType[pos-1] != ';') {
@@ -211,13 +303,247 @@ String extractCharsetFromMediaType(const String& mediaType)
             ++pos;
 
         // we don't handle spaces within quoted parameter values, because charset names cannot have any
-        int endpos = pos;
+        unsigned endpos = pos;
         while (pos != length && mediaType[endpos] > ' ' && mediaType[endpos] != '"' && mediaType[endpos] != '\'' && mediaType[endpos] != ';')
             ++endpos;
-    
-        return mediaType.substring(pos, endpos-pos);
+
+        charsetPos = pos;
+        charsetLen = endpos - pos;
+        return;
     }
-    
-    return String();
 }
+
+XSSProtectionDisposition parseXSSProtectionHeader(const String& header)
+{
+    String stippedHeader = header.stripWhiteSpace();
+
+    if (stippedHeader.isEmpty())
+        return XSSProtectionEnabled;
+
+    if (stippedHeader[0] == '0')
+        return XSSProtectionDisabled;
+
+    unsigned length = header.length();
+    unsigned pos = 0;
+    if (stippedHeader[pos++] == '1'
+        && skipWhiteSpace(stippedHeader, pos, false)
+        && stippedHeader[pos++] == ';'
+        && skipWhiteSpace(stippedHeader, pos, false)
+        && skipToken(stippedHeader, pos, "mode")
+        && skipWhiteSpace(stippedHeader, pos, false)
+        && stippedHeader[pos++] == '='
+        && skipWhiteSpace(stippedHeader, pos, false)
+        && skipToken(stippedHeader, pos, "block")
+        && pos == length)
+        return XSSProtectionBlockEnabled;
+
+    return XSSProtectionEnabled;
+}
+
+String extractReasonPhraseFromHTTPStatusLine(const String& statusLine)
+{
+    size_t spacePos = statusLine.find(' ');
+    // Remove status code from the status line.
+    spacePos = statusLine.find(' ', spacePos + 1);
+    return statusLine.substring(spacePos + 1);
+}
+
+bool parseRange(const String& range, long long& rangeOffset, long long& rangeEnd, long long& rangeSuffixLength)
+{
+    // The format of "Range" header is defined in RFC 2616 Section 14.35.1.
+    // http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.35.1
+    // We don't support multiple range requests.
+
+    rangeOffset = rangeEnd = rangeSuffixLength = -1;
+
+    // The "bytes" unit identifier should be present.
+    static const char bytesStart[] = "bytes="; 
+    if (!range.startsWith(bytesStart, false))
+        return false;
+    String byteRange = range.substring(sizeof(bytesStart) - 1);
+
+    // The '-' character needs to be present.
+    int index = byteRange.find('-');
+    if (index == -1)
+        return false;
+
+    // If the '-' character is at the beginning, the suffix length, which specifies the last N bytes, is provided.
+    // Example:
+    //     -500
+    if (!index) {
+        String suffixLengthString = byteRange.substring(index + 1).stripWhiteSpace();
+        bool ok;
+        long long value = suffixLengthString.toInt64Strict(&ok);
+        if (ok)
+            rangeSuffixLength = value;
+        return true;
+    }
+
+    // Otherwise, the first-byte-position and the last-byte-position are provied.
+    // Examples:
+    //     0-499
+    //     500-
+    String firstBytePosStr = byteRange.left(index).stripWhiteSpace();
+    bool ok;
+    long long firstBytePos = firstBytePosStr.toInt64Strict(&ok);
+    if (!ok)
+        return false;
+
+    String lastBytePosStr = byteRange.substring(index + 1).stripWhiteSpace();
+    long long lastBytePos = -1;
+    if (!lastBytePosStr.isEmpty()) {
+        lastBytePos = lastBytePosStr.toInt64Strict(&ok);
+        if (!ok)
+            return false;
+    }
+
+    if (firstBytePos < 0 || !(lastBytePos == -1 || lastBytePos >= firstBytePos))
+        return false;
+
+    rangeOffset = firstBytePos;
+    rangeEnd = lastBytePos;
+    return true;
+}
+
+// HTTP/1.1 - RFC 2616
+// http://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html#sec5.1
+// Request-Line = Method SP Request-URI SP HTTP-Version CRLF
+size_t parseHTTPRequestLine(const char* data, size_t length, String& failureReason, String& method, String& url, HTTPVersion& httpVersion)
+{
+    method = String();
+    url = String();
+    httpVersion = Unknown;
+
+    const char* space1 = 0;
+    const char* space2 = 0;
+    const char* p;
+    size_t consumedLength;
+
+    for (p = data, consumedLength = 0; consumedLength < length; p++, consumedLength++) {
+        if (*p == ' ') {
+            if (!space1)
+                space1 = p;
+            else if (!space2)
+                space2 = p;
+        } else if (*p == '\n')
+            break;
+    }
+
+    // Haven't finished header line.
+    if (consumedLength == length) {
+        failureReason = "Incomplete Request Line";
+        return 0;
+    }
+
+    // RequestLine does not contain 3 parts.
+    if (!space1 || !space2) {
+        failureReason = "Request Line does not appear to contain: <Method> <Url> <HTTPVersion>.";
+        return 0;
+    }
+
+    // The line must end with "\r\n".
+    const char* end = p + 1;
+    if (*(end - 2) != '\r') {
+        failureReason = "Request line does not end with CRLF";
+        return 0;
+    }
+
+    // Request Method.
+    method = String(data, space1 - data); // For length subtract 1 for space, but add 1 for data being the first character.
+
+    // Request URI.
+    url = String(space1 + 1, space2 - space1 - 1); // For length subtract 1 for space.
+
+    // HTTP Version.
+    String httpVersionString(space2 + 1, end - space2 - 3); // For length subtract 1 for space, and 2 for "\r\n".
+    if (httpVersionString.length() != 8 || !httpVersionString.startsWith("HTTP/1."))
+        httpVersion = Unknown;
+    else if (httpVersionString[7] == '0')
+        httpVersion = HTTP_1_0;
+    else if (httpVersionString[7] == '1')
+        httpVersion = HTTP_1_1;
+    else
+        httpVersion = Unknown;
+
+    return end - data;
+}
+
+size_t parseHTTPHeader(const char* start, size_t length, String& failureReason, AtomicString& nameStr, String& valueStr)
+{
+    const char* p = start;
+    const char* end = start + length;
+
+    Vector<char> name;
+    Vector<char> value;
+    nameStr = AtomicString();
+    valueStr = String();
+
+    for (; p < end; p++) {
+        switch (*p) {
+        case '\r':
+            if (name.isEmpty()) {
+                if (p + 1 < end && *(p + 1) == '\n')
+                    return (p + 2) - start;
+                failureReason = "CR doesn't follow LF at " + trimInputSample(p, end - p);
+                return 0;
+            }
+            failureReason = "Unexpected CR in name at " + trimInputSample(name.data(), name.size());
+            return 0;
+        case '\n':
+            failureReason = "Unexpected LF in name at " + trimInputSample(name.data(), name.size());
+            return 0;
+        case ':':
+            break;
+        default:
+            name.append(*p);
+            continue;
+        }
+        if (*p == ':') {
+            ++p;
+            break;
+        }
+    }
+
+    for (; p < end && *p == 0x20; p++) { }
+
+    for (; p < end; p++) {
+        switch (*p) {
+        case '\r':
+            break;
+        case '\n':
+            failureReason = "Unexpected LF in value at " + trimInputSample(value.data(), value.size());
+            return 0;
+        default:
+            value.append(*p);
+        }
+        if (*p == '\r') {
+            ++p;
+            break;
+        }
+    }
+    if (p >= end || *p != '\n') {
+        failureReason = "CR doesn't follow LF after value at " + trimInputSample(p, end - p);
+        return 0;
+    }
+    nameStr = AtomicString::fromUTF8(name.data(), name.size());
+    valueStr = String::fromUTF8(value.data(), value.size());
+    if (nameStr.isNull()) {
+        failureReason = "Invalid UTF-8 sequence in header name";
+        return 0;
+    }
+    if (valueStr.isNull()) {
+        failureReason = "Invalid UTF-8 sequence in header value";
+        return 0;
+    }
+    return p - start;
+}
+
+size_t parseHTTPRequestBody(const char* data, size_t length, Vector<unsigned char>& body)
+{
+    body.clear();
+    body.append(data, length);
+
+    return length;
+}
+
 }

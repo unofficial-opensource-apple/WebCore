@@ -31,11 +31,11 @@
 #ifndef RenderRubyBase_h
 #define RenderRubyBase_h
 
-#if ENABLE(RUBY)
-
 #include "RenderBlock.h"
 
 namespace WebCore {
+
+class RenderRubyRun;
 
 class RenderRubyBase : public RenderBlock {
 public:
@@ -49,19 +49,19 @@ public:
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
 
 private:
-    bool hasOnlyWrappedInlineChildren(RenderObject* beforeChild = 0) const;
+    virtual ETextAlign textAlignmentForLine(bool endsWithSoftBreak) const;
+    virtual void adjustInlineDirectionLineBounds(int expansionOpportunityCount, float& logicalLeft, float& logicalWidth) const;
 
-    void moveChildren(RenderRubyBase* toBase, RenderObject* fromBeforeChild = 0);
-    void moveInlineChildren(RenderRubyBase* toBase, RenderObject* fromBeforeChild = 0);
-    void moveBlockChildren(RenderRubyBase* toBase, RenderObject* fromBeforeChild = 0);
-    void mergeBlockChildren(RenderRubyBase* toBase, RenderObject* fromBeforeChild = 0);
-    
+    void moveChildren(RenderRubyBase* toBase, RenderObject* beforeChild = 0);
+    void moveInlineChildren(RenderRubyBase* toBase, RenderObject* beforeChild = 0);
+    void moveBlockChildren(RenderRubyBase* toBase, RenderObject* beforeChild = 0);
+
+    RenderRubyRun* rubyRun() const;
+
     // Allow RenderRubyRun to manipulate the children within ruby bases.
     friend class RenderRubyRun;
 };
 
 } // namespace WebCore
-
-#endif
 
 #endif // RenderRubyBase_h

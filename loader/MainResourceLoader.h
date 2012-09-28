@@ -26,10 +26,14 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#ifndef MainResourceLoader_h
+#define MainResourceLoader_h
+
 #include "FrameLoaderTypes.h"
 #include "ResourceLoader.h"
 #include "SubstituteData.h"
 #include <wtf/Forward.h>
+
 
 #if HAVE(RUNLOOP_TIMER)
 #include "RunLoopTimer.h"
@@ -54,8 +58,8 @@ namespace WebCore {
 
         virtual void willSendRequest(ResourceRequest&, const ResourceResponse& redirectResponse);
         virtual void didReceiveResponse(const ResourceResponse&);
-        virtual void didReceiveData(const char*, int, long long lengthReceived, bool allAtOnce);
-        virtual void didFinishLoading();
+        virtual void didReceiveData(const char*, int, long long encodedDataLength, bool allAtOnce);
+        virtual void didFinishLoading(double finishTime);
         virtual void didFail(const ResourceError&);
 
 #if HAVE(RUNLOOP_TIMER)
@@ -71,18 +75,19 @@ namespace WebCore {
     private:
         MainResourceLoader(Frame*);
 
+        virtual void willCancel(const ResourceError&);
         virtual void didCancel(const ResourceError&);
 
         bool loadNow(ResourceRequest&);
 
         void handleEmptyLoad(const KURL&, bool forURLScheme);
-        void handleDataLoadSoon(ResourceRequest& r);
+        void handleSubstituteDataLoadSoon(const ResourceRequest&);
 
         void startDataLoadTimer();
         void handleDataLoad(ResourceRequest&);
 
         void receivedError(const ResourceError&);
-        ResourceError interruptionForPolicyChangeError() const;
+        ResourceError interruptedForPolicyChangeError() const;
         void stopLoadingForPolicyChange();
         bool isPostOrRedirectAfterPost(const ResourceRequest& newRequest, const ResourceResponse& redirectResponse);
 
@@ -104,6 +109,10 @@ namespace WebCore {
 
         bool m_loadingMultipartContent;
         bool m_waitingForContentPolicy;
+        double m_timeOfLastDataReceived;
+
     };
 
 }
+
+#endif

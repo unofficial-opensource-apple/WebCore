@@ -27,11 +27,11 @@
 #include "config.h"
 #include "PluginPackage.h"
 
-#include "CString.h"
 #include "MIMETypeRegistry.h"
 #include "npruntime_impl.h"
 #include "PluginDatabase.h"
 #include "PluginDebug.h"
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -41,9 +41,8 @@ bool PluginPackage::fetchInfo()
         return false;
 
     NPP_GetValueProcPtr gv = (NPP_GetValueProcPtr)m_module->resolve("NP_GetValue");
-    typedef char *(*NPP_GetMIMEDescriptionProcPtr)();
-    NPP_GetMIMEDescriptionProcPtr gm =
-        (NPP_GetMIMEDescriptionProcPtr)m_module->resolve("NP_GetMIMEDescription");
+    NP_GetMIMEDescriptionFuncPtr gm =
+        (NP_GetMIMEDescriptionFuncPtr)m_module->resolve("NP_GetMIMEDescription");
     if (!gm || !gv)
         return false;
 
@@ -52,17 +51,26 @@ bool PluginPackage::fetchInfo()
     if (err != NPERR_NO_ERROR)
         return false;
 
-    m_name = buf;
+    m_name = String::fromUTF8(buf);
     err = gv(0, NPPVpluginDescriptionString, (void*) &buf);
     if (err != NPERR_NO_ERROR)
         return false;
 
-    m_description = buf;
+    m_description = String::fromUTF8(buf);
     determineModuleVersionFromDescription();
 
-    String s = gm();
+    setMIMEDescription(String::fromUTF8(gm()));
+    m_infoIsFromCache = false;
+
+    return true;
+}
+
+void PluginPackage::setMIMEDescription(const String& mimeDescription)
+{
+    m_fullMIMEDescription = mimeDescription.lower();
+
     Vector<String> types;
-    s.split(UChar(';'), false, types);
+    mimeDescription.lower().split(UChar(';'), false, types);
     for (unsigned i = 0; i < types.size(); ++i) {
         Vector<String> mime;
         types[i].split(UChar(':'), true, mime);
@@ -76,18 +84,49 @@ bool PluginPackage::fetchInfo()
                 m_mimeToDescriptions.add(mime[0], mime[2]);
         }
     }
-
-    return true;
 }
 
 static NPError staticPluginQuirkRequiresGtkToolKit_NPN_GetValue(NPP instance, NPNVariable variable, void* value)
 {
     if (variable == NPNVToolkit) {
-        *static_cast<uint32*>(value) = 2;
+        *static_cast<uint32_t*>(value) = 2;
         return NPERR_NO_ERROR;
     }
 
     return NPN_GetValue(instance, variable, value);
+}
+
+static void initializeGtk(QLibrary* module = 0)
+{
+    // Ensures missing Gtk initialization in some versions of Adobe's flash player
+    // plugin do not cause crashes. See BR# 40567, 44324, and 44405 for details.  
+    if (module) {
+        typedef void *(*gtk_init_ptr)(int*, char***);
+        gtk_init_ptr gtkInit = (gtk_init_ptr)module->resolve("gtk_init");
+        if (gtkInit) {
+            // Prevent gtk_init() from replacing the X error handlers, since the Gtk
+            // handlers abort when they receive an X error, thus killing the viewer.
+#ifdef Q_WS_X11
+            int (*old_error_handler)(Display*, XErrorEvent*) = XSetErrorHandler(0);
+            int (*old_io_error_handler)(Display*) = XSetIOErrorHandler(0);
+#endif
+            gtkInit(0, 0);
+#ifdef Q_WS_X11
+            XSetErrorHandler(old_error_handler);
+            XSetIOErrorHandler(old_io_error_handler);
+#endif
+            return;
+        }
+    }
+
+    QLibrary library(QLatin1String("libgtk-x11-2.0"), 0);
+    if (library.load()) {
+        typedef void *(*gtk_init_check_ptr)(int*, char***);
+        gtk_init_check_ptr gtkInitCheck = (gtk_init_check_ptr)library.resolve("gtk_init_check");
+        // NOTE: We're using gtk_init_check() since gtk_init() calls exit() on failure.
+        if (gtkInitCheck)
+            (void) gtkInitCheck(0, 0);
+    }
 }
 
 bool PluginPackage::load()
@@ -121,10 +160,17 @@ bool PluginPackage::load()
 
     initializeBrowserFuncs();
 
-    if (m_path.contains("npwrapper.")) {
+    if (m_path.contains("npwrapper.") || m_path.contains("gnash")) {
         // nspluginwrapper relies on the toolkit value to know if glib is available
         // It does so in NP_Initialize with a null instance, therefore it is done this way:
         m_browserFuncs.getvalue = staticPluginQuirkRequiresGtkToolKit_NPN_GetValue;
+        // Workaround Adobe's failure to properly initialize Gtk in some versions
+        // of their flash player plugin.
+        initializeGtk();
+    } else if (m_path.contains("flashplayer")) {
+        // Workaround Adobe's failure to properly initialize Gtk in some versions
+        // of their flash player plugin.
+        initializeGtk(m_module);
     }
 
 #if defined(XP_UNIX)
@@ -141,6 +187,11 @@ bool PluginPackage::load()
 abort:
     unloadWithoutShutdown();
     return false;
+}
+
+uint16_t PluginPackage::NPVersion() const
+{
+    return NP_VERSION_MINOR;
 }
 
 }

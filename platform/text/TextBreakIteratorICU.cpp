@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006 Lars Knoll <lars@trolltech.com>
- * Copyright (C) 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2011, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,11 +22,14 @@
 #include "config.h"
 #include "TextBreakIterator.h"
 
+#include "LineBreakIteratorPoolICU.h"
 #include "PlatformString.h"
-#include "TextBreakIteratorInternalICU.h"
+#include <wtf/Atomics.h>
 
-#include <unicode/ubrk.h>
-#include <wtf/Assertions.h>
+#include "WebCoreThread.h"
+
+using namespace WTF;
+using namespace std;
 
 namespace WebCore {
 
@@ -38,7 +41,7 @@ static TextBreakIterator* setUpIterator(bool& createdIterator, TextBreakIterator
 
     if (!createdIterator) {
         UErrorCode openStatus = U_ZERO_ERROR;
-        iterator = static_cast<TextBreakIterator*>(ubrk_open(type, currentTextBreakLocaleID(), 0, 0, &openStatus));
+        iterator = reinterpret_cast<TextBreakIterator*>(ubrk_open(type, currentTextBreakLocaleID(), 0, 0, &openStatus));
         createdIterator = true;
         ASSERT_WITH_MESSAGE(U_SUCCESS(openStatus), "ICU could not open a break iterator: %s (%d)", u_errorName(openStatus), openStatus);
     }
@@ -46,19 +49,11 @@ static TextBreakIterator* setUpIterator(bool& createdIterator, TextBreakIterator
         return 0;
 
     UErrorCode setTextStatus = U_ZERO_ERROR;
-    ubrk_setText(iterator, string, length, &setTextStatus);
+    ubrk_setText(reinterpret_cast<UBreakIterator*>(iterator), string, length, &setTextStatus);
     if (U_FAILURE(setTextStatus))
         return 0;
 
     return iterator;
-}
-
-TextBreakIterator* characterBreakIterator(const UChar* string, int length)
-{
-    static bool createdCharacterBreakIterator = false;
-    static TextBreakIterator* staticCharacterBreakIterator;
-    return setUpIterator(createdCharacterBreakIterator,
-        staticCharacterBreakIterator, UBRK_CHARACTER, string, length);
 }
 
 TextBreakIterator* wordBreakIterator(const UChar* string, int length)
@@ -69,12 +64,42 @@ TextBreakIterator* wordBreakIterator(const UChar* string, int length)
         staticWordBreakIterator, UBRK_WORD, string, length);
 }
 
-TextBreakIterator* lineBreakIterator(const UChar* string, int length)
+TextBreakIterator* acquireLineBreakIterator(const UChar* string, int length, const AtomicString& locale)
 {
-    static bool createdLineBreakIterator = false;
-    static TextBreakIterator* staticLineBreakIterator;
-    return setUpIterator(createdLineBreakIterator,
-        staticLineBreakIterator, UBRK_LINE, string, length);
+    UBreakIterator* iterator = LineBreakIteratorPool::sharedPool().take(locale);
+    if (!iterator)
+        return 0;
+
+    UErrorCode setTextStatus = U_ZERO_ERROR;
+    ubrk_setText(iterator, string, length, &setTextStatus);
+    if (U_FAILURE(setTextStatus)) {
+        LOG_ERROR("ubrk_setText failed with status %d", setTextStatus);
+        return 0;
+    }
+
+    return reinterpret_cast<TextBreakIterator*>(iterator);
+}
+
+void releaseLineBreakIterator(TextBreakIterator* iterator)
+{
+    ASSERT_ARG(iterator, iterator);
+
+    LineBreakIteratorPool::sharedPool().put(reinterpret_cast<UBreakIterator*>(iterator));
+}
+
+static TextBreakIterator* nonSharedCharacterBreakIterator;
+
+NonSharedCharacterBreakIterator::NonSharedCharacterBreakIterator(const UChar* buffer, int length)
+{
+    m_iterator = nonSharedCharacterBreakIterator;
+    bool createdIterator = m_iterator && weakCompareAndSwap(reinterpret_cast<void**>(&nonSharedCharacterBreakIterator), m_iterator, 0);
+    m_iterator = setUpIterator(createdIterator, m_iterator, UBRK_CHARACTER, buffer, length);
+}
+
+NonSharedCharacterBreakIterator::~NonSharedCharacterBreakIterator()
+{
+    if (!weakCompareAndSwap(reinterpret_cast<void**>(&nonSharedCharacterBreakIterator), 0, m_iterator))
+        ubrk_close(reinterpret_cast<UBreakIterator*>(m_iterator));
 }
 
 TextBreakIterator* sentenceBreakIterator(const UChar* string, int length)
@@ -85,44 +110,50 @@ TextBreakIterator* sentenceBreakIterator(const UChar* string, int length)
         staticSentenceBreakIterator, UBRK_SENTENCE, string, length);
 }
 
-int textBreakFirst(TextBreakIterator* bi)
+int textBreakFirst(TextBreakIterator* iterator)
 {
-    return ubrk_first(bi);
+    return ubrk_first(reinterpret_cast<UBreakIterator*>(iterator));
 }
 
-int textBreakLast(TextBreakIterator* bi)
+int textBreakLast(TextBreakIterator* iterator)
 {
-    return ubrk_last(bi);
+    return ubrk_last(reinterpret_cast<UBreakIterator*>(iterator));
 }
 
-int textBreakNext(TextBreakIterator* bi)
+int textBreakNext(TextBreakIterator* iterator)
 {
-    return ubrk_next(bi);
+    return ubrk_next(reinterpret_cast<UBreakIterator*>(iterator));
 }
 
-int textBreakPrevious(TextBreakIterator* bi)
+int textBreakPrevious(TextBreakIterator* iterator)
 {
-    return ubrk_previous(bi);
+    return ubrk_previous(reinterpret_cast<UBreakIterator*>(iterator));
 }
 
-int textBreakPreceding(TextBreakIterator* bi, int pos)
+int textBreakPreceding(TextBreakIterator* iterator, int pos)
 {
-    return ubrk_preceding(bi, pos);
+    return ubrk_preceding(reinterpret_cast<UBreakIterator*>(iterator), pos);
 }
 
-int textBreakFollowing(TextBreakIterator* bi, int pos)
+int textBreakFollowing(TextBreakIterator* iterator, int pos)
 {
-    return ubrk_following(bi, pos);
+    return ubrk_following(reinterpret_cast<UBreakIterator*>(iterator), pos);
 }
 
-int textBreakCurrent(TextBreakIterator* bi)
+int textBreakCurrent(TextBreakIterator* iterator)
 {
-    return ubrk_current(bi);
+    return ubrk_current(reinterpret_cast<UBreakIterator*>(iterator));
 }
 
-bool isTextBreak(TextBreakIterator* bi, int pos)
+bool isTextBreak(TextBreakIterator* iterator, int position)
 {
-    return ubrk_isBoundary(bi, pos);
+    return ubrk_isBoundary(reinterpret_cast<UBreakIterator*>(iterator), position);
+}
+
+bool isWordTextBreak(TextBreakIterator* iterator)
+{
+    int ruleStatus = ubrk_getRuleStatus(reinterpret_cast<UBreakIterator*>(iterator));
+    return ruleStatus != UBRK_WORD_NONE;
 }
 
 

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2007 Apple Inc.  All rights reserved.
+ * Copyright (C) 2011 Google Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,43 +27,48 @@
 #ifndef InspectorClient_h
 #define InspectorClient_h
 
-#include "InspectorController.h"
+#include "InspectorFrontendChannel.h"
+#include "InspectorStateClient.h"
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
-class Node;
+class InspectorController;
+class Frame;
 class Page;
-class String;
 
-class InspectorClient {
+class InspectorClient : public InspectorFrontendChannel, public InspectorStateClient {
 public:
-    virtual ~InspectorClient() {  }
+    virtual ~InspectorClient() { }
 
     virtual void inspectorDestroyed() = 0;
 
-    virtual Page* createPage() = 0;
+    virtual void openInspectorFrontend(InspectorController*) = 0;
+    virtual void closeInspectorFrontend() = 0;
+    virtual void bringFrontendToFront() = 0;
+    virtual void didResizeMainFrame(Frame*) { }
 
-    virtual String localizedStringsURL() = 0;
-
-    virtual String hiddenPanels() = 0;
-
-    virtual void showWindow() = 0;
-    virtual void closeWindow() = 0;
-
-    virtual void attachWindow() = 0;
-    virtual void detachWindow() = 0;
-
-    virtual void setAttachedWindowHeight(unsigned height) = 0;
-
-    virtual void highlight(Node*) = 0;
+    virtual void highlight() = 0;
     virtual void hideHighlight() = 0;
 
-    virtual void inspectedURLChanged(const String& newURL) = 0;
+    virtual bool canClearBrowserCache() { return false; }
+    virtual void clearBrowserCache() { }
+    virtual bool canClearBrowserCookies() { return false; }
+    virtual void clearBrowserCookies() { }
 
-    virtual void populateSetting(const String& key, String* value) = 0;
-    virtual void storeSetting(const String& key, const String& value) = 0;
+    virtual bool canOverrideDeviceMetrics() { return false; }
+    virtual void overrideDeviceMetrics(int /*width*/, int /*height*/, float /*fontScaleFactor*/, bool /*fitWindow*/)
+    {
+        // FIXME: Platforms may want to implement this (see https://bugs.webkit.org/show_bug.cgi?id=82886).
+    }
+    virtual void autoZoomPageToFitWidth()
+    {
+        // FIXME: Platforms may want to implement this (see https://bugs.webkit.org/show_bug.cgi?id=82886).
+    }
 
-    virtual void inspectorWindowObjectCleared() = 0;
+    bool doDispatchMessageOnFrontendPage(Page* frontendPage, const String& message);
+
+    virtual void didSetSearchingForNode(bool) { }
 };
 
 } // namespace WebCore

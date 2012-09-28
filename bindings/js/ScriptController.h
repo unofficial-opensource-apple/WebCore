@@ -22,19 +22,18 @@
 #ifndef ScriptController_h
 #define ScriptController_h
 
+#include "FrameLoaderTypes.h"
 #include "JSDOMWindowShell.h"
+#include "ScriptControllerBase.h"
 #include "ScriptInstance.h"
-#include <runtime/Protect.h>
+#include <heap/Strong.h>
+#include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/TextPosition.h>
 
 #if PLATFORM(MAC)
 #include <wtf/RetainPtr.h>
-
-#ifdef __OBJC__
-@class WebScriptObject;
-#else
-class WebScriptObject;
-#endif
+OBJC_CLASS WebScriptObject;
 #endif
 
 struct NPObject;
@@ -49,28 +48,26 @@ namespace JSC {
 
 namespace WebCore {
 
-class Event;
-class EventListener;
 class HTMLPlugInElement;
 class Frame;
-class Node;
 class ScriptSourceCode;
 class ScriptValue;
-class String;
 class Widget;
-class XSSAuditor;
 
 typedef HashMap<void*, RefPtr<JSC::Bindings::RootObject> > RootObjectMap;
 
 class ScriptController {
     friend class ScriptCachedFrameData;
-    typedef WTF::HashMap< RefPtr<DOMWrapperWorld>, JSC::ProtectedPtr<JSDOMWindowShell> > ShellMap;
+    typedef WTF::HashMap< RefPtr<DOMWrapperWorld>, JSC::Strong<JSDOMWindowShell> > ShellMap;
 
 public:
     ScriptController(Frame*);
     ~ScriptController();
 
     static PassRefPtr<DOMWrapperWorld> createWorld();
+
+    JSDOMWindowShell* createWindowShell(DOMWrapperWorld*);
+    void destroyWindowShell(DOMWrapperWorld*);
 
     JSDOMWindowShell* windowShell(DOMWrapperWorld* world)
     {
@@ -87,14 +84,14 @@ public:
         return windowShell(world)->window();
     }
 
-    static void getAllWorlds(Vector<DOMWrapperWorld*>&);
+    static void getAllWorlds(Vector<RefPtr<DOMWrapperWorld> >&);
 
     ScriptValue executeScript(const ScriptSourceCode&);
     ScriptValue executeScript(const String& script, bool forceUserGesture = false);
-    ScriptValue executeScriptInWorld(DOMWrapperWorld* world, const String& script, bool forceUserGesture = false);
+    ScriptValue executeScriptInWorld(DOMWrapperWorld*, const String& script, bool forceUserGesture = false);
 
     // Returns true if argument is a JavaScript URL.
-    bool executeIfJavaScriptURL(const KURL&, bool userGesture = false, bool replaceDocument = true);
+    bool executeIfJavaScriptURL(const KURL&, ShouldReplaceDocumentIfJavaScriptURL shouldReplaceDocumentIfJavaScriptURL = ReplaceDocumentIfJavaScriptURL);
 
     // This function must be called from the main thread. It is safe to call it repeatedly.
     // Darwin is an exception to this rule: it is OK to call this function from any thread, even reentrantly.
@@ -103,14 +100,14 @@ public:
     ScriptValue evaluate(const ScriptSourceCode&);
     ScriptValue evaluateInWorld(const ScriptSourceCode&, DOMWrapperWorld*);
 
-    void setEventHandlerLineNumber(int lineno) { m_handlerLineNumber = lineno; }
-    int eventHandlerLineNumber() { return m_handlerLineNumber; }
+    WTF::TextPosition eventHandlerPosition() const;
 
-    void setProcessingTimerCallback(bool b) { m_processingTimerCallback = b; }
-    bool processingUserGesture(DOMWrapperWorld*) const;
-    bool anyPageIsProcessingUserGesture() const;
+    void disableEval();
 
-    bool canExecuteScripts();
+    static bool processingUserGesture();
+
+    static bool canAccessFromCurrentOrigin(Frame*);
+    bool canExecuteScripts(ReasonForCallingCanExecuteScripts);
 
     // Debugger can be 0 to detach any existing Debugger.
     void attachDebugger(JSC::Debugger*); // Attaches/detaches in all worlds/window shells.
@@ -119,13 +116,13 @@ public:
     void setPaused(bool b) { m_paused = b; }
     bool isPaused() const { return m_paused; }
 
-    void setAllowPopupsFromPlugin(bool allowPopupsFromPlugin) { m_allowPopupsFromPlugin = allowPopupsFromPlugin; }
-    bool allowPopupsFromPlugin() const { return m_allowPopupsFromPlugin; }
-    
     const String* sourceURL() const { return m_sourceURL; } // 0 if we are not evaluating any script
 
-    void clearWindowShell();
+    void clearWindowShell(bool goingIntoPageCache = false);
     void updateDocument();
+
+    void namedItemAdded(HTMLDocument*, const AtomicString&) { }
+    void namedItemRemoved(HTMLDocument*, const AtomicString&) { }
 
     // Notifies the ScriptController that the securityOrigin of the current
     // document was modified.  For example, this method is called when
@@ -140,11 +137,16 @@ public:
 
     PassScriptInstance createScriptInstanceForWidget(Widget*);
     JSC::Bindings::RootObject* bindingRootObject();
+    JSC::Bindings::RootObject* cacheableBindingRootObject();
 
     PassRefPtr<JSC::Bindings::RootObject> createRootObject(void* nativeHandle);
 
+#if ENABLE(INSPECTOR)
+    static void setCaptureCallStackForUncaughtExceptions(bool);
+#endif
+
 #if PLATFORM(MAC)
-#if ENABLE(MAC_JAVA_BRIDGE)
+#if ENABLE(JAVA_BRIDGE)
     static void initJavaJSBindings();
 #endif
     WebScriptObject* windowScriptObject();
@@ -156,29 +158,25 @@ public:
     NPObject* createScriptObjectForPluginElement(HTMLPlugInElement*);
     NPObject* windowScriptNPObject();
 #endif
-    
-    XSSAuditor* xssAuditor() { return m_XSSAuditor.get(); }
 
 private:
     JSDOMWindowShell* initScript(DOMWrapperWorld* world);
 
     void disconnectPlatformScriptObjects();
 
-    bool isJavaScriptAnchorNavigation() const;
-
     ShellMap m_windowShells;
     Frame* m_frame;
-    int m_handlerLineNumber;
     const String* m_sourceURL;
 
-    bool m_inExecuteScript;
-
-    bool m_processingTimerCallback;
     bool m_paused;
-    bool m_allowPopupsFromPlugin;
 
-    // The root object used for objects bound outside the context of a plugin.
+    // The root object used for objects bound outside the context of a plugin, such
+    // as NPAPI plugins. The plugins using these objects prevent a page from being cached so they
+    // are safe to invalidate() when WebKit navigates away from the page that contains them.
     RefPtr<JSC::Bindings::RootObject> m_bindingRootObject;
+    // Unlike m_bindingRootObject these objects are used in pages that are cached, so they are not invalidate()'d.
+    // This ensures they are still available when the page is restored.
+    RefPtr<JSC::Bindings::RootObject> m_cacheableBindingRootObject;
     RootObjectMap m_rootObjects;
 #if ENABLE(NETSCAPE_PLUGIN_API)
     NPObject* m_windowScriptNPObject;
@@ -186,9 +184,6 @@ private:
 #if PLATFORM(MAC)
     RetainPtr<WebScriptObject> m_windowScriptObject;
 #endif
-    
-    // The XSSAuditor associated with this ScriptController.
-    OwnPtr<XSSAuditor> m_XSSAuditor;
 };
 
 } // namespace WebCore

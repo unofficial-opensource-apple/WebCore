@@ -28,24 +28,57 @@
 
 #if HAVE(ACCESSIBILITY)
 
-#import "AccessibilityObjectWrapper.h"
+#import "WebAccessibilityObjectWrapper.h"
+#import "Widget.h"
 
 namespace WebCore {
 
-bool AccessibilityObject::accessibilityIgnoreAttachment() const
+void AccessibilityObject::detachFromParent()
 {
-    NSView* attachment = [wrapper() attachmentView];
-    if (!attachment)
-        return true;
-    
-    return [attachment accessibilityIsIgnored];
+    if (isAttachment())
+        overrideAttachmentParent(0);
 }
 
-AccessibilityObjectPlatformInclusion AccessibilityObject::accessibilityPlatformIncludesObject() const
+void AccessibilityObject::overrideAttachmentParent(AccessibilityObject* parent)
+{
+    if (!isAttachment())
+        return;
+    
+    id parentWrapper = nil;
+    if (parent) {
+        if (parent->accessibilityIsIgnored())
+            parent = parent->parentObjectUnignored();
+        parentWrapper = parent->wrapper();
+    }
+    
+    [[wrapper() attachmentView] accessibilitySetOverrideValue:parentWrapper forAttribute:NSAccessibilityParentAttribute];
+}
+    
+bool AccessibilityObject::accessibilityIgnoreAttachment() const
+{
+    // FrameView attachments are now handled by AccessibilityScrollView, 
+    // so if this is the attachment, it should be ignored.
+    Widget* widget = 0;
+    if (isAttachment() && (widget = widgetForAttachmentView()) && widget->isFrameView())
+        return true;
+
+    if ([wrapper() attachmentView])
+        return [[wrapper() attachmentView] accessibilityIsIgnored];
+    
+    // Attachments are ignored by default (unless we determine that we should expose them).
+    return true;
+}
+
+AccessibilityObjectInclusion AccessibilityObject::accessibilityPlatformIncludesObject() const
 {
     if (isMenuListPopup() || isMenuListOption())
         return IgnoreObject;
 
+    // Never expose an unknown object on the Mac. Clients of the AX API will not know what to do with it.
+    // Special case is when the unknown object is actually an attachment.
+    if (roleValue() == UnknownRole && !isAttachment())
+        return IgnoreObject;
+    
     return DefaultBehavior;
 }
     

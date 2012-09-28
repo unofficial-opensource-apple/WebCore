@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2008, 2010, 2011 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,16 +26,12 @@
 #import "config.h"
 #import "Widget.h"
 
-#ifdef BUILDING_ON_TIGER
-#import "AutodrainedPool.h"
-#endif
 
 #import "BlockExceptions.h"
 #import "Chrome.h"
 #import "Cursor.h"
 #import "Document.h"
 #import "Font.h"
-#import "FoundationExtras.h"
 #import "Frame.h"
 #import "GraphicsContext.h"
 #import "NotImplemented.h"
@@ -56,12 +52,20 @@
 - (void)webPlugInSetIsSelected:(BOOL)isSelected;
 @end
 
+@interface NSView (Widget)
+- (void)visibleRectDidChange;
+@end
+
 namespace WebCore {
 
 class WidgetPrivate {
 public:
-    bool mustStayInWindow;
-    bool removeFromSuperviewSoon;
+    WidgetPrivate()
+        : previousVisibleRect(NSZeroRect)
+    {
+    }
+
+    NSRect previousVisibleRect;
 };
 
 static void safeRemoveFromSuperview(NSView *view)
@@ -84,37 +88,39 @@ Widget::Widget(NSView *view)
     : m_data(new WidgetPrivate)
 {
     init(view);
-    m_data->mustStayInWindow = false;
-    m_data->removeFromSuperviewSoon = false;
 }
 
 Widget::~Widget()
 {
-    releasePlatformWidget();
     delete m_data;
 }
 
 // FIXME: Should move this to Chrome; bad layering that this knows about Frame.
-void Widget::setFocus()
+void Widget::setFocus(bool focused)
 {
+    if (!focused)
+        return;
+
     Frame* frame = Frame::frameForWidget(this);
     if (!frame)
         return;
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
  
+    // Call this even when there is no platformWidget(). WK2 will focus on the widget in the UIProcess.
     NSView *view = [platformWidget() _webcore_effectiveFirstResponder];
     if (Page* page = frame->page())
         page->chrome()->focusNSView(view);
-    
+
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
- void Widget::setCursor(const Cursor& cursor)
- {
-    if ([NSCursor currentCursor] == cursor.impl())
+void Widget::setCursor(const Cursor& cursor)
+{
+    ScrollView* view = root();
+    if (!view)
         return;
-    [cursor.impl() set];
+    view->hostWindow()->setCursor(cursor);
 }
 
 void Widget::show()
@@ -158,21 +164,29 @@ void Widget::setFrameRect(const IntRect& rect)
     m_frame = rect;
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    NSView *v = getOuterView();
-    if (!v)
+    NSView *outerView = getOuterView();
+    if (!outerView)
         return;
 
+    // Take a reference to this Widget, because sending messages to outerView can invoke arbitrary
+    // code, which can deref it.
+    RefPtr<Widget> protectedThis(this);
+
+    NSRect visibleRect = [outerView visibleRect];
     NSRect f = rect;
-    if (!NSEqualRects(f, [v frame])) {
-        [v setFrame:f];
-        [v setNeedsDisplay: NO];
-    }
+    if (!NSEqualRects(f, [outerView frame])) {
+        [outerView setFrame:f];
+        [outerView setNeedsDisplay:NO];
+    } else if (!NSEqualRects(visibleRect, m_data->previousVisibleRect) && [outerView respondsToSelector:@selector(visibleRectDidChange)])
+        [outerView visibleRectDidChange];
+
+    m_data->previousVisibleRect = visibleRect;
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
-NSView* Widget::getOuterView() const
+NSView *Widget::getOuterView() const
 {
-    NSView* view = platformWidget();
+    NSView *view = platformWidget();
 
     // If this widget's view is a WebCoreFrameScrollView then we
     // resize its containing view, a WebFrameView.
@@ -189,6 +203,11 @@ void Widget::paint(GraphicsContext* p, const IntRect& r)
     if (p->paintingDisabled())
         return;
     NSView *view = getOuterView();
+
+    // Take a reference to this Widget, because sending messages to the views can invoke arbitrary
+    // code, which can deref it.
+    RefPtr<Widget> protectedThis(this);
+
     NSGraphicsContext *currentContext = [NSGraphicsContext currentContext];
     if (currentContext == [[view window] graphicsContext] || ![currentContext isDrawingToScreen]) {
         // This is the common case of drawing into a window or printing.
@@ -227,9 +246,6 @@ void Widget::paint(GraphicsContext* p, const IntRect& r)
 
         BEGIN_BLOCK_OBJC_EXCEPTIONS;
         {
-#ifdef BUILDING_ON_TIGER
-            AutodrainedPool pool;
-#endif
             NSGraphicsContext *nsContext = [NSGraphicsContext graphicsContextWithGraphicsPort:cgContext flipped:YES];
             [view displayRectIgnoringOpacity:[view convertRect:r fromView:[view superview]] inContext:nsContext];
         }
@@ -245,6 +261,7 @@ void Widget::paint(GraphicsContext* p, const IntRect& r)
 void Widget::setIsSelected(bool isSelected)
 {
     NSView *view = platformWidget();
+
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     if ([view respondsToSelector:@selector(webPlugInSetIsSelected:)])
         [view webPlugInSetIsSelected:isSelected];
@@ -255,37 +272,9 @@ void Widget::setIsSelected(bool isSelected)
 
 void Widget::removeFromSuperview()
 {
-    if (m_data->mustStayInWindow)
-        m_data->removeFromSuperviewSoon = true;
-    else {
-        m_data->removeFromSuperviewSoon = false;
-        BEGIN_BLOCK_OBJC_EXCEPTIONS;
-        safeRemoveFromSuperview(getOuterView());
-        END_BLOCK_OBJC_EXCEPTIONS;
-    }
-}
-
-void Widget::beforeMouseDown(NSView *unusedView, Widget* widget)
-{
-    if (widget) {
-        ASSERT_UNUSED(unusedView, unusedView == widget->getOuterView());
-        ASSERT(!widget->m_data->mustStayInWindow);
-        widget->m_data->mustStayInWindow = true;
-    }
-}
-
-void Widget::afterMouseDown(NSView *view, Widget* widget)
-{
-    if (!widget) {
-        BEGIN_BLOCK_OBJC_EXCEPTIONS;
-        safeRemoveFromSuperview(view);
-        END_BLOCK_OBJC_EXCEPTIONS;
-    } else {
-        ASSERT(widget->m_data->mustStayInWindow);
-        widget->m_data->mustStayInWindow = false;
-        if (widget->m_data->removeFromSuperviewSoon)
-            widget->removeFromSuperview();
-    }
+    BEGIN_BLOCK_OBJC_EXCEPTIONS;
+    safeRemoveFromSuperview(getOuterView());
+    END_BLOCK_OBJC_EXCEPTIONS;
 }
 
 // These are here to deal with flipped coords on Mac.
@@ -336,15 +325,18 @@ IntPoint Widget::convertFromContainingWindowToRoot(const Widget* rootWidget, con
     return point;
 }
 
-void Widget::releasePlatformWidget()
+NSView *Widget::platformWidget() const
 {
-    HardRelease(m_widget);
+    return m_widget.get();
 }
 
-void Widget::retainPlatformWidget()
+void Widget::setPlatformWidget(NSView *widget)
 {
-    HardRetain(m_widget);
+    if (widget == m_widget)
+        return;
+
+    m_widget = widget;
+    m_data->previousVisibleRect = NSZeroRect;
 }
 
 } // namespace WebCore
-

@@ -2,7 +2,7 @@
  * Copyright (C) 2001 Peter Kelly (pmk@post.com)
  * Copyright (C) 2001 Tobias Anton (anton@stud.fbi.fh-darmstadt.de)
  * Copyright (C) 2006 Samuel Weinig (sam.weinig@gmail.com)
- * Copyright (C) 2003, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2005, 2006, 2008, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,29 +23,39 @@
 #include "config.h"
 #include "WheelEvent.h"
 
+#include "EventDispatcher.h"
 #include "EventNames.h"
+#include "PlatformWheelEvent.h"
+
 #include <wtf/MathExtras.h>
 
 namespace WebCore {
 
 WheelEvent::WheelEvent()
-    : m_wheelDeltaX(0)
-    , m_wheelDeltaY(0)
+    : m_granularity(Pixel)
+    , m_directionInvertedFromDevice(false)
 {
 }
 
-WheelEvent::WheelEvent(float wheelTicksX, float wheelTicksY, PassRefPtr<AbstractView> view,
-                       int screenX, int screenY, int pageX, int pageY,
-                       bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
+WheelEvent::WheelEvent(const FloatPoint& wheelTicks, const FloatPoint& rawDelta,
+                       Granularity granularity, PassRefPtr<AbstractView> view,
+                       const IntPoint& screenLocation, const IntPoint& pageLocation,
+                       bool ctrlKey, bool altKey, bool shiftKey, bool metaKey,
+                       bool directionInvertedFromDevice)
     : MouseRelatedEvent(eventNames().mousewheelEvent,
-                        true, true, view, 0, screenX, screenY, pageX, pageY, 
+                        true, true, view, 0, screenLocation, pageLocation,
+#if ENABLE(POINTER_LOCK)
+                        IntPoint(0, 0),
+#endif
                         ctrlKey, altKey, shiftKey, metaKey)
-    , m_wheelDeltaX(lroundf(wheelTicksX * 120))
-    , m_wheelDeltaY(lroundf(wheelTicksY * 120)) // Normalize to the Windows 120 multiple
+    , m_wheelDelta(IntPoint(static_cast<int>(wheelTicks.x() * tickMultiplier), static_cast<int>(wheelTicks.y() * tickMultiplier)))
+    , m_rawDelta(roundedIntPoint(rawDelta))
+    , m_granularity(granularity)
+    , m_directionInvertedFromDevice(directionInvertedFromDevice)
 {
 }
 
-void WheelEvent::initWheelEvent(int wheelDeltaX, int wheelDeltaY, PassRefPtr<AbstractView> view,
+void WheelEvent::initWheelEvent(int rawDeltaX, int rawDeltaY, PassRefPtr<AbstractView> view,
                                 int screenX, int screenY, int pageX, int pageY,
                                 bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
 {
@@ -54,22 +64,66 @@ void WheelEvent::initWheelEvent(int wheelDeltaX, int wheelDeltaY, PassRefPtr<Abs
     
     initUIEvent(eventNames().mousewheelEvent, true, true, view, 0);
     
-    m_screenX = screenX;
-    m_screenY = screenY;
+    m_screenLocation = IntPoint(screenX, screenY);
     m_ctrlKey = ctrlKey;
     m_altKey = altKey;
     m_shiftKey = shiftKey;
     m_metaKey = metaKey;
-    m_wheelDeltaX = wheelDeltaX;
-    m_wheelDeltaY = wheelDeltaY;
     
-    initCoordinates(pageX, pageY);
+    // Normalize to the Windows 120 multiple
+    m_wheelDelta = IntPoint(rawDeltaX * tickMultiplier, rawDeltaY * tickMultiplier);
+    
+    m_rawDelta = IntPoint(rawDeltaX, rawDeltaY);
+    m_granularity = Pixel;
+    m_directionInvertedFromDevice = false;
+
+    initCoordinates(IntPoint(pageX, pageY));
 }
 
-
-bool WheelEvent::isWheelEvent() const
+void WheelEvent::initWebKitWheelEvent(int rawDeltaX, int rawDeltaY, PassRefPtr<AbstractView> view,
+                                      int screenX, int screenY, int pageX, int pageY,
+                                      bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
 {
-    return true;
+    initWheelEvent(rawDeltaX, rawDeltaY, view, screenX, screenY, pageX, pageY,
+                   ctrlKey, altKey, shiftKey, metaKey);
+}
+
+const AtomicString& WheelEvent::interfaceName() const
+{
+    return eventNames().interfaceForWheelEvent;
+}
+
+inline static WheelEvent::Granularity granularity(const PlatformWheelEvent& event)
+{
+    return event.granularity() == ScrollByPageWheelEvent ? WheelEvent::Page : WheelEvent::Pixel;
+}
+
+PassRefPtr<WheelEventDispatchMediator> WheelEventDispatchMediator::create(const PlatformWheelEvent& event, PassRefPtr<AbstractView> view)
+{
+    return adoptRef(new WheelEventDispatchMediator(event, view));
+}
+
+WheelEventDispatchMediator::WheelEventDispatchMediator(const PlatformWheelEvent& event, PassRefPtr<AbstractView> view)
+{
+    if (!(event.deltaX() || event.deltaY()))
+        return;
+
+    setEvent(WheelEvent::create(FloatPoint(event.wheelTicksX(), event.wheelTicksY()), FloatPoint(event.deltaX(), event.deltaY()),
+                                granularity(event), view, event.globalPosition(), event.position(),
+                                event.ctrlKey(), event.altKey(), event.shiftKey(), event.metaKey(), event.directionInvertedFromDevice()));
+}
+
+WheelEvent* WheelEventDispatchMediator::event() const
+{
+    return static_cast<WheelEvent*>(EventDispatchMediator::event());
+}
+
+bool WheelEventDispatchMediator::dispatchEvent(EventDispatcher* dispatcher) const
+{
+    if (!event())
+        return true;
+
+    return EventDispatchMediator::dispatchEvent(dispatcher) && !event()->defaultHandled();
 }
 
 } // namespace WebCore

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2008, 2011 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,35 +21,73 @@
 #include "config.h"
 #include "HitTestResult.h"
 
+#include "DocumentMarkerController.h"
 #include "Frame.h"
+#include "FrameSelection.h"
 #include "FrameTree.h"
 #include "HTMLAnchorElement.h"
+#include "HTMLVideoElement.h"
 #include "HTMLImageElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLMediaElement.h"
 #include "HTMLNames.h"
+#include "HTMLParserIdioms.h"
+#include "HTMLPlugInImageElement.h"
+#include "RenderBlock.h"
 #include "RenderImage.h"
+#include "RenderInline.h"
 #include "Scrollbar.h"
-#include "SelectionController.h"
 
 #if ENABLE(SVG)
 #include "SVGNames.h"
 #include "XLinkNames.h"
 #endif
 
-#if ENABLE(WML)
-#include "WMLImageElement.h"
-#include "WMLNames.h"
-#endif
-
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HitTestResult::HitTestResult(const IntPoint& point)
+HitTestResult::HitTestResult()
+    : m_isOverWidget(false)
+    , m_isRectBased(false)
+    , m_topPadding(0)
+    , m_rightPadding(0)
+    , m_bottomPadding(0)
+    , m_leftPadding(0)
+    , m_shadowContentFilterPolicy(DoNotAllowShadowContent)
+    , m_region(0)
+{
+}
+
+HitTestResult::HitTestResult(const LayoutPoint& point)
     : m_point(point)
     , m_isOverWidget(false)
+    , m_isRectBased(false)
+    , m_topPadding(0)
+    , m_rightPadding(0)
+    , m_bottomPadding(0)
+    , m_leftPadding(0)
+    , m_shadowContentFilterPolicy(DoNotAllowShadowContent)
+    , m_region(0)
 {
+}
+
+HitTestResult::HitTestResult(const LayoutPoint& centerPoint, unsigned topPadding, unsigned rightPadding, unsigned bottomPadding, unsigned leftPadding, ShadowContentFilterPolicy allowShadowContent)
+    : m_point(centerPoint)
+    , m_isOverWidget(false)
+    , m_topPadding(topPadding)
+    , m_rightPadding(rightPadding)
+    , m_bottomPadding(bottomPadding)
+    , m_leftPadding(leftPadding)
+    , m_shadowContentFilterPolicy(allowShadowContent)
+    , m_region(0)
+{
+    // If all padding values passed in are zero then it is not a rect based hit test.
+    m_isRectBased = topPadding || rightPadding || bottomPadding || leftPadding;
+
+    // Make sure all padding values are clamped to zero if it is not a rect hit test.
+    if (!m_isRectBased)
+        m_topPadding = m_rightPadding = m_bottomPadding = m_leftPadding = 0;
 }
 
 HitTestResult::HitTestResult(const HitTestResult& other)
@@ -60,7 +98,20 @@ HitTestResult::HitTestResult(const HitTestResult& other)
     , m_innerURLElement(other.URLElement())
     , m_scrollbar(other.scrollbar())
     , m_isOverWidget(other.isOverWidget())
+    , m_shadowContentFilterPolicy(other.shadowContentFilterPolicy())
+    , m_region(other.region())
 {
+    // Only copy the padding and NodeSet in case of rect hit test.
+    // Copying the later is rather expensive.
+    if ((m_isRectBased = other.isRectBasedTest())) {
+        m_topPadding = other.m_topPadding;
+        m_rightPadding = other.m_rightPadding;
+        m_bottomPadding = other.m_bottomPadding;
+        m_leftPadding = other.m_leftPadding;
+    } else
+        m_topPadding = m_rightPadding = m_bottomPadding = m_leftPadding = 0;
+
+    m_rectBasedTestResult = adoptPtr(other.m_rectBasedTestResult ? new NodeSet(*other.m_rectBasedTestResult) : 0);
 }
 
 HitTestResult::~HitTestResult()
@@ -76,6 +127,21 @@ HitTestResult& HitTestResult::operator=(const HitTestResult& other)
     m_innerURLElement = other.URLElement();
     m_scrollbar = other.scrollbar();
     m_isOverWidget = other.isOverWidget();
+    // Only copy the padding and NodeSet in case of rect hit test.
+    // Copying the later is rather expensive.
+    if ((m_isRectBased = other.isRectBasedTest())) {
+        m_topPadding = other.m_topPadding;
+        m_rightPadding = other.m_rightPadding;
+        m_bottomPadding = other.m_bottomPadding;
+        m_leftPadding = other.m_leftPadding;
+    } else
+        m_topPadding = m_rightPadding = m_bottomPadding = m_leftPadding = 0;
+
+    m_rectBasedTestResult = adoptPtr(other.m_rectBasedTestResult ? new NodeSet(*other.m_rectBasedTestResult) : 0);
+    m_shadowContentFilterPolicy = other.shadowContentFilterPolicy();
+
+    m_region = other.m_region;
+
     return *this;
 }
 
@@ -143,13 +209,13 @@ String HitTestResult::spellingToolTip(TextDirection& dir) const
     if (!m_innerNonSharedNode)
         return String();
     
-    DocumentMarker* marker = m_innerNonSharedNode->document()->markerContainingPoint(m_point, DocumentMarker::Grammar);
+    DocumentMarker* marker = m_innerNonSharedNode->document()->markers()->markerContainingPoint(m_point, DocumentMarker::Grammar);
     if (!marker)
         return String();
 
     if (RenderObject* renderer = m_innerNonSharedNode->renderer())
         dir = renderer->style()->direction();
-    return marker->description;
+    return marker->description();
 }
 
 String HitTestResult::replacedString() const
@@ -159,11 +225,11 @@ String HitTestResult::replacedString() const
     if (!m_innerNonSharedNode)
         return String();
     
-    DocumentMarker* marker = m_innerNonSharedNode->document()->markerContainingPoint(m_point, DocumentMarker::Replacement);
+    DocumentMarker* marker = m_innerNonSharedNode->document()->markers()->markerContainingPoint(m_point, DocumentMarker::Replacement);
     if (!marker)
         return String();
     
-    return marker->description;
+    return marker->description();
 }    
     
 String HitTestResult::title(TextDirection& dir) const
@@ -181,6 +247,32 @@ String HitTestResult::title(TextDirection& dir) const
             }
         }
     }
+    return String();
+}
+
+String HitTestResult::innerTextIfTruncated(TextDirection& dir) const
+{
+    for (Node* truncatedNode = m_innerNode.get(); truncatedNode; truncatedNode = truncatedNode->parentNode()) {
+        if (!truncatedNode->isElementNode())
+            continue;
+
+        if (RenderObject* renderer = truncatedNode->renderer()) {
+            if (renderer->isRenderBlock()) {
+                RenderBlock* block = toRenderBlock(renderer);
+                if (block->style()->textOverflow()) {
+                    for (RootInlineBox* line = block->firstRootBox(); line; line = line->nextRootBox()) {
+                        if (line->hasEllipsisBox()) {
+                            dir = block->style()->direction();
+                            return toElement(truncatedNode)->innerText();
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    dir = LTR;
     return String();
 }
 
@@ -206,13 +298,6 @@ String HitTestResult::altDisplayString() const
         return displayString(input->alt(), m_innerNonSharedNode.get());
     }
 
-#if ENABLE(WML)
-    if (m_innerNonSharedNode->hasTagName(WMLNames::imgTag)) {
-        WMLImageElement* image = static_cast<WMLImageElement*>(m_innerNonSharedNode.get());
-        return displayString(image->altText(), m_innerNonSharedNode.get());
-    }
-#endif
-
     return String();
 }
 
@@ -225,7 +310,7 @@ Image* HitTestResult::image() const
     if (renderer && renderer->isImage()) {
         RenderImage* image = static_cast<WebCore::RenderImage*>(renderer);
         if (image->cachedImage() && !image->cachedImage()->errorOccurred())
-            return image->cachedImage()->image();
+            return image->cachedImage()->imageForRenderer(image);
     }
 
     return 0;
@@ -254,37 +339,164 @@ KURL HitTestResult::absoluteImageURL() const
 #if ENABLE(SVG)
         || m_innerNonSharedNode->hasTagName(SVGNames::imageTag)
 #endif
-#if ENABLE(WML)
-        || m_innerNonSharedNode->hasTagName(WMLNames::imgTag)
-#endif
        ) {
         Element* element = static_cast<Element*>(m_innerNonSharedNode.get());
         urlString = element->getAttribute(element->imageSourceAttributeName());
     } else
         return KURL();
 
-    return m_innerNonSharedNode->document()->completeURL(deprecatedParseURL(urlString));
+    return m_innerNonSharedNode->document()->completeURL(stripLeadingAndTrailingHTMLSpaces(urlString));
+}
+
+KURL HitTestResult::absolutePDFURL() const
+{
+    if (!(m_innerNonSharedNode && m_innerNonSharedNode->document()))
+        return KURL();
+
+    if (!m_innerNonSharedNode->hasTagName(embedTag) && !m_innerNonSharedNode->hasTagName(objectTag))
+        return KURL();
+
+    HTMLPlugInImageElement* element = static_cast<HTMLPlugInImageElement*>(m_innerNonSharedNode.get());
+    KURL url = m_innerNonSharedNode->document()->completeURL(stripLeadingAndTrailingHTMLSpaces(element->url()));
+    if (!url.isValid())
+        return KURL();
+
+    if (element->serviceType() == "application/pdf" || (element->serviceType().isEmpty() && url.path().lower().endsWith(".pdf")))
+        return url;
+    return KURL();
 }
 
 KURL HitTestResult::absoluteMediaURL() const
 {
 #if ENABLE(VIDEO)
-    if (!(m_innerNonSharedNode && m_innerNonSharedNode->document()))
-        return KURL();
-
-    if (!(m_innerNonSharedNode->renderer() && m_innerNonSharedNode->renderer()->isMedia()))
-        return KURL();
-
-    AtomicString urlString;
-    if (m_innerNonSharedNode->hasTagName(HTMLNames::videoTag) || m_innerNonSharedNode->hasTagName(HTMLNames::audioTag)) {
-        HTMLMediaElement* mediaElement = static_cast<HTMLMediaElement*>(m_innerNonSharedNode.get());
-        urlString = mediaElement->currentSrc();
-    } else
-        return KURL();
-
-    return m_innerNonSharedNode->document()->completeURL(deprecatedParseURL(urlString));
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        return mediaElt->currentSrc();
+    return KURL();
 #else
     return KURL();
+#endif
+}
+
+bool HitTestResult::mediaSupportsFullscreen() const
+{
+#if ENABLE(VIDEO)
+    HTMLMediaElement* mediaElt(mediaElement());
+    return (mediaElt && mediaElt->hasTagName(HTMLNames::videoTag) && mediaElt->supportsFullscreen());
+#else
+    return false;
+#endif
+}
+
+#if ENABLE(VIDEO)
+HTMLMediaElement* HitTestResult::mediaElement() const
+{
+    if (!(m_innerNonSharedNode && m_innerNonSharedNode->document()))
+        return 0;
+
+    if (!(m_innerNonSharedNode->renderer() && m_innerNonSharedNode->renderer()->isMedia()))
+        return 0;
+
+    if (m_innerNonSharedNode->hasTagName(HTMLNames::videoTag) || m_innerNonSharedNode->hasTagName(HTMLNames::audioTag))
+        return static_cast<HTMLMediaElement*>(m_innerNonSharedNode.get());
+    return 0;
+}
+#endif
+
+void HitTestResult::toggleMediaControlsDisplay() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        mediaElt->setControls(!mediaElt->controls());
+#endif
+}
+
+void HitTestResult::toggleMediaLoopPlayback() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        mediaElt->setLoop(!mediaElt->loop());
+#endif
+}
+
+void HitTestResult::enterFullscreenForVideo() const
+{
+#if ENABLE(VIDEO)
+    HTMLMediaElement* mediaElt(mediaElement());
+    if (mediaElt && mediaElt->hasTagName(HTMLNames::videoTag)) {
+        HTMLVideoElement* videoElt = static_cast<HTMLVideoElement*>(mediaElt);
+        if (!videoElt->isFullscreen() && mediaElt->supportsFullscreen())
+            videoElt->enterFullscreen();
+    }
+#endif
+}
+
+bool HitTestResult::mediaControlsEnabled() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        return mediaElt->controls();
+#endif
+    return false;
+}
+
+bool HitTestResult::mediaLoopEnabled() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        return mediaElt->loop();
+#endif
+    return false;
+}
+
+bool HitTestResult::mediaPlaying() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        return !mediaElt->paused();
+#endif
+    return false;
+}
+
+void HitTestResult::toggleMediaPlayState() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        mediaElt->togglePlayState();
+#endif
+}
+
+bool HitTestResult::mediaHasAudio() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        return mediaElt->hasAudio();
+#endif
+    return false;
+}
+
+bool HitTestResult::mediaIsVideo() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        return mediaElt->hasTagName(HTMLNames::videoTag);
+#endif
+    return false;
+}
+
+bool HitTestResult::mediaMuted() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        return mediaElt->muted();
+#endif
+    return false;
+}
+
+void HitTestResult::toggleMediaMuteState() const
+{
+#if ENABLE(VIDEO)
+    if (HTMLMediaElement* mediaElt = mediaElement())
+        mediaElt->setMuted(!mediaElt->muted());
 #endif
 }
 
@@ -300,14 +512,10 @@ KURL HitTestResult::absoluteLinkURL() const
     else if (m_innerURLElement->hasTagName(SVGNames::aTag))
         urlString = m_innerURLElement->getAttribute(XLinkNames::hrefAttr);
 #endif
-#if ENABLE(WML)
-    else if (m_innerURLElement->hasTagName(WMLNames::aTag))
-        urlString = m_innerURLElement->getAttribute(hrefAttr);
-#endif
     else
         return KURL();
 
-    return m_innerURLElement->document()->completeURL(deprecatedParseURL(urlString));
+    return m_innerURLElement->document()->completeURL(stripLeadingAndTrailingHTMLSpaces(urlString));
 }
 
 bool HitTestResult::isLiveLink() const
@@ -319,10 +527,6 @@ bool HitTestResult::isLiveLink() const
         return static_cast<HTMLAnchorElement*>(m_innerURLElement.get())->isLiveLink();
 #if ENABLE(SVG)
     if (m_innerURLElement->hasTagName(SVGNames::aTag))
-        return m_innerURLElement->isLink();
-#endif
-#if ENABLE(WML)
-    if (m_innerURLElement->hasTagName(WMLNames::aTag))
         return m_innerURLElement->isLink();
 #endif
 
@@ -353,13 +557,125 @@ bool HitTestResult::isContentEditable() const
     if (!m_innerNonSharedNode)
         return false;
 
-    if (m_innerNonSharedNode->hasTagName(textareaTag) || m_innerNonSharedNode->hasTagName(isindexTag))
+    if (m_innerNonSharedNode->hasTagName(textareaTag))
         return true;
 
     if (m_innerNonSharedNode->hasTagName(inputTag))
         return static_cast<HTMLInputElement*>(m_innerNonSharedNode.get())->isTextField();
 
-    return m_innerNonSharedNode->isContentEditable();
+    return m_innerNonSharedNode->rendererIsEditable();
+}
+
+bool HitTestResult::addNodeToRectBasedTestResult(Node* node, const LayoutPoint& pointInContainer, const IntRect& rect)
+{
+    // If it is not a rect-based hit test, this method has to be no-op.
+    // Return false, so the hit test stops.
+    if (!isRectBasedTest())
+        return false;
+
+    // If node is null, return true so the hit test can continue.
+    if (!node)
+        return true;
+
+    if (m_shadowContentFilterPolicy == DoNotAllowShadowContent)
+        node = node->shadowAncestorNode();
+
+    mutableRectBasedTestResult().add(node);
+
+    if (node->renderer()->isInline()) {
+        for (RenderObject* curr = node->renderer()->parent(); curr; curr = curr->parent()) {
+            if (!curr->isRenderInline())
+                break;
+            
+            // We need to make sure the nodes for culled inlines get included.
+            RenderInline* currInline = toRenderInline(curr);
+            if (currInline->alwaysCreateLineBoxes())
+                break;
+            
+            if (currInline->visibleToHitTesting() && currInline->node())
+                mutableRectBasedTestResult().add(currInline->node()->shadowAncestorNode());
+        }
+    }
+    return !rect.contains(rectForPoint(pointInContainer));
+}
+
+bool HitTestResult::addNodeToRectBasedTestResult(Node* node, const LayoutPoint& pointInContainer, const FloatRect& rect)
+{
+    // If it is not a rect-based hit test, this method has to be no-op.
+    // Return false, so the hit test stops.
+    if (!isRectBasedTest())
+        return false;
+
+    // If node is null, return true so the hit test can continue.
+    if (!node)
+        return true;
+
+    if (m_shadowContentFilterPolicy == DoNotAllowShadowContent)
+        node = node->shadowAncestorNode();
+
+    mutableRectBasedTestResult().add(node);
+
+    if (node->renderer()->isInline()) {
+        for (RenderObject* curr = node->renderer()->parent(); curr; curr = curr->parent()) {
+            if (!curr->isRenderInline())
+                break;
+            
+            // We need to make sure the nodes for culled inlines get included.
+            RenderInline* currInline = toRenderInline(curr);
+            if (currInline->alwaysCreateLineBoxes())
+                break;
+            
+            if (currInline->visibleToHitTesting() && currInline->node())
+                mutableRectBasedTestResult().add(currInline->node()->shadowAncestorNode());
+        }
+    }
+    return !rect.contains(rectForPoint(pointInContainer));
+}
+
+void HitTestResult::append(const HitTestResult& other)
+{
+    ASSERT(isRectBasedTest() && other.isRectBasedTest());
+
+    if (!m_innerNode && other.innerNode()) {
+        m_innerNode = other.innerNode();
+        m_innerNonSharedNode = other.innerNonSharedNode();
+        m_localPoint = other.localPoint();
+        m_innerURLElement = other.URLElement();
+        m_scrollbar = other.scrollbar();
+        m_isOverWidget = other.isOverWidget();
+    }
+
+    if (other.m_rectBasedTestResult) {
+        NodeSet& set = mutableRectBasedTestResult();
+        for (NodeSet::const_iterator it = other.m_rectBasedTestResult->begin(), last = other.m_rectBasedTestResult->end(); it != last; ++it)
+            set.add(it->get());
+    }
+}
+
+IntRect HitTestResult::rectForPoint(const LayoutPoint& point, unsigned topPadding, unsigned rightPadding, unsigned bottomPadding, unsigned leftPadding)
+{
+    IntPoint actualPoint(roundedIntPoint(point));
+    actualPoint -= IntSize(leftPadding, topPadding);
+
+    IntSize actualPadding(leftPadding + rightPadding, topPadding + bottomPadding);
+    // As IntRect is left inclusive and right exclusive (seeing IntRect::contains(x, y)), adding "1".
+    actualPadding += IntSize(1, 1);
+
+    return IntRect(actualPoint, actualPadding);
+}
+
+const HitTestResult::NodeSet& HitTestResult::rectBasedTestResult() const
+{
+    if (!m_rectBasedTestResult)
+        m_rectBasedTestResult = adoptPtr(new NodeSet);
+    return *m_rectBasedTestResult;
+}
+
+HitTestResult::NodeSet& HitTestResult::mutableRectBasedTestResult()
+{
+    if (!m_rectBasedTestResult)
+        m_rectBasedTestResult = adoptPtr(new NodeSet);
+    return *m_rectBasedTestResult;
 }
 
 } // namespace WebCore

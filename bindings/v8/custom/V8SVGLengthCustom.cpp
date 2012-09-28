@@ -33,31 +33,75 @@
 #if ENABLE(SVG)
 #include "V8SVGLength.h"
 
-#include "SVGLength.h"
+#include "ExceptionCode.h"
+#include "SVGLengthContext.h"
+#include "SVGPropertyTearOff.h"
 #include "V8Binding.h"
-#include "V8CustomBinding.h"
-#include "V8SVGPODTypeWrapper.h"
-#include "V8Proxy.h"
+#include "V8BindingMacros.h"
 
 namespace WebCore {
 
 v8::Handle<v8::Value> V8SVGLength::valueAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
 {
-    INC_STATS("DOM.SVGLength.value");
-    V8SVGPODTypeWrapper<SVGLength>* wrapper = V8SVGPODTypeWrapper<SVGLength>::toNative(info.Holder());
-    SVGLength imp = *wrapper;
-    return v8::Number::New(imp.value(V8Proxy::svgContext(wrapper)));
+    INC_STATS("DOM.SVGLength.value._get");
+    SVGPropertyTearOff<SVGLength>* wrapper = V8SVGLength::toNative(info.Holder());
+    SVGLength& imp = wrapper->propertyReference();
+    ExceptionCode ec = 0;
+    SVGLengthContext lengthContext(wrapper->contextElement());
+    float value = imp.value(lengthContext, ec);
+    if (UNLIKELY(ec)) {
+        V8Proxy::setDOMException(ec, info.GetIsolate());
+        return v8::Handle<v8::Value>();
+    }
+    return v8::Number::New(value);
+}
+
+void V8SVGLength::valueAccessorSetter(v8::Local<v8::String> name, v8::Local<v8::Value> value, const v8::AccessorInfo& info)
+{
+    INC_STATS("DOM.SVGLength.value._set");
+    SVGPropertyTearOff<SVGLength>* wrapper = V8SVGLength::toNative(info.Holder());
+    if (wrapper->role() == AnimValRole) {
+        V8Proxy::setDOMException(NO_MODIFICATION_ALLOWED_ERR, info.GetIsolate());
+        return;
+    }
+
+    if (!isUndefinedOrNull(value) && !value->IsNumber() && !value->IsBoolean()) {
+        V8Proxy::throwTypeError();
+        return;
+    }
+
+    SVGLength& imp = wrapper->propertyReference();
+    ExceptionCode ec = 0;
+    SVGLengthContext lengthContext(wrapper->contextElement());
+    imp.setValue(static_cast<float>(value->NumberValue()), lengthContext, ec);
+    if (UNLIKELY(ec))
+        V8Proxy::setDOMException(ec, info.GetIsolate());
+    else
+        wrapper->commitChange();
 }
 
 v8::Handle<v8::Value> V8SVGLength::convertToSpecifiedUnitsCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.SVGLength.convertToSpecifiedUnits");
-    V8SVGPODTypeWrapper<SVGLength>* wrapper = V8SVGPODTypeWrapper<SVGLength>::toNative(args.Holder());
-    SVGLength imp = *wrapper;
-    SVGElement* context = V8Proxy::svgContext(wrapper);
-    imp.convertToSpecifiedUnits(toInt32(args[0]), context);
-    wrapper->commitChange(imp, context);
-    return v8::Undefined();
+    SVGPropertyTearOff<SVGLength>* wrapper = V8SVGLength::toNative(args.Holder());
+    if (wrapper->role() == AnimValRole) {
+        V8Proxy::setDOMException(NO_MODIFICATION_ALLOWED_ERR, args.GetIsolate());
+        return v8::Handle<v8::Value>();
+    }
+
+    if (args.Length() < 1)
+        return V8Proxy::throwNotEnoughArgumentsError();
+
+    SVGLength& imp = wrapper->propertyReference();
+    ExceptionCode ec = 0;
+    EXCEPTION_BLOCK(int, unitType, toUInt32(args[0]));
+    SVGLengthContext lengthContext(wrapper->contextElement());
+    imp.convertToSpecifiedUnits(unitType, lengthContext, ec);
+    if (UNLIKELY(ec))
+        V8Proxy::setDOMException(ec, args.GetIsolate());
+    else
+        wrapper->commitChange();
+    return v8::Handle<v8::Value>();
 }
 
 } // namespace WebCore

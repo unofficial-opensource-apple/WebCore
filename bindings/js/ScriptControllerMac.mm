@@ -29,7 +29,7 @@
 #import "config.h"
 #import "ScriptController.h"
 
-#import "Bridge.h"
+#import "BridgeJSC.h"
 #import "DOMAbstractViewFrame.h"
 #import "DOMWindow.h"
 #import "Frame.h"
@@ -49,7 +49,7 @@
 #import "npruntime_impl.h"
 #endif
 
-#if ENABLE(MAC_JAVA_BRIDGE)
+#if ENABLE(JAVA_BRIDGE)
 #import "JavaInstanceJSC.h"
 #endif
 
@@ -95,7 +95,7 @@ PassScriptInstance ScriptController::createScriptInstanceForWidget(Widget* widge
 #endif
     }
 
-#if ENABLE(MAC_JAVA_BRIDGE)
+#if ENABLE(JAVA_BRIDGE)
     jobject applet = m_frame->loader()->client()->javaApplet(widgetView);
     if (!applet)
         return 0;
@@ -107,11 +107,11 @@ PassScriptInstance ScriptController::createScriptInstanceForWidget(Widget* widge
 
 WebScriptObject* ScriptController::windowScriptObject()
 {
-    if (!canExecuteScripts())
+    if (!canExecuteScripts(NotAboutToExecuteScript))
         return 0;
 
     if (!m_windowScriptObject) {
-        JSC::JSLock lock(JSC::SilenceAssertionsOnly);
+        JSC::JSLockHolder lock(JSDOMWindowBase::commonJSGlobalData());
         JSC::Bindings::RootObject* root = bindingRootObject();
         m_windowScriptObject = [WebScriptObject scriptObjectForJSObject:toRef(windowShell(pluginWorld())) originRootObject:root rootObject:root];
     }
@@ -136,7 +136,7 @@ void ScriptController::disconnectPlatformScriptObjects()
     }
 }
 
-#if ENABLE(MAC_JAVA_BRIDGE)
+#if ENABLE(JAVA_BRIDGE)
 
 static pthread_t mainThread;
 
@@ -148,7 +148,7 @@ static void updateStyleIfNeededForBindings(JSC::ExecState*, JSC::JSObject* rootO
     if (!rootObject)
         return;
 
-    JSDOMWindow* window = static_cast<JSDOMWindow*>(rootObject);
+    JSDOMWindow* window = JSC::jsCast<JSDOMWindow*>(rootObject);
     if (!window)
         return;
 

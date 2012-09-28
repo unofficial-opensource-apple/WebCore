@@ -27,10 +27,9 @@
 #include "config.h"
 #include "ScrollbarThemeChromium.h"
 
-#include "ChromiumBridge.h"
 #include "PlatformMouseEvent.h"
+#include "ScrollableArea.h"
 #include "Scrollbar.h"
-#include "ScrollbarClient.h"
 #include "ScrollbarThemeComposite.h"
 
 // -----------------------------------------------------------------------------
@@ -40,14 +39,14 @@
 
 namespace WebCore {
 
-bool ScrollbarThemeChromium::hasThumb(Scrollbar* scrollbar)
+bool ScrollbarThemeChromium::hasThumb(ScrollbarThemeClient* scrollbar)
 {
     // This method is just called as a paint-time optimization to see if
     // painting the thumb can be skipped.  We don't have to be exact here.
     return thumbLength(scrollbar) > 0;
 }
 
-IntRect ScrollbarThemeChromium::backButtonRect(Scrollbar* scrollbar, ScrollbarPart part, bool)
+IntRect ScrollbarThemeChromium::backButtonRect(ScrollbarThemeClient* scrollbar, ScrollbarPart part, bool)
 {
     // Windows and Linux just have single arrows.
     if (part == BackButtonEndPart)
@@ -57,7 +56,7 @@ IntRect ScrollbarThemeChromium::backButtonRect(Scrollbar* scrollbar, ScrollbarPa
     return IntRect(scrollbar->x(), scrollbar->y(), size.width(), size.height());
 }
 
-IntRect ScrollbarThemeChromium::forwardButtonRect(Scrollbar* scrollbar, ScrollbarPart part, bool)
+IntRect ScrollbarThemeChromium::forwardButtonRect(ScrollbarThemeClient* scrollbar, ScrollbarPart part, bool)
 {
     // Windows and Linux just have single arrows.
     if (part == ForwardButtonStartPart)
@@ -75,14 +74,32 @@ IntRect ScrollbarThemeChromium::forwardButtonRect(Scrollbar* scrollbar, Scrollba
     return IntRect(x, y, size.width(), size.height());
 }
 
-void ScrollbarThemeChromium::paintTrackBackground(GraphicsContext* context, Scrollbar* scrollbar, const IntRect& rect)
+IntRect ScrollbarThemeChromium::trackRect(ScrollbarThemeClient* scrollbar, bool)
+{
+    IntSize bs = buttonSize(scrollbar);
+    // The buttons at the top and bottom of the scrollbar are square, so the
+    // thickness of the scrollbar is also their height.
+    int thickness = scrollbarThickness(scrollbar->controlSize());
+    if (scrollbar->orientation() == HorizontalScrollbar) {
+        // Once the scrollbar becomes smaller than the natural size of the
+        // two buttons, the track disappears.
+        if (scrollbar->width() < 2 * thickness)
+            return IntRect();
+        return IntRect(scrollbar->x() + bs.width(), scrollbar->y(), scrollbar->width() - 2 * bs.width(), thickness);
+    }
+    if (scrollbar->height() < 2 * thickness)
+        return IntRect();
+    return IntRect(scrollbar->x(), scrollbar->y() + bs.height(), thickness, scrollbar->height() - 2 * bs.height());
+}
+
+void ScrollbarThemeChromium::paintTrackBackground(GraphicsContext* context, ScrollbarThemeClient* scrollbar, const IntRect& rect)
 {
     // Just assume a forward track part.  We only paint the track as a single piece when there is no thumb.
     if (!hasThumb(scrollbar))
         paintTrackPiece(context, scrollbar, rect, ForwardTrackPart);
 }
 
-void ScrollbarThemeChromium::paintTickmarks(GraphicsContext* context, Scrollbar* scrollbar, const IntRect& rect)
+void ScrollbarThemeChromium::paintTickmarks(GraphicsContext* context, ScrollbarThemeClient* scrollbar, const IntRect& rect)
 {
     if (scrollbar->orientation() != VerticalScrollbar)
         return;
@@ -92,12 +109,12 @@ void ScrollbarThemeChromium::paintTickmarks(GraphicsContext* context, Scrollbar*
 
     // Get the tickmarks for the frameview.
     Vector<IntRect> tickmarks;
-    scrollbar->client()->getTickmarks(tickmarks);
+    scrollbar->getTickmarks(tickmarks);
     if (!tickmarks.size())
         return;
 
     // Get the image for the tickmarks.
-    static RefPtr<Image> dash = Image::loadPlatformResource("tickmarkDash");
+    DEFINE_STATIC_LOCAL(RefPtr<Image>, dash, (Image::loadPlatformResource("tickmarkDash")));
     if (dash->isNull()) {
         ASSERT_NOT_REACHED();
         return;
@@ -110,22 +127,13 @@ void ScrollbarThemeChromium::paintTickmarks(GraphicsContext* context, Scrollbar*
         const float percent = static_cast<float>(i->y()) / scrollbar->totalSize();
 
         // Calculate how far down (in pixels) the tick-mark should appear.
-        const int yPos = rect.topLeft().y() + (rect.height() * percent);
+        const int yPos = rect.y() + (rect.height() * percent);
 
         IntPoint tick(scrollbar->x(), yPos);
-        context->drawImage(dash.get(), DeviceColorSpace, tick);
+        context->drawImage(dash.get(), ColorSpaceDeviceRGB, tick);
     }
 
     context->restore();
-}
-
-void ScrollbarThemeChromium::paintScrollCorner(ScrollView* view, GraphicsContext* context, const IntRect& cornerRect)
-{
-    // ScrollbarThemeComposite::paintScrollCorner incorrectly assumes that the
-    // ScrollView is a FrameView (see FramelessScrollView), so we cannot let
-    // that code run.  For FrameView's this is correct since we don't do custom
-    // scrollbar corner rendering, which ScrollbarThemeComposite supports.
-    ScrollbarTheme::paintScrollCorner(view, context, cornerRect);
 }
 
 } // namespace WebCore

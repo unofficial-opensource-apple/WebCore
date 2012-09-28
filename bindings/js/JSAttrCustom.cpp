@@ -29,11 +29,9 @@
 #include "config.h"
 #include "JSAttr.h"
 
-#include "CSSHelper.h"
 #include "Document.h"
-#include "HTMLFrameElementBase.h"
+#include "Element.h"
 #include "HTMLNames.h"
-#include "JSDOMBinding.h"
 
 using namespace JSC;
 
@@ -41,28 +39,18 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-void JSAttr::setValue(ExecState* exec, JSValue value)
+void JSAttr::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
-    Attr* imp = static_cast<Attr*>(impl());
-    String attrValue = valueToStringWithNullCheck(exec, value);
+    JSAttr* thisObject = jsCast<JSAttr*>(cell);
+    ASSERT_GC_OBJECT_INHERITS(thisObject, &s_info);
+    COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
+    ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
+    Base::visitChildren(thisObject, visitor);
 
-    Element* ownerElement = imp->ownerElement();
-    if (ownerElement && !allowSettingSrcToJavascriptURL(exec, ownerElement, imp->name(), attrValue))
+    Element* element = thisObject->impl()->ownerElement();
+    if (!element)
         return;
-
-    ExceptionCode ec = 0;
-    imp->setValue(attrValue, ec);
-    setDOMException(exec, ec);
-}
-
-void JSAttr::markChildren(MarkStack& markStack)
-{
-    Base::markChildren(markStack);
-
-    // Mark the element so that this will work to access the attribute even if the last
-    // other reference goes away.
-    if (Element* element = impl()->ownerElement())
-        markDOMNodeWrapper(markStack, element->document(), element);
+    visitor.addOpaqueRoot(root(element));
 }
 
 } // namespace WebCore

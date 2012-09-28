@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
 
@@ -29,24 +29,27 @@
 
 #if ENABLE(WORKERS)
 
-#include "AtomicStringHash.h"
-#include "Database.h"
+#include "ContentSecurityPolicy.h"
 #include "EventListener.h"
 #include "EventNames.h"
 #include "EventTarget.h"
 #include "ScriptExecutionContext.h"
+#include "WorkerEventQueue.h"
 #include "WorkerScriptController.h"
 #include <wtf/Assertions.h>
+#include <wtf/HashMap.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/AtomicStringHash.h>
 
 namespace WebCore {
 
-    class Database;
-    class NotificationCenter;
+    class Blob;
+    class DOMURL;
     class ScheduledAction;
+    class WorkerInspectorController;
     class WorkerLocation;
     class WorkerNavigator;
     class WorkerThread;
@@ -67,15 +70,17 @@ namespace WebCore {
 
         virtual String userAgent(const KURL&) const;
 
+        virtual void disableEval();
+
         WorkerScriptController* script() { return m_script.get(); }
         void clearScript() { m_script.clear(); }
+#if ENABLE(INSPECTOR)
+        void clearInspector();
+#endif
 
         WorkerThread* thread() const { return m_thread; }
 
         bool hasPendingActivity() const;
-
-        virtual void resourceRetrievedByXMLHttpRequest(unsigned long identifier, const ScriptString& sourceString);
-        virtual void scriptImported(unsigned long identifier, const String& sourceString);
 
         virtual void postTask(PassOwnPtr<Task>); // Executes the task on context's thread asynchronously.
 
@@ -87,35 +92,25 @@ namespace WebCore {
         DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
 
         // WorkerUtils
-        virtual void importScripts(const Vector<String>& urls, const String& callerURL, int callerLine, ExceptionCode&);
+        virtual void importScripts(const Vector<String>& urls, ExceptionCode&);
         WorkerNavigator* navigator() const;
 
         // Timers
-        int setTimeout(ScheduledAction*, int timeout);
+        int setTimeout(PassOwnPtr<ScheduledAction>, int timeout);
         void clearTimeout(int timeoutId);
-        int setInterval(ScheduledAction*, int timeout);
+        int setInterval(PassOwnPtr<ScheduledAction>, int timeout);
         void clearInterval(int timeoutId);
 
         // ScriptExecutionContext
-        virtual void reportException(const String& errorMessage, int lineNumber, const String& sourceURL);
-        virtual void addMessage(MessageDestination, MessageSource, MessageType, MessageLevel, const String& message, unsigned lineNumber, const String& sourceURL);
+        virtual WorkerEventQueue* eventQueue() const;
 
-#if ENABLE(NOTIFICATIONS)
-        NotificationCenter* webkitNotifications() const;
-#endif
-
-#if ENABLE(DATABASE)
-        // HTML 5 client-side database
-        PassRefPtr<Database> openDatabase(const String& name, const String& version, const String& displayName, unsigned long estimatedSize, ExceptionCode&);
-        // Not implemented yet.
-        virtual bool isDatabaseReadOnly() const { return false; }
-        // Not implemented yet.
-        virtual void databaseExceededQuota(const String&) { }
-#endif
         virtual bool isContextThread() const;
+        virtual bool isJSExecutionForbidden() const;
 
-
-        // These methods are used for GC marking. See JSWorkerContext::markChildren(MarkStack&) in
+#if ENABLE(INSPECTOR)
+        WorkerInspectorController* workerInspectorController() { return m_workerInspectorController.get(); }
+#endif
+        // These methods are used for GC marking. See JSWorkerContext::visitChildrenVirtual(SlotVisitor&) in
         // JSWorkerContextCustom.cpp.
         WorkerNavigator* optionalNavigator() const { return m_navigator.get(); }
         WorkerLocation* optionalLocation() const { return m_location.get(); }
@@ -125,8 +120,27 @@ namespace WebCore {
 
         bool isClosing() { return m_closing; }
 
+        // An observer interface to be notified when the worker thread is getting stopped.
+        class Observer {
+            WTF_MAKE_NONCOPYABLE(Observer);
+        public:
+            Observer(WorkerContext*);
+            virtual ~Observer();
+            virtual void notifyStop() = 0;
+            void stopObserving();
+        private:
+            WorkerContext* m_context;
+        };
+        friend class Observer;
+        void registerObserver(Observer*);
+        void unregisterObserver(Observer*);
+        void notifyObserversOfStop();
+
     protected:
-        WorkerContext(const KURL&, const String&, WorkerThread*);
+        WorkerContext(const KURL&, const String&, WorkerThread*, const String& contentSecurityPolicy, ContentSecurityPolicy::HeaderType);
+
+        virtual void logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, PassRefPtr<ScriptCallStack>);
+        void addMessageToWorkerConsole(MessageSource, MessageType, MessageLevel, const String& message, const String& sourceURL, unsigned lineNumber, PassRefPtr<ScriptCallStack>);
 
     private:
         virtual void refScriptExecutionContext() { ref(); }
@@ -140,6 +154,10 @@ namespace WebCore {
         virtual const KURL& virtualURL() const;
         virtual KURL virtualCompleteURL(const String&) const;
 
+        virtual void addMessage(MessageSource, MessageType, MessageLevel, const String& message, const String& sourceURL, unsigned lineNumber, PassRefPtr<ScriptCallStack>);
+
+        virtual EventTarget* errorEventTarget();
+
         KURL m_url;
         String m_userAgent;
 
@@ -149,11 +167,18 @@ namespace WebCore {
         OwnPtr<WorkerScriptController> m_script;
         WorkerThread* m_thread;
 
-#if ENABLE_NOTIFICATIONS
-        mutable RefPtr<NotificationCenter> m_notifications;
+#if ENABLE(BLOB)
+        mutable RefPtr<DOMURL> m_domURL;
+#endif
+#if ENABLE(INSPECTOR)
+        OwnPtr<WorkerInspectorController> m_workerInspectorController;
 #endif
         bool m_closing;
         EventTargetData m_eventTargetData;
+
+        HashSet<Observer*> m_workerObservers;
+
+        OwnPtr<WorkerEventQueue> m_eventQueue;
     };
 
 } // namespace WebCore

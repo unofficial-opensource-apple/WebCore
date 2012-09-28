@@ -28,6 +28,13 @@
 
 #if USE(ACCELERATED_COMPOSITING)
 
+#ifdef __OBJC__
+@class CALayer;
+#else
+class CALayer;
+#endif
+typedef CALayer PlatformLayer;
+
 namespace WebCore {
 
 class GraphicsContext;
@@ -36,24 +43,29 @@ class IntPoint;
 class IntRect;
 class FloatPoint;
 
-enum GraphicsLayerPaintingPhase {
+enum GraphicsLayerPaintingPhaseFlags {
     GraphicsLayerPaintBackground = (1 << 0),
     GraphicsLayerPaintForeground = (1 << 1),
     GraphicsLayerPaintMask = (1 << 2),
+    GraphicsLayerPaintOverflowContents = (1 << 3),
     GraphicsLayerPaintAll = (GraphicsLayerPaintBackground | GraphicsLayerPaintForeground | GraphicsLayerPaintMask)
 };
+typedef unsigned GraphicsLayerPaintingPhase;
 
 enum AnimatedPropertyID {
     AnimatedPropertyInvalid,
     AnimatedPropertyWebkitTransform,
     AnimatedPropertyOpacity,
-    AnimatedPropertyBackgroundColor
+    AnimatedPropertyBackgroundColor,
+    AnimatedPropertyWebkitFilter
 };
 
 class GraphicsLayerClient {
 public:
     virtual ~GraphicsLayerClient() {}
 
+    virtual bool shouldUseTileCache(const GraphicsLayer*) const { return false; }
+    
     // Callback for when hardware-accelerated animation started.
     virtual void notifyAnimationStarted(const GraphicsLayer*, double time) = 0;
 
@@ -62,9 +74,27 @@ public:
     virtual void notifySyncRequired(const GraphicsLayer*) = 0;
     
     virtual void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const IntRect& inClip) = 0;
-    
-    virtual bool showDebugBorders() const = 0;
-    virtual bool showRepaintCounter() const = 0;
+    virtual void didCommitChangesForLayer(const GraphicsLayer*) const { }
+
+    // Multiplier for backing store size, related to high DPI.
+    virtual float deviceScaleFactor() const { return 1; }
+    // Page scale factor.
+    virtual float pageScaleFactor() const { return 1; }
+
+    virtual bool showDebugBorders(const GraphicsLayer*) const = 0;
+    virtual bool showRepaintCounter(const GraphicsLayer*) const = 0;
+    virtual void platformLayerChanged(GraphicsLayer*, PlatformLayer* oldPlatformLayer, PlatformLayer* newPlatformLayer) = 0;
+    virtual float minimumDocumentScale() const = 0;
+    virtual bool allowCompositingLayerVisualDegradation() const = 0;
+
+#ifndef NDEBUG
+    // RenderLayerBacking overrides this to verify that it is not
+    // currently painting contents. An ASSERT fails, if it is.
+    // This is executed in GraphicsLayer construction and destruction
+    // to verify that we don't create or destroy GraphicsLayers
+    // while painting.
+    virtual void verifyNotPainting() { }
+#endif
 };
 
 } // namespace WebCore

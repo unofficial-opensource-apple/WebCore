@@ -1,79 +1,108 @@
 /*
-    Copyright (C) 2004, 2005, 2006, 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
-                  2004, 2005, 2007 Rob Buis <buis@kde.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2007 Rob Buis <buis@kde.org>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #ifndef SVGStyledElement_h
 #define SVGStyledElement_h
 
 #if ENABLE(SVG)
-#include "HTMLNames.h"
-#include "SVGElement.h"
+#include "CSSPropertyNames.h"
+#include "SVGAnimatedString.h"
+#include "SVGLocatable.h"
 #include "SVGStylable.h"
+#include <wtf/HashSet.h>
 
 namespace WebCore {
 
-    class SVGResource;
+void mapAttributeToCSSProperty(HashMap<AtomicStringImpl*, CSSPropertyID>* propertyNameToIdMap, const QualifiedName& attrName);
 
-    void mapAttributeToCSSProperty(HashMap<AtomicStringImpl*, int>* propertyNameToIdMap, const QualifiedName& attrName);
+class SVGStyledElement : public SVGElement,
+                         public SVGStylable {
+public:
+    virtual ~SVGStyledElement();
 
-    class SVGStyledElement : public SVGElement,
-                             public SVGStylable {
-    public:
-        SVGStyledElement(const QualifiedName&, Document*);
-        virtual ~SVGStyledElement();
+    virtual String title() const;
 
-        virtual bool hasRelativeValues() const { return false; }
-        virtual bool isStyled() const { return true; }
-        virtual bool supportsMarkers() const { return false; }
+    bool hasRelativeLengths() const { return !m_elementsWithRelativeLengths.isEmpty(); }
 
-        virtual PassRefPtr<CSSValue> getPresentationAttribute(const String& name);
-        virtual CSSStyleDeclaration* style() { return StyledElement::style(); }
+    virtual bool supportsMarkers() const { return false; }
 
-        bool isKnownAttribute(const QualifiedName&);
+    virtual PassRefPtr<CSSValue> getPresentationAttribute(const String& name);
 
-        virtual bool rendererIsNeeded(RenderStyle*);
-        virtual SVGResource* canvasResource(const RenderObject*) { return 0; }
+    bool isKnownAttribute(const QualifiedName&);
 
-        virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-        virtual void parseMappedAttribute(MappedAttribute*);
-        virtual void svgAttributeChanged(const QualifiedName&);
-        virtual void synchronizeProperty(const QualifiedName&);
+    bool instanceUpdatesBlocked() const;
+    void setInstanceUpdatesBlocked(bool);
 
-        virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
+    bool hasPendingResources() const;
+    void setHasPendingResources();
+    void clearHasPendingResourcesIfPossible();
 
-        // Centralized place to force a manual style resolution. Hacky but needed for now.
-        PassRefPtr<RenderStyle> resolveStyle(RenderStyle* parentStyle);
+    virtual void animatedPropertyTypeForAttribute(const QualifiedName&, Vector<AnimatedPropertyType>&);
+    static bool isAnimatableCSSProperty(const QualifiedName&);
 
-        void invalidateResourcesInAncestorChain() const;
-        void invalidateResources();
+    virtual AffineTransform localCoordinateSpaceTransform(SVGLocatable::CTMScope) const;
 
-        virtual void detach();
+    virtual CSSStyleDeclaration* style() { return StyledElement::style(); }
+    virtual bool needsPendingResourceHandling() const { return true; }
 
-        bool instanceUpdatesBlocked() const;
-        void setInstanceUpdatesBlocked(bool);
+protected: 
+    SVGStyledElement(const QualifiedName&, Document*, ConstructionType = CreateSVGElement);
+    virtual bool rendererIsNeeded(const NodeRenderingContext&);
 
-    protected: 
-        static int cssPropertyIdForSVGAttributeName(const QualifiedName&);
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+    virtual void svgAttributeChanged(const QualifiedName&);
 
-    private:
-        DECLARE_ANIMATED_PROPERTY(SVGStyledElement, HTMLNames::classAttr, String, ClassName, className)
-    };
+    virtual void attach();
+    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void removedFrom(Node*) OVERRIDE;
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
+
+    static CSSPropertyID cssPropertyIdForSVGAttributeName(const QualifiedName&);
+    void updateRelativeLengthsInformation() { updateRelativeLengthsInformation(selfHasRelativeLengths(), this); }
+    void updateRelativeLengthsInformation(bool hasRelativeLengths, SVGStyledElement*);
+
+    virtual bool selfHasRelativeLengths() const { return false; }
+    virtual void buildPendingResource() { }
+
+private:
+    virtual bool isStyled() const { return true; }
+
+    virtual bool isKeyboardFocusable(KeyboardEvent*) const;
+    virtual bool isMouseFocusable() const;
+
+    void buildPendingResourcesIfNeeded();
+
+    HashSet<SVGStyledElement*> m_elementsWithRelativeLengths;
+
+    BEGIN_DECLARE_ANIMATED_PROPERTIES(SVGStyledElement)
+        DECLARE_ANIMATED_STRING(ClassName, className)
+    END_DECLARE_ANIMATED_PROPERTIES
+};
+
+inline SVGStyledElement* toSVGStyledElement(Node* node)
+{
+    ASSERT(!node || (node->isStyledElement() && node->isSVGElement()));
+    return static_cast<SVGStyledElement*>(node);
+}
 
 } // namespace WebCore
 

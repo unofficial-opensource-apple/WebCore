@@ -28,6 +28,7 @@
 
 #include "Page.h"
 #include "Settings.h"
+#include "WebCoreInstanceHandle.h"
 #include "Widget.h"
 #include <wtf/Assertions.h>
 #include <wtf/CurrentTime.h>
@@ -125,12 +126,12 @@ static void initializeOffScreenTimerWindow()
     memset(&wcex, 0, sizeof(WNDCLASSEX));
     wcex.cbSize = sizeof(WNDCLASSEX);
     wcex.lpfnWndProc    = TimerWindowWndProc;
-    wcex.hInstance      = Page::instanceHandle();
+    wcex.hInstance      = WebCore::instanceHandle();
     wcex.lpszClassName  = kTimerWindowClassName;
     RegisterClassEx(&wcex);
 
     timerWindowHandle = CreateWindow(kTimerWindowClassName, 0, 0,
-       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, HWND_MESSAGE, 0, Page::instanceHandle(), 0);
+       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, HWND_MESSAGE, 0, WebCore::instanceHandle(), 0);
     timerFiredMessage = RegisterWindowMessage(L"com.apple.WebKit.TimerFired");
 }
 
@@ -145,21 +146,16 @@ static void NTAPI queueTimerProc(PVOID, BOOLEAN)
         PostMessage(timerWindowHandle, timerFiredMessage, 0, 0);
 }
 
-void setSharedTimerFireTime(double fireTime)
+void setSharedTimerFireInterval(double interval)
 {
     ASSERT(sharedTimerFiredFunction);
 
-    double interval = fireTime - currentTime();
     unsigned intervalInMS;
-    if (interval < 0)
-        intervalInMS = 0;
-    else {
-        interval *= 1000;
-        if (interval > USER_TIMER_MAXIMUM)
-            intervalInMS = USER_TIMER_MAXIMUM;
-        else
-            intervalInMS = (unsigned)interval;
-    }
+    interval *= 1000;
+    if (interval > USER_TIMER_MAXIMUM)
+        intervalInMS = USER_TIMER_MAXIMUM;
+    else
+        intervalInMS = static_cast<unsigned>(interval);
 
     initializeOffScreenTimerWindow();
     bool timerSet = false;

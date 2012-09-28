@@ -1,6 +1,7 @@
 /*
  *  Copyright (C) 2003, 2006, 2008 Apple Inc. All rights reserved.
  *  Copyright (C) 2005, 2006 Alexey Proskuryakov <ap@nypop.com>
+ *  Copyright (C) 2011 Google Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -21,27 +22,33 @@
 #define XMLHttpRequest_h
 
 #include "ActiveDOMObject.h"
-#include "AtomicStringHash.h"
 #include "EventListener.h"
 #include "EventNames.h"
 #include "EventTarget.h"
 #include "FormData.h"
 #include "ResourceResponse.h"
-#include "ScriptString.h"
+#include "SecurityOrigin.h"
 #include "ThreadableLoaderClient.h"
+#include "XMLHttpRequestProgressEventThrottle.h"
 #include <wtf/OwnPtr.h>
+#include <wtf/text/AtomicStringHash.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
 class Blob;
 class Document;
+class DOMFormData;
 class ResourceRequest;
+class SecurityOrigin;
+class SharedBuffer;
 class TextResourceDecoder;
 class ThreadableLoader;
 
 class XMLHttpRequest : public RefCounted<XMLHttpRequest>, public EventTarget, private ThreadableLoaderClient, public ActiveDOMObject {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    static PassRefPtr<XMLHttpRequest> create(ScriptExecutionContext* context) { return adoptRef(new XMLHttpRequest(context)); }
+    static PassRefPtr<XMLHttpRequest> create(ScriptExecutionContext*, PassRefPtr<SecurityOrigin> = 0);
     ~XMLHttpRequest();
 
     // These exact numeric values are important because JS expects them.
@@ -52,20 +59,35 @@ public:
         LOADING = 3,
         DONE = 4
     };
-
-    virtual XMLHttpRequest* toXMLHttpRequest() { return this; }
+    
+    enum ResponseTypeCode {
+        ResponseTypeDefault,
+        ResponseTypeText, 
+        ResponseTypeDocument,
+        ResponseTypeBlob,
+        ResponseTypeArrayBuffer
+    };
 
     virtual void contextDestroyed();
     virtual bool canSuspend() const;
+    virtual void suspend(ReasonForSuspension);
+    virtual void resume();
     virtual void stop();
 
+    virtual const AtomicString& interfaceName() const;
     virtual ScriptExecutionContext* scriptExecutionContext() const;
 
+    const KURL& url() const { return m_url; }
     String statusText(ExceptionCode&) const;
     int status(ExceptionCode&) const;
     State readyState() const;
     bool withCredentials() const { return m_includeCredentials; }
     void setWithCredentials(bool, ExceptionCode&);
+#if ENABLE(XHR_RESPONSE_BLOB)
+    bool asBlob() const { return m_responseTypeCode == ResponseTypeBlob; }
+    void setAsBlob(bool, ExceptionCode&);
+#endif
+    void open(const String& method, const KURL&, ExceptionCode&);
     void open(const String& method, const KURL&, bool async, ExceptionCode&);
     void open(const String& method, const KURL&, bool async, const String& user, ExceptionCode&);
     void open(const String& method, const KURL&, bool async, const String& user, const String& password, ExceptionCode&);
@@ -73,13 +95,34 @@ public:
     void send(Document*, ExceptionCode&);
     void send(const String&, ExceptionCode&);
     void send(Blob*, ExceptionCode&);
+    void send(DOMFormData*, ExceptionCode&);
+    void send(ArrayBuffer*, ExceptionCode&);
     void abort();
     void setRequestHeader(const AtomicString& name, const String& value, ExceptionCode&);
     void overrideMimeType(const String& override);
     String getAllResponseHeaders(ExceptionCode&) const;
     String getResponseHeader(const AtomicString& name, ExceptionCode&) const;
-    const ScriptString& responseText() const;
-    Document* responseXML() const;
+    String responseText(ExceptionCode&);
+    Document* responseXML(ExceptionCode&);
+    Document* optionalResponseXML() const { return m_responseDocument.get(); }
+#if ENABLE(XHR_RESPONSE_BLOB)
+    Blob* responseBlob(ExceptionCode&);
+    Blob* optionalResponseBlob() const { return m_responseBlob.get(); }
+#endif
+
+    // Expose HTTP validation methods for other untrusted requests.
+    static bool isAllowedHTTPMethod(const String&);
+    static String uppercaseKnownHTTPMethod(const String&);
+    static bool isAllowedHTTPHeader(const String&);
+
+    void setResponseType(const String&, ExceptionCode&);
+    String responseType();
+    ResponseTypeCode responseTypeCode() const { return m_responseTypeCode; }
+    
+    // response attribute has custom getter.
+    ArrayBuffer* responseArrayBuffer(ExceptionCode&);
+    ArrayBuffer* optionalResponseArrayBuffer() const { return m_responseArrayBuffer.get(); }
+
     void setLastSendLineNumber(unsigned lineNumber) { m_lastSendLineNumber = lineNumber; }
     void setLastSendURL(const String& url) { m_lastSendURL = url; }
 
@@ -90,6 +133,7 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(abort);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(load);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(loadend);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(loadstart);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);
 
@@ -97,7 +141,7 @@ public:
     using RefCounted<XMLHttpRequest>::deref;
 
 private:
-    XMLHttpRequest(ScriptExecutionContext*);
+    XMLHttpRequest(ScriptExecutionContext*, PassRefPtr<SecurityOrigin>);
 
     virtual void refEventTarget() { ref(); }
     virtual void derefEventTarget() { deref(); }
@@ -105,18 +149,18 @@ private:
     virtual EventTargetData* ensureEventTargetData();
 
     Document* document() const;
+    SecurityOrigin* securityOrigin() const;
 
 #if ENABLE(DASHBOARD_SUPPORT)
     bool usesDashboardBackwardCompatibilityMode() const;
 #endif
 
     virtual void didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent);
-    virtual void didReceiveResponse(const ResourceResponse&);
-    virtual void didReceiveData(const char* data, int lengthReceived);
-    virtual void didFinishLoading(unsigned long identifier);
+    virtual void didReceiveResponse(unsigned long identifier, const ResourceResponse&);
+    virtual void didReceiveData(const char* data, int dataLength);
+    virtual void didFinishLoading(unsigned long identifier, double finishTime);
     virtual void didFail(const ResourceError&);
     virtual void didFailRedirectCheck();
-    virtual void didReceiveAuthenticationCancellation(const ResourceResponse&);
 
     String responseMIMEType() const;
     bool responseIsXML() const;
@@ -125,13 +169,13 @@ private:
 
     String getRequestHeader(const AtomicString& name) const;
     void setRequestHeaderInternal(const AtomicString& name, const String& value);
-    bool isSafeRequestHeader(const String&) const;
 
     void changeState(State newState);
     void callReadyStateChangeListener();
     void dropProtection();
     void internalAbort();
     void clearResponse();
+    void clearResponseBuffers();
     void clearRequest();
 
     void createRequest(ExceptionCode&);
@@ -140,7 +184,7 @@ private:
     void networkError();
     void abortError();
 
-    RefPtr<XMLHttpRequestUpload> m_upload;
+    OwnPtr<XMLHttpRequestUpload> m_upload;
 
     KURL m_url;
     String m_method;
@@ -149,6 +193,9 @@ private:
     String m_mimeTypeOverride;
     bool m_async;
     bool m_includeCredentials;
+#if ENABLE(XHR_RESPONSE_BLOB)
+    RefPtr<Blob> m_responseBlob;
+#endif
 
     RefPtr<ThreadableLoader> m_loader;
     State m_state;
@@ -158,15 +205,12 @@ private:
 
     RefPtr<TextResourceDecoder> m_decoder;
 
-    // Unlike most strings in the DOM, we keep this as a ScriptString, not a WebCore::String.
-    // That's because these strings can easily get huge (they are filled from the network with
-    // no parsing) and because JS can easily observe many intermediate states, so it's very useful
-    // to be able to share the buffer with JavaScript versions of the whole or partial string.
-    // In contrast, this string doesn't interact much with the rest of the engine so it's not that
-    // big a cost that it isn't a String.
-    ScriptString m_responseText;
+    StringBuilder m_responseBuilder;
     mutable bool m_createdDocument;
-    mutable RefPtr<Document> m_responseXML;
+    mutable RefPtr<Document> m_responseDocument;
+    
+    RefPtr<SharedBuffer> m_binaryResponseBuilder;
+    mutable RefPtr<ArrayBuffer> m_responseArrayBuffer;
 
     bool m_error;
 
@@ -174,7 +218,6 @@ private:
     bool m_uploadComplete;
 
     bool m_sameOriginRequest;
-    bool m_didTellLoaderAboutRequest;
 
     // Used for onprogress tracking
     long long m_receivedLength;
@@ -184,6 +227,13 @@ private:
     ExceptionCode m_exceptionCode;
 
     EventTargetData m_eventTargetData;
+
+    XMLHttpRequestProgressEventThrottle m_progressEventThrottle;
+
+    // An enum corresponding to the allowed string values for the responseType attribute.
+    ResponseTypeCode m_responseTypeCode;
+
+    RefPtr<SecurityOrigin> m_securityOrigin;
 };
 
 } // namespace WebCore

@@ -31,14 +31,22 @@ class DocumentFragment;
 class HTMLCollection;
 class HTMLFormElement;
 
-enum HTMLTagStatus { TagStatusOptional, TagStatusRequired, TagStatusForbidden };
-                       
+#if ENABLE(MICRODATA)
+class MicroDataItemValue;
+#endif
+
+enum TranslateAttributeMode {
+    TranslateAttributeYes,
+    TranslateAttributeNo,
+    TranslateAttributeInherit
+};
+
 class HTMLElement : public StyledElement {
 public:
     static PassRefPtr<HTMLElement> create(const QualifiedName& tagName, Document*);
 
-    PassRefPtr<HTMLCollection> children();
-    
+    HTMLCollection* children();
+
     virtual String title() const;
 
     virtual short tabIndex() const;
@@ -46,7 +54,6 @@ public:
 
     String innerHTML() const;
     String outerHTML() const;
-    PassRefPtr<DocumentFragment> createContextualFragment(const String&, FragmentScriptingPermission = FragmentScriptingAllowed);
     void setInnerHTML(const String&, ExceptionCode&);
     void setOuterHTML(const String&, ExceptionCode&);
     void setInnerText(const String&, ExceptionCode&);
@@ -57,68 +64,108 @@ public:
     void insertAdjacentText(const String& where, const String& text, ExceptionCode&);
 
     virtual bool supportsFocus() const;
-    
-    virtual bool isContentEditable() const;
-    virtual bool isContentRichlyEditable() const;
 
     String contentEditable() const;
-    void setContentEditable(const String&);
+    void setContentEditable(const String&, ExceptionCode&);
 
     virtual bool draggable() const;
     void setDraggable(bool);
 
+    bool spellcheck() const;
+    void setSpellcheck(bool);
+
+    bool translate() const;
+    void setTranslate(bool);
+
     void click();
 
-    virtual void accessKeyAction(bool sendToAnyElement);
+    virtual void accessKeyAction(bool sendMouseEvents);
 
-    virtual HTMLTagStatus endTagRequirement() const;
-    virtual int tagPriority() const;
+    bool ieForbidsInsertHTML() const;
 
-    virtual bool rendererIsNeeded(RenderStyle*);
+    virtual bool rendererIsNeeded(const NodeRenderingContext&);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
     HTMLFormElement* form() const { return virtualForm(); }
 
-    static void addHTMLAlignmentToStyledElement(StyledElement*, MappedAttribute*);
-
-    virtual bool willRespondToMouseMoveEvents();
-    virtual bool willRespondToMouseWheelEvents();
-    virtual bool willRespondToMouseClickEvents();
-
-protected:
-    HTMLElement(const QualifiedName& tagName, Document*, ConstructionType = CreateElementZeroRefCount);
-
-    void addHTMLAlignment(MappedAttribute*);
-
-    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
-    virtual void parseMappedAttribute(MappedAttribute*);
-
-    virtual bool childAllowed(Node* newChild); // Error-checking during parsing that checks the DTD
-
-    // Helper function to check the DTD for a given child node.
-    virtual bool checkDTD(const Node*);
-
-    static bool inEitherTagList(const Node*);
-    static bool inInlineTagList(const Node*);
-    static bool inBlockTagList(const Node*);
-    static bool isRecognizedTagName(const QualifiedName&);
-
     HTMLFormElement* findFormAncestor() const;
 
-private:
-    virtual bool isHTMLElement() const { return true; }
+    bool hasDirectionAuto() const;
+    TextDirection directionalityIfhasDirAutoAttribute(bool& isAuto) const;
 
+#if ENABLE(MICRODATA)
+    void setItemValue(const String&, ExceptionCode&);
+    PassRefPtr<MicroDataItemValue> itemValue() const;
+#endif
+
+#ifndef NDEBUG
+    virtual bool isHTMLUnknownElement() const { return false; }
+#endif
+
+    virtual bool willRespondToMouseMoveEvents() OVERRIDE;
+    virtual bool willRespondToMouseWheelEvents() OVERRIDE;
+    virtual bool willRespondToMouseClickEvents() OVERRIDE;
+    virtual bool isInsertionPoint() const { return false; }
+    virtual bool isLabelable() const { return false; }
+
+protected:
+    HTMLElement(const QualifiedName& tagName, Document*);
+
+    void addHTMLLengthToStyle(StylePropertySet*, CSSPropertyID, const String& value);
+    void addHTMLColorToStyle(StylePropertySet*, CSSPropertyID, const String& color);
+
+    void applyAlignmentAttributeToStyle(Attribute*, StylePropertySet*);
+    void applyBorderAttributeToStyle(Attribute*, StylePropertySet*);
+
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
+    void calculateAndAdjustDirectionality();
+
+    virtual bool isURLAttribute(Attribute*) const;
+
+private:
     virtual String nodeName() const;
 
-    void setContentEditable(MappedAttribute*);
+    void mapLanguageAttributeToLocale(Attribute*, StylePropertySet*);
 
     virtual HTMLFormElement* virtualForm() const;
 
     Node* insertAdjacent(const String& where, Node* newChild, ExceptionCode&);
+    PassRefPtr<DocumentFragment> textToFragment(const String&, ExceptionCode&);
+
+    void dirAttributeChanged(Attribute*);
+    void adjustDirectionalityIfNeededAfterChildAttributeChanged(Element* child);
+    void adjustDirectionalityIfNeededAfterChildrenChanged(Node* beforeChange, int childCountDelta);
+    TextDirection directionality(Node** strongDirectionalityTextNode= 0) const;
+
+    TranslateAttributeMode translateAttributeMode() const;
+
+#if ENABLE(MICRODATA)
+    virtual String itemValueText() const;
+    virtual void setItemValueText(const String&, ExceptionCode&);
+#endif
 };
 
-inline HTMLElement::HTMLElement(const QualifiedName& tagName, Document* document, ConstructionType type)
-    : StyledElement(tagName, document, type)
+inline HTMLElement* toHTMLElement(Node* node)
+{
+    ASSERT(!node || node->isHTMLElement());
+    return static_cast<HTMLElement*>(node);
+}
+
+inline const HTMLElement* toHTMLElement(const Node* node)
+{
+    ASSERT(!node || node->isHTMLElement());
+    return static_cast<const HTMLElement*>(node);
+}
+
+// This will catch anyone doing an unnecessary cast.
+void toHTMLElement(const HTMLElement*);
+
+inline HTMLElement::HTMLElement(const QualifiedName& tagName, Document* document)
+    : StyledElement(tagName, document, CreateHTMLElement)
 {
     ASSERT(tagName.localName().impl());
 }

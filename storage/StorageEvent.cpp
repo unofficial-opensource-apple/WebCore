@@ -26,11 +26,14 @@
 #include "config.h"
 #include "StorageEvent.h"
 
-#if ENABLE(DOM_STORAGE)
-
+#include "EventNames.h"
 #include "Storage.h"
 
 namespace WebCore {
+
+StorageEventInit::StorageEventInit()
+{
+}
 
 PassRefPtr<StorageEvent> StorageEvent::create()
 {
@@ -41,22 +44,41 @@ StorageEvent::StorageEvent()
 {
 }
 
-PassRefPtr<StorageEvent> StorageEvent::create(const AtomicString& type, const String& key, const String& oldValue, const String& newValue, const String& uri, Storage* storageArea)
+StorageEvent::~StorageEvent()
 {
-    return adoptRef(new StorageEvent(type, key, oldValue, newValue, uri, storageArea));
 }
 
-StorageEvent::StorageEvent(const AtomicString& type, const String& key, const String& oldValue, const String& newValue, const String& uri, Storage* storageArea)
+PassRefPtr<StorageEvent> StorageEvent::create(const AtomicString& type, const String& key, const String& oldValue, const String& newValue, const String& url, Storage* storageArea)
+{
+    return adoptRef(new StorageEvent(type, key, oldValue, newValue, url, storageArea));
+}
+
+PassRefPtr<StorageEvent> StorageEvent::create(const AtomicString& type, const StorageEventInit& initializer)
+{
+    return adoptRef(new StorageEvent(type, initializer));
+}
+
+StorageEvent::StorageEvent(const AtomicString& type, const String& key, const String& oldValue, const String& newValue, const String& url, Storage* storageArea)
     : Event(type, false, false)
     , m_key(key)
     , m_oldValue(oldValue)
     , m_newValue(newValue)
-    , m_uri(uri)
+    , m_url(url)
     , m_storageArea(storageArea)
 {
 }
 
-void StorageEvent::initStorageEvent(const AtomicString& type, bool canBubble, bool cancelable, const String& key, const String& oldValue, const String& newValue, const String& uri, Storage* storageArea)
+StorageEvent::StorageEvent(const AtomicString& type, const StorageEventInit& initializer)
+    : Event(type, initializer)
+    , m_key(initializer.key)
+    , m_oldValue(initializer.oldValue)
+    , m_newValue(initializer.newValue)
+    , m_url(initializer.url)
+    , m_storageArea(initializer.storageArea)
+{
+}
+
+void StorageEvent::initStorageEvent(const AtomicString& type, bool canBubble, bool cancelable, const String& key, const String& oldValue, const String& newValue, const String& url, Storage* storageArea)
 {
     if (dispatched())
         return;
@@ -66,10 +88,13 @@ void StorageEvent::initStorageEvent(const AtomicString& type, bool canBubble, bo
     m_key = key;
     m_oldValue = oldValue;
     m_newValue = newValue;
-    m_uri = uri;
+    m_url = url;
     m_storageArea = storageArea;
 }
 
-} // namespace WebCore
+const AtomicString& StorageEvent::interfaceName() const
+{
+    return eventNames().interfaceForStorageEvent;
+}
 
-#endif // ENABLE(DOM_STORAGE)
+} // namespace WebCore

@@ -31,10 +31,14 @@
 
 #include "JSWorkerContextBase.h"
 
+#include "DOMWrapperWorld.h"
 #include "JSDedicatedWorkerContext.h"
-#include "JSSharedWorkerContext.h"
 #include "JSWorkerContext.h"
 #include "WorkerContext.h"
+
+#if ENABLE(SHARED_WORKERS)
+#include "JSSharedWorkerContext.h"
+#endif
 
 using namespace JSC;
 
@@ -42,16 +46,23 @@ namespace WebCore {
 
 ASSERT_CLASS_FITS_IN_CELL(JSWorkerContextBase);
 
-const ClassInfo JSWorkerContextBase::s_info = { "WorkerContext", &JSDOMGlobalObject::s_info, 0, 0 };
+const ClassInfo JSWorkerContextBase::s_info = { "WorkerContext", &JSDOMGlobalObject::s_info, 0, 0, CREATE_METHOD_TABLE(JSWorkerContextBase) };
 
-JSWorkerContextBase::JSWorkerContextBase(NonNullPassRefPtr<JSC::Structure> structure, PassRefPtr<WorkerContext> impl)
-    : JSDOMGlobalObject(structure, new JSDOMGlobalObjectData(normalWorld(*impl->script()->globalData())), this)
+JSWorkerContextBase::JSWorkerContextBase(JSC::JSGlobalData& globalData, JSC::Structure* structure, PassRefPtr<WorkerContext> impl)
+    : JSDOMGlobalObject(globalData, structure, normalWorld(globalData))
     , m_impl(impl)
 {
 }
 
-JSWorkerContextBase::~JSWorkerContextBase()
+void JSWorkerContextBase::finishCreation(JSGlobalData& globalData)
 {
+    Base::finishCreation(globalData);
+    ASSERT(inherits(&s_info));
+}
+
+void JSWorkerContextBase::destroy(JSCell* cell)
+{
+    jsCast<JSWorkerContextBase*>(cell)->JSWorkerContextBase::~JSWorkerContextBase();
 }
 
 ScriptExecutionContext* JSWorkerContextBase::scriptExecutionContext() const
@@ -71,7 +82,9 @@ JSValue toJS(ExecState*, WorkerContext* workerContext)
     WorkerScriptController* script = workerContext->script();
     if (!script)
         return jsNull();
-    return script->workerContextWrapper();
+    JSWorkerContext* contextWrapper = script->workerContextWrapper();
+    ASSERT(contextWrapper);
+    return contextWrapper;
 }
 
 JSDedicatedWorkerContext* toJSDedicatedWorkerContext(JSValue value)
@@ -80,7 +93,7 @@ JSDedicatedWorkerContext* toJSDedicatedWorkerContext(JSValue value)
         return 0;
     const ClassInfo* classInfo = asObject(value)->classInfo();
     if (classInfo == &JSDedicatedWorkerContext::s_info)
-        return static_cast<JSDedicatedWorkerContext*>(asObject(value));
+        return jsCast<JSDedicatedWorkerContext*>(asObject(value));
     return 0;
 }
 
@@ -91,7 +104,7 @@ JSSharedWorkerContext* toJSSharedWorkerContext(JSValue value)
         return 0;
     const ClassInfo* classInfo = asObject(value)->classInfo();
     if (classInfo == &JSSharedWorkerContext::s_info)
-        return static_cast<JSSharedWorkerContext*>(asObject(value));
+        return jsCast<JSSharedWorkerContext*>(asObject(value));
     return 0;
 }
 #endif

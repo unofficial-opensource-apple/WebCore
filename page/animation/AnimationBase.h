@@ -29,12 +29,16 @@
 #ifndef AnimationBase_h
 #define AnimationBase_h
 
-#include "AtomicString.h"
+#include "Animation.h"
+#include "CSSPropertyNames.h"
+#include "RenderStyleConstants.h"
 #include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
+#include <wtf/RefCounted.h>
+#include <wtf/text/AtomicString.h>
 
 namespace WebCore {
 
-class Animation;
 class AnimationBase;
 class AnimationController;
 class CompositeAnimation;
@@ -46,14 +50,20 @@ class TimingFunction;
 
 class AnimationBase : public RefCounted<AnimationBase> {
     friend class CompositeAnimation;
+    friend class CSSPropertyAnimation;
 
 public:
     AnimationBase(const Animation* transition, RenderObject* renderer, CompositeAnimation* compAnim);
-    virtual ~AnimationBase();
+    virtual ~AnimationBase() { }
 
     RenderObject* renderer() const { return m_object; }
-    void clearRenderer() { m_object = 0; }
-    
+    void clear()
+    {
+      endAnimation();
+      m_object = 0;
+      m_compAnim = 0;
+    }
+
     double duration() const;
 
     // Animations and Transitions go through the states below. When entering the STARTED state
@@ -69,6 +79,7 @@ public:
         AnimationStateLooping,              // response received, animation running, loop timer running, waiting for fire
         AnimationStateEnding,               // received, animation running, end timer running, waiting for fire
         AnimationStatePausedWaitTimer,      // in pause mode when animation started
+        AnimationStatePausedWaitStyleAvailable, // in pause mode when waiting for style setup
         AnimationStatePausedWaitResponse,   // animation paused when in STARTING state
         AnimationStatePausedRun,            // animation paused when in LOOPING or ENDING state
         AnimationStateDone,                 // end timer fired, animation finished and removed
@@ -101,7 +112,7 @@ public:
     }
 
     // Called to change to or from paused state
-    void updatePlayState(bool running);
+    void updatePlayState(EAnimPlayState);
     bool playStatePlaying() const;
 
     bool waitingToStart() const { return m_animState == AnimationStateNew || m_animState == AnimationStateStartWaitTimer; }
@@ -143,10 +154,11 @@ public:
     virtual bool overridden() const { return false; }
 
     // Does this animation/transition involve the given property?
-    virtual bool affectsProperty(int /*property*/) const { return false; }
-    bool isAnimatingProperty(int property, bool isRunningNow) const
+    virtual bool affectsProperty(CSSPropertyID /*property*/) const { return false; }
+
+    bool isAnimatingProperty(CSSPropertyID property, bool acceleratedOnly, bool isRunningNow) const
     {
-        if (m_fallbackAnimating)
+        if (acceleratedOnly && !m_isAccelerated)
             return false;
             
         if (isRunningNow)
@@ -155,17 +167,24 @@ public:
         return !postActive() && affectsProperty(property);
     }
 
+    // FIXME: rename this using the "lists match" terminology.
     bool isTransformFunctionListValid() const { return m_transformFunctionListValid; }
-    
+#if ENABLE(CSS_FILTERS)
+    bool filterFunctionListsMatch() const { return m_filterFunctionListsMatch; }
+#endif
+
     // Freeze the animation; used by DumpRenderTree.
     void freezeAtTime(double t);
+
+    // Play and pause API
+    void play();
+    void pause();
     
     double beginAnimationUpdateTime() const;
     
     double getElapsedTime() const;
-    
-    AnimationBase* next() const { return m_next; }
-    void setNext(AnimationBase* animation) { m_next = animation; }
+    // Setting the elapsed time will adjust the start time and possibly pause time.
+    void setElapsedTime(double);
     
     void styleAvailable() 
     {
@@ -173,9 +192,7 @@ public:
         updateStateMachine(AnimationBase::AnimationStateInputStyleAvailable, -1);
     }
 
-#if USE(ACCELERATED_COMPOSITING)
-    static bool animationOfPropertyIsAccelerated(int prop);
-#endif
+    const Animation* animation() const { return m_animation.get(); }
 
 protected:
     virtual void overrideAnimations() { }
@@ -197,34 +214,33 @@ protected:
 
     void goIntoEndingOrLoopingState();
 
-    bool isFallbackAnimating() const { return m_fallbackAnimating; }
-
-    static bool propertiesEqual(int prop, const RenderStyle* a, const RenderStyle* b);
-    static int getPropertyAtIndex(int, bool& isShorthand);
-    static int getNumProperties();
-
-    // Return true if we need to start software animation timers
-    static bool blendProperties(const AnimationBase* anim, int prop, RenderStyle* dst, const RenderStyle* a, const RenderStyle* b, double progress);
+    bool isAccelerated() const { return m_isAccelerated; }
 
     static void setNeedsStyleRecalc(Node*);
     
     void getTimeToNextEvent(double& time, bool& isLooping) const;
 
+    double fractionalTime(double scale, double elapsedTime, double offset) const;
+
     AnimState m_animState;
 
     bool m_isAnimating;       // transition/animation requires continual timer firing
+    bool m_isAccelerated;
+    bool m_transformFunctionListValid;
+#if ENABLE(CSS_FILTERS)
+    bool m_filterFunctionListsMatch;
+#endif
     double m_startTime;
     double m_pauseTime;
     double m_requestedStartTime;
+
+    double m_totalDuration;
+    double m_nextIterationDuration;
+
     RenderObject* m_object;
 
     RefPtr<Animation> m_animation;
     CompositeAnimation* m_compAnim;
-    bool m_fallbackAnimating;       // true when animating an accelerated property but have to fall back to software
-    bool m_transformFunctionListValid;
-    double m_totalDuration, m_nextIterationDuration;
-    
-    AnimationBase* m_next;
 };
 
 } // namespace WebCore

@@ -28,16 +28,14 @@
 #include "config.h"
 #include "XPathFunctions.h"
 
-#if ENABLE(XPATH)
-
-#include "Document.h"
 #include "Element.h"
-#include "NamedNodeMap.h"
 #include "ProcessingInstruction.h"
+#include "TreeScope.h"
 #include "XMLNames.h"
 #include "XPathUtil.h"
 #include "XPathValue.h"
 #include <wtf/MathExtras.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 namespace XPath {
@@ -318,26 +316,26 @@ Value FunPosition::evaluate() const
 Value FunId::evaluate() const
 {
     Value a = arg(0)->evaluate();
-    Vector<UChar> idList; // A whitespace-separated list of IDs
+    StringBuilder idList; // A whitespace-separated list of IDs
 
     if (a.isNodeSet()) {
         const NodeSet& nodes = a.toNodeSet();
         for (size_t i = 0; i < nodes.size(); ++i) {
             String str = stringValue(nodes[i]);
-            idList.append(str.characters(), str.length());
+            idList.append(str);
             idList.append(' ');
         }
     } else {
         String str = a.toString();
-        idList.append(str.characters(), str.length());
+        idList.append(str);
     }
     
-    Document* contextDocument = evaluationContext().node->document();
+    TreeScope* contextScope = evaluationContext().node->treeScope();
     NodeSet result;
     HashSet<Node*> resultSet;
 
-    size_t startPos = 0;
-    size_t length = idList.size();
+    unsigned startPos = 0;
+    unsigned length = idList.length();
     while (true) {
         while (startPos < length && isWhitespace(idList[startPos]))
             ++startPos;
@@ -351,8 +349,8 @@ Value FunId::evaluate() const
 
         // If there are several nodes with the same id, id() should return the first one.
         // In WebKit, getElementById behaves so, too, although its behavior in this case is formally undefined.
-        Node* node = contextDocument->getElementById(String(&idList[startPos], endPos - startPos));
-        if (node && resultSet.add(node).second)
+        Node* node = contextScope->getElementById(String(idList.characters() + startPos, endPos - startPos));
+        if (node && resultSet.add(node).isNewEntry)
             result.append(node);
         
         startPos = endPos;
@@ -436,15 +434,16 @@ Value FunString::evaluate() const
 
 Value FunConcat::evaluate() const
 {
-    Vector<UChar, 1024> result;
+    StringBuilder result;
+    result.reserveCapacity(1024);
 
     unsigned count = argCount();
     for (unsigned i = 0; i < count; ++i) {
         String str(arg(i)->evaluate().toString());
-        result.append(str.characters(), str.length());
+        result.append(str);
     }
 
-    return String(result.data(), result.size());
+    return result.toString();
 }
 
 Value FunStartsWith::evaluate() const
@@ -477,9 +476,9 @@ Value FunSubstringBefore::evaluate() const
     if (s2.isEmpty())
         return "";
 
-    int i = s1.find(s2);
+    size_t i = s1.find(s2);
 
-    if (i == -1)
+    if (i == notFound)
         return "";
 
     return s1.left(i);
@@ -490,8 +489,8 @@ Value FunSubstringAfter::evaluate() const
     String s1 = arg(0)->evaluate().toString();
     String s2 = arg(1)->evaluate().toString();
 
-    int i = s1.find(s2);
-    if (i == -1)
+    size_t i = s1.find(s2);
+    if (i == notFound)
         return "";
 
     return s1.substring(i + s2.length());
@@ -500,7 +499,10 @@ Value FunSubstringAfter::evaluate() const
 Value FunSubstring::evaluate() const
 {
     String s = arg(0)->evaluate().toString();
-    long pos = static_cast<long>(FunRound::round(arg(1)->evaluate().toNumber()));
+    double doublePos = arg(1)->evaluate().toNumber();
+    if (isnan(doublePos))
+        return "";
+    long pos = static_cast<long>(FunRound::round(doublePos));
     bool haveLength = argCount() == 3;
     long len = -1;
     if (haveLength) {
@@ -513,11 +515,13 @@ Value FunSubstring::evaluate() const
     if (pos > long(s.length())) 
         return "";
 
-    if (haveLength && pos < 1) {
-        len -= 1 - pos;
+    if (pos < 1) {
+        if (haveLength) {
+            len -= 1 - pos;
+            if (len < 1)
+                return "";
+        }
         pos = 1;
-        if (len < 1)
-            return "";
     }
 
     return s.substring(pos - 1, len);
@@ -551,11 +555,11 @@ Value FunTranslate::evaluate() const
     // FIXME: Building a String a character at a time is quite slow.
     for (unsigned i1 = 0; i1 < s1.length(); ++i1) {
         UChar ch = s1[i1];
-        int i2 = s2.find(ch);
+        size_t i2 = s2.find(ch);
         
-        if (i2 == -1)
+        if (i2 == notFound)
             newString += String(&ch, 1);
-        else if ((unsigned)i2 < s3.length()) {
+        else if (i2 < s3.length()) {
             UChar c2 = s3[i2];
             newString += String(&c2, 1);
         }
@@ -586,9 +590,11 @@ Value FunLang::evaluate() const
     Attribute* languageAttribute = 0;
     Node* node = evaluationContext().node.get();
     while (node) {
-        NamedNodeMap* attrs = node->attributes();
-        if (attrs)
-            languageAttribute = attrs->getAttributeItem(XMLNames::langAttr);
+        if (node->isElementNode()) {
+            Element* element = toElement(node);
+            if (element->hasAttributes())
+                languageAttribute = element->getAttributeItem(XMLNames::langAttr);
+        }
         if (languageAttribute)
             break;
         node = node->parentNode();
@@ -603,8 +609,8 @@ Value FunLang::evaluate() const
             return true;
 
         // Remove suffixes one by one.
-        int index = langValue.reverseFind('-');
-        if (index == -1)
+        size_t index = langValue.reverseFind('-');
+        if (index == notFound)
             break;
         langValue = langValue.left(index);
     }
@@ -703,10 +709,9 @@ static void createFunctionMap()
         { "translate", { &createFunTranslate, 3 } },
         { "true", { &createFunTrue, 0 } },
     };
-    const unsigned int numFunctions = sizeof(functions) / sizeof(functions[0]);
 
     functionMap = new HashMap<String, FunctionRec>;
-    for (unsigned i = 0; i < numFunctions; ++i)
+    for (size_t i = 0; i < WTF_ARRAY_LENGTH(functions); ++i)
         functionMap->set(functions[i].name, functions[i].function);
 }
 
@@ -729,5 +734,3 @@ Function* createFunction(const String& name, const Vector<Expression*>& args)
 
 }
 }
-
-#endif // ENABLE(XPATH)

@@ -32,15 +32,13 @@ namespace WebCore {
 
 class HTMLCollection;
 class HTMLTableCaptionElement;
+class HTMLTableRowsCollection;
 class HTMLTableSectionElement;
 
 class HTMLTableElement : public HTMLElement {
 public:
-    HTMLTableElement(const QualifiedName&, Document*);
-
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
-    virtual int tagPriority() const { return 9; }
-    virtual bool checkDTD(const Node*);
+    static PassRefPtr<HTMLTableElement> create(Document*);
+    static PassRefPtr<HTMLTableElement> create(const QualifiedName&, Document*);
 
     HTMLTableCaptionElement* caption() const;
     void setCaption(PassRefPtr<HTMLTableCaptionElement>, ExceptionCode&);
@@ -55,64 +53,40 @@ public:
     void deleteTHead();
     PassRefPtr<HTMLElement> createTFoot();
     void deleteTFoot();
+    PassRefPtr<HTMLElement> createTBody();
     PassRefPtr<HTMLElement> createCaption();
     void deleteCaption();
     PassRefPtr<HTMLElement> insertRow(int index, ExceptionCode&);
     void deleteRow(int index, ExceptionCode&);
 
-    PassRefPtr<HTMLCollection> rows();
-    PassRefPtr<HTMLCollection> tBodies();
-
-    String align() const;
-    void setAlign(const String&);
-
-    String bgColor() const;
-    void setBgColor(const String&);
-
-    String border() const;
-    void setBorder(const String&);
-
-    String cellPadding() const;
-    void setCellPadding(const String&);
-
-    String cellSpacing() const;
-    void setCellSpacing(const String&);
-
-    String frame() const;
-    void setFrame(const String&);
+    HTMLCollection* rows();
+    HTMLCollection* tBodies();
 
     String rules() const;
-    void setRules(const String&);
-
     String summary() const;
-    void setSummary(const String&);
 
-    String width() const;
-    void setWidth(const String&);
+    StylePropertySet* additionalCellStyle();
+    StylePropertySet* additionalGroupStyle(bool rows);
 
-    virtual ContainerNode* addChild(PassRefPtr<Node>);
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(MappedAttribute*);
-    virtual void attach();
+private:
+    HTMLTableElement(const QualifiedName&, Document*);
+
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
     virtual bool isURLAttribute(Attribute*) const;
 
-    // Used to obtain either a solid or outset border decl and to deal with the frame
-    // and rules attributes.
-    virtual bool canHaveAdditionalAttributeStyleDecls() const { return true; }
-    virtual void additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>&);
-    void addSharedCellDecls(Vector<CSSMutableStyleDeclaration*>&);
-    void addSharedGroupDecls(bool rows, Vector<CSSMutableStyleDeclaration*>&);
+    // Used to obtain either a solid or outset border decl and to deal with the frame and rules attributes.
+    virtual StylePropertySet* additionalAttributeStyle() OVERRIDE;
 
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
-private:
-    void addSharedCellBordersDecl(Vector<CSSMutableStyleDeclaration*>&);
-    void addSharedCellPaddingDecl(Vector<CSSMutableStyleDeclaration*>&);
-    
     enum TableRules { UnsetRules, NoneRules, GroupsRules, RowsRules, ColsRules, AllRules };
     enum CellBorders { NoBorders, SolidBorders, InsetBorders, SolidBordersColsOnly, SolidBordersRowsOnly };
 
     CellBorders cellBorders() const;
+
+    PassRefPtr<StylePropertySet> createSharedCellStyle();
 
     HTMLTableSectionElement* lastBody() const;
 
@@ -121,9 +95,10 @@ private:
     bool m_frameAttr;           // Implies a thin border width if no border is set and then a certain set of solid/hidden borders based off the value.
     TableRules m_rulesAttr;     // Implies a thin border width, a collapsing border model, and all borders on the table becoming set to hidden (if frame/border
                                 // are present, to none otherwise).
-   
+
     unsigned short m_padding;
-    RefPtr<CSSMappedAttributeDeclaration> m_paddingDecl;
+    OwnPtr<HTMLTableRowsCollection> m_rowsCollection;
+    RefPtr<StylePropertySet> m_sharedCellStyle;
 };
 
 } //namespace

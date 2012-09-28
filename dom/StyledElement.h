@@ -3,7 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,86 +25,92 @@
 #ifndef StyledElement_h
 #define StyledElement_h
 
-#include "CSSPrimitiveValue.h"
 #include "Element.h"
-#include "MappedAttributeEntry.h"
-#include "NamedMappedAttrMap.h"
+#include "StylePropertySet.h"
 
 namespace WebCore {
 
-class CSSMappedAttributeDeclaration;
-class CSSMutableStyleDeclaration;
-class MappedAttribute;
+class Attribute;
+struct PresentationAttributeCacheKey;
 
 class StyledElement : public Element {
 public:
     virtual ~StyledElement();
 
-    NamedMappedAttrMap* mappedAttributes() { return static_cast<NamedMappedAttrMap*>(namedAttrMap.get()); }
-    const NamedMappedAttrMap* mappedAttributes() const { return static_cast<NamedMappedAttrMap*>(namedAttrMap.get()); }
-
-    bool hasMappedAttributes() const { return namedAttrMap && mappedAttributes()->hasMappedAttributes(); }
-    bool isMappedAttribute(const QualifiedName& name) const { MappedAttributeEntry res = eNone; mapToEntry(name, res); return res != eNone; }
-
-    void addCSSLength(MappedAttribute*, int id, const String& value);
-    void addCSSProperty(MappedAttribute*, int id, const String& value);
-    void addCSSProperty(MappedAttribute*, int id, int value);
-    void addCSSImageProperty(MappedAttribute*, int propertyID, const String& url);
-    void addCSSColor(MappedAttribute*, int id, const String& color);
-
-    static CSSMappedAttributeDeclaration* getMappedAttributeDecl(MappedAttributeEntry, const QualifiedName& name, const AtomicString& value);
-    static void setMappedAttributeDecl(MappedAttributeEntry, const QualifiedName& name, const AtomicString& value, CSSMappedAttributeDeclaration*);
-    static void removeMappedAttributeDecl(MappedAttributeEntry, const QualifiedName& name, const AtomicString& value);
-
-    static CSSMappedAttributeDeclaration* getMappedAttributeDecl(MappedAttributeEntry, Attribute*);
-    static void setMappedAttributeDecl(MappedAttributeEntry, Attribute*, CSSMappedAttributeDeclaration*);
-
-    CSSMutableStyleDeclaration* inlineStyleDecl() const { return m_inlineStyleDecl.get(); }
-    virtual bool canHaveAdditionalAttributeStyleDecls() const { return false; }
-    virtual void additionalAttributeStyleDecls(Vector<CSSMutableStyleDeclaration*>&) {};
-    CSSMutableStyleDeclaration* getInlineStyleDecl();
-    CSSStyleDeclaration* style();
+    virtual StylePropertySet* additionalAttributeStyle() { return 0; }
     void invalidateStyleAttribute();
 
-    const SpaceSplitString& classNames() const { ASSERT(hasClass()); ASSERT(mappedAttributes()); return mappedAttributes()->classNames(); }
+    const StylePropertySet* inlineStyle() const { return attributeData() ? attributeData()->inlineStyle() : 0; }
+    const StylePropertySet* ensureInlineStyle() { return ensureAttributeData()->ensureInlineStyle(this); }
+    
+    // Unlike StylePropertySet setters, these implement invalidation.
+    bool setInlineStyleProperty(CSSPropertyID, int identifier, bool important = false);
+    bool setInlineStyleProperty(CSSPropertyID, double value, CSSPrimitiveValue::UnitTypes, bool important = false);
+    bool setInlineStyleProperty(CSSPropertyID, const String& value, bool important = false);
+    bool removeInlineStyleProperty(CSSPropertyID);
+    
+    virtual CSSStyleDeclaration* style() OVERRIDE;
 
-    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
+    StylePropertySet* attributeStyle();
 
-    virtual PassRefPtr<Attribute> createAttribute(const QualifiedName&, const AtomicString& value);
+    const SpaceSplitString& classNames() const;
+
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) { }
 
 protected:
-    StyledElement(const QualifiedName&, Document*, ConstructionType);
+    StyledElement(const QualifiedName& name, Document* document, ConstructionType type)
+        : Element(name, document, type)
+    {
+    }
 
-    virtual void attributeChanged(Attribute*, bool preserveDecls = false);
-    virtual void parseMappedAttribute(MappedAttribute*);
+    virtual void attributeChanged(Attribute*) OVERRIDE;
+    virtual void parseAttribute(Attribute*);
     virtual void copyNonAttributeProperties(const Element*);
+
+    virtual bool isPresentationAttribute(const QualifiedName&) const { return false; }
+
+    void addPropertyToAttributeStyle(StylePropertySet*, CSSPropertyID, int identifier);
+    void addPropertyToAttributeStyle(StylePropertySet*, CSSPropertyID, double value, CSSPrimitiveValue::UnitTypes);
+    void addPropertyToAttributeStyle(StylePropertySet*, CSSPropertyID, const String& value);
 
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
     // classAttributeChanged() exists to share code between
-    // parseMappedAttribute (called via setAttribute()) and
+    // parseAttribute (called via setAttribute()) and
     // svgAttributeChanged (called when element.className.baseValue is set)
     void classAttributeChanged(const AtomicString& newClassString);
-    
-    virtual void didMoveToNewOwnerDocument();
 
 private:
-    virtual bool isStyledElement() const { return true; }
-
-    void createMappedDecl(MappedAttribute*);
-
-    void createInlineStyleDecl();
-    void destroyInlineStyleDecl();
     virtual void updateStyleAttribute() const;
+    void inlineStyleChanged();
 
-    virtual void createAttributeMap() const;
+    void makePresentationAttributeCacheKey(PresentationAttributeCacheKey&) const;
+    void updateAttributeStyle();
 
-    RefPtr<CSSMutableStyleDeclaration> m_inlineStyleDecl;
+    void destroyInlineStyle()
+    {
+        if (attributeData())
+            attributeData()->destroyInlineStyle(this);
+    }
 };
+
+inline const SpaceSplitString& StyledElement::classNames() const
+{
+    ASSERT(hasClass());
+    ASSERT(attributeData());
+    return attributeData()->classNames();
+}
 
 inline void StyledElement::invalidateStyleAttribute()
 {
-    m_isStyleAttributeValid = false;
+    clearIsStyleAttributeValid();
+}
+
+inline StylePropertySet* StyledElement::attributeStyle()
+{
+    if (attributeStyleDirty())
+        updateAttributeStyle();
+    return attributeData() ? attributeData()->attributeStyle() : 0;
 }
 
 } //namespace

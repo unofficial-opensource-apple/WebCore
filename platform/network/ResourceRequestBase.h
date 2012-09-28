@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2003, 2006 Apple Computer, Inc.  All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2009, 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,11 +29,10 @@
 #define ResourceRequestBase_h
 
 #include "FormData.h"
-#include "KURL.h"
 #include "HTTPHeaderMap.h"
-#include "loader.h" // for Loader::Priority
+#include "KURL.h"
+#include "ResourceLoadPriority.h"
 
-#include <memory>
 #include <wtf/OwnPtr.h>
 
 namespace WebCore {
@@ -42,34 +41,20 @@ namespace WebCore {
         UseProtocolCachePolicy, // normal load
         ReloadIgnoringCacheData, // reload
         ReturnCacheDataElseLoad, // back/forward or encoding change - allow stale data
-        ReturnCacheDataDontLoad, // results of a post - allow stale data and only use cache
+        ReturnCacheDataDontLoad  // results of a post - allow stale data and only use cache
     };
-
-    const int unspecifiedTimeoutInterval = INT_MAX;
 
     class ResourceRequest;
     struct CrossThreadResourceRequestData;
 
     // Do not use this type directly.  Use ResourceRequest instead.
-    class ResourceRequestBase : public FastAllocBase {
+    class ResourceRequestBase {
+        WTF_MAKE_FAST_ALLOCATED;
     public:
-        // The type of this ResourceRequest, based on how the resource will be used.
-        enum TargetType {
-            TargetIsMainFrame,
-            TargetIsSubframe,
-            TargetIsSubresource,  // Resource is a generic subresource.  (Generally a specific type should be specified)
-            TargetIsStyleSheet,
-            TargetIsScript,
-            TargetIsFontResource,
-            TargetIsImage,
-            TargetIsObject,
-            TargetIsMedia
-        };
-
-        static std::auto_ptr<ResourceRequest> adopt(std::auto_ptr<CrossThreadResourceRequestData>);
+        static PassOwnPtr<ResourceRequest> adopt(PassOwnPtr<CrossThreadResourceRequestData>);
 
         // Gets a copy of the data suitable for passing to another thread.
-        std::auto_ptr<CrossThreadResourceRequestData> copyData() const;
+        PassOwnPtr<CrossThreadResourceRequestData> copyData() const;
 
         bool isNull() const;
         bool isEmpty() const;
@@ -82,7 +67,7 @@ namespace WebCore {
         ResourceRequestCachePolicy cachePolicy() const;
         void setCachePolicy(ResourceRequestCachePolicy cachePolicy);
         
-        double timeoutInterval() const;
+        double timeoutInterval() const; // May return 0 when using platform default.
         void setTimeoutInterval(double timeoutInterval);
         
         const KURL& firstPartyForCookies() const;
@@ -99,9 +84,12 @@ namespace WebCore {
         void addHTTPHeaderField(const AtomicString& name, const String& value);
         void addHTTPHeaderFields(const HTTPHeaderMap& headerFields);
         
+        void clearHTTPAuthorization();
+
         String httpContentType() const { return httpHeaderField("Content-Type");  }
         void setHTTPContentType(const String& httpContentType) { setHTTPHeaderField("Content-Type", httpContentType); }
-        
+        void clearHTTPContentType();
+
         String httpReferrer() const { return httpHeaderField("Referer"); }
         void setHTTPReferrer(const String& httpReferrer) { setHTTPHeaderField("Referer", httpReferrer); }
         void clearHTTPReferrer();
@@ -112,9 +100,11 @@ namespace WebCore {
 
         String httpUserAgent() const { return httpHeaderField("User-Agent"); }
         void setHTTPUserAgent(const String& httpUserAgent) { setHTTPHeaderField("User-Agent", httpUserAgent); }
+        void clearHTTPUserAgent();
 
         String httpAccept() const { return httpHeaderField("Accept"); }
         void setHTTPAccept(const String& httpAccept) { setHTTPHeaderField("Accept", httpAccept); }
+        void clearHTTPAccept();
 
         void setResponseContentDispositionEncodingFallbackArray(const String& encoding1, const String& encoding2 = String(), const String& encoding3 = String());
 
@@ -124,6 +114,9 @@ namespace WebCore {
         bool allowCookies() const;
         void setAllowCookies(bool allowCookies);
 
+        ResourceLoadPriority priority() const;
+        void setPriority(ResourceLoadPriority);
+
         bool isConditional() const;
 
         // Whether the associated ResourceHandleClient needs to be notified of
@@ -131,12 +124,21 @@ namespace WebCore {
         bool reportUploadProgress() const { return m_reportUploadProgress; }
         void setReportUploadProgress(bool reportUploadProgress) { m_reportUploadProgress = reportUploadProgress; }
         
-        inline void setPriority(Loader::Priority priority) { m_priority = priority; }
-        inline Loader::Priority priority() const { return m_priority; }
+        // Whether the timing information should be collected for the request.
+        bool reportLoadTiming() const { return m_reportLoadTiming; }
+        void setReportLoadTiming(bool reportLoadTiming) { m_reportLoadTiming = reportLoadTiming; }
 
-        // What this request is for.
-        TargetType targetType() const { return m_targetType; }
-        void setTargetType(TargetType type) { m_targetType = type; }
+        // Whether actual headers being sent/received should be collected and reported for the request.
+        bool reportRawHeaders() const { return m_reportRawHeaders; }
+        void setReportRawHeaders(bool reportRawHeaders) { m_reportRawHeaders = reportRawHeaders; }
+
+        static double defaultTimeoutInterval(); // May return 0 when using platform default.
+        static void setDefaultTimeoutInterval(double);
+
+        static bool defaultAllowCookies();
+        static void setDefaultAllowCookies(bool);
+
+        static bool compare(const ResourceRequest&, const ResourceRequest&);
 
     protected:
         // Used when ResourceRequest is initialized from a platform representation of the request
@@ -144,54 +146,66 @@ namespace WebCore {
             : m_resourceRequestUpdated(false)
             , m_platformRequestUpdated(true)
             , m_reportUploadProgress(false)
-            , m_priority(Loader::Low)
-            , m_targetType(TargetIsSubresource)
+            , m_reportLoadTiming(false)
+            , m_reportRawHeaders(false)
+            , m_priority(ResourceLoadPriorityLow)
         {
         }
 
         ResourceRequestBase(const KURL& url, ResourceRequestCachePolicy policy)
             : m_url(url)
             , m_cachePolicy(policy)
-            , m_timeoutInterval(unspecifiedTimeoutInterval)
+            , m_timeoutInterval(s_defaultTimeoutInterval)
             , m_httpMethod("GET")
-            , m_allowCookies(true)
+            , m_allowCookies(ResourceRequestBase::defaultAllowCookies())
             , m_resourceRequestUpdated(true)
             , m_platformRequestUpdated(false)
             , m_reportUploadProgress(false)
-            , m_priority(Loader::Low)
-            , m_targetType(TargetIsSubresource)
+            , m_reportLoadTiming(false)
+            , m_reportRawHeaders(false)
+            , m_priority(ResourceLoadPriorityLow)
         {
         }
 
         void updatePlatformRequest() const; 
         void updateResourceRequest() const; 
 
+        // The ResourceRequest subclass may "shadow" this method to compare platform specific fields
+        static bool platformCompare(const ResourceRequest&, const ResourceRequest&) { return true; }
+
         KURL m_url;
 
         ResourceRequestCachePolicy m_cachePolicy;
-        double m_timeoutInterval;
+        double m_timeoutInterval; // 0 is a magic value for platform default on platforms that have one.
         KURL m_firstPartyForCookies;
         String m_httpMethod;
         HTTPHeaderMap m_httpHeaderFields;
         Vector<String> m_responseContentDispositionEncodingFallbackArray;
         RefPtr<FormData> m_httpBody;
-        bool m_allowCookies;
-        mutable bool m_resourceRequestUpdated;
-        mutable bool m_platformRequestUpdated;
-        bool m_reportUploadProgress;
-        Loader::Priority m_priority;
-        TargetType m_targetType;
+        bool m_allowCookies : 1;
+        mutable bool m_resourceRequestUpdated : 1;
+        mutable bool m_platformRequestUpdated : 1;
+        bool m_reportUploadProgress : 1;
+        bool m_reportLoadTiming : 1;
+        bool m_reportRawHeaders : 1;
+        ResourceLoadPriority m_priority;
 
     private:
         const ResourceRequest& asResourceRequest() const;
+
+        static double s_defaultTimeoutInterval;
+        static bool s_defaultAllowCookies;
     };
 
     bool equalIgnoringHeaderFields(const ResourceRequestBase&, const ResourceRequestBase&);
 
-    bool operator==(const ResourceRequestBase&, const ResourceRequestBase&);
-    inline bool operator!=(ResourceRequestBase& a, const ResourceRequestBase& b) { return !(a == b); }
+    inline bool operator==(const ResourceRequest& a, const ResourceRequest& b) { return ResourceRequestBase::compare(a, b); }
+    inline bool operator!=(ResourceRequest& a, const ResourceRequest& b) { return !(a == b); }
 
-    struct CrossThreadResourceRequestData : Noncopyable {
+    struct CrossThreadResourceRequestDataBase {
+        WTF_MAKE_NONCOPYABLE(CrossThreadResourceRequestDataBase); WTF_MAKE_FAST_ALLOCATED;
+    public:
+        CrossThreadResourceRequestDataBase() { }
         KURL m_url;
 
         ResourceRequestCachePolicy m_cachePolicy;
@@ -203,11 +217,11 @@ namespace WebCore {
         Vector<String> m_responseContentDispositionEncodingFallbackArray;
         RefPtr<FormData> m_httpBody;
         bool m_allowCookies;
-        Loader::Priority m_priority;
+        ResourceLoadPriority m_priority;
     };
     
     unsigned initializeMaximumHTTPConnectionCountPerHost();
-
+    void initializeHTTPConnectionSettingsOnStartup();
 } // namespace WebCore
 
 #endif // ResourceRequestBase_h

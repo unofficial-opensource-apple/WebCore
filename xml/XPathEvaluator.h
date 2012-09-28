@@ -27,8 +27,7 @@
 #ifndef XPathEvaluator_h
 #define XPathEvaluator_h
 
-#if ENABLE(XPATH)
-
+#include <wtf/Forward.h>
 #include <wtf/RefCounted.h>
 #include <wtf/PassRefPtr.h>
 
@@ -37,7 +36,6 @@ namespace WebCore {
     typedef int ExceptionCode;
 
     class Node;
-    class String;
     class XPathExpression;
     class XPathNSResolver;
     class XPathResult;
@@ -56,7 +54,5 @@ namespace WebCore {
     };
 
 }
-
-#endif // ENABLE(XPATH)
 
 #endif // XPathEvaluator_h

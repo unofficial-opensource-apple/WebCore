@@ -22,7 +22,8 @@
 
 #include "EventListener.h"
 #include "JSDOMWindow.h"
-#include <runtime/WeakGCPtr.h>
+#include <heap/StrongInlines.h>
+#include <heap/Weak.h>
 
 namespace WebCore {
 
@@ -53,22 +54,20 @@ namespace WebCore {
         DOMWrapperWorld* isolatedWorld() const { return m_isolatedWorld.get(); }
 
         JSC::JSObject* wrapper() const { return m_wrapper.get(); }
-        void setWrapper(JSC::JSObject* wrapper) const { m_wrapper = wrapper; }
+        void setWrapper(JSC::JSGlobalData&, JSC::JSObject* wrapper) const { m_wrapper = JSC::PassWeak<JSC::JSObject>(wrapper); }
 
     private:
         virtual JSC::JSObject* initializeJSFunction(ScriptExecutionContext*) const;
-        virtual void markJSFunction(JSC::MarkStack&);
-        virtual void invalidateJSFunction(JSC::JSObject*);
-        virtual void handleEvent(ScriptExecutionContext*, Event*);
-        virtual bool reportError(ScriptExecutionContext*, const String& message, const String& url, int lineNumber);
+        virtual void visitJSFunction(JSC::SlotVisitor&);
         virtual bool virtualisAttribute() const;
 
     protected:
         JSEventListener(JSC::JSObject* function, JSC::JSObject* wrapper, bool isAttribute, DOMWrapperWorld* isolatedWorld);
+        virtual void handleEvent(ScriptExecutionContext*, Event*);
 
     private:
-        mutable JSC::JSObject* m_jsFunction;
-        mutable JSC::WeakGCPtr<JSC::JSObject> m_wrapper;
+        mutable JSC::WriteBarrier<JSC::JSObject> m_jsFunction;
+        mutable JSC::Weak<JSC::JSObject> m_wrapper;
 
         bool m_isAttribute;
         RefPtr<DOMWrapperWorld> m_isolatedWorld;
@@ -76,8 +75,15 @@ namespace WebCore {
 
     inline JSC::JSObject* JSEventListener::jsFunction(ScriptExecutionContext* scriptExecutionContext) const
     {
-        if (!m_jsFunction)
-            m_jsFunction = initializeJSFunction(scriptExecutionContext);
+        // initializeJSFunction can trigger code that deletes this event listener
+        // before we're done. It should always return 0 in this case.
+        RefPtr<JSEventListener> protect(const_cast<JSEventListener*>(this));
+        JSC::Strong<JSC::JSObject> wrapper(*m_isolatedWorld->globalData(), m_wrapper.get());
+
+        if (!m_jsFunction) {
+            JSC::JSObject* function = initializeJSFunction(scriptExecutionContext);
+            m_jsFunction.setMayBeNull(*scriptExecutionContext->globalData(), m_wrapper.get(), function);
+        }
 
         // Verify that we have a valid wrapper protecting our function from
         // garbage collection.
@@ -87,14 +93,9 @@ namespace WebCore {
 
         // Try to verify that m_jsFunction wasn't recycled. (Not exact, since an
         // event listener can be almost anything, but this makes test-writing easier).
-        ASSERT(!m_jsFunction || static_cast<JSC::JSCell*>(m_jsFunction)->isObject());
+        ASSERT(!m_jsFunction || static_cast<JSC::JSCell*>(m_jsFunction.get())->isObject());
 
-        return m_jsFunction;
-    }
-
-    inline void JSEventListener::invalidateJSFunction(JSC::JSObject* wrapper)
-    {
-        m_wrapper.clear(wrapper);
+        return m_jsFunction.get();
     }
 
     // Creates a JS EventListener for an "onXXX" event attribute.

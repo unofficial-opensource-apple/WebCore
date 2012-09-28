@@ -37,63 +37,284 @@ var Preferences = {
     minScriptsSidebarWidth: 200,
     styleRulesExpandedState: {},
     showMissingLocalizedStrings: false,
+    useLowerCaseMenuTitlesOnWindows: false,
+    sharedWorkersDebugNote: undefined,
+    localizeUI: true,
+    exposeDisableCache: false,
+    exposeWorkersInspection: false,
+    applicationTitle: "Web Inspector - %s",
+    showHeapSnapshotObjectsHiddenProperties: false,
+    showDockToRight: false
+}
+
+var Capabilities = {
     samplingCPUProfiler: false,
-    showColorNicknames: true
+    debuggerCausesRecompilation: true,
+    profilerCausesRecompilation: true,
+    nativeInstrumentationEnabled: false,
+    heapProfilerPresent: false,
+    canOverrideDeviceMetrics: false
 }
 
-WebInspector.populateFrontendSettings = function(settingsString)
-{
-    WebInspector.settings._load(settingsString);
-}
-
+/**
+ * @constructor
+ */
 WebInspector.Settings = function()
 {
+    this._eventSupport = new WebInspector.Object();
+
+    this.colorFormat = this.createSetting("colorFormat", "hex");
+    this.consoleHistory = this.createSetting("consoleHistory", []);
+    this.debuggerEnabled = this.createSetting("debuggerEnabled", false);
+    this.domWordWrap = this.createSetting("domWordWrap", true);
+    this.profilerEnabled = this.createSetting("profilerEnabled", false);
+    this.eventListenersFilter = this.createSetting("eventListenersFilter", "all");
+    this.lastActivePanel = this.createSetting("lastActivePanel", "elements");
+    this.lastViewedScriptFile = this.createSetting("lastViewedScriptFile", "application");
+    this.monitoringXHREnabled = this.createSetting("monitoringXHREnabled", false);
+    this.preserveConsoleLog = this.createSetting("preserveConsoleLog", false);
+    this.resourcesLargeRows = this.createSetting("resourcesLargeRows", true);
+    this.resourcesSortOptions = this.createSetting("resourcesSortOptions", {timeOption: "responseTime", sizeOption: "transferSize"});
+    this.resourceViewTab = this.createSetting("resourceViewTab", "preview");
+    this.showInheritedComputedStyleProperties = this.createSetting("showInheritedComputedStyleProperties", false);
+    this.showUserAgentStyles = this.createSetting("showUserAgentStyles", true);
+    this.watchExpressions = this.createSetting("watchExpressions", []);
+    this.breakpoints = this.createSetting("breakpoints", []);
+    this.eventListenerBreakpoints = this.createSetting("eventListenerBreakpoints", []);
+    this.domBreakpoints = this.createSetting("domBreakpoints", []);
+    this.xhrBreakpoints = this.createSetting("xhrBreakpoints", []);
+    this.sourceMapsEnabled = this.createSetting("sourceMapsEnabled", false);
+    this.cacheDisabled = this.createSetting("cacheDisabled", false);
+    this.overrideUserAgent = this.createSetting("overrideUserAgent", "");
+    this.userAgent = this.createSetting("userAgent", "");
+    this.deviceMetrics = this.createSetting("deviceMetrics", "");
+    this.deviceFitWindow = this.createSetting("deviceFitWindow", false);
+    this.showScriptFolders = this.createSetting("showScriptFolders", true);
+    this.dockToRight = this.createSetting("dockToRight", false);
+    this.emulateTouchEvents = this.createSetting("emulateTouchEvents", false);
+    this.showPaintRects = this.createSetting("showPaintRects", false);
+    this.zoomLevel = this.createSetting("zoomLevel", 0);
+    this.savedURLs = this.createSetting("savedURLs", {});
+    this.javaScriptDisabled = this.createSetting("javaScriptDisabled", false);
+
+    // If there are too many breakpoints in a storage, it is likely due to a recent bug that caused
+    // periodical breakpoints duplication leading to inspector slowness.
+    if (this.breakpoints.get().length > 500000)
+        this.breakpoints.set([]);
 }
 
 WebInspector.Settings.prototype = {
-    _load: function(settingsString)
+    /**
+     * @return {WebInspector.Setting}
+     */
+    createSetting: function(key, defaultValue)
     {
-        try {
-            this._store = JSON.parse(settingsString);
-        } catch (e) {
-            // May fail;
-            this._store = {};
-        }
-
-        this._installSetting("eventListenersFilter", "event-listeners-filter", "all");
-        this._installSetting("colorFormat", "color-format", "hex");
-        this._installSetting("resourcesLargeRows", "resources-large-rows", true);
-        this._installSetting("watchExpressions", "watch-expressions", []);
-        this._installSetting("lastViewedScriptFile", "last-viewed-script-file");
-        this._installSetting("showInheritedComputedStyleProperties", "show-inherited-computed-style-properties", false);
-        this._installSetting("showUserAgentStyles", "show-user-agent-styles", true);
-        this._installSetting("resourceViewTab", "resource-view-tab", "headers");
-        this.dispatchEventToListeners("loaded");
-    },
-
-    _installSetting: function(name, propertyName, defaultValue)
-    {
-        this.__defineGetter__(name, this._get.bind(this, propertyName));
-        this.__defineSetter__(name, this._set.bind(this, propertyName));
-        if (!(propertyName in this._store)) {
-            this._store[propertyName] = defaultValue;
-        }
-    },
-
-    _get: function(propertyName)
-    {
-        return this._store[propertyName];
-    },
-
-    _set: function(propertyName, newValue)
-    {
-        this._store[propertyName] = newValue;
-        try {
-            InspectorBackend.saveFrontendSettings(JSON.stringify(this._store));
-        } catch (e) {
-            // May fail;
-        }
+        return new WebInspector.Setting(key, defaultValue, this._eventSupport);
     }
 }
 
-WebInspector.Settings.prototype.__proto__ = WebInspector.Object.prototype;
+/**
+ * @constructor
+ */
+WebInspector.Setting = function(name, defaultValue, eventSupport)
+{
+    this._name = name;
+    this._defaultValue = defaultValue;
+    this._eventSupport = eventSupport;
+}
+
+WebInspector.Setting.prototype = {
+    addChangeListener: function(listener, thisObject)
+    {
+        this._eventSupport.addEventListener(this._name, listener, thisObject);
+    },
+
+    removeChangeListener: function(listener, thisObject)
+    {
+        this._eventSupport.removeEventListener(this._name, listener, thisObject);
+    },
+
+    get name()
+    {
+        return this._name;
+    },
+
+    get: function()
+    {
+        if (typeof this._value !== "undefined")
+            return this._value;
+
+        this._value = this._defaultValue;
+        if (window.localStorage != null && this._name in window.localStorage) {
+            try {
+                this._value = JSON.parse(window.localStorage[this._name]);
+            } catch(e) {
+                window.localStorage.removeItem(this._name);
+            }
+        }
+        return this._value;
+    },
+
+    set: function(value)
+    {
+        this._value = value;
+        if (window.localStorage != null) {
+            try {
+                window.localStorage[this._name] = JSON.stringify(value);
+            } catch(e) {
+                console.error("Error saving setting with name:" + this._name);
+            }
+        }
+        this._eventSupport.dispatchEventToListeners(this._name, value);
+    }
+}
+
+/**
+ * @constructor
+ */
+WebInspector.ExperimentsSettings = function()
+{
+    this._setting = WebInspector.settings.createSetting("experiments", {});
+    this._experiments = [];
+    this._enabledForTest = {};
+    
+    // Add currently running experiments here.
+    this.timelineVerticalOverview = this._createExperiment("timelineStartAtZero", "Enable vertical overview mode in the Timeline panel");
+    this.showShadowDOM = this._createExperiment("showShadowDOM", "Show shadow DOM");
+    this.snippetsSupport = this._createExperiment("snippetsSupport", "Snippets support");
+    this.showStylesPanel = this._createExperiment("stylesPanel", "Show styles panel");
+
+    this._cleanUpSetting();
+}
+
+WebInspector.ExperimentsSettings.prototype = {
+    /**
+     * @return {Array.<WebInspector.Experiment>}
+     */
+    get experiments()
+    {
+        return this._experiments.slice();
+    },
+    
+    /**
+     * @return {boolean}
+     */
+    get experimentsEnabled()
+    {
+        return "experiments" in WebInspector.queryParamsObject;
+    },
+    
+    /**
+     * @param {string} experimentName
+     * @param {string} experimentTitle
+     * @return {WebInspector.Experiment}
+     */
+    _createExperiment: function(experimentName, experimentTitle)
+    {
+        var experiment = new WebInspector.Experiment(this, experimentName, experimentTitle);
+        this._experiments.push(experiment);
+        return experiment;
+    },
+    
+    /**
+     * @param {string} experimentName
+     * @return {boolean}
+     */
+    isEnabled: function(experimentName)
+    {
+        if (this._enabledForTest[experimentName])
+            return true;
+
+        if (!this.experimentsEnabled)
+            return false;
+        
+        var experimentsSetting = this._setting.get();
+        return experimentsSetting[experimentName];
+    },
+    
+    /**
+     * @param {string} experimentName
+     * @param {boolean} enabled
+     */
+    setEnabled: function(experimentName, enabled)
+    {
+        var experimentsSetting = this._setting.get();
+        experimentsSetting[experimentName] = enabled;
+        this._setting.set(experimentsSetting);
+    },
+
+    /**
+     * @param {string} experimentName
+     */
+    _enableForTest: function(experimentName)
+    {
+        this._enabledForTest[experimentName] = true;
+    },
+
+    _cleanUpSetting: function()
+    {
+        var experimentsSetting = this._setting.get();
+        var cleanedUpExperimentSetting = {};
+        for (var i = 0; i < this._experiments.length; ++i) {
+            var experimentName = this._experiments[i].name;
+            if (experimentsSetting[experimentName])
+                cleanedUpExperimentSetting[experimentName] = true;
+        }
+        this._setting.set(cleanedUpExperimentSetting);
+    }
+}
+
+/**
+ * @constructor
+ * @param {WebInspector.ExperimentsSettings} experimentsSettings
+ * @param {string} name
+ * @param {string} title
+ */
+WebInspector.Experiment = function(experimentsSettings, name, title)
+{
+    this._name = name;
+    this._title = title;
+    this._experimentsSettings = experimentsSettings;
+}
+
+WebInspector.Experiment.prototype = {
+    /**
+     * @return {string}
+     */
+    get name()
+    {
+        return this._name;
+    },
+    
+    /**
+     * @return {string}
+     */
+    get title()
+    {
+        return this._title;
+    },
+    
+    /**
+     * @return {boolean}
+     */
+    isEnabled: function()
+    {
+        return this._experimentsSettings.isEnabled(this._name);
+    },
+    
+    /**
+     * @param {boolean} enabled
+     */
+    setEnabled: function(enabled)
+    {
+        return this._experimentsSettings.setEnabled(this._name, enabled);
+    },
+
+    enableForTest: function()
+    {
+        this._experimentsSettings._enableForTest(this._name);
+    }
+}
+
+WebInspector.settings = new WebInspector.Settings();
+WebInspector.experimentsSettings = new WebInspector.ExperimentsSettings();

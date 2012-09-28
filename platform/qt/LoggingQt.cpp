@@ -19,14 +19,16 @@
 
 #include "config.h"
 #include "Logging.h"
-#include "PlatformString.h"
 
+#if !LOG_DISABLED
+
+#include "PlatformString.h"
 #include <QDebug>
 #include <QStringList>
 
 namespace WebCore {
 
-void InitializeLoggingChannelsIfNecessary()
+void initializeLoggingChannelsIfNecessary()
 {
     static bool haveInitializedLoggingChannels = false;
     if (haveInitializedLoggingChannels)
@@ -54,3 +56,5 @@ void InitializeLoggingChannelsIfNecessary()
 }
 
 } // namespace WebCore
+
+#endif // !LOG_DISABLED

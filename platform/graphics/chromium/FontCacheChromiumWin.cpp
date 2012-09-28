@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006, 2007 Apple Computer, Inc.
- * Copyright (c) 2006, 2007, 2008, 2009 Google Inc. All rights reserved.
+ * Copyright (c) 2006, 2007, 2008, 2009, 2012 Google Inc. All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -32,14 +32,15 @@
 #include "config.h"
 #include "FontCache.h"
 
-#include "ChromiumBridge.h"
 #include "Font.h"
 #include "FontUtilsChromiumWin.h"
-#include "HashMap.h"
-#include "HashSet.h"
+#include "HWndDC.h"
+#include "PlatformSupport.h"
 #include "SimpleFontData.h"
-#include "StringHash.h"
 #include <unicode/uniset.h>
+#include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
+#include <wtf/text/StringHash.h>
 
 #include <windows.h>
 #include <objidl.h>
@@ -49,17 +50,6 @@ using std::min;
 
 namespace WebCore
 {
-
-void FontCache::platformInit()
-{
-    // Not needed on Windows.
-}
-
-// FIXME: consider adding to WebKit String class
-static bool charactersAreAllASCII(const String& s)
-{
-    return charactersAreAllASCII(s.characters(), s.length());
-}
 
 // When asked for a CJK font with a native name under a non-CJK locale or
 // asked for a CJK font with a Romanized name under a CJK locale,
@@ -140,6 +130,9 @@ static bool LookupAltName(const String& name, String& altName)
         // 宋体, SimSun
         {L"\x5B8B\x4F53", {L"SimSun", simplifiedChineseCodepage}},
         {L"simsun", {L"\x5B8B\x4F53", simplifiedChineseCodepage}},
+        // 宋体-ExtB, SimSun-ExtB
+        {L"\x5B8B\x4F53-ExtB", {L"SimSun-ExtB", simplifiedChineseCodepage}},
+        {L"simsun-extb", {L"\x5B8B\x4F53-extb", simplifiedChineseCodepage}},
         // 黑体, SimHei
         {L"\x9ED1\x4F53", {L"SimHei", simplifiedChineseCodepage}},
         {L"simhei", {L"\x9ED1\x4F53", simplifiedChineseCodepage}},
@@ -164,9 +157,15 @@ static bool LookupAltName(const String& name, String& altName)
         // 新細明體, PMingLiu
         {L"\x65B0\x7D30\x660E\x9AD4", {L"PMingLiu", traditionalChineseCodepage}},
         {L"pmingliu", {L"\x65B0\x7D30\x660E\x9AD4", traditionalChineseCodepage}},
+        // 新細明體-ExtB, PMingLiu-ExtB
+        {L"\x65B0\x7D30\x660E\x9AD4-ExtB", {L"PMingLiu-ExtB", traditionalChineseCodepage}},
+        {L"pmingliu-extb", {L"\x65B0\x7D30\x660E\x9AD4-extb", traditionalChineseCodepage}},
         // 細明體, MingLiu
         {L"\x7D30\x660E\x9AD4", {L"MingLiu", traditionalChineseCodepage}},
         {L"mingliu", {L"\x7D30\x660E\x9AD4", traditionalChineseCodepage}},
+        // 細明體-ExtB, MingLiu-ExtB
+        {L"\x7D30\x660E\x9AD4-ExtB", {L"MingLiu-ExtB", traditionalChineseCodepage}},
+        {L"mingliu-extb", {L"x65B0\x7D30\x660E\x9AD4-extb", traditionalChineseCodepage}},
         // 微軟正黑體, Microsoft JhengHei
         {L"\x5FAE\x8EDF\x6B63\x9ED1\x9AD4", {L"Microsoft JhengHei", traditionalChineseCodepage}},
         {L"microsoft jhengHei", {L"\x5FAE\x8EDF\x6B63\x9ED1\x9AD4", traditionalChineseCodepage}},
@@ -202,9 +201,8 @@ static bool LookupAltName(const String& name, String& altName)
     static NameMap* fontNameMap = 0;
 
     if (!fontNameMap) {
-        size_t numElements = sizeof(namePairs) / sizeof(NamePair);
         fontNameMap = new NameMap;
-        for (size_t i = 0; i < numElements; ++i)
+        for (size_t i = 0; i < WTF_ARRAY_LENGTH(namePairs); ++i)
             fontNameMap->set(String(namePairs[i].name), &(namePairs[i].altNameCodepage));
     }
 
@@ -213,7 +211,7 @@ static bool LookupAltName(const String& name, String& altName)
     // use |lower| only for ASCII names 
     // For non-ASCII names, we don't want to invoke an expensive 
     // and unnecessary |lower|. 
-    if (charactersAreAllASCII(name)) {
+    if (name.containsOnlyASCII()) {
         isAscii = true;
         n = name.lower();
     } else
@@ -244,7 +242,7 @@ static HFONT createFontIndirectAndGetWinName(const String& family, LOGFONT* winf
     if (!hfont)
         return 0;
 
-    HDC dc = GetDC(0);
+    HWndDC dc(0);
     HGDIOBJ oldFont = static_cast<HFONT>(SelectObject(dc, hfont));
     WCHAR name[LF_FACESIZE];
     unsigned resultLength = GetTextFace(dc, LF_FACESIZE, name);
@@ -252,7 +250,6 @@ static HFONT createFontIndirectAndGetWinName(const String& family, LOGFONT* winf
         resultLength--; // ignore the null terminator
 
     SelectObject(dc, oldFont);
-    ReleaseDC(0, dc);
     *winName = String(name, resultLength);
     return hfont;
 }
@@ -282,15 +279,14 @@ static bool fontContainsCharacter(const FontPlatformData* fontData,
         return it->second->contains(character);
     
     HFONT hfont = fontData->hfont(); 
-    HDC hdc = GetDC(0);
+    HWndDC hdc(0);
     HGDIOBJ oldFont = static_cast<HFONT>(SelectObject(hdc, hfont));
     int count = GetFontUnicodeRanges(hdc, 0);
-    if (count == 0 && ChromiumBridge::ensureFontLoaded(hfont))
+    if (!count && PlatformSupport::ensureFontLoaded(hfont))
         count = GetFontUnicodeRanges(hdc, 0);
-    if (count == 0) {
+    if (!count) {
         LOG_ERROR("Unable to get the font unicode range after second attempt");
         SelectObject(hdc, oldFont);
-        ReleaseDC(0, hdc);
         return true;
     }
 
@@ -302,7 +298,6 @@ static bool fontContainsCharacter(const FontPlatformData* fontData,
     count = GetFontUnicodeRanges(hdc, glyphset);
     ASSERT(count > 0);
     SelectObject(hdc, oldFont);
-    ReleaseDC(0, hdc);
 
     // FIXME: consider doing either of the following two:
     // 1) port back ICU 4.0's faster look-up code for UnicodeSet
@@ -319,6 +314,110 @@ static bool fontContainsCharacter(const FontPlatformData* fontData,
     // and they're already lowercased. 
     fontCmapCache->set(family, cmap); 
     return cmap->contains(character);
+}
+
+// Tries the given font and save it |outFontFamilyName| if it succeeds.
+SimpleFontData* FontCache::fontDataFromDescriptionAndLogFont(const FontDescription& fontDescription, ShouldRetain shouldRetain, const LOGFONT& font, wchar_t* outFontFamilyName)
+{
+    SimpleFontData* fontData = getCachedFontData(fontDescription, font.lfFaceName, false, shouldRetain);
+    if (fontData)
+        memcpy(outFontFamilyName, font.lfFaceName, sizeof(font.lfFaceName));
+    return fontData;
+}
+
+static LONG toGDIFontWeight(FontWeight fontWeight)
+{
+    static LONG gdiFontWeights[] = {
+        FW_THIN, // FontWeight100
+        FW_EXTRALIGHT, // FontWeight200
+        FW_LIGHT, // FontWeight300
+        FW_NORMAL, // FontWeight400
+        FW_MEDIUM, // FontWeight500
+        FW_SEMIBOLD, // FontWeight600
+        FW_BOLD, // FontWeight700
+        FW_EXTRABOLD, // FontWeight800
+        FW_HEAVY // FontWeight900
+    };
+    return gdiFontWeights[fontWeight];
+}
+
+static void FillLogFont(const FontDescription& fontDescription, LOGFONT* winfont)
+{
+    // The size here looks unusual.  The negative number is intentional.
+    // Unlike WebKit trunk, we don't multiply the size by 32.  That seems to be
+    // some kind of artifact of their CG backend, or something.
+    winfont->lfHeight = -fontDescription.computedPixelSize();
+    winfont->lfWidth = 0;
+    winfont->lfEscapement = 0;
+    winfont->lfOrientation = 0;
+    winfont->lfUnderline = false;
+    winfont->lfStrikeOut = false;
+    winfont->lfCharSet = DEFAULT_CHARSET;
+    winfont->lfOutPrecision = OUT_TT_ONLY_PRECIS;
+    winfont->lfQuality = PlatformSupport::layoutTestMode() ? NONANTIALIASED_QUALITY : DEFAULT_QUALITY; // Honor user's desktop settings.
+    winfont->lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
+    winfont->lfItalic = fontDescription.italic();
+    winfont->lfWeight = toGDIFontWeight(fontDescription.weight());
+}
+
+struct TraitsInFamilyProcData {
+    TraitsInFamilyProcData(const AtomicString& familyName)
+        : m_familyName(familyName)
+    {
+    }
+
+    const AtomicString& m_familyName;
+    HashSet<unsigned> m_traitsMasks;
+};
+
+static int CALLBACK traitsInFamilyEnumProc(CONST LOGFONT* logFont, CONST TEXTMETRIC* metrics, DWORD fontType, LPARAM lParam)
+{
+    TraitsInFamilyProcData* procData = reinterpret_cast<TraitsInFamilyProcData*>(lParam);
+
+    unsigned traitsMask = 0;
+    traitsMask |= logFont->lfItalic ? FontStyleItalicMask : FontStyleNormalMask;
+    traitsMask |= FontVariantNormalMask;
+    LONG weight = logFont->lfWeight;
+    traitsMask |= weight == FW_THIN ? FontWeight100Mask :
+        weight == FW_EXTRALIGHT ? FontWeight200Mask :
+        weight == FW_LIGHT ? FontWeight300Mask :
+        weight == FW_NORMAL ? FontWeight400Mask :
+        weight == FW_MEDIUM ? FontWeight500Mask :
+        weight == FW_SEMIBOLD ? FontWeight600Mask :
+        weight == FW_BOLD ? FontWeight700Mask :
+        weight == FW_EXTRABOLD ? FontWeight800Mask :
+                                 FontWeight900Mask;
+    procData->m_traitsMasks.add(traitsMask);
+    return 1;
+}
+
+struct GetLastResortFallbackFontProcData {
+    GetLastResortFallbackFontProcData(FontCache* fontCache, const FontDescription* fontDescription, FontCache::ShouldRetain shouldRetain, wchar_t* fontName)
+        : m_fontCache(fontCache)
+        , m_fontDescription(fontDescription)
+        , m_shouldRetain(shouldRetain)
+        , m_fontName(fontName)
+        , m_fontData(0)
+    {
+    }
+
+    FontCache* m_fontCache;
+    const FontDescription* m_fontDescription;
+    FontCache::ShouldRetain m_shouldRetain;
+    wchar_t* m_fontName;
+    SimpleFontData* m_fontData;
+};
+
+static int CALLBACK getLastResortFallbackFontProc(const LOGFONT* logFont, const TEXTMETRIC* metrics, DWORD fontType, LPARAM lParam)
+{
+    GetLastResortFallbackFontProcData* procData = reinterpret_cast<GetLastResortFallbackFontProcData*>(lParam);
+    procData->m_fontData = procData->m_fontCache->fontDataFromDescriptionAndLogFont(*procData->m_fontDescription, procData->m_shouldRetain, *logFont, procData->m_fontName);
+    return !procData->m_fontData;
+}
+
+void FontCache::platformInit()
+{
+    // Not needed on Windows.
 }
 
 // Given the desired base font, this will create a SimpleFontData for a specific
@@ -363,8 +462,10 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
         L"lucida sans unicode",
         L"microsoft sans serif",
         L"palatino linotype",
-        // Four fonts below (and code2000 at the end) are not from MS, but
+        // Six fonts below (and code2000 at the end) are not from MS, but
         // once installed, cover a very wide range of characters.
+        L"dejavu serif",
+        L"dejavu sasns",
         L"freeserif",
         L"freesans",
         L"gentium",
@@ -380,10 +481,10 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
     int numFonts = 0;
     if (script == USCRIPT_HAN) {
         panUniFonts = cjkFonts;
-        numFonts = ARRAYSIZE(cjkFonts);
+        numFonts = WTF_ARRAY_LENGTH(cjkFonts);
     } else {
         panUniFonts = commonFonts;
-        numFonts = ARRAYSIZE(commonFonts);
+        numFonts = WTF_ARRAY_LENGTH(commonFonts);
     }
     // Font returned from GetFallbackFamily may not cover |characters|
     // because it's based on script to font mapping. This problem is
@@ -399,19 +500,19 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
     // last font in the array covers the character, |i| will be numFonts.
     // So, we have to use '<=" rather than '<' to see if we found a font
     // covering the character.
-    if (i <= numFonts) 
-       return getCachedFontData(data);
+    if (i <= numFonts)
+        return getCachedFontData(data, DoNotRetain);
 
     return 0;
 
 }
 
-FontPlatformData* FontCache::getSimilarFontPlatformData(const Font& font)
+SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
 {
     return 0;
 }
 
-FontPlatformData* FontCache::getLastResortFallbackFont(const FontDescription& description)
+SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& description, ShouldRetain shouldRetain)
 {
     FontDescription::GenericFamilyType generic = description.genericFamily();
 
@@ -428,78 +529,62 @@ FontPlatformData* FontCache::getLastResortFallbackFont(const FontDescription& de
     else if (generic == FontDescription::MonospaceFamily)
         fontStr = courierStr;
 
-    return getCachedFontPlatformData(description, fontStr);
-}
+    SimpleFontData* simpleFont = getCachedFontData(description, fontStr, false, shouldRetain);
+    if (simpleFont)
+        return simpleFont;
 
-static LONG toGDIFontWeight(FontWeight fontWeight)
-{
-    static LONG gdiFontWeights[] = {
-        FW_THIN,        // FontWeight100
-        FW_EXTRALIGHT,  // FontWeight200
-        FW_LIGHT,       // FontWeight300
-        FW_NORMAL,      // FontWeight400
-        FW_MEDIUM,      // FontWeight500
-        FW_SEMIBOLD,    // FontWeight600
-        FW_BOLD,        // FontWeight700
-        FW_EXTRABOLD,   // FontWeight800
-        FW_HEAVY        // FontWeight900
-    };
-    return gdiFontWeights[fontWeight];
-}
+    // Fall back to system fonts as Win Safari does because this function must
+    // return a valid font. Once we find a valid system font, we save its name
+    // to a static variable and use it to prevent trying system fonts again.
+    static wchar_t fallbackFontName[LF_FACESIZE] = {0};
+    if (fallbackFontName[0])
+        return getCachedFontData(description, fallbackFontName, false, shouldRetain);
 
-static void FillLogFont(const FontDescription& fontDescription, LOGFONT* winfont)
-{
-    // The size here looks unusual.  The negative number is intentional.
-    // Unlike WebKit trunk, we don't multiply the size by 32.  That seems to be
-    // some kind of artifact of their CG backend, or something.
-    winfont->lfHeight = -fontDescription.computedPixelSize();
-    winfont->lfWidth = 0;
-    winfont->lfEscapement = 0;
-    winfont->lfOrientation = 0;
-    winfont->lfUnderline = false;
-    winfont->lfStrikeOut = false;
-    winfont->lfCharSet = DEFAULT_CHARSET;
-    winfont->lfOutPrecision = OUT_TT_ONLY_PRECIS;
-    winfont->lfQuality = ChromiumBridge::layoutTestMode() ? NONANTIALIASED_QUALITY : DEFAULT_QUALITY; // Honor user's desktop settings.
-    winfont->lfPitchAndFamily = DEFAULT_PITCH | FF_DONTCARE;
-    winfont->lfItalic = fontDescription.italic();
-    winfont->lfWeight = toGDIFontWeight(fontDescription.weight());
-}
-
-struct TraitsInFamilyProcData {
-    TraitsInFamilyProcData(const AtomicString& familyName)
-        : m_familyName(familyName)
-    {
+    // Fall back to the DEFAULT_GUI_FONT if no known Unicode fonts are available.
+    if (HFONT defaultGUIFont = static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT))) {
+        LOGFONT defaultGUILogFont;
+        GetObject(defaultGUIFont, sizeof(defaultGUILogFont), &defaultGUILogFont);
+        if (simpleFont = fontDataFromDescriptionAndLogFont(description, shouldRetain, defaultGUILogFont, fallbackFontName))
+            return simpleFont;
     }
 
-    const AtomicString& m_familyName;
-    HashSet<unsigned> m_traitsMasks;
-};
+    // Fall back to Non-client metrics fonts.
+    NONCLIENTMETRICS nonClientMetrics = {0};
+    nonClientMetrics.cbSize = sizeof(nonClientMetrics);
+    if (SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(nonClientMetrics), &nonClientMetrics, 0)) {
+        if (simpleFont = fontDataFromDescriptionAndLogFont(description, shouldRetain, nonClientMetrics.lfMessageFont, fallbackFontName))
+            return simpleFont;
+        if (simpleFont = fontDataFromDescriptionAndLogFont(description, shouldRetain, nonClientMetrics.lfMenuFont, fallbackFontName))
+            return simpleFont;
+        if (simpleFont = fontDataFromDescriptionAndLogFont(description, shouldRetain, nonClientMetrics.lfStatusFont, fallbackFontName))
+            return simpleFont;
+        if (simpleFont = fontDataFromDescriptionAndLogFont(description, shouldRetain, nonClientMetrics.lfCaptionFont, fallbackFontName))
+            return simpleFont;
+        if (simpleFont = fontDataFromDescriptionAndLogFont(description, shouldRetain, nonClientMetrics.lfSmCaptionFont, fallbackFontName))
+            return simpleFont;
+    }
 
-static int CALLBACK traitsInFamilyEnumProc(CONST LOGFONT* logFont, CONST TEXTMETRIC* metrics, DWORD fontType, LPARAM lParam)
-{
-    TraitsInFamilyProcData* procData = reinterpret_cast<TraitsInFamilyProcData*>(lParam);
+    // Fall back to all the fonts installed in this PC. When a font has a
+    // localized name according to the system locale as well as an English name,
+    // both GetTextFace() and EnumFontFamilies() return the localized name. So,
+    // FontCache::createFontPlatformData() does not filter out the fonts
+    // returned by this EnumFontFamilies() call.
+    HWndDC dc(0);
+    if (dc) {
+        GetLastResortFallbackFontProcData procData(this, &description, shouldRetain, fallbackFontName);
+        EnumFontFamilies(dc, 0, getLastResortFallbackFontProc, reinterpret_cast<LPARAM>(&procData));
 
-    unsigned traitsMask = 0;
-    traitsMask |= logFont->lfItalic ? FontStyleItalicMask : FontStyleNormalMask;
-    traitsMask |= FontVariantNormalMask;
-    LONG weight = logFont->lfWeight;
-    traitsMask |= weight == FW_THIN ? FontWeight100Mask :
-        weight == FW_EXTRALIGHT ? FontWeight200Mask :
-        weight == FW_LIGHT ? FontWeight300Mask :
-        weight == FW_NORMAL ? FontWeight400Mask :
-        weight == FW_MEDIUM ? FontWeight500Mask :
-        weight == FW_SEMIBOLD ? FontWeight600Mask :
-        weight == FW_BOLD ? FontWeight700Mask :
-        weight == FW_EXTRABOLD ? FontWeight800Mask :
-                                 FontWeight900Mask;
-    procData->m_traitsMasks.add(traitsMask);
-    return 1;
+        if (procData.m_fontData)
+            return procData.m_fontData;
+    }
+
+    ASSERT_NOT_REACHED();
+    return 0;
 }
 
 void FontCache::getTraitsInFamily(const AtomicString& familyName, Vector<unsigned>& traitsMasks)
 {
-    HDC hdc = GetDC(0);
+    HWndDC hdc(0);
 
     LOGFONT logFont;
     logFont.lfCharSet = DEFAULT_CHARSET;
@@ -511,8 +596,6 @@ void FontCache::getTraitsInFamily(const AtomicString& familyName, Vector<unsigne
     TraitsInFamilyProcData procData(familyName);
     EnumFontFamiliesEx(hdc, &logFont, traitsInFamilyEnumProc, reinterpret_cast<LPARAM>(&procData), 0);
     copyToVector(procData.m_traitsMasks, traitsMasks);
-
-    ReleaseDC(0, hdc);
 }
 
 FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontDescription, const AtomicString& family)

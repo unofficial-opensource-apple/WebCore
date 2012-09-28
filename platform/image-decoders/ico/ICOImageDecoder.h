@@ -40,7 +40,8 @@ namespace WebCore {
     // This class decodes the ICO and CUR image formats.
     class ICOImageDecoder : public ImageDecoder {
     public:
-        ICOImageDecoder();
+        ICOImageDecoder(ImageSource::AlphaOption, ImageSource::GammaAndColorProfileOption);
+        virtual ~ICOImageDecoder();
 
         // ImageDecoder
         virtual String filenameExtension() const { return "ico"; }
@@ -50,7 +51,11 @@ namespace WebCore {
         virtual IntSize frameSizeAtIndex(size_t) const;
         virtual bool setSize(unsigned width, unsigned height);
         virtual size_t frameCount();
-        virtual RGBA32Buffer* frameBufferAtIndex(size_t);
+        virtual ImageFrame* frameBufferAtIndex(size_t);
+        // CAUTION: setFailed() deletes all readers and decoders.  Be careful to
+        // avoid accessing deleted memory, especially when calling this from
+        // inside BMPImageReader!
+        virtual bool setFailed();
 
     private:
         enum ImageType {
@@ -67,19 +72,16 @@ namespace WebCore {
 
         // Returns true if |a| is a preferable icon entry to |b|.
         // Larger sizes, or greater bitdepths at the same size, are preferable.
-        static bool compareEntries(const IconDirectoryEntry& a,
-                                   const IconDirectoryEntry& b);
+        static bool compareEntries(const IconDirectoryEntry& a, const IconDirectoryEntry& b);
 
         inline uint16_t readUint16(int offset) const
         {
-            return BMPImageReader::readUint16(m_data.get(),
-                                              m_decodedOffset + offset);
+            return BMPImageReader::readUint16(m_data.get(), m_decodedOffset + offset);
         }
 
         inline uint32_t readUint32(int offset) const
         {
-            return BMPImageReader::readUint32(m_data.get(),
-                                              m_decodedOffset + offset);
+            return BMPImageReader::readUint32(m_data.get(), m_decodedOffset + offset);
         }
 
         // If the desired PNGImageDecoder exists, gives it the appropriate data.
@@ -88,12 +90,7 @@ namespace WebCore {
         // Decodes the entry at |index|.  If |onlySize| is true, stops decoding
         // after calculating the image size.  If decoding fails but there is no
         // more data coming, sets the "decode failure" flag.
-        //
-        // NOTE: If the desired entry is a PNG, this doesn't actually trigger
-        // decoding, it merely ensures the decoder is created and ready to
-        // decode.  The caller will then call a function on the PNGImageDecoder
-        // that actually triggers decoding.
-        void decodeWithCheckForDataEnded(size_t index, bool onlySize);
+        void decode(size_t index, bool onlySize);
 
         // Decodes the directory and directory entries at the beginning of the
         // data, and initializes members.  Returns true if all decoding
@@ -119,9 +116,6 @@ namespace WebCore {
         // Determines whether the desired entry is a BMP or PNG.  Returns true
         // if the type could be determined.
         ImageType imageTypeAtIndex(size_t);
-
-        // True if we've seen all the data.
-        bool m_allDataReceived;
 
         // An index into |m_data| representing how much we've already decoded.
         // Note that this only tracks data _this_ class decodes; once the

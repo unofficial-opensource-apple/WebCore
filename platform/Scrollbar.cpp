@@ -26,33 +26,47 @@
 #include "config.h"
 #include "Scrollbar.h"
 
-#include "AccessibilityScrollbar.h"
+#include "GraphicsContext.h"
+#include "PlatformMouseEvent.h"
+#include "ScrollAnimator.h"
+#include "ScrollableArea.h"
+#include "ScrollbarTheme.h"
+#include <algorithm>
+
+// FIXME: The following #includes are a layering violation and should be removed.
 #include "AXObjectCache.h"
+#include "AccessibilityScrollbar.h"
+#include "Document.h"
 #include "EventHandler.h"
 #include "Frame.h"
 #include "FrameView.h"
-#include "GraphicsContext.h"
-#include "PlatformMouseEvent.h"
-#include "ScrollbarClient.h"
-#include "ScrollbarTheme.h"
 
-#include <algorithm>
+using namespace std;
 
-using std::max;
-using std::min;
+#if (PLATFORM(CHROMIUM) && (OS(UNIX) && !OS(DARWIN))) || PLATFORM(GTK)
+// The position of the scrollbar thumb affects the appearance of the steppers, so
+// when the thumb moves, we have to invalidate them for painting.
+#define THUMB_POSITION_AFFECTS_BUTTONS
+#endif
 
 namespace WebCore {
 
-#if !PLATFORM(GTK)
-PassRefPtr<Scrollbar> Scrollbar::createNativeScrollbar(ScrollbarClient* client, ScrollbarOrientation orientation, ScrollbarControlSize size)
+#if !PLATFORM(EFL)
+PassRefPtr<Scrollbar> Scrollbar::createNativeScrollbar(ScrollableArea* scrollableArea, ScrollbarOrientation orientation, ScrollbarControlSize size)
 {
-    return adoptRef(new Scrollbar(client, orientation, size));
+    return adoptRef(new Scrollbar(scrollableArea, orientation, size));
 }
 #endif
 
-Scrollbar::Scrollbar(ScrollbarClient* client, ScrollbarOrientation orientation, ScrollbarControlSize controlSize,
+int Scrollbar::maxOverlapBetweenPages()
+{
+    static int maxOverlapBetweenPages = ScrollbarTheme::theme()->maxOverlapBetweenPages();
+    return maxOverlapBetweenPages;
+}
+
+Scrollbar::Scrollbar(ScrollableArea* scrollableArea, ScrollbarOrientation orientation, ScrollbarControlSize controlSize,
                      ScrollbarTheme* theme)
-    : m_client(client)
+    : m_scrollableArea(scrollableArea)
     , m_orientation(orientation)
     , m_controlSize(controlSize)
     , m_theme(theme)
@@ -66,13 +80,15 @@ Scrollbar::Scrollbar(ScrollbarClient* client, ScrollbarOrientation orientation, 
     , m_hoveredPart(NoPart)
     , m_pressedPart(NoPart)
     , m_pressedPos(0)
+    , m_draggingDocument(false)
+    , m_documentDragPos(0)
     , m_enabled(true)
     , m_scrollTimer(this, &Scrollbar::autoscrollTimerFired)
     , m_overlapsResizer(false)
     , m_suppressInvalidation(false)
 {
     if (!m_theme)
-        m_theme = ScrollbarTheme::nativeTheme();
+        m_theme = ScrollbarTheme::theme();
 
     m_theme->registerScrollbar(this);
 
@@ -81,22 +97,55 @@ Scrollbar::Scrollbar(ScrollbarClient* client, ScrollbarOrientation orientation, 
     // alone when sizing).
     int thickness = m_theme->scrollbarThickness(controlSize);
     Widget::setFrameRect(IntRect(0, 0, thickness, thickness));
+
+    if (m_scrollableArea)
+        m_currentPos = static_cast<float>(m_scrollableArea->scrollPosition(this));
 }
 
 Scrollbar::~Scrollbar()
 {
+    if (AXObjectCache::accessibilityEnabled() && axObjectCache())
+        axObjectCache()->remove(this);
+    
     stopTimerIfNeeded();
     
     m_theme->unregisterScrollbar(this);
 }
 
-bool Scrollbar::setValue(int v)
+ScrollbarOverlayStyle Scrollbar::scrollbarOverlayStyle() const
 {
-    v = max(min(v, m_totalSize - m_visibleSize), 0);
-    if (value() == v)
-        return false; // Our value stayed the same.
-    setCurrentPos(v);
-    return true;
+    return m_scrollableArea ? ScrollbarOverlayStyleDefault : m_scrollableArea->scrollbarOverlayStyle();
+}
+
+void Scrollbar::getTickmarks(Vector<IntRect>& tickmarks) const
+{
+    if (m_scrollableArea)
+        m_scrollableArea->getTickmarks(tickmarks);
+}
+
+bool Scrollbar::isScrollableAreaActive() const
+{
+    return m_scrollableArea && m_scrollableArea->isActive();
+}
+
+bool Scrollbar::isScrollViewScrollbar() const
+{
+    return parent() && parent()->isFrameView() && static_cast<FrameView*>(parent())->isScrollViewScrollbar(this);
+}
+
+void Scrollbar::offsetDidChange()
+{
+    ASSERT(m_scrollableArea);
+
+    float position = static_cast<float>(m_scrollableArea->scrollPosition(this));
+    if (position == m_currentPos)
+        return;
+
+    int oldThumbPosition = theme()->thumbPosition(this);
+    m_currentPos = position;
+    updateThumbPosition();
+    if (m_pressedPart == ThumbPart)
+        setPressedPos(m_pressedPos + theme()->thumbPosition(this) - oldThumbPosition);    
 }
 
 void Scrollbar::setProportion(int visibleSize, int totalSize)
@@ -117,48 +166,23 @@ void Scrollbar::setSteps(int lineStep, int pageStep, int pixelsPerStep)
     m_pixelStep = 1.0f / pixelsPerStep;
 }
 
-bool Scrollbar::scroll(ScrollDirection direction, ScrollGranularity granularity, float multiplier)
+void Scrollbar::updateThumb()
 {
-#if HAVE(ACCESSIBILITY)
-    if (AXObjectCache::accessibilityEnabled()) {
-        if (parent() && parent()->isFrameView()) {
-            Document* document = static_cast<FrameView*>(parent())->frame()->document();
-            AXObjectCache* cache = document->axObjectCache();
-            AccessibilityScrollbar* axObject = static_cast<AccessibilityScrollbar*>(cache->getOrCreate(ScrollBarRole));
-            axObject->setScrollbar(this);
-            cache->postNotification(axObject, document, AXObjectCache::AXValueChanged, true);
-        }
-    }
+#ifdef THUMB_POSITION_AFFECTS_BUTTONS
+    invalidate();
+#else
+    theme()->invalidateParts(this, ForwardTrackPart | BackTrackPart | ThumbPart);
 #endif
-
-    float step = 0;
-    if ((direction == ScrollUp && m_orientation == VerticalScrollbar) || (direction == ScrollLeft && m_orientation == HorizontalScrollbar))
-        step = -1;
-    else if ((direction == ScrollDown && m_orientation == VerticalScrollbar) || (direction == ScrollRight && m_orientation == HorizontalScrollbar)) 
-        step = 1;
-    
-    if (granularity == ScrollByLine)
-        step *= m_lineStep;
-    else if (granularity == ScrollByPage)
-        step *= m_pageStep;
-    else if (granularity == ScrollByDocument)
-        step *= m_totalSize;
-    else if (granularity == ScrollByPixel)
-        step *= m_pixelStep;
-        
-    float newPos = m_currentPos + step * multiplier;
-    float maxPos = m_totalSize - m_visibleSize;
-    return setCurrentPos(max(min(newPos, maxPos), 0.0f));
 }
 
 void Scrollbar::updateThumbPosition()
 {
-    theme()->invalidateParts(this, ForwardTrackPart | BackTrackPart | ThumbPart);
+    updateThumb();
 }
 
 void Scrollbar::updateThumbProportion()
 {
-    theme()->invalidateParts(this, ForwardTrackPart | BackTrackPart | ThumbPart);
+    updateThumb();
 }
 
 void Scrollbar::paint(GraphicsContext* context, const IntRect& damageRect)
@@ -167,7 +191,7 @@ void Scrollbar::paint(GraphicsContext* context, const IntRect& damageRect)
         invalidate();
         return;
     }
-        
+
     if (context->paintingDisabled() || !frameRect().intersects(damageRect))
         return;
 
@@ -201,7 +225,7 @@ void Scrollbar::autoscrollPressedPart(double delay)
     }
 
     // Handle the arrows and track.
-    if (scroll(pressedPartScrollDirection(), pressedPartScrollGranularity()))
+    if (m_scrollableArea && m_scrollableArea->scroll(pressedPartScrollDirection(), pressedPartScrollGranularity()))
         startTimerIfNeeded(delay);
 }
 
@@ -258,37 +282,47 @@ ScrollGranularity Scrollbar::pressedPartScrollGranularity()
     return ScrollByPage;
 }
 
-void Scrollbar::moveThumb(int pos)
+void Scrollbar::moveThumb(int pos, bool draggingDocument)
 {
+    if (!m_scrollableArea)
+        return;
+
+    int delta = pos - m_pressedPos;
+
+    if (draggingDocument) {
+        if (m_draggingDocument)
+            delta = pos - m_documentDragPos;
+        m_draggingDocument = true;
+        FloatPoint currentPosition = m_scrollableArea->scrollAnimator()->currentPosition();
+        int destinationPosition = (m_orientation == HorizontalScrollbar ? currentPosition.x() : currentPosition.y()) + delta;
+        if (delta > 0)
+            destinationPosition = min(destinationPosition + delta, maximum());
+        else if (delta < 0)
+            destinationPosition = max(destinationPosition + delta, 0);
+        m_scrollableArea->scrollToOffsetWithoutAnimation(m_orientation, destinationPosition);
+        m_documentDragPos = pos;
+        return;
+    }
+
+    if (m_draggingDocument) {
+        delta += m_pressedPos - m_documentDragPos;
+        m_draggingDocument = false;
+    }
+
     // Drag the thumb.
     int thumbPos = theme()->thumbPosition(this);
     int thumbLen = theme()->thumbLength(this);
     int trackLen = theme()->trackLength(this);
     int maxPos = trackLen - thumbLen;
-    int delta = pos - m_pressedPos;
     if (delta > 0)
         delta = min(maxPos - thumbPos, delta);
     else if (delta < 0)
         delta = max(-thumbPos, delta);
-    if (delta)
-        setCurrentPos(static_cast<float>(thumbPos + delta) * maximum() / (trackLen - thumbLen));
-}
-
-bool Scrollbar::setCurrentPos(float pos)
-{
-    if (pos == m_currentPos)
-        return false;
-
-    int oldValue = value();
-    int oldThumbPos = theme()->thumbPosition(this);
-    m_currentPos = pos;
-    updateThumbPosition();
-    if (m_pressedPart == ThumbPart)
-        setPressedPos(m_pressedPos + theme()->thumbPosition(this) - oldThumbPos);
-
-    if (value() != oldValue && client())
-        client()->valueChanged(this);
-    return true;
+    
+    if (delta) {
+        float newPosition = static_cast<float>(thumbPos + delta) * maximum() / (trackLen - thumbLen);
+        m_scrollableArea->scrollToOffsetWithoutAnimation(m_orientation, newPosition);
+    }
 }
 
 void Scrollbar::setHoveredPart(ScrollbarPart part)
@@ -317,17 +351,34 @@ void Scrollbar::setPressedPart(ScrollbarPart part)
 }
 
 
+void Scrollbar::mouseEntered()
+{
+    if (m_scrollableArea)
+        m_scrollableArea->mouseEnteredScrollbar(this);
+}
+
 bool Scrollbar::mouseExited()
 {
+    if (m_scrollableArea)
+        m_scrollableArea->mouseExitedScrollbar(this);
     setHoveredPart(NoPart);
     return true;
 }
 
-bool Scrollbar::mouseUp()
+bool Scrollbar::mouseUp(const PlatformMouseEvent& mouseEvent)
 {
     setPressedPart(NoPart);
     m_pressedPos = 0;
+    m_draggingDocument = false;
     stopTimerIfNeeded();
+
+    if (m_scrollableArea) {
+        // m_hoveredPart won't be updated until the next mouseMoved or mouseDown, so we have to hit test
+        // to really know if the mouse has exited the scrollbar on a mouseUp.
+        ScrollbarPart part = theme()->hitTest(this, mouseEvent);
+        if (part == NoPart)
+            m_scrollableArea->mouseExitedScrollbar(this);
+    }
 
     if (parent() && parent()->isFrameView())
         static_cast<FrameView*>(parent())->frame()->eventHandler()->setMousePressed(false);
@@ -342,7 +393,7 @@ bool Scrollbar::mouseDown(const PlatformMouseEvent& evt)
         return true; // FIXME: Handled as context menu by Qt right now.  Should just avoid even calling this method on a right click though.
 
     setPressedPart(theme()->hitTest(this, evt));
-    int pressedPos = (orientation() == HorizontalScrollbar ? convertFromContainingWindow(evt.pos()).x() : convertFromContainingWindow(evt.pos()).y());
+    int pressedPos = (orientation() == HorizontalScrollbar ? convertFromContainingWindow(evt.position()).x() : convertFromContainingWindow(evt.position()).y());
     
     if ((m_pressedPart == BackTrackPart || m_pressedPart == ForwardTrackPart) && theme()->shouldCenterOnThumb(this, evt)) {
         setHoveredPart(ThumbPart);
@@ -366,7 +417,7 @@ bool Scrollbar::mouseDown(const PlatformMouseEvent& evt)
 
 void Scrollbar::setFrameRect(const IntRect& rect)
 {
-    // Get our window resizer rect and see if we overlap.  Adjust to avoid the overlap
+    // Get our window resizer rect and see if we overlap. Adjust to avoid the overlap
     // if necessary.
     IntRect adjustedRect(rect);
     bool overlapsResizer = false;
@@ -375,14 +426,14 @@ void Scrollbar::setFrameRect(const IntRect& rect)
         IntRect resizerRect = view->convertFromContainingWindow(view->windowResizerRect());
         if (rect.intersects(resizerRect)) {
             if (orientation() == HorizontalScrollbar) {
-                int overlap = rect.right() - resizerRect.x();
-                if (overlap > 0 && resizerRect.right() >= rect.right()) {
+                int overlap = rect.maxX() - resizerRect.x();
+                if (overlap > 0 && resizerRect.maxX() >= rect.maxX()) {
                     adjustedRect.setWidth(rect.width() - overlap);
                     overlapsResizer = true;
                 }
             } else {
-                int overlap = rect.bottom() - resizerRect.y();
-                if (overlap > 0 && resizerRect.bottom() >= rect.bottom()) {
+                int overlap = rect.maxY() - resizerRect.y();
+                if (overlap > 0 && resizerRect.maxY() >= rect.maxY()) {
                     adjustedRect.setHeight(rect.height() - overlap);
                     overlapsResizer = true;
                 }
@@ -410,52 +461,78 @@ void Scrollbar::setEnabled(bool e)
     if (m_enabled == e)
         return;
     m_enabled = e;
+    theme()->updateEnabledState(this);
     invalidate();
+}
+
+bool Scrollbar::isOverlayScrollbar() const
+{
+    return m_theme->usesOverlayScrollbars();
+}
+
+bool Scrollbar::shouldParticipateInHitTesting()
+{
+    // Non-overlay scrollbars should always participate in hit testing.
+    if (!isOverlayScrollbar())
+        return true;
+    return m_scrollableArea->scrollAnimator()->shouldScrollbarParticipateInHitTesting(this);
 }
 
 bool Scrollbar::isWindowActive() const
 {
-    return m_client && m_client->isActive();
+    return m_scrollableArea && m_scrollableArea->isActive();
 }
- 
+    
+AXObjectCache* Scrollbar::axObjectCache() const
+{
+    if (!parent() || !parent()->isFrameView())
+        return 0;
+    
+    // FIXME: Accessing the FrameView and Document here is a layering violation
+    // and should be removed.
+    Document* document = static_cast<FrameView*>(parent())->frame()->document();
+    return document->axObjectCache();
+}
+
 void Scrollbar::invalidateRect(const IntRect& rect)
 {
     if (suppressInvalidation())
         return;
-    if (m_client)
-        m_client->invalidateScrollbarRect(this, rect);
+
+    if (m_scrollableArea)
+        m_scrollableArea->invalidateScrollbar(this, rect);
 }
 
 IntRect Scrollbar::convertToContainingView(const IntRect& localRect) const
 {
-    if (m_client)
-        return m_client->convertFromScrollbarToContainingView(this, localRect);
+    if (m_scrollableArea)
+        return m_scrollableArea->convertFromScrollbarToContainingView(this, localRect);
 
     return Widget::convertToContainingView(localRect);
 }
 
 IntRect Scrollbar::convertFromContainingView(const IntRect& parentRect) const
 {
-    if (m_client)
-        return m_client->convertFromContainingViewToScrollbar(this, parentRect);
+    if (m_scrollableArea)
+        return m_scrollableArea->convertFromContainingViewToScrollbar(this, parentRect);
 
     return Widget::convertFromContainingView(parentRect);
 }
 
 IntPoint Scrollbar::convertToContainingView(const IntPoint& localPoint) const
 {
-    if (m_client)
-        return m_client->convertFromScrollbarToContainingView(this, localPoint);
+    if (m_scrollableArea)
+        return m_scrollableArea->convertFromScrollbarToContainingView(this, localPoint);
 
     return Widget::convertToContainingView(localPoint);
 }
 
 IntPoint Scrollbar::convertFromContainingView(const IntPoint& parentPoint) const
 {
-    if (m_client)
-        return m_client->convertFromContainingViewToScrollbar(this, parentPoint);
+    if (m_scrollableArea)
+        return m_scrollableArea->convertFromContainingViewToScrollbar(this, parentPoint);
 
     return Widget::convertFromContainingView(parentPoint);
 }
 
-}
+} // namespace WebCore

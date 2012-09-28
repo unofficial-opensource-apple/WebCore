@@ -20,21 +20,22 @@
 #include "config.h"
 #include "qt_instance.h"
 
-#include "ArgList.h"
+#include "Error.h"
 #include "JSDOMBinding.h"
+#include "JSDOMWindowBase.h"
 #include "JSGlobalObject.h"
 #include "JSLock.h"
+#include "ObjectPrototype.h"
+#include "PropertyNameArray.h"
 #include "qt_class.h"
 #include "qt_runtime.h"
-#include "PropertyNameArray.h"
 #include "runtime_object.h"
-#include "ObjectPrototype.h"
-#include "Error.h"
+#include "runtime/FunctionPrototype.h"
 
-#include <qmetaobject.h>
 #include <qdebug.h>
-#include <qmetatype.h>
 #include <qhash.h>
+#include <qmetaobject.h>
+#include <qmetatype.h>
 
 namespace JSC {
 namespace Bindings {
@@ -43,37 +44,49 @@ namespace Bindings {
 typedef QMultiHash<void*, QtInstance*> QObjectInstanceMap;
 static QObjectInstanceMap cachedInstances;
 
-// Derived RuntimeObject
-class QtRuntimeObjectImp : public RuntimeObjectImp {
-public:
-    QtRuntimeObjectImp(ExecState*, PassRefPtr<Instance>);
+// Used for implementing '__qt_sender__'.
+Q_GLOBAL_STATIC(QtInstance::QtSenderStack, senderStack)
 
+// Derived RuntimeObject
+class QtRuntimeObject : public RuntimeObject {
+public:
+    typedef RuntimeObject Base;
+
+    static QtRuntimeObject* create(ExecState* exec, JSGlobalObject* globalObject, PassRefPtr<Instance> instance)
+    {
+        Structure* domStructure = WebCore::deprecatedGetDOMStructure<QtRuntimeObject>(exec);
+        QtRuntimeObject* object = new (allocateCell<QtRuntimeObject>(*exec->heap())) QtRuntimeObject(exec, globalObject, domStructure, instance);
+        object->finishCreation(globalObject);
+        return object;
+    }
+    
     static const ClassInfo s_info;
 
-    virtual void markChildren(MarkStack& markStack)
+    static void visitChildren(JSCell* cell, SlotVisitor& visitor)
     {
-        RuntimeObjectImp::markChildren(markStack);
-        QtInstance* instance = static_cast<QtInstance*>(getInternalInstance());
+        QtRuntimeObject* thisObject = jsCast<QtRuntimeObject*>(cell);
+        RuntimeObject::visitChildren(thisObject, visitor);
+        QtInstance* instance = static_cast<QtInstance*>(thisObject->getInternalInstance());
         if (instance)
-            instance->markAggregate(markStack);
+            instance->visitAggregate(visitor);
     }
 
-    static PassRefPtr<Structure> createStructure(JSValue prototype)
+    static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(prototype, TypeInfo(ObjectType,  StructureFlags), AnonymousSlotCount);
+        return Structure::create(globalData, globalObject, prototype, TypeInfo(ObjectType,  StructureFlags), &s_info);
     }
 
 protected:
-    static const unsigned StructureFlags = RuntimeObjectImp::StructureFlags | OverridesMarkChildren;
+    static const unsigned StructureFlags = RuntimeObject::StructureFlags | OverridesVisitChildren;
 
 private:
-    virtual const ClassInfo* classInfo() const { return &s_info; }
+    QtRuntimeObject(ExecState*, JSGlobalObject*, Structure*, PassRefPtr<Instance>);
 };
 
-const ClassInfo QtRuntimeObjectImp::s_info = { "QtRuntimeObject", &RuntimeObjectImp::s_info, 0, 0 };
+const ClassInfo QtRuntimeObject::s_info = { "QtRuntimeObject", &RuntimeObject::s_info, 0, 0, CREATE_METHOD_TABLE(QtRuntimeObject) };
 
-QtRuntimeObjectImp::QtRuntimeObjectImp(ExecState* exec, PassRefPtr<Instance> instance)
-    : RuntimeObjectImp(exec, WebCore::deprecatedGetDOMStructure<QtRuntimeObjectImp>(exec), instance)
+QtRuntimeObject::QtRuntimeObject(ExecState* exec, JSGlobalObject* globalObject, Structure* structure, PassRefPtr<Instance> instance)
+    : RuntimeObject(exec, globalObject, structure, instance)
 {
 }
 
@@ -83,14 +96,13 @@ QtInstance::QtInstance(QObject* o, PassRefPtr<RootObject> rootObject, QScriptEng
     , m_class(0)
     , m_object(o)
     , m_hashkey(o)
-    , m_defaultMethod(0)
     , m_ownership(ownership)
 {
 }
 
 QtInstance::~QtInstance()
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(WebCore::JSDOMWindowBase::commonJSGlobalData());
 
     cachedInstances.remove(m_hashkey);
 
@@ -105,11 +117,11 @@ QtInstance::~QtInstance()
         case QScriptEngine::QtOwnership:
             break;
         case QScriptEngine::AutoOwnership:
-            if (m_object->parent())
+            if (m_object.data()->parent())
                 break;
             // fall through!
         case QScriptEngine::ScriptOwnership:
-            delete m_object;
+            delete m_object.data();
             break;
         }
     }
@@ -117,9 +129,9 @@ QtInstance::~QtInstance()
 
 PassRefPtr<QtInstance> QtInstance::getQtInstance(QObject* o, PassRefPtr<RootObject> rootObject, QScriptEngine::ValueOwnership ownership)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(WebCore::JSDOMWindowBase::commonJSGlobalData());
 
-    foreach(QtInstance* instance, cachedInstances.values(o))
+    foreach (QtInstance* instance, cachedInstances.values(o))
         if (instance->rootObject() == rootObject) {
             // The garbage collector removes instances, but it may happen that the wrapped
             // QObject dies before the gc kicks in. To handle that case we have to do an additional
@@ -139,57 +151,54 @@ PassRefPtr<QtInstance> QtInstance::getQtInstance(QObject* o, PassRefPtr<RootObje
 
 bool QtInstance::getOwnPropertySlot(JSObject* object, ExecState* exec, const Identifier& propertyName, PropertySlot& slot)
 {
-    return object->JSObject::getOwnPropertySlot(exec, propertyName, slot);
+    return JSObject::getOwnPropertySlot(object, exec, propertyName, slot);
 }
 
 void QtInstance::put(JSObject* object, ExecState* exec, const Identifier& propertyName, JSValue value, PutPropertySlot& slot)
 {
-    object->JSObject::put(exec, propertyName, value, slot);
+    JSObject::put(object, exec, propertyName, value, slot);
 }
 
 void QtInstance::removeCachedMethod(JSObject* method)
 {
-    if (m_defaultMethod == method)
-        m_defaultMethod = 0;
-
-    for(QHash<QByteArray, JSObject*>::Iterator it = m_methods.begin(),
-        end = m_methods.end(); it != end; ++it)
-        if (it.value() == method) {
+    for (QHash<QByteArray, WriteBarrier<JSObject> >::Iterator it = m_methods.begin(), end = m_methods.end(); it != end; ++it) {
+        if (it.value().get() == method) {
             m_methods.erase(it);
             return;
         }
+    }
 }
 
 QtInstance* QtInstance::getInstance(JSObject* object)
 {
     if (!object)
         return 0;
-    if (!object->inherits(&QtRuntimeObjectImp::s_info))
+    if (!object->inherits(&QtRuntimeObject::s_info))
         return 0;
-    return static_cast<QtInstance*>(static_cast<RuntimeObjectImp*>(object)->getInternalInstance());
+    return static_cast<QtInstance*>(static_cast<RuntimeObject*>(object)->getInternalInstance());
 }
 
 Class* QtInstance::getClass() const
 {
-    if (!m_class)
-        m_class = QtClass::classForObject(m_object);
+    if (!m_class) {
+        if (!m_object)
+            return 0;
+        m_class = QtClass::classForObject(m_object.data());
+    }
     return m_class;
 }
 
-RuntimeObjectImp* QtInstance::newRuntimeObject(ExecState* exec)
+RuntimeObject* QtInstance::newRuntimeObject(ExecState* exec)
 {
-    JSLock lock(SilenceAssertionsOnly);
-    return new (exec) QtRuntimeObjectImp(exec, this);
+    JSLockHolder lock(exec);
+    m_methods.clear();
+    return QtRuntimeObject::create(exec, exec->lexicalGlobalObject(), this);
 }
 
-void QtInstance::markAggregate(MarkStack& markStack)
+void QtInstance::visitAggregate(SlotVisitor& visitor)
 {
-    if (m_defaultMethod)
-        markStack.append(m_defaultMethod);
-    foreach(JSObject* val, m_methods.values()) {
-        if (val)
-            markStack.append(val);
-    }
+    for (QHash<QByteArray, WriteBarrier<JSObject> >::Iterator it = m_methods.begin(), end = m_methods.end(); it != end; ++it)
+        visitor.append(&it.value());
 }
 
 void QtInstance::begin()
@@ -213,33 +222,46 @@ void QtInstance::getPropertyNames(ExecState* exec, PropertyNameArray& array)
         const QMetaObject* meta = obj->metaObject();
 
         int i;
-        for (i=0; i < meta->propertyCount(); i++) {
+        for (i = 0; i < meta->propertyCount(); i++) {
             QMetaProperty prop = meta->property(i);
-            if (prop.isScriptable()) {
+            if (prop.isScriptable())
                 array.add(Identifier(exec, prop.name()));
-            }
         }
 
+#ifndef QT_NO_PROPERTIES
         QList<QByteArray> dynProps = obj->dynamicPropertyNames();
-        foreach(QByteArray ba, dynProps) {
+        foreach (const QByteArray& ba, dynProps)
             array.add(Identifier(exec, ba.constData()));
-        }
+#endif
 
-        for (i=0; i < meta->methodCount(); i++) {
+        const int methodCount = meta->methodCount();
+        for (i = 0; i < methodCount; i++) {
             QMetaMethod method = meta->method(i);
             if (method.access() != QMetaMethod::Private) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+                QString sig = QString::fromLatin1(method.methodSignature());
+                array.add(Identifier(exec, UString(sig.utf16(), sig.length())));
+#else
                 array.add(Identifier(exec, method.signature()));
+#endif
             }
         }
     }
 }
 
-JSValue QtInstance::invokeMethod(ExecState*, const MethodList&, const ArgList&)
+JSValue QtInstance::getMethod(ExecState* exec, const Identifier& propertyName)
+{
+    if (!getClass())
+        return jsNull();
+    MethodList methodList = m_class->methodsNamed(propertyName, this);
+    return RuntimeMethod::create(exec, exec->lexicalGlobalObject(), WebCore::deprecatedGetDOMStructure<RuntimeMethod>(exec), propertyName, methodList);
+}
+
+JSValue QtInstance::invokeMethod(ExecState*, RuntimeMethod*)
 {
     // Implemented via fallbackMethod & QtRuntimeMetaMethod::callAsFunction
     return jsUndefined();
 }
-
 
 JSValue QtInstance::defaultValue(ExecState* exec, PreferredPrimitiveType hint) const
 {
@@ -252,12 +274,15 @@ JSValue QtInstance::defaultValue(ExecState* exec, PreferredPrimitiveType hint) c
 
 JSValue QtInstance::stringValue(ExecState* exec) const
 {
+    QObject* obj = getObject();
+    if (!obj)
+        return jsNull();
+
     // Hmm.. see if there is a toString defined
     QByteArray buf;
     bool useDefault = true;
     getClass();
-    QObject* obj = getObject();
-    if (m_class && obj) {
+    if (m_class) {
         // Cheat and don't use the full name resolution
         int index = obj->metaObject()->indexOfMethod("toString()");
         if (index >= 0) {
@@ -265,18 +290,31 @@ JSValue QtInstance::stringValue(ExecState* exec) const
             // Check to see how much we can call it
             if (m.access() != QMetaMethod::Private
                 && m.methodType() != QMetaMethod::Signal
-                && m.parameterTypes().count() == 0) {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+                && m.parameterCount() == 0
+                && m.returnType() != QMetaType::Void) {
+                QVariant ret(m.returnType(), (void*)0);
+                void * qargs[1];
+                qargs[0] = ret.data();
+
+                if (QMetaObject::metacall(obj, QMetaObject::InvokeMetaMethod, index, qargs) < 0) {
+                    if (ret.isValid() && ret.canConvert(QVariant::String)) {
+                        buf = ret.toString().toLatin1().constData(); // ### Latin 1? Ascii?
+                        useDefault = false;
+#else
+                && m.parameterTypes().isEmpty()) {
                 const char* retsig = m.typeName();
                 if (retsig && *retsig) {
                     QVariant ret(QMetaType::type(retsig), (void*)0);
                     void * qargs[1];
                     qargs[0] = ret.data();
 
-                    if (obj->qt_metacall(QMetaObject::InvokeMetaMethod, index, qargs) < 0) {
+                    if (QMetaObject::metacall(obj, QMetaObject::InvokeMetaMethod, index, qargs) < 0) {
                         if (ret.isValid() && ret.canConvert(QVariant::String)) {
                             buf = ret.toString().toLatin1().constData(); // ### Latin 1? Ascii?
                             useDefault = false;
                         }
+#endif
                     }
                 }
             }
@@ -294,15 +332,15 @@ JSValue QtInstance::stringValue(ExecState* exec) const
     return jsString(exec, buf.constData());
 }
 
-JSValue QtInstance::numberValue(ExecState* exec) const
+JSValue QtInstance::numberValue(ExecState*) const
 {
-    return jsNumber(exec, 0);
+    return jsNumber(0);
 }
 
 JSValue QtInstance::booleanValue() const
 {
     // ECMA 9.2
-    return jsBoolean(true);
+    return jsBoolean(getObject());
 }
 
 JSValue QtInstance::valueOf(ExecState* exec) const
@@ -310,19 +348,26 @@ JSValue QtInstance::valueOf(ExecState* exec) const
     return stringValue(exec);
 }
 
+QtInstance::QtSenderStack* QtInstance::qtSenderStack()
+{
+    return senderStack();
+}
+
 // In qt_runtime.cpp
 JSValue convertQVariantToValue(ExecState*, PassRefPtr<RootObject> root, const QVariant& variant);
 QVariant convertValueToQVariant(ExecState*, JSValue, QMetaType::Type hint, int *distance);
 
-const char* QtField::name() const
+QByteArray QtField::name() const
 {
     if (m_type == MetaProperty)
         return m_property.name();
-    else if (m_type == ChildObject && m_childObject)
-        return m_childObject->objectName().toLatin1();
-    else if (m_type == DynamicProperty)
-        return m_dynamicProperty.constData();
-    return ""; // deleted child object
+    if (m_type == ChildObject && m_childObject)
+        return m_childObject.data()->objectName().toLatin1();
+#ifndef QT_NO_PROPERTIES
+    if (m_type == DynamicProperty)
+        return m_dynamicProperty;
+#endif
+    return QByteArray(); // deleted child object
 }
 
 JSValue QtField::valueFromInstance(ExecState* exec, const Instance* inst) const
@@ -338,15 +383,15 @@ JSValue QtField::valueFromInstance(ExecState* exec, const Instance* inst) const
             else
                 return jsUndefined();
         } else if (m_type == ChildObject)
-            val = QVariant::fromValue((QObject*) m_childObject);
+            val = QVariant::fromValue((QObject*) m_childObject.data());
+#ifndef QT_NO_PROPERTIES
         else if (m_type == DynamicProperty)
             val = obj->property(m_dynamicProperty);
-
+#endif
         return convertQVariantToValue(exec, inst->rootObject(), val);
-    } else {
-        QString msg = QString(QLatin1String("cannot access member `%1' of deleted QObject")).arg(QLatin1String(name()));
-        return throwError(exec, GeneralError, msg.toLatin1().constData());
     }
+    QString msg = QString(QLatin1String("cannot access member `%1' of deleted QObject")).arg(QLatin1String(name()));
+    return throwError(exec, createError(exec, msg.toLatin1().constData()));
 }
 
 void QtField::setValueToInstance(ExecState* exec, const Instance* inst, JSValue aValue) const
@@ -359,18 +404,25 @@ void QtField::setValueToInstance(ExecState* exec, const Instance* inst, JSValue 
     if (obj) {
         QMetaType::Type argtype = QMetaType::Void;
         if (m_type == MetaProperty)
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+            argtype = (QMetaType::Type) m_property.userType();
+#else
             argtype = (QMetaType::Type) QMetaType::type(m_property.typeName());
+#endif
 
         // dynamic properties just get any QVariant
         QVariant val = convertValueToQVariant(exec, aValue, argtype, 0);
         if (m_type == MetaProperty) {
             if (m_property.isWritable())
                 m_property.write(obj, val);
-        } else if (m_type == DynamicProperty)
+        }
+#ifndef QT_NO_PROPERTIES
+        else if (m_type == DynamicProperty)
             obj->setProperty(m_dynamicProperty.constData(), val);
+#endif
     } else {
         QString msg = QString(QLatin1String("cannot access member `%1' of deleted QObject")).arg(QLatin1String(name()));
-        throwError(exec, GeneralError, msg.toLatin1().constData());
+        throwError(exec, createError(exec, msg.toLatin1().constData()));
     }
 }
 

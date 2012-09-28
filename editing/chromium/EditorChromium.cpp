@@ -33,12 +33,18 @@
 
 #include "ChromiumDataObject.h"
 #include "ClipboardChromium.h"
+#include "Frame.h"
 
 namespace WebCore {
 
-PassRefPtr<Clipboard> Editor::newGeneralClipboard(ClipboardAccessPolicy policy)
+PassRefPtr<Clipboard> Editor::newGeneralClipboard(ClipboardAccessPolicy policy, Frame* frame)
 {
-    return ClipboardChromium::create(false, ChromiumDataObject::create(), policy);
+    return ClipboardChromium::create(
+        Clipboard::CopyAndPaste,
+        policy == ClipboardWritable ? ChromiumDataObject::create() : ChromiumDataObject::createFromPasteboard(),
+        policy,
+        frame);
+
 }
 
 } // namespace WebCore

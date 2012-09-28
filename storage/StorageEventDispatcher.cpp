@@ -26,8 +26,7 @@
 #include "config.h"
 #include "StorageEventDispatcher.h"
 
-#if ENABLE(DOM_STORAGE)
-
+#include "Document.h"
 #include "DOMWindow.h"
 #include "EventNames.h"
 #include "Frame.h"
@@ -54,8 +53,12 @@ void StorageEventDispatcher::dispatch(const String& key, const String& oldValue,
                 frames.append(frame);
         }
 
-        for (unsigned i = 0; i < frames.size(); ++i)
-            frames[i]->document()->enqueueStorageEvent(StorageEvent::create(eventNames().storageEvent, key, oldValue, newValue, sourceFrame->document()->url(), frames[i]->domWindow()->sessionStorage()));
+        for (unsigned i = 0; i < frames.size(); ++i) {
+            ExceptionCode ec = 0;
+            Storage* storage = frames[i]->domWindow()->sessionStorage(ec);
+            if (!ec)
+                frames[i]->document()->enqueueWindowEvent(StorageEvent::create(eventNames().storageEvent, key, oldValue, newValue, sourceFrame->document()->url(), storage));
+        }
     } else {
         // Send events to every page.
         const HashSet<Page*>& pages = page->group().pages();
@@ -67,11 +70,13 @@ void StorageEventDispatcher::dispatch(const String& key, const String& oldValue,
             }
         }
 
-        for (unsigned i = 0; i < frames.size(); ++i)
-            frames[i]->document()->enqueueStorageEvent(StorageEvent::create(eventNames().storageEvent, key, oldValue, newValue, sourceFrame->document()->url(), frames[i]->domWindow()->localStorage()));
+        for (unsigned i = 0; i < frames.size(); ++i) {
+            ExceptionCode ec = 0;
+            Storage* storage = frames[i]->domWindow()->localStorage(ec);
+            if (!ec)
+                frames[i]->document()->enqueueWindowEvent(StorageEvent::create(eventNames().storageEvent, key, oldValue, newValue, sourceFrame->document()->url(), storage));
+        }
     }
 }
 
 }
-
-#endif // ENABLE(DOM_STORAGE)

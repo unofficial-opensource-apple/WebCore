@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -32,30 +32,36 @@ class RenderMarquee;
 
 class HTMLMarqueeElement : public HTMLElement, private ActiveDOMObject {
 public:
-    HTMLMarqueeElement(const QualifiedName&, Document*);
-    
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
-    virtual int tagPriority() const { return 3; }
+    static PassRefPtr<HTMLMarqueeElement> create(const QualifiedName&, Document*);
 
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(MappedAttribute*);
-
-    int minimumDelay() const { return m_minimumDelay; }
+    int minimumDelay() const;
 
     // DOM Functions
 
     void start();
     void stop();
     
+    int scrollAmount() const;
+    void setScrollAmount(int, ExceptionCode&);
+    
+    int scrollDelay() const;
+    void setScrollDelay(int, ExceptionCode&);
+    
+    int loop() const;
+    void setLoop(int, ExceptionCode&);
+    
 private:
+    HTMLMarqueeElement(const QualifiedName&, Document*);
+
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
+
     // ActiveDOMObject
     virtual bool canSuspend() const;
-    virtual void suspend();
+    virtual void suspend(ReasonForSuspension);
     virtual void resume();
 
     RenderMarquee* renderMarquee() const;
-
-    int m_minimumDelay;
 };
 
 } // namespace WebCore

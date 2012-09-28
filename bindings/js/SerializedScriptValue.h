@@ -27,195 +27,98 @@
 #ifndef SerializedScriptValue_h
 #define SerializedScriptValue_h
 
-#include "ScriptValue.h"
+#include "PlatformString.h"
+#include "ScriptState.h"
+#include <heap/Strong.h>
+#include <runtime/JSValue.h>
+#include <wtf/ArrayBuffer.h>
+#include <wtf/Forward.h>
+#include <wtf/PassRefPtr.h>
+#include <wtf/RefCounted.h>
 
 typedef const struct OpaqueJSContext* JSContextRef;
 typedef const struct OpaqueJSValue* JSValueRef;
 
 namespace WebCore {
-    class File;
-    class FileList;
-    class SerializedArray;
-    class SerializedFileList;
-    class SerializedObject;
 
-    class SharedSerializedData : public RefCounted<SharedSerializedData> {
-    public:
-        virtual ~SharedSerializedData() { }
-        SerializedArray* asArray();
-        SerializedObject* asObject();
-        SerializedFileList* asFileList();
-    };
+class MessagePort;
+typedef Vector<RefPtr<MessagePort>, 1> MessagePortArray;
+typedef Vector<RefPtr<WTF::ArrayBuffer>, 1> ArrayBufferArray;
+ 
+enum SerializationReturnCode {
+    SuccessfullyCompleted,
+    StackOverflowError,
+    InterruptedExecutionError,
+    ValidationError,
+    ExistingExceptionError,
+    UnspecifiedError
+};
+    
+enum SerializationErrorMode { NonThrowing, Throwing };
 
-    class SerializedScriptValue;
+class ScriptValue;
+class SharedBuffer;
 
-    class SerializedScriptValueData {
-    public:
-        enum SerializedType {
-            EmptyType,
-            DateType,
-            NumberType,
-            ImmediateType,
-            ObjectType,
-            ArrayType,
-            StringType,
-            FileType,
-            FileListType
-        };
+class SerializedScriptValue :
+#if ENABLE(INDEXED_DATABASE)
+    public ThreadSafeRefCounted<SerializedScriptValue> {
+#else
+    public RefCounted<SerializedScriptValue> {
+#endif
+public:
+    static PassRefPtr<SerializedScriptValue> create(JSC::ExecState*, JSC::JSValue, MessagePortArray*, ArrayBufferArray*,
+                                                    SerializationErrorMode = Throwing);
+    static PassRefPtr<SerializedScriptValue> create(JSContextRef, JSValueRef, MessagePortArray*, ArrayBufferArray*, JSValueRef* exception);
+    static PassRefPtr<SerializedScriptValue> create(JSContextRef, JSValueRef, JSValueRef* exception);
 
-        SerializedType type() const { return m_type; }
-        static SerializedScriptValueData serialize(JSC::ExecState*, JSC::JSValue);
-        JSC::JSValue deserialize(JSC::ExecState*, JSC::JSGlobalObject*, bool mustCopy) const;
+    static PassRefPtr<SerializedScriptValue> create(const String&);
+    static PassRefPtr<SerializedScriptValue> adopt(Vector<uint8_t>& buffer)
+    {
+        return adoptRef(new SerializedScriptValue(buffer));
+    }
 
-        ~SerializedScriptValueData()
-        {
-            if (m_sharedData)
-                tearDownSerializedData();
-        }
+    static PassRefPtr<SerializedScriptValue> create();
+    static SerializedScriptValue* nullValue();
+    static PassRefPtr<SerializedScriptValue> undefinedValue();
+    static PassRefPtr<SerializedScriptValue> booleanValue(bool value);
 
-        SerializedScriptValueData()
-            : m_type(EmptyType)
-        {
-        }
+    String toString();
+    
+    JSC::JSValue deserialize(JSC::ExecState*, JSC::JSGlobalObject*, MessagePortArray*, SerializationErrorMode = Throwing);
+    JSValueRef deserialize(JSContextRef, JSValueRef* exception, MessagePortArray*);
+    JSValueRef deserialize(JSContextRef, JSValueRef* exception);
 
-        explicit SerializedScriptValueData(const String& string)
-            : m_type(StringType)
-            , m_string(string.crossThreadString()) // FIXME: Should be able to just share the Rep
-        {
-        }
-        
-        explicit SerializedScriptValueData(const File*);
-        explicit SerializedScriptValueData(const FileList*);
+#if ENABLE(INSPECTOR)
+    ScriptValue deserializeForInspector(ScriptState*);
+#endif
 
-        explicit SerializedScriptValueData(JSC::JSValue value)
-            : m_type(ImmediateType)
-        {
-            ASSERT(!value.isCell());
-            m_data.m_immediate = JSC::JSValue::encode(value);
-        }
+    const Vector<uint8_t>& data() { return m_data; }
+    const Vector<String>& blobURLs() const { return m_blobURLs; }
 
-        SerializedScriptValueData(SerializedType type, double value)
-            : m_type(type)
-        {
-            m_data.m_double = value;
-        }
+#if ENABLE(INDEXED_DATABASE)
+    static PassRefPtr<SerializedScriptValue> create(JSC::ExecState*, JSC::JSValue);
+    static PassRefPtr<SerializedScriptValue> createFromWire(const String& data);
+    String toWireString() const;
+    static PassRefPtr<SerializedScriptValue> numberValue(double value);
+    JSC::JSValue deserialize(JSC::ExecState*, JSC::JSGlobalObject*);
+#endif
 
-        SerializedScriptValueData(RefPtr<SerializedObject>);
-        SerializedScriptValueData(RefPtr<SerializedArray>);
+    ~SerializedScriptValue();
 
-        JSC::JSValue asImmediate() const
-        {
-            ASSERT(m_type == ImmediateType);
-            return JSC::JSValue::decode(m_data.m_immediate);
-        }
+private:
+    typedef Vector<WTF::ArrayBufferContents> ArrayBufferContentsArray;
+    static void maybeThrowExceptionIfSerializationFailed(JSC::ExecState*, SerializationReturnCode);
+    static bool serializationDidCompleteSuccessfully(SerializationReturnCode);
+    static PassOwnPtr<ArrayBufferContentsArray> transferArrayBuffers(ArrayBufferArray&, SerializationReturnCode&);
 
-        double asDouble() const
-        {
-            ASSERT(m_type == NumberType || m_type == DateType);
-            return m_data.m_double;
-        }
+    SerializedScriptValue(Vector<unsigned char>&);
+    SerializedScriptValue(Vector<unsigned char>&, Vector<String>& blobURLs);
+    SerializedScriptValue(Vector<unsigned char>&, Vector<String>& blobURLs, PassOwnPtr<ArrayBufferContentsArray>);
+    Vector<unsigned char> m_data;
+    OwnPtr<ArrayBufferContentsArray> m_arrayBufferContentsArray;
+    Vector<String> m_blobURLs;
+};
 
-        String asString() const
-        {
-            ASSERT(m_type == StringType || m_type == FileType);
-            return m_string;
-        }
-
-        SerializedObject* asObject() const
-        {
-            ASSERT(m_type == ObjectType);
-            ASSERT(m_sharedData);
-            return m_sharedData->asObject();
-        }
-
-        SerializedArray* asArray() const
-        {
-            ASSERT(m_type == ArrayType);
-            ASSERT(m_sharedData);
-            return m_sharedData->asArray();
-        }
-
-        SerializedFileList* asFileList() const
-        {
-            ASSERT(m_type == FileListType);
-            ASSERT(m_sharedData);
-            return m_sharedData->asFileList();
-        }
-
-        operator bool() const { return m_type != EmptyType; }
-
-        SerializedScriptValueData release()
-        {
-            SerializedScriptValueData result = *this;
-            *this = SerializedScriptValueData();
-            return result;
-        }
-
-    private:
-        void tearDownSerializedData();
-        SerializedType m_type;
-        RefPtr<SharedSerializedData> m_sharedData;
-        String m_string;
-        union {
-            double m_double;
-            JSC::EncodedJSValue m_immediate;
-        } m_data;
-    };
-
-    class SerializedScriptValue : public RefCounted<SerializedScriptValue> {
-    public:
-        static PassRefPtr<SerializedScriptValue> create(JSC::ExecState* exec, JSC::JSValue value)
-        {
-            return adoptRef(new SerializedScriptValue(SerializedScriptValueData::serialize(exec, value)));
-        }
-
-        static PassRefPtr<SerializedScriptValue> create(JSContextRef, JSValueRef value, JSValueRef* exception);
-
-        static PassRefPtr<SerializedScriptValue> create(String string)
-        {
-            return adoptRef(new SerializedScriptValue(SerializedScriptValueData(string)));
-        }
-
-        static PassRefPtr<SerializedScriptValue> create()
-        {
-            return adoptRef(new SerializedScriptValue(SerializedScriptValueData()));
-        }
-
-        PassRefPtr<SerializedScriptValue> release()
-        {
-            PassRefPtr<SerializedScriptValue> result = adoptRef(new SerializedScriptValue(m_value));
-            m_value = SerializedScriptValueData();
-            result->m_mustCopy = true;
-            return result;
-        }
-
-        String toString()
-        {
-            if (m_value.type() != SerializedScriptValueData::StringType)
-                return "";
-            return m_value.asString();
-        }
-
-        JSC::JSValue deserialize(JSC::ExecState* exec, JSC::JSGlobalObject* globalObject)
-        {
-            if (!m_value)
-                return JSC::jsNull();
-            return m_value.deserialize(exec, globalObject, m_mustCopy);
-        }
-
-        JSValueRef deserialize(JSContextRef, JSValueRef* exception);
-        ~SerializedScriptValue();
-
-    private:
-        SerializedScriptValue(SerializedScriptValueData value)
-            : m_value(value)
-            , m_mustCopy(false)
-        {
-        }
-
-        SerializedScriptValueData m_value;
-        bool m_mustCopy;
-    };
 }
 
 #endif // SerializedScriptValue_h

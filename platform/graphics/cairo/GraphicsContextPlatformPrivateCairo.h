@@ -25,8 +25,13 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
+#ifndef GraphicsContextPlatformPrivateCairo_h
+#define GraphicsContextPlatformPrivateCairo_h
+
 #include "GraphicsContext.h"
 
+#include "PlatformContextCairo.h"
+#include "RefPtrCairo.h"
 #include <cairo.h>
 #include <math.h>
 #include <stdio.h>
@@ -43,22 +48,20 @@ namespace WebCore {
 
 class GraphicsContextPlatformPrivate {
 public:
-    GraphicsContextPlatformPrivate()
-        : cr(0)
+    GraphicsContextPlatformPrivate(PlatformContextCairo* newPlatformContext)
+        : platformContext(newPlatformContext)
 #if PLATFORM(GTK)
         , expose(0)
 #elif PLATFORM(WIN)
         // NOTE:  These may note be needed: review and remove once Cairo implementation is complete
         , m_hdc(0)
-        , m_transparencyCount(0)
         , m_shouldIncludeChildWindows(false)
 #endif
     {
     }
 
-    ~GraphicsContextPlatformPrivate()
+    virtual ~GraphicsContextPlatformPrivate()
     {
-        cairo_destroy(cr);
     }
 
 #if PLATFORM(WIN)
@@ -71,10 +74,9 @@ public:
     void scale(const FloatSize&);
     void rotate(float);
     void translate(float, float);
-    void concatCTM(const TransformationMatrix&);
-    void beginTransparencyLayer() { m_transparencyCount++; }
-    void endTransparencyLayer() { m_transparencyCount--; }
-    void syncContext(PlatformGraphicsContext* cr);
+    void concatCTM(const AffineTransform&);
+    void setCTM(const AffineTransform&);
+    void syncContext(cairo_t* cr);
 #else
     // On everything else, we do nothing.
     void save() {}
@@ -85,23 +87,40 @@ public:
     void scale(const FloatSize&) {}
     void rotate(float) {}
     void translate(float, float) {}
-    void concatCTM(const TransformationMatrix&) {}
-    void beginTransparencyLayer() {}
-    void endTransparencyLayer() {}
-    void syncContext(PlatformGraphicsContext* cr) {}
+    void concatCTM(const AffineTransform&) {}
+    void setCTM(const AffineTransform&) {}
+    void syncContext(cairo_t* cr) {}
 #endif
 
-    cairo_t* cr;
+    PlatformContextCairo* platformContext;
     Vector<float> layers;
+    InterpolationQuality imageInterpolationQuality;
 
 #if PLATFORM(GTK)
     GdkEventExpose* expose;
 #elif PLATFORM(WIN)
     HDC m_hdc;
-    unsigned m_transparencyCount;
     bool m_shouldIncludeChildWindows;
 #endif
 };
 
+// This is a specialized private section for the Cairo GraphicsContext, which knows how
+// to clean up the heap allocated PlatformContextCairo that we must use for the top-level
+// GraphicsContext.
+class GraphicsContextPlatformPrivateToplevel : public GraphicsContextPlatformPrivate {
+public:
+    GraphicsContextPlatformPrivateToplevel(PlatformContextCairo* platformContext)
+        : GraphicsContextPlatformPrivate(platformContext)
+    {
+    }
+
+    virtual ~GraphicsContextPlatformPrivateToplevel()
+    {
+        delete platformContext;
+    }
+};
+
+
 } // namespace WebCore
 
+#endif // GraphicsContextPlatformPrivateCairo_h

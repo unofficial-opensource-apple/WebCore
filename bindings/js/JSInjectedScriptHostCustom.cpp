@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Matt Lilek <webkit@mattlilek.com>
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2010-2011 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,183 +31,244 @@
  */
 
 #include "config.h"
-#include "JSInjectedScriptHost.h"
 
 #if ENABLE(INSPECTOR)
 
-#include "Console.h"
-#if ENABLE(DATABASE)
+#include "JSInjectedScriptHost.h"
+
+#if ENABLE(SQL_DATABASE)
 #include "Database.h"
 #include "JSDatabase.h"
 #endif
 #include "ExceptionCode.h"
-#include "Frame.h"
-#include "FrameLoader.h"
 #include "InjectedScriptHost.h"
-#include "InspectorController.h"
-#include "InspectorResource.h"
-#include "JSDOMWindow.h"
+#include "InspectorDOMAgent.h"
+#include "InspectorDebuggerAgent.h"
+#include "InspectorValues.h"
+#include "JSEventListener.h"
+#include "JSFloat32Array.h"
+#include "JSFloat64Array.h"
+#include "JSHTMLAllCollection.h"
+#include "JSHTMLCollection.h"
+#include "JSInt16Array.h"
+#include "JSInt32Array.h"
+#include "JSInt8Array.h"
 #include "JSNode.h"
-#include "JSRange.h"
-#include "Node.h"
-#include "Page.h"
-#if ENABLE(DOM_STORAGE)
-#include "Storage.h"
+#include "JSNodeList.h"
 #include "JSStorage.h"
-#endif
-#include "TextIterator.h"
-#include "VisiblePosition.h"
+#include "JSUint16Array.h"
+#include "JSUint32Array.h"
+#include "JSUint8Array.h"
+#include "ScriptValue.h"
+#include "Storage.h"
 #include <parser/SourceCode.h>
+#include <runtime/DateInstance.h>
+#include <runtime/Error.h>
 #include <runtime/JSArray.h>
+#include <runtime/JSFunction.h>
 #include <runtime/JSLock.h>
-#include <wtf/Vector.h>
-
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-#include "JavaScriptCallFrame.h"
-#include "JavaScriptDebugServer.h"
-#include "JSJavaScriptCallFrame.h"
-#endif
+#include <runtime/RegExpObject.h>
 
 using namespace JSC;
 
 namespace WebCore {
 
-static ScriptObject createInjectedScript(const String& source, InjectedScriptHost* injectedScriptHost, ScriptState* scriptState, long id)
+Node* InjectedScriptHost::scriptValueAsNode(ScriptValue value)
 {
-    SourceCode sourceCode = makeSource(source);
-    JSLock lock(SilenceAssertionsOnly);
-    JSDOMGlobalObject* globalObject = static_cast<JSDOMGlobalObject*>(scriptState->lexicalGlobalObject());
-    JSValue globalThisValue = scriptState->globalThisValue();
-    Completion comp = JSC::evaluate(scriptState, globalObject->globalScopeChain(), sourceCode, globalThisValue);
-    if (comp.complType() != JSC::Normal && comp.complType() != JSC::ReturnValue)
-        return ScriptObject();
-    JSValue functionValue = comp.value();
-    CallData callData;
-    CallType callType = functionValue.getCallData(callData);
-    if (callType == CallTypeNone)
-        return ScriptObject();
-
-    MarkedArgumentBuffer args;
-    args.append(toJS(scriptState, globalObject, injectedScriptHost));
-    args.append(globalThisValue);
-    args.append(jsNumber(scriptState, id));
-    JSValue result = JSC::call(scriptState, functionValue, callType, callData, globalThisValue, args);
-    if (result.isObject())
-        return ScriptObject(scriptState, result.getObject());
-    return ScriptObject();
+    if (!value.isObject() || value.isNull())
+        return 0;
+    return toNode(value.jsValue());
 }
 
-#if ENABLE(DATABASE)
-JSValue JSInjectedScriptHost::databaseForId(ExecState* exec, const ArgList& args)
+ScriptValue InjectedScriptHost::nodeAsScriptValue(ScriptState* state, Node* node)
 {
-    if (args.size() < 1)
-        return jsUndefined();
-
-    InspectorController* ic = impl()->inspectorController();
-    if (!ic)
-        return jsUndefined();
-
-    Database* database = impl()->databaseForId(args.at(0).toInt32(exec));
-    if (!database)
-        return jsUndefined();
-    return toJS(exec, database);
-}
-#endif
-
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-
-JSValue JSInjectedScriptHost::currentCallFrame(ExecState* exec, const ArgList&)
-{
-    JavaScriptCallFrame* callFrame = impl()->currentCallFrame();
-    if (!callFrame || !callFrame->isValid())
-        return jsUndefined();
-
-    JSLock lock(SilenceAssertionsOnly);
-    return toJS(exec, callFrame);
+    JSLockHolder lock(state);
+    return ScriptValue(state->globalData(), toJS(state, deprecatedGlobalObjectForPrototype(state), node));
 }
 
-JSValue JSInjectedScriptHost::isActivation(ExecState*, const ArgList& args)
+JSValue JSInjectedScriptHost::inspectedObject(ExecState* exec)
 {
-    JSObject* object = args.at(0).getObject();
-    return jsBoolean(object && object->isActivationObject());
-}
-
-#endif
-
-JSValue JSInjectedScriptHost::nodeForId(ExecState* exec, const ArgList& args)
-{
-    if (args.size() < 1)
+    if (exec->argumentCount() < 1)
         return jsUndefined();
 
-    Node* node = impl()->nodeForId(args.at(0).toInt32(exec));
+    InjectedScriptHost::InspectableObject* object = impl()->inspectedObject(exec->argument(0).toInt32(exec));
+    if (!object)
+        return jsUndefined();
+
+    JSLockHolder lock(exec);
+    ScriptValue scriptValue = object->get(exec);
+    if (scriptValue.hasNoValue())
+        return jsUndefined();
+
+    return scriptValue.jsValue();
+}
+
+JSValue JSInjectedScriptHost::internalConstructorName(ExecState* exec)
+{
+    if (exec->argumentCount() < 1)
+        return jsUndefined();
+
+    JSObject* thisObject = exec->argument(0).toThisObject(exec);
+    UString result = thisObject->methodTable()->className(thisObject);
+    return jsString(exec, result);
+}
+
+JSValue JSInjectedScriptHost::isHTMLAllCollection(ExecState* exec)
+{
+    if (exec->argumentCount() < 1)
+        return jsUndefined();
+
+    JSValue value = exec->argument(0);
+    return jsBoolean(value.inherits(&JSHTMLAllCollection::s_info));
+}
+
+JSValue JSInjectedScriptHost::type(ExecState* exec)
+{
+    if (exec->argumentCount() < 1)
+        return jsUndefined();
+
+    JSValue value = exec->argument(0);
+    if (value.isString())
+        return jsString(exec, String("string"));
+    if (value.inherits(&JSArray::s_info))
+        return jsString(exec, String("array"));
+    if (value.isBoolean())
+        return jsString(exec, String("boolean"));
+    if (value.isNumber())
+        return jsString(exec, String("number"));
+    if (value.inherits(&DateInstance::s_info))
+        return jsString(exec, String("date"));
+    if (value.inherits(&RegExpObject::s_info))
+        return jsString(exec, String("regexp"));
+    if (value.inherits(&JSNode::s_info))
+        return jsString(exec, String("node"));
+    if (value.inherits(&JSNodeList::s_info))
+        return jsString(exec, String("array"));
+    if (value.inherits(&JSHTMLCollection::s_info))
+        return jsString(exec, String("array"));
+    if (value.inherits(&JSInt8Array::s_info) || value.inherits(&JSInt16Array::s_info) || value.inherits(&JSInt32Array::s_info))
+        return jsString(exec, String("array"));
+    if (value.inherits(&JSUint8Array::s_info) || value.inherits(&JSUint16Array::s_info) || value.inherits(&JSUint32Array::s_info))
+        return jsString(exec, String("array"));
+    if (value.inherits(&JSFloat32Array::s_info) || value.inherits(&JSFloat64Array::s_info))
+        return jsString(exec, String("array"));
+    return jsUndefined();
+}
+
+JSValue JSInjectedScriptHost::functionDetails(ExecState* exec)
+{
+    if (exec->argumentCount() < 1)
+        return jsUndefined();
+    JSValue value = exec->argument(0);
+    if (!value.asCell()->inherits(&JSFunction::s_info))
+        return jsUndefined();
+    JSFunction* function = jsCast<JSFunction*>(value);
+
+    const SourceCode* sourceCode = function->sourceCode();
+    if (!sourceCode)
+        return jsUndefined();
+    int lineNumber = sourceCode->firstLine();
+    if (lineNumber)
+        lineNumber -= 1; // In the inspector protocol all positions are 0-based while in SourceCode they are 1-based
+    UString scriptId = UString::number(sourceCode->provider()->asID());
+
+    JSObject* location = constructEmptyObject(exec);
+    location->putDirect(exec->globalData(), Identifier(exec, "lineNumber"), jsNumber(lineNumber));
+    location->putDirect(exec->globalData(), Identifier(exec, "scriptId"), jsString(exec, scriptId));
+
+    JSObject* result = constructEmptyObject(exec);
+    result->putDirect(exec->globalData(), Identifier(exec, "location"), location);
+    UString name = function->name(exec);
+    if (!name.isEmpty())
+        result->putDirect(exec->globalData(), Identifier(exec, "name"), jsString(exec, name));
+    UString displayName = function->displayName(exec);
+    if (!displayName.isEmpty())
+        result->putDirect(exec->globalData(), Identifier(exec, "displayName"), jsString(exec, displayName));
+    return result;
+}
+
+static JSArray* getJSListenerFunctions(ExecState* exec, Document* document, const EventListenerInfo& listenerInfo)
+{
+    JSArray* result = constructEmptyArray(exec);
+    size_t handlersCount = listenerInfo.eventListenerVector.size();
+    for (size_t i = 0, outputIndex = 0; i < handlersCount; ++i) {
+        const JSEventListener* jsListener = JSEventListener::cast(listenerInfo.eventListenerVector[i].listener.get());
+        if (!jsListener) {
+            ASSERT_NOT_REACHED();
+            continue;
+        }
+        // Hide listeners from other contexts.
+        if (jsListener->isolatedWorld() != currentWorld(exec))
+            continue;
+        JSObject* function = jsListener->jsFunction(document);
+        JSObject* listenerEntry = constructEmptyObject(exec);
+        listenerEntry->putDirect(exec->globalData(), Identifier(exec, "listener"), function);
+        listenerEntry->putDirect(exec->globalData(), Identifier(exec, "useCapture"), jsBoolean(listenerInfo.eventListenerVector[i].useCapture));
+        result->putDirectIndex(exec, outputIndex++, JSValue(listenerEntry));
+    }
+    return result;
+}
+
+JSValue JSInjectedScriptHost::getEventListeners(ExecState* exec)
+{
+    if (exec->argumentCount() < 1)
+        return jsUndefined();
+    JSValue value = exec->argument(0);
+    if (!value.isObject() || value.isNull())
+        return jsUndefined();
+    Node* node = toNode(value);
     if (!node)
         return jsUndefined();
-
-    InspectorController* ic = impl()->inspectorController();
-    if (!ic)
+    // This can only happen for orphan DocumentType nodes.
+    Document* document = node->document();
+    if (!node->document())
         return jsUndefined();
 
-    JSLock lock(SilenceAssertionsOnly);
-    return toJS(exec, node);
+    Vector<EventListenerInfo> listenersArray;
+    impl()->getEventListenersImpl(node, listenersArray);
+
+    JSObject* result = constructEmptyObject(exec);
+    for (size_t i = 0; i < listenersArray.size(); ++i) {
+        JSArray* listeners = getJSListenerFunctions(exec, document, listenersArray[i]);
+        if (!listeners->length())
+            continue;
+        AtomicString eventType = listenersArray[i].eventType;
+        result->putDirect(exec->globalData(), Identifier(exec, eventType.impl()), JSValue(listeners));
+    }
+
+    return result;
 }
 
-JSValue JSInjectedScriptHost::pushNodePathToFrontend(ExecState* exec, const ArgList& args)
+JSValue JSInjectedScriptHost::inspect(ExecState* exec)
 {
-    if (args.size() < 3)
-        return jsUndefined();
-
-    Node* node = toNode(args.at(0));
-    if (!node)
-        return jsUndefined();
-
-    bool withChildren = args.at(1).toBoolean(exec);
-    bool selectInUI = args.at(2).toBoolean(exec);
-    return jsNumber(exec, impl()->pushNodePathToFrontend(node, withChildren, selectInUI));
+    if (exec->argumentCount() >= 2) {
+        ScriptValue object(exec->globalData(), exec->argument(0));
+        ScriptValue hints(exec->globalData(), exec->argument(1));
+        impl()->inspectImpl(object.toInspectorValue(exec), hints.toInspectorValue(exec));
+    }
+    return jsUndefined();
 }
 
-#if ENABLE(DATABASE)
-JSValue JSInjectedScriptHost::selectDatabase(ExecState*, const ArgList& args)
+JSValue JSInjectedScriptHost::databaseId(ExecState* exec)
 {
-    if (args.size() < 1)
+    if (exec->argumentCount() < 1)
         return jsUndefined();
-
-    Database* database = toDatabase(args.at(0));
+#if ENABLE(SQL_DATABASE)
+    Database* database = toDatabase(exec->argument(0));
     if (database)
-        impl()->selectDatabase(database);
+        return jsString(exec, impl()->databaseIdImpl(database));
+#endif
     return jsUndefined();
 }
-#endif
 
-#if ENABLE(DOM_STORAGE)
-JSValue JSInjectedScriptHost::selectDOMStorage(ExecState*, const ArgList& args)
+JSValue JSInjectedScriptHost::storageId(ExecState* exec)
 {
-    if (args.size() < 1)
+    if (exec->argumentCount() < 1)
         return jsUndefined();
-    InspectorController* ic = impl()->inspectorController();
-    if (!ic)
-        return jsUndefined();
-
-    Storage* storage = toStorage(args.at(0));
+    Storage* storage = toStorage(exec->argument(0));
     if (storage)
-        impl()->selectDOMStorage(storage);
+        return jsString(exec, impl()->storageIdImpl(storage));
     return jsUndefined();
-}
-#endif
-
-ScriptObject InjectedScriptHost::injectedScriptFor(ScriptState* scriptState)
-{
-    JSLock lock(SilenceAssertionsOnly);
-    JSDOMGlobalObject* globalObject = static_cast<JSDOMGlobalObject*>(scriptState->lexicalGlobalObject());
-    JSObject* injectedScript = globalObject->injectedScript();
-    if (injectedScript)
-        return ScriptObject(scriptState, injectedScript);
-
-    ASSERT(!m_injectedScriptSource.isEmpty());
-    ScriptObject injectedScriptObject = createInjectedScript(m_injectedScriptSource, this, scriptState, m_nextInjectedScriptId);
-    globalObject->setInjectedScript(injectedScriptObject.jsObject());
-    m_idToInjectedScript.set(m_nextInjectedScriptId, injectedScriptObject);
-    m_nextInjectedScriptId++;
-    return injectedScriptObject;
 }
 
 } // namespace WebCore

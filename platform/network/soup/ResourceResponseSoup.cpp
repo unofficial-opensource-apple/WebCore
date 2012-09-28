@@ -21,9 +21,12 @@
 #include "config.h"
 #include "ResourceResponse.h"
 
-#include "CString.h"
-#include "GOwnPtr.h"
+#include <wtf/gobject/GOwnPtr.h>
+#include "HTTPParsers.h"
+#include "MIMETypeRegistry.h"
 #include "PlatformString.h"
+#include "SoupURIUtils.h"
+#include <wtf/text/CString.h>
 
 using namespace std;
 
@@ -38,7 +41,7 @@ SoupMessage* ResourceResponse::toSoupMessage() const
 
     soupMessage->status_code = httpStatusCode();
 
-    HTTPHeaderMap headers = httpHeaderFields();
+    const HTTPHeaderMap& headers = httpHeaderFields();
     SoupMessageHeaders* soupHeaders = soupMessage->response_headers;
     if (!headers.isEmpty()) {
         HTTPHeaderMap::const_iterator end = headers.end();
@@ -46,15 +49,15 @@ SoupMessage* ResourceResponse::toSoupMessage() const
             soup_message_headers_append(soupHeaders, it->first.string().utf8().data(), it->second.utf8().data());
     }
 
+    soup_message_set_flags(soupMessage, m_soupFlags);
+
     // Body data is not in the message.
     return soupMessage;
 }
 
 void ResourceResponse::updateFromSoupMessage(SoupMessage* soupMessage)
 {
-    SoupURI* soupURI = soup_message_get_uri(soupMessage);
-    GOwnPtr<gchar> uri(soup_uri_to_string(soupURI, FALSE));
-    m_url = KURL(KURL(), String::fromUTF8(uri.get()));
+    m_url = soupURIToKURL(soup_message_get_uri(soupMessage));
 
     m_httpStatusCode = soupMessage->status_code;
 
@@ -64,7 +67,23 @@ void ResourceResponse::updateFromSoupMessage(SoupMessage* soupMessage)
 
     soup_message_headers_iter_init(&headersIter, soupMessage->response_headers);
     while (soup_message_headers_iter_next(&headersIter, &headerName, &headerValue))
-        m_httpHeaderFields.set(String::fromUTF8(headerName), String::fromUTF8(headerValue));
+        m_httpHeaderFields.set(String::fromUTF8(headerName),
+                               String::fromUTF8WithLatin1Fallback(headerValue, strlen(headerValue)));
+
+    m_soupFlags = soup_message_get_flags(soupMessage);
+
+    String contentType;
+    const char* officialType = soup_message_headers_get_one(soupMessage->response_headers, "Content-Type");
+    if (!m_sniffedContentType.isEmpty() && m_sniffedContentType != officialType)
+        contentType = m_sniffedContentType;
+    else
+        contentType = officialType;
+    setMimeType(extractMIMETypeFromMediaType(contentType));
+    setTextEncodingName(extractCharsetFromMediaType(contentType));
+
+    setExpectedContentLength(soup_message_headers_get_content_length(soupMessage->response_headers));
+    setHTTPStatusText(soupMessage->reason_phrase);
+    setSuggestedFilename(filenameFromHTTPContentDisposition(httpHeaderField("Content-Disposition")));
 }
 
 }

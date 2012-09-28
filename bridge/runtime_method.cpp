@@ -27,6 +27,8 @@
 #include "runtime_method.h"
 
 #include "JSDOMBinding.h"
+#include "JSHTMLElement.h"
+#include "JSPluginElementFunctions.h"
 #include "runtime_object.h"
 #include <runtime/Error.h>
 #include <runtime/FunctionPrototype.h>
@@ -39,20 +41,29 @@ using namespace Bindings;
 
 ASSERT_CLASS_FITS_IN_CELL(RuntimeMethod);
 
-const ClassInfo RuntimeMethod::s_info = { "RuntimeMethod", 0, 0, 0 };
+const ClassInfo RuntimeMethod::s_info = { "RuntimeMethod", &InternalFunction::s_info, 0, 0, CREATE_METHOD_TABLE(RuntimeMethod) };
 
-RuntimeMethod::RuntimeMethod(ExecState* exec, const Identifier& ident, Bindings::MethodList& m)
-    // FIXME: deprecatedGetDOMStructure uses the prototype off of the wrong global object
-    // exec-globalData() is also likely wrong.
+RuntimeMethod::RuntimeMethod(JSGlobalObject* globalObject, Structure* structure, Bindings::MethodList& m)
     // Callers will need to pass in the right global object corresponding to this native object "m".
-    : InternalFunction(&exec->globalData(), deprecatedGetDOMStructure<RuntimeMethod>(exec), ident)
-    , _methodList(new MethodList(m))
+    : InternalFunction(globalObject, structure)
+    , _methodList(adoptPtr(new MethodList(m)))
 {
 }
 
-JSValue RuntimeMethod::lengthGetter(ExecState* exec, const Identifier&, const PropertySlot& slot)
+void RuntimeMethod::destroy(JSCell* cell)
 {
-    RuntimeMethod* thisObj = static_cast<RuntimeMethod*>(asObject(slot.slotBase()));
+    jsCast<RuntimeMethod*>(cell)->RuntimeMethod::~RuntimeMethod();
+}
+
+void RuntimeMethod::finishCreation(JSGlobalData& globalData, const Identifier& ident)
+{
+    Base::finishCreation(globalData, ident);
+    ASSERT(inherits(&s_info));
+}
+
+JSValue RuntimeMethod::lengthGetter(ExecState*, JSValue slotBase, const Identifier&)
+{
+    RuntimeMethod* thisObj = static_cast<RuntimeMethod*>(asObject(slotBase));
 
     // Ick!  There may be more than one method with this name.  Arbitrarily
     // just pick the first method.  The fundamental problem here is that 
@@ -60,63 +71,66 @@ JSValue RuntimeMethod::lengthGetter(ExecState* exec, const Identifier&, const Pr
     // Java does.
     // FIXME: a better solution might be to give the maximum number of parameters
     // of any method
-    return jsNumber(exec, thisObj->_methodList->at(0)->numParameters());
+    return jsNumber(thisObj->_methodList->at(0)->numParameters());
 }
 
-bool RuntimeMethod::getOwnPropertySlot(ExecState* exec, const Identifier& propertyName, PropertySlot &slot)
+bool RuntimeMethod::getOwnPropertySlot(JSCell* cell, ExecState* exec, const Identifier& propertyName, PropertySlot &slot)
 {
+    RuntimeMethod* thisObject = jsCast<RuntimeMethod*>(cell);
     if (propertyName == exec->propertyNames().length) {
-        slot.setCustom(this, lengthGetter);
+        slot.setCacheableCustom(thisObject, thisObject->lengthGetter);
         return true;
     }
     
-    return InternalFunction::getOwnPropertySlot(exec, propertyName, slot);
+    return InternalFunction::getOwnPropertySlot(thisObject, exec, propertyName, slot);
 }
 
-bool RuntimeMethod::getOwnPropertyDescriptor(ExecState* exec, const Identifier& propertyName, PropertyDescriptor &descriptor)
+bool RuntimeMethod::getOwnPropertyDescriptor(JSObject* object, ExecState* exec, const Identifier& propertyName, PropertyDescriptor &descriptor)
 {
+    RuntimeMethod* thisObject = jsCast<RuntimeMethod*>(object);
     if (propertyName == exec->propertyNames().length) {
         PropertySlot slot;
-        slot.setCustom(this, lengthGetter);
+        slot.setCustom(thisObject, lengthGetter);
         descriptor.setDescriptor(slot.getValue(exec, propertyName), ReadOnly | DontDelete | DontEnum);
         return true;
     }
     
-    return InternalFunction::getOwnPropertyDescriptor(exec, propertyName, descriptor);
+    return InternalFunction::getOwnPropertyDescriptor(thisObject, exec, propertyName, descriptor);
 }
 
-static JSValue JSC_HOST_CALL callRuntimeMethod(ExecState* exec, JSObject* function, JSValue thisValue, const ArgList& args)
+static EncodedJSValue JSC_HOST_CALL callRuntimeMethod(ExecState* exec)
 {
-    RuntimeMethod* method = static_cast<RuntimeMethod*>(function);
+    RuntimeMethod* method = static_cast<RuntimeMethod*>(exec->callee());
 
     if (method->methods()->isEmpty())
-        return jsUndefined();
-    
-    RuntimeObjectImp* imp;
+        return JSValue::encode(jsUndefined());
 
-    if (thisValue.inherits(&RuntimeObjectImp::s_info)) {
-        imp = static_cast<RuntimeObjectImp*>(asObject(thisValue));
+    RefPtr<Instance> instance;
+
+    JSValue thisValue = exec->hostThisValue();
+    if (thisValue.inherits(&RuntimeObject::s_info)) {
+        RuntimeObject* runtimeObject = static_cast<RuntimeObject*>(asObject(thisValue));
+        instance = runtimeObject->getInternalInstance();
+        if (!instance) 
+            return JSValue::encode(RuntimeObject::throwInvalidAccessError(exec));
     } else {
-        // If thisObj is the DOM object for a plugin, get the corresponding
-        // runtime object from the DOM object.
-        JSValue value = thisValue.get(exec, Identifier(exec, "__apple_runtime_object"));
-        if (value.inherits(&RuntimeObjectImp::s_info))    
-            imp = static_cast<RuntimeObjectImp*>(asObject(value));
-        else
-            return throwError(exec, TypeError);
+        // Calling a runtime object of a plugin element?
+        if (thisValue.inherits(&JSHTMLElement::s_info)) {
+            HTMLElement* element = jsCast<JSHTMLElement*>(asObject(thisValue))->impl();
+            instance = pluginInstance(element);
+        }
+        if (!instance)
+            return throwVMTypeError(exec);
     }
+    ASSERT(instance);
 
-    RefPtr<Instance> instance = imp->getInternalInstance();
-    if (!instance) 
-        return RuntimeObjectImp::throwInvalidAccessError(exec);
-        
     instance->begin();
-    JSValue result = instance->invokeMethod(exec, *method->methods(), args);
+    JSValue result = instance->invokeMethod(exec, method);
     instance->end();
-    return result;
+    return JSValue::encode(result);
 }
 
-CallType RuntimeMethod::getCallData(CallData& callData)
+CallType RuntimeMethod::getCallData(JSCell*, CallData& callData)
 {
     callData.native.function = callRuntimeMethod;
     return CallTypeHost;

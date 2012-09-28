@@ -26,19 +26,18 @@
 #include "config.h"
 #include "StorageSyncManager.h"
 
-#if ENABLE(DOM_STORAGE)
-
-#include "CString.h"
 #include "EventNames.h"
 #include "FileSystem.h"
 #include "Frame.h"
 #include "FrameTree.h"
-#include "LocalStorageTask.h"
-#include "LocalStorageThread.h"
+#include "StorageTask.h"
+#include "StorageThread.h"
 #include "Page.h"
 #include "PageGroup.h"
 #include "StorageAreaSync.h"
+#include <wtf/MainThread.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -48,17 +47,17 @@ PassRefPtr<StorageSyncManager> StorageSyncManager::create(const String& path)
 }
 
 StorageSyncManager::StorageSyncManager(const String& path)
-    : m_thread(LocalStorageThread::create())
-    , m_path(path.crossThreadString())
+    : m_thread(StorageThread::create())
+    , m_path(path.isolatedCopy())
 {
-    ASSERT(isMainThread());
+    ASSERT(isMainThread() || pthread_main_np());
     ASSERT(!m_path.isEmpty());
     m_thread->start();
 }
 
 StorageSyncManager::~StorageSyncManager()
 {
-    ASSERT(isMainThread());
+    ASSERT(isMainThread() || pthread_main_np());
     ASSERT(!m_thread);
 }
 
@@ -75,31 +74,37 @@ String StorageSyncManager::fullDatabaseFilename(const String& databaseIdentifier
 
 void StorageSyncManager::close()
 {
-    ASSERT(isMainThread());
+    ASSERT(isMainThread() || pthread_main_np());
 
     if (m_thread) {
         m_thread->terminate();
-        m_thread = 0;
+        m_thread.clear();
     }
 }
 
 bool StorageSyncManager::scheduleImport(PassRefPtr<StorageAreaSync> area)
 {
-    ASSERT(isMainThread());
+    ASSERT(isMainThread() || pthread_main_np());
     ASSERT(m_thread);
     if (m_thread)
-        m_thread->scheduleTask(LocalStorageTask::createImport(area.get()));
+        m_thread->scheduleTask(StorageTask::createImport(area.get()));
     return m_thread;
 }
 
 void StorageSyncManager::scheduleSync(PassRefPtr<StorageAreaSync> area)
 {
+    ASSERT(isMainThread() || pthread_main_np());
+    ASSERT(m_thread);
+    if (m_thread)
+        m_thread->scheduleTask(StorageTask::createSync(area.get()));
+}
+
+void StorageSyncManager::scheduleDeleteEmptyDatabase(PassRefPtr<StorageAreaSync> area)
+{
     ASSERT(isMainThread());
     ASSERT(m_thread);
     if (m_thread)
-        m_thread->scheduleTask(LocalStorageTask::createSync(area.get()));
+        m_thread->scheduleTask(StorageTask::createDeleteEmptyDatabase(area.get()));
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(DOM_STORAGE)

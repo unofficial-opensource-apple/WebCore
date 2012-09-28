@@ -21,13 +21,14 @@
 
 #include "JSDOMWindow.h"
 #include "JSDOMWindowShell.h"
+#include "SecurityOrigin.h"
 #include <wtf/AlwaysInline.h>
 
 namespace WebCore {
 
 inline JSDOMWindow* asJSDOMWindow(JSC::JSGlobalObject* globalObject)
 {
-    return static_cast<JSDOMWindow*>(globalObject);
+    return JSC::jsCast<JSDOMWindow*>(globalObject);
 }
  
 inline const JSDOMWindow* asJSDOMWindow(const JSC::JSGlobalObject* globalObject)
@@ -67,7 +68,7 @@ inline bool JSDOMWindowBase::allowsAccessFrom(JSC::ExecState* exec, String& mess
 ALWAYS_INLINE bool JSDOMWindowBase::allowsAccessFromPrivate(const JSGlobalObject* other) const
 {
     const JSDOMWindow* originWindow = asJSDOMWindow(other);
-    const JSDOMWindow* targetWindow = d()->shell->window();
+    const JSDOMWindow* targetWindow = m_shell->window();
 
     if (originWindow == targetWindow)
         return true;

@@ -2,7 +2,8 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,75 +21,96 @@
  * Boston, MA 02110-1301, USA.
  *
  */
+
 #ifndef HTMLOptionElement_h
 #define HTMLOptionElement_h
 
-#include "HTMLFormControlElement.h"
-#include "OptionElement.h"
+#include "HTMLElement.h"
 
 namespace WebCore {
 
 class HTMLSelectElement;
-class HTMLFormElement;
-class MappedAttribute;
 
-class HTMLOptionElement : public HTMLFormControlElement, public OptionElement {
-    friend class HTMLSelectElement;
-    friend class RenderMenuList;
-
+class HTMLOptionElement : public HTMLElement {
 public:
-    HTMLOptionElement(const QualifiedName&, Document*, HTMLFormElement* = 0);
-
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusOptional; }
-    virtual int tagPriority() const { return 2; }
-    virtual bool checkDTD(const Node* newChild);
-    virtual bool supportsFocus() const;
-    virtual bool isFocusable() const;
-    virtual bool rendererIsNeeded(RenderStyle*) { return false; }
-    virtual void attach();
-    virtual void detach();
-    virtual void setRenderStyle(PassRefPtr<RenderStyle>);
-    
-    virtual const AtomicString& formControlType() const;
+    static PassRefPtr<HTMLOptionElement> create(Document*);
+    static PassRefPtr<HTMLOptionElement> create(const QualifiedName&, Document*);
+    static PassRefPtr<HTMLOptionElement> createForJSConstructor(Document*, const String& data, const String& value,
+       bool defaultSelected, bool selected, ExceptionCode&);
 
     virtual String text() const;
     void setText(const String&, ExceptionCode&);
 
     int index() const;
-    virtual void parseMappedAttribute(MappedAttribute*);
 
-    virtual String value() const;
+    String value() const;
     void setValue(const String&);
 
-    virtual bool selected() const;
+    bool selected();
     void setSelected(bool);
-    virtual void setSelectedState(bool);
 
     HTMLSelectElement* ownerSelectElement() const;
-
-    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
-
-    bool defaultSelected() const;
-    void setDefaultSelected(bool);
 
     String label() const;
     void setLabel(const String&);
 
-    virtual String textIndentedToRespectGroupLabel() const;
+    virtual bool isEnabledFormControl() const OVERRIDE { return !disabled(); }
+    bool ownElementDisabled() const { return m_disabled; }
 
-    bool ownElementDisabled() const { return HTMLFormControlElement::disabled(); }
     virtual bool disabled() const;
-    
-    virtual void insertedIntoTree(bool);
-    virtual void accessKeyAction(bool);
-    
+
+    String textIndentedToRespectGroupLabel() const;
+
+    void setSelectedState(bool);
+
 private:
+    HTMLOptionElement(const QualifiedName&, Document*);
+
+    virtual bool supportsFocus() const;
+    virtual bool isFocusable() const;
+    virtual bool rendererIsNeeded(const NodeRenderingContext&) { return false; }
+    virtual void attach();
+    virtual void detach();
+    virtual void setRenderStyle(PassRefPtr<RenderStyle>);
+
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+
+    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void accessKeyAction(bool);
+
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
+
     virtual RenderStyle* nonRendererRenderStyle() const;
 
-    OptionElementData m_data;
+    String collectOptionInnerText() const;
+
+    String m_value;
+    String m_label;
+    bool m_disabled;
+    bool m_isSelected;
     RefPtr<RenderStyle> m_style;
 };
 
-} //namespace
+HTMLOptionElement* toHTMLOptionElement(Node*);
+const HTMLOptionElement* toHTMLOptionElement(const Node*);
+void toHTMLOptionElement(const HTMLOptionElement*); // This overload will catch anyone doing an unnecessary cast.
+
+#ifdef NDEBUG
+
+// The debug versions of these, with assertions, are not inlined.
+
+inline HTMLOptionElement* toHTMLOptionElement(Node* node)
+{
+    return static_cast<HTMLOptionElement*>(node);
+}
+
+inline const HTMLOptionElement* toHTMLOptionElement(const Node* node)
+{
+    return static_cast<const HTMLOptionElement*>(node);
+}
+
+#endif
+
+} // namespace
 
 #endif

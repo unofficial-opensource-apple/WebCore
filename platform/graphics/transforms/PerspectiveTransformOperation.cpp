@@ -26,7 +26,8 @@
 #include "config.h"
 #include "PerspectiveTransformOperation.h"
 
-#include <algorithm>
+#include "AnimationUtilities.h"
+#include <wtf/MathExtras.h>
 
 using namespace std;
 
@@ -37,22 +38,29 @@ PassRefPtr<TransformOperation> PerspectiveTransformOperation::blend(const Transf
     if (from && !from->isSameType(*this))
         return this;
     
-    if (blendToIdentity)
-        return PerspectiveTransformOperation::create(m_p + (1. - m_p) * progress);
+    if (blendToIdentity) {
+        double p = floatValueForLength(m_p, 1);
+        p = WebCore::blend(p, 1.0, progress); // FIXME: this seems wrong. https://bugs.webkit.org/show_bug.cgi?id=52700
+        return PerspectiveTransformOperation::create(Length(clampToPositiveInteger(p), Fixed));
+    }
     
     const PerspectiveTransformOperation* fromOp = static_cast<const PerspectiveTransformOperation*>(from);
-    double fromP = fromOp ? fromOp->m_p : 0;
-    double toP = m_p;
+    Length fromP = fromOp ? fromOp->m_p : Length(m_p.type());
+    Length toP = m_p;
 
     TransformationMatrix fromT;
     TransformationMatrix toT;
-    fromT.applyPerspective(fromP);
-    toT.applyPerspective(toP);
+    fromT.applyPerspective(floatValueForLength(fromP, 1));
+    toT.applyPerspective(floatValueForLength(toP, 1));
     toT.blend(fromT, progress);
     TransformationMatrix::DecomposedType decomp;
     toT.decompose(decomp);
-    
-    return PerspectiveTransformOperation::create(decomp.perspectiveZ ? -1.0 / decomp.perspectiveZ : 0.0);
+
+    if (decomp.perspectiveZ) {
+        double val = -1.0 / decomp.perspectiveZ;
+        return PerspectiveTransformOperation::create(Length(clampToPositiveInteger(val), Fixed));
+    }
+    return PerspectiveTransformOperation::create(Length(0, Fixed));
 }
 
 } // namespace WebCore

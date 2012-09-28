@@ -26,20 +26,17 @@
 #ifndef StorageMap_h
 #define StorageMap_h
 
-#if ENABLE(DOM_STORAGE)
-
 #include "PlatformString.h"
-#include "StringHash.h"
-
 #include <wtf/HashMap.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
     class StorageMap : public RefCounted<StorageMap> {
     public:
-        // Quota size mesured in bytes.
+        // Quota size measured in bytes.
         static PassRefPtr<StorageMap> create(unsigned quotaSize);
 
         unsigned length() const;
@@ -71,7 +68,5 @@ namespace WebCore {
     };
 
 } // namespace WebCore
-
-#endif // ENABLE(DOM_STORAGE)
 
 #endif // StorageMap_h

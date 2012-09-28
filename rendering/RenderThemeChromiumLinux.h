@@ -54,40 +54,51 @@ namespace WebCore {
         virtual Color platformActiveSelectionForegroundColor() const;
         virtual Color platformInactiveSelectionForegroundColor() const;
 
-        virtual void adjustSliderThumbSize(RenderObject*) const;
+        virtual void adjustSliderThumbSize(RenderStyle*) const;
 
-        void setCaretBlinkInterval(double interval);
+        static void setCaretBlinkInterval(double interval);
         virtual double caretBlinkIntervalInternal() const;
+
+        virtual bool paintCheckbox(RenderObject*, const PaintInfo&, const IntRect&);
+        virtual void setCheckboxSize(RenderStyle*) const;
+
+        virtual bool paintRadio(RenderObject*, const PaintInfo&, const IntRect&);
+        virtual void setRadioSize(RenderStyle*) const;
+
+        virtual bool paintButton(RenderObject*, const PaintInfo&, const IntRect&);
+        virtual bool paintTextField(RenderObject*, const PaintInfo&, const IntRect&);
+        virtual bool paintMenuList(RenderObject*, const PaintInfo&, const IntRect&);
+        virtual bool paintSliderTrack(RenderObject*, const PaintInfo&, const IntRect&);
+        virtual bool paintSliderThumb(RenderObject*, const PaintInfo&, const IntRect&);
+
+        virtual void adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle*, Element*) const;
+        virtual bool paintInnerSpinButton(RenderObject*, const PaintInfo&, const IntRect&);
+
+        virtual bool popsMenuBySpaceOrReturn() const OVERRIDE { return true; }
+
+#if ENABLE(PROGRESS_TAG)
+        virtual bool paintProgressBar(RenderObject*, const PaintInfo&, const IntRect&);
+#endif
 
         static void setSelectionColors(unsigned activeBackgroundColor,
                                        unsigned activeForegroundColor,
                                        unsigned inactiveBackgroundColor,
                                        unsigned inactiveForegroundColor);
 
-        static void setScrollbarColors(unsigned inactive_color,
-                                       unsigned active_color,
-                                       unsigned track_color);
-        static unsigned thumbInactiveColor() { return m_thumbInactiveColor; }
-        static unsigned thumbActiveColor() { return m_thumbActiveColor; }
-        static unsigned trackColor() { return m_trackColor; }
-
-    private:
+    protected:
         RenderThemeChromiumLinux();
         virtual ~RenderThemeChromiumLinux();
 
+    private:
         // A general method asking if any control tinting is supported at all.
         virtual bool supportsControlTints() const;
 
-        double m_caretBlinkInterval;
+        static double m_caretBlinkInterval;
 
         static unsigned m_activeSelectionBackgroundColor;
         static unsigned m_activeSelectionForegroundColor;
         static unsigned m_inactiveSelectionBackgroundColor;
         static unsigned m_inactiveSelectionForegroundColor;
-
-        static unsigned m_thumbInactiveColor;
-        static unsigned m_thumbActiveColor;
-        static unsigned m_trackColor;
     };
 
 } // namespace WebCore

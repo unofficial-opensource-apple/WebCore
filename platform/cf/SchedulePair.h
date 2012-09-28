@@ -31,14 +31,11 @@
 
 #include "PlatformString.h"
 #include <wtf/HashSet.h>
+#include <wtf/RefCounted.h>
 #include <wtf/RetainPtr.h>
 
 #if PLATFORM(MAC)
-#ifdef __OBJC__
-@class NSRunLoop;
-#else
-class NSRunLoop;
-#endif
+OBJC_CLASS NSRunLoop;
 #endif
 
 namespace WebCore {
@@ -47,7 +44,7 @@ class SchedulePair : public RefCounted<SchedulePair> {
 public:
     static PassRefPtr<SchedulePair> create(CFRunLoopRef runLoop, CFStringRef mode) { return adoptRef(new SchedulePair(runLoop, mode)); }
 
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) && !USE(CFNETWORK)
     static PassRefPtr<SchedulePair> create(NSRunLoop* runLoop, CFStringRef mode) { return adoptRef(new SchedulePair(runLoop, mode)); }
     NSRunLoop* nsRunLoop() const { return m_nsRunLoop.get(); }
 #endif
@@ -60,7 +57,7 @@ public:
 private:
     SchedulePair(CFRunLoopRef, CFStringRef);
 
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) && !USE(CFNETWORK)
     SchedulePair(NSRunLoop*, CFStringRef);
     RetainPtr<NSRunLoop*> m_nsRunLoop;
 #endif
@@ -73,7 +70,7 @@ struct SchedulePairHash {
     static unsigned hash(const RefPtr<SchedulePair>& pair)
     {
         uintptr_t hashCodes[2] = { reinterpret_cast<uintptr_t>(pair->runLoop()), pair->mode() ? CFHash(pair->mode()) : 0 };
-        return StringImpl::computeHash(reinterpret_cast<UChar*>(hashCodes), sizeof(hashCodes) / sizeof(UChar));
+        return StringHasher::hashMemory<sizeof(hashCodes)>(hashCodes);
     }
 
     static bool equal(const RefPtr<SchedulePair>& a, const RefPtr<SchedulePair>& b) { return a == b; }

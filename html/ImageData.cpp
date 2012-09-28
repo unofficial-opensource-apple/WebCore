@@ -31,16 +31,43 @@
 
 namespace WebCore {
 
-PassRefPtr<ImageData> ImageData::create(unsigned width, unsigned height)
+PassRefPtr<ImageData> ImageData::create(const IntSize& size)
 {
-    return adoptRef(new ImageData(width, height));
+    Checked<int, RecordOverflow> dataSize = 4;
+    dataSize *= size.width();
+    dataSize *= size.height();
+    if (dataSize.hasOverflowed())
+        return 0;
+
+    return adoptRef(new ImageData(size));
 }
 
-ImageData::ImageData(unsigned width, unsigned height)
-    : m_width(width)
-    , m_height(height)
-    , m_data(CanvasPixelArray::create(width * height * 4))
+PassRefPtr<ImageData> ImageData::create(const IntSize& size, PassRefPtr<Uint8ClampedArray> byteArray)
 {
+    Checked<int, RecordOverflow> dataSize = 4;
+    dataSize *= size.width();
+    dataSize *= size.height();
+    if (dataSize.hasOverflowed())
+        return 0;
+
+    if (dataSize.unsafeGet() < 0
+        || static_cast<unsigned>(dataSize.unsafeGet()) > byteArray->length())
+        return 0;
+
+    return adoptRef(new ImageData(size, byteArray));
+}
+
+ImageData::ImageData(const IntSize& size)
+    : m_size(size)
+    , m_data(Uint8ClampedArray::createUninitialized(size.width() * size.height() * 4))
+{
+}
+
+ImageData::ImageData(const IntSize& size, PassRefPtr<Uint8ClampedArray> byteArray)
+    : m_size(size)
+    , m_data(byteArray)
+{
+    ASSERT(static_cast<unsigned>(size.width() * size.height() * 4) <= m_data->length());
 }
 
 }

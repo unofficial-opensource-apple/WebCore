@@ -33,24 +33,36 @@
 
 namespace WebCore {
 
+    class DataTransferItemList;
+    class DragData;
     class FileList;
+    class Frame;
 
     // State available during IE's events for drag and drop and copy/paste
     class Clipboard : public RefCounted<Clipboard> {
     public:
+        // Whether this clipboard is serving a drag-drop or copy-paste request.
+        enum ClipboardType {
+            CopyAndPaste,
+            DragAndDrop,
+        };
+        
+        static PassRefPtr<Clipboard> create(ClipboardAccessPolicy, DragData*, Frame*);
+
         virtual ~Clipboard() { }
 
-        // Is this operation a drag-drop or a copy-paste?
-        bool isForDragging() const { return m_forDragging; }
+        bool isForCopyAndPaste() const { return m_clipboardType == CopyAndPaste; }
+        bool isForDragAndDrop() const { return m_clipboardType == DragAndDrop; }
 
-        String dropEffect() const { return m_dropEffect; }
+        String dropEffect() const { return dropEffectIsUninitialized() ? "none" : m_dropEffect; }
         void setDropEffect(const String&);
+        bool dropEffectIsUninitialized() const { return m_dropEffect == "uninitialized"; }
         String effectAllowed() const { return m_effectAllowed; }
         void setEffectAllowed(const String&);
     
         virtual void clearData(const String& type) = 0;
         virtual void clearAllData() = 0;
-        virtual String getData(const String& type, bool& success) const = 0;
+        virtual String getData(const String& type) const = 0;
         virtual bool setData(const String& type, const String& data) = 0;
     
         // extensions beyond IE's API
@@ -69,37 +81,50 @@ namespace WebCore {
 #endif
         virtual void writeURL(const KURL&, const String&, Frame*) = 0;
         virtual void writeRange(Range*, Frame*) = 0;
+        virtual void writePlainText(const String&) = 0;
 
         virtual bool hasData() = 0;
         
         void setAccessPolicy(ClipboardAccessPolicy);
+        ClipboardAccessPolicy policy() const { return m_policy; }
 
         DragOperation sourceOperation() const;
         DragOperation destinationOperation() const;
         void setSourceOperation(DragOperation);
         void setDestinationOperation(DragOperation);
         
+        bool hasDropZoneType(const String&);
+        
         void setDragHasStarted() { m_dragStarted = true; }
+
+#if ENABLE(DATA_TRANSFER_ITEMS)
+        virtual PassRefPtr<DataTransferItemList> items() = 0;
+#endif
         
     protected:
-        Clipboard(ClipboardAccessPolicy, bool isForDragging);
+        Clipboard(ClipboardAccessPolicy, ClipboardType);
 
-        ClipboardAccessPolicy policy() const { return m_policy; }
         bool dragStarted() const { return m_dragStarted; }
         
     private:
+        bool hasFileOfType(const String&) const;
+        bool hasStringOfType(const String&) const;
+        
         ClipboardAccessPolicy m_policy;
         String m_dropEffect;
         String m_effectAllowed;
         bool m_dragStarted;
+        ClipboardType m_clipboardType;
         
     protected:
-        bool m_forDragging;
         IntPoint m_dragLoc;
         CachedResourceHandle<CachedImage> m_dragImage;
         RefPtr<Node> m_dragImageElement;
     };
 
+    DragOperation convertDropZoneOperationToDragOperation(const String& dragOperation);
+    String convertDragOperationToDropZoneOperation(DragOperation);
+    
 } // namespace WebCore
 
 #endif // Clipboard_h

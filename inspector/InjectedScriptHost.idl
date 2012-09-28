@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Matt Lilek <webkit@mattlilek.com>
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,30 +31,27 @@
  */
 
 module core {
-    interface [Conditional=INSPECTOR] InjectedScriptHost {
+    interface [
+        Conditional=INSPECTOR
+    ] InjectedScriptHost {
         void clearConsoleMessages();
 
         void copyText(in DOMString text);
-        [Custom] DOMObject nodeForId(in long nodeId);
-        [Custom] int pushNodePathToFrontend(in DOMObject node, in boolean withChildren, in boolean selectInUI);
+        [Custom] void inspect(in DOMObject objectId, in DOMObject hints);
+        [Custom] DOMObject inspectedObject(in int num);
+        [Custom] DOMObject internalConstructorName(in DOMObject object);
+        [Custom] boolean isHTMLAllCollection(in DOMObject object);
+        [Custom] DOMString type(in DOMObject object);
+        [Custom] DOMObject functionDetails(in DOMObject object);
+        [Custom] Array getEventListeners(in Node node);
 
-        void addNodesToSearchResult(in DOMString nodeIds);
-        long pushNodeByPathToFrontend(in DOMString path);
+        [Custom] DOMString databaseId(in DOMObject database);
+        [Custom] DOMString storageId(in DOMObject storage);
 
-#if defined(ENABLE_JAVASCRIPT_DEBUGGER) && ENABLE_JAVASCRIPT_DEBUGGER
-        [Custom] DOMObject currentCallFrame();
-        [Custom] boolean isActivation(in DOMObject object);
+#if defined(ENABLE_WORKERS) && ENABLE_WORKERS
+        void didCreateWorker(in long id, in DOMString url, in boolean isFakeWorker);
+        void didDestroyWorker(in long id);
+        long nextWorkerId();
 #endif
-
-#if defined(ENABLE_DATABASE) && ENABLE_DATABASE
-        [Custom] DOMObject databaseForId(in long databaseId);
-        [Custom] void selectDatabase(in DOMObject database);
-#endif
-
-#if defined(ENABLE_DOM_STORAGE) && ENABLE_DOM_STORAGE
-        [Custom] void selectDOMStorage(in DOMObject storage);
-#endif
-
-        void reportDidDispatchOnInjectedScript(in long callId, in DOMString result, in boolean isException);
     };
 }

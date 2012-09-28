@@ -1,22 +1,22 @@
 /*
-    Copyright (C) 2004, 2005 Nikolas Zimmermann <wildfox@kde.org>
-                  2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
 #if ENABLE(SVG)
@@ -25,22 +25,19 @@
 #include "EventNames.h"
 #include "ExceptionCode.h"
 #include "FrameView.h"
+#include "NodeRenderingContext.h"
 #include "RenderView.h"
 #include "SVGElement.h"
 #include "SVGNames.h"
 #include "SVGSVGElement.h"
 #include "SVGViewSpec.h"
-#include "SVGZoomEvent.h"
 #include "SVGZoomAndPan.h"
+#include "SVGZoomEvent.h"
 
 namespace WebCore {
 
-SVGDocument::SVGDocument(Frame* frame)
-    : Document(frame, false, false)
-{
-}
-
-SVGDocument::~SVGDocument()
+SVGDocument::SVGDocument(Frame* frame, const KURL& url)
+    : Document(frame, url, false, false)
 {
 }
 
@@ -87,22 +84,22 @@ bool SVGDocument::zoomAndPanEnabled() const
 void SVGDocument::startPan(const FloatPoint& start)
 {
     if (rootElement())
-        m_translate = FloatPoint(start.x() - rootElement()->currentTranslate().x(), rootElement()->currentTranslate().y() + start.y());
+        m_translate = FloatPoint(start.x() - rootElement()->currentTranslate().x(), start.y() - rootElement()->currentTranslate().y());
 }
 
 void SVGDocument::updatePan(const FloatPoint& pos) const
 {
     if (rootElement()) {
-        rootElement()->setCurrentTranslate(FloatPoint(pos.x() - m_translate.x(), m_translate.y() - pos.y()));
+        rootElement()->setCurrentTranslate(FloatPoint(pos.x() - m_translate.x(), pos.y() - m_translate.y()));
         if (renderer())
             renderer()->repaint();
     }
 }
 
-bool SVGDocument::childShouldCreateRenderer(Node* node) const
+bool SVGDocument::childShouldCreateRenderer(const NodeRenderingContext& childContext) const
 {
-    if (node->hasTagName(SVGNames::svgTag))
-        return static_cast<SVGSVGElement*>(node)->isValid();
+    if (childContext.node()->hasTagName(SVGNames::svgTag))
+        return static_cast<SVGSVGElement*>(childContext.node())->isValid();
     return true;
 }
 

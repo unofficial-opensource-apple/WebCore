@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009, 2011 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,68 +26,151 @@
 #include "config.h"
 #include "Settings.h"
 
-#include "BackForwardList.h"
+#include "BackForwardController.h"
+#include "CachedResourceLoader.h"
+#include "CookieStorage.h"
+#include "DOMTimer.h"
+#include "Database.h"
+#include "Document.h"
 #include "Frame.h"
 #include "FrameTree.h"
 #include "FrameView.h"
 #include "HistoryItem.h"
 #include "Page.h"
 #include "PageCache.h"
+#include "ResourceHandle.h"
 #include "StorageMap.h"
 #include <limits>
 
-#include "HTMLTokenizer.h"
-#include "SystemMemory.h"
+#include "HTMLParserScheduler.h"
+#include "ImageSource.h"
 
 using namespace std;
 
 namespace WebCore {
 
-static void setNeedsReapplyStylesInAllFrames(Page* page)
+static void setLoadsImagesAutomaticallyInAllFrames(Page* page)
 {
     for (Frame* frame = page->mainFrame(); frame; frame = frame->tree()->traverseNext())
-        frame->setNeedsReapplyStyles();
+        frame->document()->cachedResourceLoader()->setAutoLoadImages(page->settings()->loadsImagesAutomatically());
+}
+
+// Sets the entry in the font map for the given script. If family is the empty string, removes the entry instead.
+static inline void setGenericFontFamilyMap(ScriptFontFamilyMap& fontMap, const AtomicString& family, UScriptCode script, Page* page)
+{
+    ScriptFontFamilyMap::iterator it = fontMap.find(static_cast<int>(script));
+    if (family.isEmpty()) {
+        if (it == fontMap.end())
+            return;
+        fontMap.remove(it);
+    } else if (it != fontMap.end() && it->second == family)
+        return;
+    else
+        fontMap.set(static_cast<int>(script), family);
+
+    if (page)
+        page->setNeedsRecalcStyleInAllFrames();
+}
+
+static inline const AtomicString& getGenericFontFamilyForScript(const ScriptFontFamilyMap& fontMap, UScriptCode script)
+{
+    ScriptFontFamilyMap::const_iterator it = fontMap.find(static_cast<int>(script));
+    if (it != fontMap.end())
+        return it->second;
+    if (script != USCRIPT_COMMON)
+        return getGenericFontFamilyForScript(fontMap, USCRIPT_COMMON);
+    return emptyAtom;
 }
 
 #if USE(SAFARI_THEME)
 bool Settings::gShouldPaintNativeControls = true;
 #endif
 
+#if USE(AVFOUNDATION)
+bool Settings::gAVFoundationEnabled(false);
+#endif
+
+bool Settings::gMockScrollbarsEnabled = false;
+
 #if PLATFORM(WIN) || (OS(WINDOWS) && PLATFORM(WX))
 bool Settings::gShouldUseHighResolutionTimers = true;
 #endif
+    
+#if USE(JSC)
+bool Settings::gShouldRespectPriorityInCSSAttributeSetters = false;
+#endif
+
+unsigned int Settings::gAudioSessionCategoryOverride = 0;
+
+// NOTEs
+//  1) EditingMacBehavior comprises Tiger, Leopard, SnowLeopard and iOS builds, as well QtWebKit and Chromium when built on Mac;
+//  2) EditingWindowsBehavior comprises Win32 and WinCE builds, as well as QtWebKit and Chromium when built on Windows;
+//  3) EditingUnixBehavior comprises all unix-based systems, but Darwin/MacOS (and then abusing the terminology);
+// 99) MacEditingBehavior is used a fallback.
+static EditingBehaviorType editingBehaviorTypeForPlatform()
+{
+    return
+#if OS(DARWIN)
+    EditingMacBehavior
+#elif OS(WINDOWS)
+    EditingWindowsBehavior
+#elif OS(UNIX)
+    EditingUnixBehavior
+#else
+    // Fallback
+    EditingMacBehavior
+#endif
+    ;
+}
+
+static const double defaultIncrementalRenderingSuppressionTimeoutInSeconds = 5;
 
 Settings::Settings(Page* page)
-    : m_page(page)
+    : m_page(0)
     , m_editableLinkBehavior(EditableLinkDefaultBehavior)
     , m_textDirectionSubmenuInclusionBehavior(TextDirectionSubmenuAutomaticallyIncluded)
+    , m_passwordEchoDurationInSeconds(1)
     , m_minimumFontSize(0)
     , m_minimumLogicalFontSize(0)
     , m_defaultFontSize(0)
     , m_defaultFixedFontSize(0)
-    , m_maximumDecodedImageSize(12582912) // Possibly overridden in constructor body
-    , m_maximumResourceDataLength(10485760)
+    , m_defaultDeviceScaleFactor(1)
+    , m_validationMessageTimerMagnification(50)
+    , m_minimumAccelerated2dCanvasSize(257 * 256)
+    , m_layoutFallbackWidth(980)
+    , m_devicePixelRatio(1.0)
+    , m_maximumDecodedImageSize(ImageSource::maximumImageSizeBeforeSubsampling() * 4)
+    , m_deviceWidth(480)
+    , m_deviceHeight(854)
     , m_minimumZoomFontSize(15.0f)
     , m_layoutInterval(cLayoutScheduleThreshold)
-    , m_maxParseDuration(defaultTokenizerTimeDelay)
+    , m_maxParseDuration(-1)
     , m_alwaysUseBaselineOfPrimaryFont(false)
-#if ENABLE(DOM_STORAGE)
-    , m_localStorageQuota(5 * 1024 * 1024)  // Suggested by the HTML5 spec.
+    , m_allowMultiElementImplicitFormSubmission(false)
+    , m_useLegacyNumberInputFieldFormatting(false)
+    , m_alwaysRequestGeolocationPermission(false)
+    , m_alwaysUseAcceleratedOverflowScroll(false)
+    , m_allowCompositingLayerVisualDegradation(false)
     , m_sessionStorageQuota(StorageMap::noQuota)
-#endif
-    , m_pluginAllowedRunTime(numeric_limits<unsigned>::max())
+    , m_editingBehaviorType(editingBehaviorTypeForPlatform())
+    , m_maximumHTMLParserDOMTreeDepth(defaultMaximumHTMLParserDOMTreeDepth)
+    , m_isSpatialNavigationEnabled(false)
     , m_isJavaEnabled(false)
+    , m_isJavaEnabledForLocalFiles(true)
     , m_loadsImagesAutomatically(false)
+    , m_loadsSiteIconsIgnoringImageLoadingSetting(false)
     , m_privateBrowsingEnabled(false)
     , m_caretBrowsingEnabled(false)
     , m_areImagesEnabled(true)
+    , m_isMediaEnabled(true)
     , m_arePluginsEnabled(false)
-    , m_databasesEnabled(false)
     , m_localStorageEnabled(false)
-    , m_isJavaScriptEnabled(false)
+    , m_isScriptEnabled(false)
     , m_isWebSecurityEnabled(true)
     , m_allowUniversalAccessFromFileURLs(true)
+    , m_allowFileAccessFromFileURLs(true)
     , m_javaScriptCanOpenWindowsAutomatically(false)
+    , m_javaScriptCanAccessClipboard(false)
     , m_shouldPrintBackgrounds(false)
     , m_textAreasAreResizable(false)
 #if ENABLE(DASHBOARD_SUPPORT)
@@ -97,11 +180,12 @@ Settings::Settings(Page* page)
     , m_needsKeyboardEventDisambiguationQuirks(false)
     , m_treatsAnyTextCSSLinkAsStylesheet(false)
     , m_needsLeopardMailQuirks(false)
-    , m_needsTigerMailQuirks(false)
     , m_isDOMPasteAllowed(false)
     , m_shrinksStandaloneImagesToFit(true)
     , m_usesPageCache(false)
+    , m_pageCacheSupportsPlugins(false)
     , m_showsURLsInToolTips(false)
+    , m_showsToolTipOverTruncatedText(false)
     , m_forceFTPDirectoryListings(false)
     , m_developerExtrasEnabled(false)
     , m_authorAndUserStylesEnabled(true)
@@ -110,105 +194,188 @@ Settings::Settings(Page* page)
     , m_frameFlatteningEnabled(false)
     , m_standalone(false)
     , m_telephoneNumberParsingEnabled(false)
-    , m_foundationCachingEnabled(false)
-    , m_mediaPlaybackAllowsInline(false)
-    , m_mediaPlaybackRequiresUserAction(true)
+    , m_mediaDataLoadsAutomatically(false)
+    , m_shouldTransformsAffectOverflow(true)
+    , m_fontFallbackPrefersPictographs(false)
     , m_webArchiveDebugModeEnabled(false)
     , m_localFileContentSniffingEnabled(false)
     , m_inApplicationChromeMode(false)
     , m_offlineWebApplicationCacheEnabled(false)
-    , m_shouldPaintCustomScrollbars(false)
-    , m_zoomsTextOnly(false)
-    , m_enforceCSSMIMETypeInStrictMode(true)
+    , m_enforceCSSMIMETypeInNoQuirksMode(true)
     , m_usesEncodingDetector(false)
     , m_allowScriptsToCloseWindows(false)
-    , m_editingBehavior(
-#if PLATFORM(MAC) || (PLATFORM(CHROMIUM) && OS(DARWIN))
-        // (PLATFORM(MAC) is always false in Chromium, hence the extra condition.)
-        EditingMacBehavior
-#else
-        EditingWindowsBehavior
+    , m_canvasUsesAcceleratedDrawing(false)
+    , m_acceleratedDrawingEnabled(false)
+    , m_acceleratedFiltersEnabled(false)
+    , m_isCSSCustomFilterEnabled(false)
+#if ENABLE(CSS_REGIONS)
+    , m_cssRegionsEnabled(false)
 #endif
-        )
+    , m_regionBasedColumnsEnabled(false)
     // FIXME: This should really be disabled by default as it makes platforms that don't support the feature download files
     // they can't use by. Leaving enabled for now to not change existing behavior.
     , m_downloadableBinaryFontsEnabled(true)
     , m_xssAuditorEnabled(false)
     , m_acceleratedCompositingEnabled(true)
+    , m_acceleratedCompositingFor3DTransformsEnabled(true)
+    , m_acceleratedCompositingForVideoEnabled(true)
+    , m_acceleratedCompositingForPluginsEnabled(true)
+    , m_acceleratedCompositingForCanvasEnabled(true)
+    , m_acceleratedCompositingForAnimationEnabled(true)
+    , m_acceleratedCompositingForFixedPositionEnabled(false)
+    , m_acceleratedCompositingForScrollableFramesEnabled(false)
     , m_showDebugBorders(false)
     , m_showRepaintCounter(false)
     , m_experimentalNotificationsEnabled(false)
     , m_webGLEnabled(false)
-    , m_geolocationEnabled(true)
+    , m_webGLErrorsToConsoleEnabled(false)
+    , m_openGLMultisamplingEnabled(true)
+    , m_privilegedWebGLExtensionsEnabled(false)
+    , m_webAudioEnabled(false)
+    , m_acceleratedCanvas2dEnabled(false)
+    , m_deferredCanvas2dEnabled(false)
     , m_loadDeferringEnabled(true)
+    , m_tiledBackingStoreEnabled(false)
+    , m_paginateDuringLayoutEnabled(false)
+    , m_dnsPrefetchingEnabled(false)
+#if ENABLE(FULLSCREEN_API)
+    , m_fullScreenAPIEnabled(false)
+#endif
+    , m_asynchronousSpellCheckingEnabled(false)
+#if USE(UNIFIED_TEXT_CHECKING)
+    , m_unifiedTextCheckerEnabled(true)
+#else
+    , m_unifiedTextCheckerEnabled(false)
+#endif
+    , m_memoryInfoEnabled(false)
+    , m_interactiveFormValidation(false)
+    , m_usePreHTML5ParserQuirks(false)
+    , m_hyperlinkAuditingEnabled(false)
+    , m_crossOriginCheckInGetMatchedCSSRulesDisabled(false)
+    , m_forceCompositingMode(false)
+    , m_shouldInjectUserScriptsInInitialEmptyDocument(false)
+    , m_fixedElementsLayoutRelativeToFrame(false)
+    , m_allowDisplayOfInsecureContent(true)
+    , m_allowRunningOfInsecureContent(true)
+#if ENABLE(SMOOTH_SCROLLING)
+    , m_scrollAnimatorEnabled(true)
+#endif
+#if ENABLE(WEB_SOCKETS)
+    , m_useHixie76WebSocketProtocol(false)
+#endif
+    , m_mediaPlaybackAllowsAirPlay(true)
+    , m_mediaPlaybackRequiresUserGesture(true)
+    , m_mediaPlaybackAllowsInline(false)
+    , m_passwordEchoEnabled(false)
+    , m_suppressesIncrementalRendering(false)
+    , m_backspaceKeyNavigationEnabled(true)
+    , m_visualWordMovementEnabled(false)
+#if ENABLE(VIDEO_TRACK)
+    , m_shouldDisplaySubtitles(false)
+    , m_shouldDisplayCaptions(false)
+    , m_shouldDisplayTextDescriptions(false)
+#endif
+    , m_perTileDrawingEnabled(false)
+    , m_partialSwapEnabled(false)
+    , m_scrollingCoordinatorEnabled(false)
+    , m_notificationsEnabled(true)
+    , m_needsIsLoadingInAPISenseQuirk(false)
+    , m_touchEventEmulationEnabled(false)
+    , m_threadedAnimationEnabled(false)
+    , m_shouldRespectImageOrientation(true)
+    , m_wantsBalancedSetDefersLoadingBehavior(false)
+    , m_requestAnimationFrameEnabled(true)
+    , m_needsDidFinishLoadOrderQuirk(false)
+    , m_loadsImagesAutomaticallyTimer(this, &Settings::loadsImagesAutomaticallyTimerFired)
+    , m_incrementalRenderingSuppressionTimeoutInSeconds(defaultIncrementalRenderingSuppressionTimeoutInSeconds)
 {
-    // This limit is also calculated in WebKit's WebPreferences.
-    // If we have more than 256MB of physical memory, allow 5.0MP images, otherwise allow 3.0MP images
-    static size_t defaultMaximumDecodedImageSize;
-    if (!defaultMaximumDecodedImageSize) {
-        if (systemTotalMemory() > 256 << 20)
-            defaultMaximumDecodedImageSize = 5 * 4 * 1024 * 1024;
-        else
-            defaultMaximumDecodedImageSize = 3 * 4 * 1024 * 1024;
-    }
-    m_maximumDecodedImageSize = defaultMaximumDecodedImageSize;
-    // A Frame may not have been created yet, so we initialize the AtomicString 
+    // A Frame may not have been created yet, so we initialize the AtomicString
     // hash before trying to use it.
     AtomicString::init();
+    initializeDefaultFontFamilies();
+    m_page = page; // Page is not yet fully initialized wen constructing Settings, so keeping m_page null over initializeDefaultFontFamilies() call.
 }
 
-void Settings::setStandardFontFamily(const AtomicString& standardFontFamily)
+PassOwnPtr<Settings> Settings::create(Page* page)
 {
-    if (standardFontFamily == m_standardFontFamily)
-        return;
+    return adoptPtr(new Settings(page));
+} 
 
-    m_standardFontFamily = standardFontFamily;
-    setNeedsReapplyStylesInAllFrames(m_page);
+#if !PLATFORM(MAC) && !PLATFORM(BLACKBERRY)
+void Settings::initializeDefaultFontFamilies()
+{
+    // Other platforms can set up fonts from a client, but on Mac, we want it in WebCore to share code between WebKit1 and WebKit2.
+}
+#endif
+
+const AtomicString& Settings::standardFontFamily(UScriptCode script) const
+{
+    return getGenericFontFamilyForScript(m_standardFontFamilyMap, script);
 }
 
-void Settings::setFixedFontFamily(const AtomicString& fixedFontFamily)
+void Settings::setStandardFontFamily(const AtomicString& family, UScriptCode script)
 {
-    if (m_fixedFontFamily == fixedFontFamily)
-        return;
-        
-    m_fixedFontFamily = fixedFontFamily;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    setGenericFontFamilyMap(m_standardFontFamilyMap, family, script, m_page);
 }
 
-void Settings::setSerifFontFamily(const AtomicString& serifFontFamily)
+const AtomicString& Settings::fixedFontFamily(UScriptCode script) const
 {
-    if (m_serifFontFamily == serifFontFamily)
-        return;
-        
-    m_serifFontFamily = serifFontFamily;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    return getGenericFontFamilyForScript(m_fixedFontFamilyMap, script);
 }
 
-void Settings::setSansSerifFontFamily(const AtomicString& sansSerifFontFamily)
+void Settings::setFixedFontFamily(const AtomicString& family, UScriptCode script)
 {
-    if (m_sansSerifFontFamily == sansSerifFontFamily)
-        return;
-        
-    m_sansSerifFontFamily = sansSerifFontFamily; 
-    setNeedsReapplyStylesInAllFrames(m_page);
+    setGenericFontFamilyMap(m_fixedFontFamilyMap, family, script, m_page);
 }
 
-void Settings::setCursiveFontFamily(const AtomicString& cursiveFontFamily)
+const AtomicString& Settings::serifFontFamily(UScriptCode script) const
 {
-    if (m_cursiveFontFamily == cursiveFontFamily)
-        return;
-        
-    m_cursiveFontFamily = cursiveFontFamily;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    return getGenericFontFamilyForScript(m_serifFontFamilyMap, script);
 }
 
-void Settings::setFantasyFontFamily(const AtomicString& fantasyFontFamily)
+void Settings::setSerifFontFamily(const AtomicString& family, UScriptCode script)
 {
-    if (m_fantasyFontFamily == fantasyFontFamily)
-        return;
-        
-    m_fantasyFontFamily = fantasyFontFamily;
-    setNeedsReapplyStylesInAllFrames(m_page);
+     setGenericFontFamilyMap(m_serifFontFamilyMap, family, script, m_page);
+}
+
+const AtomicString& Settings::sansSerifFontFamily(UScriptCode script) const
+{
+    return getGenericFontFamilyForScript(m_sansSerifFontFamilyMap, script);
+}
+
+void Settings::setSansSerifFontFamily(const AtomicString& family, UScriptCode script)
+{
+    setGenericFontFamilyMap(m_sansSerifFontFamilyMap, family, script, m_page);
+}
+
+const AtomicString& Settings::cursiveFontFamily(UScriptCode script) const
+{
+    return getGenericFontFamilyForScript(m_cursiveFontFamilyMap, script);
+}
+
+void Settings::setCursiveFontFamily(const AtomicString& family, UScriptCode script)
+{
+    setGenericFontFamilyMap(m_cursiveFontFamilyMap, family, script, m_page);
+}
+
+const AtomicString& Settings::fantasyFontFamily(UScriptCode script) const
+{
+    return getGenericFontFamilyForScript(m_fantasyFontFamilyMap, script);
+}
+
+void Settings::setFantasyFontFamily(const AtomicString& family, UScriptCode script)
+{
+    setGenericFontFamilyMap(m_fantasyFontFamilyMap, family, script, m_page);
+}
+
+const AtomicString& Settings::pictographFontFamily(UScriptCode script) const
+{
+    return getGenericFontFamilyForScript(m_pictographFontFamilyMap, script);
+}
+
+void Settings::setPictographFontFamily(const AtomicString& family, UScriptCode script)
+{
+    setGenericFontFamilyMap(m_pictographFontFamilyMap, family, script, m_page);
 }
 
 void Settings::setMinimumFontSize(int minimumFontSize)
@@ -217,7 +384,7 @@ void Settings::setMinimumFontSize(int minimumFontSize)
         return;
 
     m_minimumFontSize = minimumFontSize;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 void Settings::setMinimumLogicalFontSize(int minimumLogicalFontSize)
@@ -226,7 +393,7 @@ void Settings::setMinimumLogicalFontSize(int minimumLogicalFontSize)
         return;
 
     m_minimumLogicalFontSize = minimumLogicalFontSize;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 void Settings::setDefaultFontSize(int defaultFontSize)
@@ -235,7 +402,7 @@ void Settings::setDefaultFontSize(int defaultFontSize)
         return;
 
     m_defaultFontSize = defaultFontSize;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 void Settings::setDefaultFixedFontSize(int defaultFontSize)
@@ -244,21 +411,45 @@ void Settings::setDefaultFixedFontSize(int defaultFontSize)
         return;
 
     m_defaultFixedFontSize = defaultFontSize;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
+}
+
+void Settings::setDefaultDeviceScaleFactor(int defaultDeviceScaleFactor)
+{
+    m_defaultDeviceScaleFactor = defaultDeviceScaleFactor;
 }
 
 void Settings::setLoadsImagesAutomatically(bool loadsImagesAutomatically)
 {
     m_loadsImagesAutomatically = loadsImagesAutomatically;
+    
+    // Changing this setting to true might immediately start new loads for images that had previously had loading disabled.
+    // If this happens while a WebView is being dealloc'ed, and we don't know the WebView is being dealloc'ed, these new loads
+    // can cause crashes downstream when the WebView memory has actually been free'd.
+    // One example where this can happen is in Mac apps that subclass WebView then do work in their overridden dealloc methods.
+    // Starting these loads synchronously is not important.  By putting it on a 0-delay, properly closing the Page cancels them
+    // before they have a chance to really start.
+    // See http://webkit.org/b/60572 for more discussion.
+    m_loadsImagesAutomaticallyTimer.startOneShot(0);
 }
 
-void Settings::setJavaScriptEnabled(bool isJavaScriptEnabled)
+void Settings::loadsImagesAutomaticallyTimerFired(Timer<Settings>*)
 {
-    if (m_isJavaScriptEnabled == isJavaScriptEnabled)
+    setLoadsImagesAutomaticallyInAllFrames(m_page);
+}
+
+void Settings::setLoadsSiteIconsIgnoringImageLoadingSetting(bool loadsSiteIcons)
+{
+    m_loadsSiteIconsIgnoringImageLoadingSetting = loadsSiteIcons;
+}
+
+void Settings::setScriptEnabled(bool isScriptEnabled)
+{
+    if (m_isScriptEnabled == isScriptEnabled)
         return;
 
-    m_isJavaScriptEnabled = isJavaScriptEnabled;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_isScriptEnabled = isScriptEnabled;
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 void Settings::setWebSecurityEnabled(bool isWebSecurityEnabled)
@@ -271,9 +462,24 @@ void Settings::setAllowUniversalAccessFromFileURLs(bool allowUniversalAccessFrom
     m_allowUniversalAccessFromFileURLs = allowUniversalAccessFromFileURLs;
 }
 
+void Settings::setAllowFileAccessFromFileURLs(bool allowFileAccessFromFileURLs)
+{
+    m_allowFileAccessFromFileURLs = allowFileAccessFromFileURLs;
+}
+
+void Settings::setSpatialNavigationEnabled(bool isSpatialNavigationEnabled)
+{
+    m_isSpatialNavigationEnabled = isSpatialNavigationEnabled;
+}
+
 void Settings::setJavaEnabled(bool isJavaEnabled)
 {
     m_isJavaEnabled = isJavaEnabled;
+}
+
+void Settings::setJavaEnabledForLocalFiles(bool isJavaEnabledForLocalFiles)
+{
+    m_isJavaEnabledForLocalFiles = isJavaEnabledForLocalFiles;
 }
 
 void Settings::setImagesEnabled(bool areImagesEnabled)
@@ -281,14 +487,14 @@ void Settings::setImagesEnabled(bool areImagesEnabled)
     m_areImagesEnabled = areImagesEnabled;
 }
 
+void Settings::setMediaEnabled(bool isMediaEnabled)
+{
+    m_isMediaEnabled = isMediaEnabled;
+}
+
 void Settings::setPluginsEnabled(bool arePluginsEnabled)
 {
     m_arePluginsEnabled = arePluginsEnabled;
-}
-
-void Settings::setDatabasesEnabled(bool databasesEnabled)
-{
-    m_databasesEnabled = databasesEnabled;
 }
 
 void Settings::setLocalStorageEnabled(bool localStorageEnabled)
@@ -296,26 +502,46 @@ void Settings::setLocalStorageEnabled(bool localStorageEnabled)
     m_localStorageEnabled = localStorageEnabled;
 }
 
-#if ENABLE(DOM_STORAGE)
-void Settings::setLocalStorageQuota(unsigned localStorageQuota)
-{
-    m_localStorageQuota = localStorageQuota;
-}
-
 void Settings::setSessionStorageQuota(unsigned sessionStorageQuota)
 {
     m_sessionStorageQuota = sessionStorageQuota;
 }
-#endif
 
 void Settings::setPrivateBrowsingEnabled(bool privateBrowsingEnabled)
 {
+    if (m_privateBrowsingEnabled == privateBrowsingEnabled)
+        return;
+
+    // FIXME http://webkit.org/b/67870: The private browsing storage session and cookie private
+    // browsing mode (which is used if storage sessions are not available) are global settings, so
+    // it is misleading to have them as per-page settings.
+    // In addition, if they are treated as a per Page settings, the global values can get out of
+    // sync with the per Page value in the following situation:
+    // 1. The global values get set to true when setPrivateBrowsingEnabled(true) is called.
+    // 2. All Pages are closed, so all Settings objects go away.
+    // 3. A new Page is created, and a corresponding new Settings object is created - with
+    //    m_privateBrowsingEnabled starting out as false in the constructor.
+    // 4. The WebPage settings get applied to the new Page and setPrivateBrowsingEnabled(false)
+    //    is called, but an if (m_privateBrowsingEnabled == privateBrowsingEnabled) early return
+    //    prevents the global values from getting changed from true to false.
+#if USE(CFURLSTORAGESESSIONS)
+    ResourceHandle::setPrivateBrowsingEnabled(privateBrowsingEnabled);
+#endif
+    setCookieStoragePrivateBrowsingEnabled(privateBrowsingEnabled);
+
+
     m_privateBrowsingEnabled = privateBrowsingEnabled;
+    m_page->privateBrowsingStateChanged();
 }
 
 void Settings::setJavaScriptCanOpenWindowsAutomatically(bool javaScriptCanOpenWindowsAutomatically)
 {
     m_javaScriptCanOpenWindowsAutomatically = javaScriptCanOpenWindowsAutomatically;
+}
+
+void Settings::setJavaScriptCanAccessClipboard(bool javaScriptCanAccessClipboard)
+{
+    m_javaScriptCanAccessClipboard = javaScriptCanAccessClipboard;
 }
 
 void Settings::setDefaultTextEncodingName(const String& defaultTextEncodingName)
@@ -333,6 +559,11 @@ void Settings::setUserStyleSheetLocation(const KURL& userStyleSheetLocation)
     m_page->userStyleSheetLocationChanged();
 }
 
+void Settings::setFixedElementsLayoutRelativeToFrame(bool fixedElementsLayoutRelativeToFrame)
+{
+    m_fixedElementsLayoutRelativeToFrame = fixedElementsLayoutRelativeToFrame;
+}
+
 void Settings::setShouldPrintBackgrounds(bool shouldPrintBackgrounds)
 {
     m_shouldPrintBackgrounds = shouldPrintBackgrounds;
@@ -344,7 +575,7 @@ void Settings::setTextAreasAreResizable(bool textAreasAreResizable)
         return;
 
     m_textAreasAreResizable = textAreasAreResizable;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 void Settings::setEditableLinkBehavior(EditableLinkBehavior editableLinkBehavior)
@@ -389,14 +620,29 @@ void Settings::setNeedsLeopardMailQuirks(bool needsQuirks)
     m_needsLeopardMailQuirks = needsQuirks;
 }
 
-void Settings::setNeedsTigerMailQuirks(bool needsQuirks)
-{
-    m_needsTigerMailQuirks = needsQuirks;
-}
-    
 void Settings::setDOMPasteAllowed(bool DOMPasteAllowed)
 {
     m_isDOMPasteAllowed = DOMPasteAllowed;
+}
+
+void Settings::setDefaultMinDOMTimerInterval(double interval)
+{
+    DOMTimer::setDefaultMinTimerInterval(interval);
+}
+
+double Settings::defaultMinDOMTimerInterval()
+{
+    return DOMTimer::defaultMinTimerInterval();
+}
+
+void Settings::setMinDOMTimerInterval(double interval)
+{
+    m_page->setMinimumTimerInterval(interval);
+}
+
+double Settings::minDOMTimerInterval()
+{
+    return m_page->minimumTimerInterval();
 }
 
 void Settings::setUsesPageCache(bool usesPageCache)
@@ -406,9 +652,10 @@ void Settings::setUsesPageCache(bool usesPageCache)
         
     m_usesPageCache = usesPageCache;
     if (!m_usesPageCache) {
-        HistoryItemVector& historyItems = m_page->backForwardList()->entries();
-        for (unsigned i = 0; i < historyItems.size(); i++)
-            pageCache()->remove(historyItems[i].get());
+        int first = -m_page->backForward()->backCount();
+        int last = m_page->backForward()->forwardCount();
+        for (int i = first; i <= last; i++)
+            pageCache()->remove(m_page->backForward()->itemAtIndex(i));
         pageCache()->releaseAutoreleasedPagesNow();
     }
 }
@@ -421,6 +668,11 @@ void Settings::setShrinksStandaloneImagesToFit(bool shrinksStandaloneImagesToFit
 void Settings::setShowsURLsInToolTips(bool showsURLsInToolTips)
 {
     m_showsURLsInToolTips = showsURLsInToolTips;
+}
+
+void Settings::setShowsToolTipOverTruncatedText(bool showsToolTipForTruncatedText)
+{
+    m_showsToolTipOverTruncatedText = showsToolTipForTruncatedText;
 }
 
 void Settings::setFTPDirectoryTemplatePath(const String& path)
@@ -444,17 +696,7 @@ void Settings::setAuthorAndUserStylesEnabled(bool authorAndUserStylesEnabled)
         return;
 
     m_authorAndUserStylesEnabled = authorAndUserStylesEnabled;
-    setNeedsReapplyStylesInAllFrames(m_page);
-}
-
-void Settings::setMaximumResourceDataLength(long long length)
-{
-    m_maximumResourceDataLength = length;
-}
-
-long long Settings::maximumResourceDataLength()
-{
-    return m_maximumResourceDataLength;
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 void Settings::setStandalone(bool flag)
@@ -462,13 +704,21 @@ void Settings::setStandalone(bool flag)
     m_standalone = flag;
 }
 
+void Settings::setFontFallbackPrefersPictographs(bool preferPictographs)
+{
+    if (m_fontFallbackPrefersPictographs == preferPictographs)
+        return;
+
+    m_fontFallbackPrefersPictographs = preferPictographs;
+    m_page->setNeedsRecalcStyleInAllFrames();
+}
 
 void Settings::setFontRenderingMode(FontRenderingMode mode)
 {
     if (fontRenderingMode() == mode)
         return;
     m_fontRenderingMode = mode;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 FontRenderingMode Settings::fontRenderingMode() const
@@ -486,10 +736,12 @@ void Settings::setFrameFlatteningEnabled(bool frameFlatteningEnabled)
     m_frameFlatteningEnabled = frameFlatteningEnabled;
 }
 
+#if ENABLE(WEB_ARCHIVE)
 void Settings::setWebArchiveDebugModeEnabled(bool enabled)
 {
     m_webArchiveDebugModeEnabled = enabled;
 }
+#endif
 
 void Settings::setLocalFileContentSniffingEnabled(bool enabled)
 {
@@ -511,23 +763,9 @@ void Settings::setOfflineWebApplicationCacheEnabled(bool enabled)
     m_offlineWebApplicationCacheEnabled = enabled;
 }
 
-void Settings::setShouldPaintCustomScrollbars(bool shouldPaintCustomScrollbars)
+void Settings::setEnforceCSSMIMETypeInNoQuirksMode(bool enforceCSSMIMETypeInNoQuirksMode)
 {
-    m_shouldPaintCustomScrollbars = shouldPaintCustomScrollbars;
-}
-
-void Settings::setZoomsTextOnly(bool zoomsTextOnly)
-{
-    if (zoomsTextOnly == m_zoomsTextOnly)
-        return;
-    
-    m_zoomsTextOnly = zoomsTextOnly;
-    setNeedsReapplyStylesInAllFrames(m_page);
-}
-
-void Settings::setEnforceCSSMIMETypeInStrictMode(bool enforceCSSMIMETypeInStrictMode)
-{
-    m_enforceCSSMIMETypeInStrictMode = enforceCSSMIMETypeInStrictMode;
+    m_enforceCSSMIMETypeInNoQuirksMode = enforceCSSMIMETypeInNoQuirksMode;
 }
 
 #if USE(SAFARI_THEME)
@@ -540,6 +778,15 @@ void Settings::setShouldPaintNativeControls(bool shouldPaintNativeControls)
 void Settings::setUsesEncodingDetector(bool usesEncodingDetector)
 {
     m_usesEncodingDetector = usesEncodingDetector;
+}
+
+void Settings::setDNSPrefetchingEnabled(bool dnsPrefetchingEnabled)
+{
+    if (m_dnsPrefetchingEnabled == dnsPrefetchingEnabled)
+        return;
+
+    m_dnsPrefetchingEnabled = dnsPrefetchingEnabled;
+    m_page->dnsPrefetchingStateChanged();
 }
 
 void Settings::setAllowScriptsToCloseWindows(bool allowScriptsToCloseWindows)
@@ -568,7 +815,37 @@ void Settings::setAcceleratedCompositingEnabled(bool enabled)
         return;
         
     m_acceleratedCompositingEnabled = enabled;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
+}
+
+void Settings::setCanvasUsesAcceleratedDrawing(bool enabled)
+{
+    m_canvasUsesAcceleratedDrawing = enabled;
+}
+
+void Settings::setAcceleratedCompositingFor3DTransformsEnabled(bool enabled)
+{
+    m_acceleratedCompositingFor3DTransformsEnabled = enabled;
+}
+
+void Settings::setAcceleratedCompositingForVideoEnabled(bool enabled)
+{
+    m_acceleratedCompositingForVideoEnabled = enabled;
+}
+
+void Settings::setAcceleratedCompositingForPluginsEnabled(bool enabled)
+{
+    m_acceleratedCompositingForPluginsEnabled = enabled;
+}
+
+void Settings::setAcceleratedCompositingForCanvasEnabled(bool enabled)
+{
+    m_acceleratedCompositingForCanvasEnabled = enabled;
+}
+
+void Settings::setAcceleratedCompositingForAnimationEnabled(bool enabled)
+{
+    m_acceleratedCompositingForAnimationEnabled = enabled;
 }
 
 void Settings::setShowDebugBorders(bool enabled)
@@ -577,7 +854,7 @@ void Settings::setShowDebugBorders(bool enabled)
         return;
         
     m_showDebugBorders = enabled;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 void Settings::setShowRepaintCounter(bool enabled)
@@ -586,18 +863,12 @@ void Settings::setShowRepaintCounter(bool enabled)
         return;
         
     m_showRepaintCounter = enabled;
-    setNeedsReapplyStylesInAllFrames(m_page);
+    m_page->setNeedsRecalcStyleInAllFrames();
 }
 
 void Settings::setExperimentalNotificationsEnabled(bool enabled)
 {
     m_experimentalNotificationsEnabled = enabled;
-}
-
-void Settings::setPluginAllowedRunTime(unsigned runTime)
-{
-    m_pluginAllowedRunTime = runTime;
-    m_page->pluginAllowedRunTimeChanged();
 }
 
 #if PLATFORM(WIN) || (OS(WINDOWS) && PLATFORM(WX))
@@ -607,19 +878,92 @@ void Settings::setShouldUseHighResolutionTimers(bool shouldUseHighResolutionTime
 }
 #endif
 
+void Settings::setWebAudioEnabled(bool enabled)
+{
+    m_webAudioEnabled = enabled;
+}
+
 void Settings::setWebGLEnabled(bool enabled)
 {
     m_webGLEnabled = enabled;
 }
 
-void Settings::setGeolocationEnabled(bool enabled)
+void Settings::setWebGLErrorsToConsoleEnabled(bool enabled)
 {
-    m_geolocationEnabled = enabled;
+    m_webGLErrorsToConsoleEnabled = enabled;
+}
+
+void Settings::setOpenGLMultisamplingEnabled(bool enabled)
+{
+    m_openGLMultisamplingEnabled = enabled;
+}
+
+void Settings::setPrivilegedWebGLExtensionsEnabled(bool enabled)
+{
+    m_privilegedWebGLExtensionsEnabled = enabled;
+}
+
+void Settings::setAccelerated2dCanvasEnabled(bool enabled)
+{
+    m_acceleratedCanvas2dEnabled = enabled;
+}
+
+void Settings::setDeferred2dCanvasEnabled(bool enabled)
+{
+    m_deferredCanvas2dEnabled = enabled;
+}
+
+void Settings::setMinimumAccelerated2dCanvasSize(int numPixels)
+{
+    m_minimumAccelerated2dCanvasSize = numPixels;
 }
 
 void Settings::setLoadDeferringEnabled(bool enabled)
 {
     m_loadDeferringEnabled = enabled;
+}
+
+void Settings::setTiledBackingStoreEnabled(bool enabled)
+{
+    m_tiledBackingStoreEnabled = enabled;
+#if USE(TILED_BACKING_STORE)
+    if (m_page->mainFrame())
+        m_page->mainFrame()->setTiledBackingStoreEnabled(enabled);
+#endif
+}
+
+void Settings::setMockScrollbarsEnabled(bool flag)
+{
+    gMockScrollbarsEnabled = flag;
+}
+
+bool Settings::mockScrollbarsEnabled()
+{
+    return gMockScrollbarsEnabled;
+}
+
+#if USE(JSC)
+void Settings::setShouldRespectPriorityInCSSAttributeSetters(bool flag)
+{
+    gShouldRespectPriorityInCSSAttributeSetters = flag;
+}
+
+bool Settings::shouldRespectPriorityInCSSAttributeSetters()
+{
+    return gShouldRespectPriorityInCSSAttributeSetters;
+}
+#endif
+
+void Settings::setAudioSessionCategoryOverride(unsigned int sessionCategory)
+{
+    gAudioSessionCategoryOverride = sessionCategory;
+    if (sessionCategory)
+        Page::setAudioSessionCategory(sessionCategory);
+}
+    
+unsigned int Settings::audioSessionCategoryOverride()
+{
+    return gAudioSessionCategoryOverride;
 }
 
 } // namespace WebCore

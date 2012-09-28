@@ -59,14 +59,17 @@ static inline const char* toVGErrorConstant(VGErrorCode error)
 
 namespace WebCore {
 
+class AffineTransform;
 class FloatRect;
 class TransformationMatrix;
 
 class VGMatrix {
 public:
     VGMatrix(const VGfloat data[9]);
+    VGMatrix(const AffineTransform&);
     VGMatrix(const TransformationMatrix&);
     const VGfloat* toVGfloat() const { return m_data; }
+    operator AffineTransform() const;
     operator TransformationMatrix() const;
 private:
     VGfloat m_data[9];
@@ -80,6 +83,31 @@ public:
     operator FloatRect() const;
 private:
     VGfloat m_data[4];
+};
+
+class VGUtils {
+public:
+    static int bytesForImage(VGImageFormat, VGint width, VGint height);
+    static int bytesForImageScanline(VGImageFormat, VGint width);
+    static int imageFormatBitsPerPixel(VGImageFormat);
+
+    /**
+     * Return a flipped VGImageFormat if the platform is little endian
+     * (e.g. VG_ABGR_8888 for a given VG_RGBA_8888), or return the image format
+     * as is if the platform is big endian.
+     *
+     * OpenVG itself is indifferent to endianness, it will always work on a
+     * single machine word with the bytes going from left to right as specified
+     * in the image format, no matter which one of the bytes is most or least
+     * significant.
+     *
+     * However, if you interface with vgImageSubData()/vgGetImageSubData()
+     * using a byte array then you want to make sure the byte order is
+     * appropriate for the given platform (otherwise the byte indexes need
+     * to be swapped depending on endianness). So, use this function when
+     * interfacing with byte arrays, and don't use it otherwise.
+     */
+    static VGImageFormat endianAwareImageFormat(VGImageFormat bigEndianFormat);
 };
 
 }

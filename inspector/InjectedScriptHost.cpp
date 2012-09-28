@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Matt Lilek <webkit@mattlilek.com>
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,36 +29,29 @@
  */
 
 #include "config.h"
-#include "InjectedScriptHost.h"
 
 #if ENABLE(INSPECTOR)
 
+#include "InjectedScriptHost.h"
 
 #include "Element.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "HTMLFrameOwnerElement.h"
+#include "InjectedScript.h"
+#include "InspectorAgent.h"
 #include "InspectorClient.h"
-#include "InspectorController.h"
+#include "InspectorConsoleAgent.h"
 #include "InspectorDOMAgent.h"
+#include "InspectorDOMStorageAgent.h"
+#include "InspectorDatabaseAgent.h"
 #include "InspectorFrontend.h"
-#include "InspectorResource.h"
+#include "InspectorValues.h"
 #include "Pasteboard.h"
-#include "ScriptArray.h"
-#include "ScriptFunctionCall.h"
-
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-#include "JavaScriptCallFrame.h"
-#include "JavaScriptDebugServer.h"
-using namespace JSC;
-#endif
-
-#if ENABLE(DATABASE)
-#include "Database.h"
-#endif
-
-#if ENABLE(DOM_STORAGE)
 #include "Storage.h"
+
+#if ENABLE(SQL_DATABASE)
+#include "Database.h"
 #endif
 
 #include "markup.h"
@@ -70,20 +63,59 @@ using namespace std;
 
 namespace WebCore {
 
-InjectedScriptHost::InjectedScriptHost(InspectorController* inspectorController)
-    : m_inspectorController(inspectorController)
-    , m_nextInjectedScriptId(1)
+PassRefPtr<InjectedScriptHost> InjectedScriptHost::create()
 {
+    return adoptRef(new InjectedScriptHost());
+}
+
+InjectedScriptHost::InjectedScriptHost()
+    : m_inspectorAgent(0)
+    , m_consoleAgent(0)
+#if ENABLE(SQL_DATABASE)
+    , m_databaseAgent(0)
+#endif
+    , m_domStorageAgent(0)
+    , m_domAgent(0)
+    , m_lastWorkerId(1 << 31) // Distinguish ids of fake workers from real ones, to minimize the chances they overlap.
+{
+    m_defaultInspectableObject = adoptPtr(new InspectableObject());
 }
 
 InjectedScriptHost::~InjectedScriptHost()
 {
 }
 
+void InjectedScriptHost::disconnect()
+{
+    m_inspectorAgent = 0;
+    m_consoleAgent = 0;
+#if ENABLE(SQL_DATABASE)
+    m_databaseAgent = 0;
+#endif
+    m_domStorageAgent = 0;
+    m_domAgent = 0;
+}
+
+void InjectedScriptHost::inspectImpl(PassRefPtr<InspectorValue> object, PassRefPtr<InspectorValue> hints)
+{
+    if (m_inspectorAgent) {
+        RefPtr<TypeBuilder::Runtime::RemoteObject> remoteObject = TypeBuilder::Runtime::RemoteObject::runtimeCast(object);
+        m_inspectorAgent->inspect(remoteObject, hints->asObject());
+    }
+}
+
+void InjectedScriptHost::getEventListenersImpl(Node* node, Vector<EventListenerInfo>& listenersArray)
+{
+    if (m_domAgent)
+        m_domAgent->getEventListeners(node, listenersArray, false);
+}
+
 void InjectedScriptHost::clearConsoleMessages()
 {
-    if (m_inspectorController)
-        m_inspectorController->clearConsoleMessages();
+    if (m_consoleAgent) {
+        ErrorString error;
+        m_consoleAgent->clearMessages(&error);
+    }
 }
 
 void InjectedScriptHost::copyText(const String& text)
@@ -91,125 +123,64 @@ void InjectedScriptHost::copyText(const String& text)
     Pasteboard::generalPasteboard()->writePlainText(text);
 }
 
-Node* InjectedScriptHost::nodeForId(long nodeId)
+ScriptValue InjectedScriptHost::InspectableObject::get(ScriptState*)
 {
-    if (InspectorDOMAgent* domAgent = inspectorDOMAgent())
-        return domAgent->nodeForId(nodeId);
-    return 0;
+    return ScriptValue();
+};
+
+void InjectedScriptHost::addInspectedObject(PassOwnPtr<InjectedScriptHost::InspectableObject> object)
+{
+    m_inspectedObjects.prepend(object);
+    while (m_inspectedObjects.size() > 5)
+        m_inspectedObjects.removeLast();
 }
 
-long InjectedScriptHost::pushNodePathToFrontend(Node* node, bool withChildren, bool selectInUI)
+void InjectedScriptHost::clearInspectedObjects()
 {
-    InspectorFrontend* frontend = inspectorFrontend();
-    InspectorDOMAgent* domAgent = inspectorDOMAgent();
-    if (!domAgent || !frontend)
-        return 0;
-    long id = domAgent->pushNodePathToFrontend(node);
-    if (withChildren)
-        domAgent->pushChildNodesToFrontend(id);
-    if (selectInUI)
-        frontend->updateFocusedNode(id);
-    return id;
+    m_inspectedObjects.clear();
 }
 
-void InjectedScriptHost::addNodesToSearchResult(const String& nodeIds)
+InjectedScriptHost::InspectableObject* InjectedScriptHost::inspectedObject(unsigned int num)
 {
-    if (InspectorFrontend* frontend = inspectorFrontend())
-        frontend->addNodesToSearchResult(nodeIds);
+    if (num >= m_inspectedObjects.size())
+        return m_defaultInspectableObject.get();
+    return m_inspectedObjects[num].get();
 }
 
-long InjectedScriptHost::pushNodeByPathToFrontend(const String& path)
+#if ENABLE(SQL_DATABASE)
+String InjectedScriptHost::databaseIdImpl(Database* database)
 {
-    InspectorDOMAgent* domAgent = inspectorDOMAgent();
-    if (!domAgent)
-        return 0;
-
-    Node* node = domAgent->nodeForPath(path);
-    if (!node)
-        return 0;
-
-    return domAgent->pushNodePathToFrontend(node);
-}
-
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-JavaScriptCallFrame* InjectedScriptHost::currentCallFrame() const
-{
-    return JavaScriptDebugServer::shared().currentCallFrame();
+    if (m_databaseAgent)
+        return m_databaseAgent->databaseId(database);
+    return String();
 }
 #endif
 
-#if ENABLE(DATABASE)
-Database* InjectedScriptHost::databaseForId(long databaseId)
+String InjectedScriptHost::storageIdImpl(Storage* storage)
 {
-    if (m_inspectorController)
-        return m_inspectorController->databaseForId(databaseId);
-    return 0;
+    if (m_domStorageAgent)
+        return m_domStorageAgent->storageId(storage);
+    return String();
 }
 
-void InjectedScriptHost::selectDatabase(Database* database)
+#if ENABLE(WORKERS)
+long InjectedScriptHost::nextWorkerId()
 {
-    if (m_inspectorController)
-        m_inspectorController->selectDatabase(database);
-}
-#endif
-
-#if ENABLE(DOM_STORAGE)
-void InjectedScriptHost::selectDOMStorage(Storage* storage)
-{
-    if (m_inspectorController)
-        m_inspectorController->selectDOMStorage(storage);
-}
-#endif
-
-void InjectedScriptHost::reportDidDispatchOnInjectedScript(long callId, const String& result, bool isException)
-{
-    if (InspectorFrontend* frontend = inspectorFrontend())
-        frontend->didDispatchOnInjectedScript(callId, result, isException);
+    return ++m_lastWorkerId;
 }
 
-ScriptObject InjectedScriptHost::injectedScriptForId(long id)
+void InjectedScriptHost::didCreateWorker(long id, const String& url, bool isSharedWorker)
 {
-    return m_idToInjectedScript.get(id);
+    if (m_inspectorAgent)
+        m_inspectorAgent->didCreateWorker(static_cast<int>(id), url, isSharedWorker);
 }
 
-void InjectedScriptHost::discardInjectedScripts()
+void InjectedScriptHost::didDestroyWorker(long id)
 {
-    m_idToInjectedScript.clear();
+    if (m_inspectorAgent)
+        m_inspectorAgent->didDestroyWorker(static_cast<int>(id));
 }
-
-void InjectedScriptHost::releaseWrapperObjectGroup(long injectedScriptId, const String& objectGroup)
-{
-    if (injectedScriptId) {
-         ScriptObject injectedScript = m_idToInjectedScript.get(injectedScriptId);
-         if (!injectedScript.hasNoValue())
-             releaseWrapperObjectGroup(injectedScript, objectGroup);
-    } else {
-         // Iterate over all injected scripts if injectedScriptId is not specified.
-         for (IdToInjectedScriptMap::iterator it = m_idToInjectedScript.begin(); it != m_idToInjectedScript.end(); ++it)
-              releaseWrapperObjectGroup(it->second, objectGroup);
-    }
-}
-
-InspectorDOMAgent* InjectedScriptHost::inspectorDOMAgent()
-{
-    if (!m_inspectorController)
-        return 0;
-    return m_inspectorController->domAgent();
-}
-
-InspectorFrontend* InjectedScriptHost::inspectorFrontend()
-{
-    if (!m_inspectorController)
-        return 0;
-    return m_inspectorController->m_frontend.get();
-}
-
-void InjectedScriptHost::releaseWrapperObjectGroup(const ScriptObject& injectedScript, const String& objectGroup)
-{
-    ScriptFunctionCall releaseFunction(injectedScript.scriptState(), injectedScript, "releaseWrapperObjectGroup");
-    releaseFunction.appendArgument(objectGroup);
-    releaseFunction.call();
-}
+#endif // ENABLE(WORKERS)
 
 } // namespace WebCore
 

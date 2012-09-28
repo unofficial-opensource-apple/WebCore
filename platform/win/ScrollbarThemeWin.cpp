@@ -27,6 +27,7 @@
 #include "ScrollbarThemeWin.h"
 
 #include "GraphicsContext.h"
+#include "LocalWindowsContext.h"
 #include "PlatformMouseEvent.h"
 #include "Scrollbar.h"
 #include "SoftLinking.h"
@@ -99,7 +100,7 @@ ScrollbarThemeWin::ScrollbarThemeWin()
     if (!initialized) {
         initialized = true;
         checkAndInitScrollbarTheme();
-        runningVista = isRunningOnVistaOrLater();
+        runningVista = (windowsVersion() >= WindowsVista);
     }
 }
 
@@ -129,12 +130,12 @@ bool ScrollbarThemeWin::invalidateOnMouseEnterExit()
     return runningVista;
 }
 
-bool ScrollbarThemeWin::hasThumb(Scrollbar* scrollbar)
+bool ScrollbarThemeWin::hasThumb(ScrollbarThemeClient* scrollbar)
 {
     return thumbLength(scrollbar) > 0;
 }
 
-IntRect ScrollbarThemeWin::backButtonRect(Scrollbar* scrollbar, ScrollbarPart part, bool)
+IntRect ScrollbarThemeWin::backButtonRect(ScrollbarThemeClient* scrollbar, ScrollbarPart part, bool)
 {
     // Windows just has single arrows.
     if (part == BackButtonEndPart)
@@ -153,7 +154,7 @@ IntRect ScrollbarThemeWin::backButtonRect(Scrollbar* scrollbar, ScrollbarPart pa
                    thickness, scrollbar->height() < 2 * thickness ? scrollbar->height() / 2 : thickness);
 }
 
-IntRect ScrollbarThemeWin::forwardButtonRect(Scrollbar* scrollbar, ScrollbarPart part, bool)
+IntRect ScrollbarThemeWin::forwardButtonRect(ScrollbarThemeClient* scrollbar, ScrollbarPart part, bool)
 {
     // Windows just has single arrows.
     if (part == ForwardButtonStartPart)
@@ -174,7 +175,7 @@ IntRect ScrollbarThemeWin::forwardButtonRect(Scrollbar* scrollbar, ScrollbarPart
     return IntRect(scrollbar->x(), scrollbar->y() + scrollbar->height() - h, thickness, h);
 }
 
-IntRect ScrollbarThemeWin::trackRect(Scrollbar* scrollbar, bool)
+IntRect ScrollbarThemeWin::trackRect(ScrollbarThemeClient* scrollbar, bool)
 {
     int thickness = scrollbarThickness();
     if (scrollbar->orientation() == HorizontalScrollbar) {
@@ -187,12 +188,12 @@ IntRect ScrollbarThemeWin::trackRect(Scrollbar* scrollbar, bool)
     return IntRect(scrollbar->x(), scrollbar->y() + thickness, thickness, scrollbar->height() - 2 * thickness);
 }
 
-bool ScrollbarThemeWin::shouldCenterOnThumb(Scrollbar*, const PlatformMouseEvent& evt)
+bool ScrollbarThemeWin::shouldCenterOnThumb(ScrollbarThemeClient*, const PlatformMouseEvent& evt)
 {
     return evt.shiftKey() && evt.button() == LeftButton;
 }
 
-bool ScrollbarThemeWin::shouldSnapBackToDragOrigin(Scrollbar* scrollbar, const PlatformMouseEvent& evt)
+bool ScrollbarThemeWin::shouldSnapBackToDragOrigin(ScrollbarThemeClient* scrollbar, const PlatformMouseEvent& evt)
 {
     // Find the rect within which we shouldn't snap, by expanding the track rect
     // in both dimensions.
@@ -203,21 +204,21 @@ bool ScrollbarThemeWin::shouldSnapBackToDragOrigin(Scrollbar* scrollbar, const P
     rect.inflateY((horz ? kOffSideMultiplier : kOffEndMultiplier) * thickness);
 
     // Convert the event to local coordinates.
-    IntPoint mousePosition = scrollbar->convertFromContainingWindow(evt.pos());
+    IntPoint mousePosition = scrollbar->convertFromContainingWindow(evt.position());
     mousePosition.move(scrollbar->x(), scrollbar->y());
 
     // We should snap iff the event is outside our calculated rect.
     return !rect.contains(mousePosition);
 }
 
-void ScrollbarThemeWin::paintTrackBackground(GraphicsContext* context, Scrollbar* scrollbar, const IntRect& rect)
+void ScrollbarThemeWin::paintTrackBackground(GraphicsContext* context, ScrollbarThemeClient* scrollbar, const IntRect& rect)
 {
     // Just assume a forward track part.  We only paint the track as a single piece when there is no thumb.
     if (!hasThumb(scrollbar))
         paintTrackPiece(context, scrollbar, rect, ForwardTrackPart);
 }
 
-void ScrollbarThemeWin::paintTrackPiece(GraphicsContext* context, Scrollbar* scrollbar, const IntRect& rect, ScrollbarPart partType)
+void ScrollbarThemeWin::paintTrackPiece(GraphicsContext* context, ScrollbarThemeClient* scrollbar, const IntRect& rect, ScrollbarPart partType)
 {
     checkAndInitScrollbarTheme();
 
@@ -240,14 +241,17 @@ void ScrollbarThemeWin::paintTrackPiece(GraphicsContext* context, Scrollbar* scr
     bool alphaBlend = false;
     if (scrollbarTheme)
         alphaBlend = IsThemeBackgroundPartiallyTransparent(scrollbarTheme, part, state);
-    HDC hdc = context->getWindowsContext(rect, alphaBlend);
+
+    LocalWindowsContext windowsContext(context, rect, alphaBlend);
     RECT themeRect(rect);
+
     if (scrollbarTheme)
-        DrawThemeBackground(scrollbarTheme, hdc, part, state, &themeRect, 0);
+        DrawThemeBackground(scrollbarTheme, windowsContext.hdc(), part, state, &themeRect, 0);
     else {
         DWORD color3DFace = ::GetSysColor(COLOR_3DFACE);
         DWORD colorScrollbar = ::GetSysColor(COLOR_SCROLLBAR);
         DWORD colorWindow = ::GetSysColor(COLOR_WINDOW);
+        HDC hdc = windowsContext.hdc();
         if ((color3DFace != colorScrollbar) && (colorWindow != colorScrollbar))
             ::FillRect(hdc, &themeRect, HBRUSH(COLOR_SCROLLBAR+1));
         else {
@@ -265,10 +269,14 @@ void ScrollbarThemeWin::paintTrackPiece(GraphicsContext* context, Scrollbar* scr
             ::DeleteObject(patternBitmap);
         }
     }
-    context->releaseWindowsContext(hdc, rect, alphaBlend);
+
+#if !OS(WINCE)
+    if (!alphaBlend && !context->isInTransparencyLayer())
+        DIBPixelData::setRGBABitmapAlpha(windowsContext.hdc(), rect, 255);
+#endif
 }
 
-void ScrollbarThemeWin::paintButton(GraphicsContext* context, Scrollbar* scrollbar, const IntRect& rect, ScrollbarPart part)
+void ScrollbarThemeWin::paintButton(GraphicsContext* context, ScrollbarThemeClient* scrollbar, const IntRect& rect, ScrollbarPart part)
 {
     checkAndInitScrollbarTheme();
 
@@ -288,7 +296,10 @@ void ScrollbarThemeWin::paintButton(GraphicsContext* context, Scrollbar* scrollb
                (scrollbar->hoveredPart() == ForwardButtonEndPart && !start)) {
         if (scrollbar->pressedPart() == scrollbar->hoveredPart()) {
             xpState += TS_ACTIVE;
-            classicState |= DFCS_PUSHED | DFCS_FLAT;
+            classicState |= DFCS_PUSHED;
+#if !OS(WINCE)
+            classicState |= DFCS_FLAT;
+#endif
         } else
             xpState += TS_HOVER;
     } else {
@@ -305,14 +316,18 @@ void ScrollbarThemeWin::paintButton(GraphicsContext* context, Scrollbar* scrollb
     bool alphaBlend = false;
     if (scrollbarTheme)
         alphaBlend = IsThemeBackgroundPartiallyTransparent(scrollbarTheme, SP_BUTTON, xpState);
-    HDC hdc = context->getWindowsContext(rect, alphaBlend);
 
+    LocalWindowsContext windowsContext(context, rect, alphaBlend);
     RECT themeRect(rect);
     if (scrollbarTheme)
-        DrawThemeBackground(scrollbarTheme, hdc, SP_BUTTON, xpState, &themeRect, 0);
+        DrawThemeBackground(scrollbarTheme, windowsContext.hdc(), SP_BUTTON, xpState, &themeRect, 0);
     else
-        ::DrawFrameControl(hdc, &themeRect, DFC_SCROLL, classicState);
-    context->releaseWindowsContext(hdc, rect, alphaBlend);
+        ::DrawFrameControl(windowsContext.hdc(), &themeRect, DFC_SCROLL, classicState);
+
+#if !OS(WINCE)
+    if (!alphaBlend && !context->isInTransparencyLayer())
+        DIBPixelData::setRGBABitmapAlpha(windowsContext.hdc(), rect, 255);
+#endif
 }
 
 static IntRect gripperRect(int thickness, const IntRect& thumbRect)
@@ -324,7 +339,7 @@ static IntRect gripperRect(int thickness, const IntRect& thumbRect)
                    gripperThickness, gripperThickness);
 }
 
-static void paintGripper(Scrollbar* scrollbar, HDC hdc, const IntRect& rect)
+static void paintGripper(ScrollbarThemeClient* scrollbar, HDC hdc, const IntRect& rect)
 {
     if (!scrollbarTheme)
         return;  // Classic look has no gripper.
@@ -343,7 +358,7 @@ static void paintGripper(Scrollbar* scrollbar, HDC hdc, const IntRect& rect)
     DrawThemeBackground(scrollbarTheme, hdc, scrollbar->orientation() == HorizontalScrollbar ? SP_GRIPPERHOR : SP_GRIPPERVERT, state, &themeRect, 0);
 }
 
-void ScrollbarThemeWin::paintThumb(GraphicsContext* context, Scrollbar* scrollbar, const IntRect& rect)
+void ScrollbarThemeWin::paintThumb(GraphicsContext* context, ScrollbarThemeClient* scrollbar, const IntRect& rect)
 {
     checkAndInitScrollbarTheme();
 
@@ -367,6 +382,11 @@ void ScrollbarThemeWin::paintThumb(GraphicsContext* context, Scrollbar* scrollba
         paintGripper(scrollbar, hdc, gripperRect(scrollbarThickness(), rect));
     } else
         ::DrawEdge(hdc, &themeRect, EDGE_RAISED, BF_RECT | BF_MIDDLE);
+
+#if !OS(WINCE)
+    if (!alphaBlend && !context->isInTransparencyLayer())
+        DIBPixelData::setRGBABitmapAlpha(hdc, rect, 255);
+#endif
     context->releaseWindowsContext(hdc, rect, alphaBlend);
 }
 

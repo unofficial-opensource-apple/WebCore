@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2003, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2006, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,50 +23,57 @@
 #include "config.h"
 #include "HTMLBRElement.h"
 
+#include "Attribute.h"
 #include "CSSPropertyNames.h"
+#include "CSSValueKeywords.h"
 #include "HTMLNames.h"
-#include "MappedAttribute.h"
 #include "RenderBR.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLBRElement::HTMLBRElement(const QualifiedName& tagName, Document *doc)
-    : HTMLElement(tagName, doc)
+HTMLBRElement::HTMLBRElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(brTag));
 }
 
-bool HTMLBRElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+PassRefPtr<HTMLBRElement> HTMLBRElement::create(Document* document)
 {
-    if (attrName == clearAttr) {
-        result = eUniversal;
-        return false;
-    }
-    
-    return HTMLElement::mapToEntry(attrName, result);
+    return adoptRef(new HTMLBRElement(brTag, document));
 }
 
-void HTMLBRElement::parseMappedAttribute(MappedAttribute* attr)
+PassRefPtr<HTMLBRElement> HTMLBRElement::create(const QualifiedName& tagName, Document* document)
+{
+    return adoptRef(new HTMLBRElement(tagName, document));
+}
+
+bool HTMLBRElement::isPresentationAttribute(const QualifiedName& name) const
+{
+    if (name == clearAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
+}
+
+void HTMLBRElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
 {
     if (attr->name() == clearAttr) {
-        // If the string is empty, then don't add the clear property. 
+        // If the string is empty, then don't add the clear property.
         // <br clear> and <br clear=""> are just treated like <br> by Gecko, Mac IE, etc. -dwh
-        const AtomicString& str = attr->value();
-        if (!str.isEmpty()) {
-            if (equalIgnoringCase(str, "all"))
-                addCSSProperty(attr, CSSPropertyClear, "both");
+        if (!attr->isEmpty()) {
+            if (equalIgnoringCase(attr->value(), "all"))
+                addPropertyToAttributeStyle(style, CSSPropertyClear, CSSValueBoth);
             else
-                addCSSProperty(attr, CSSPropertyClear, str);
+                addPropertyToAttributeStyle(style, CSSPropertyClear, attr->value());
         }
     } else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::collectStyleForAttribute(attr, style);
 }
 
 RenderObject* HTMLBRElement::createRenderer(RenderArena* arena, RenderStyle* style)
 {
-     if (style->contentData())
+     if (style->hasContent())
         return RenderObject::createObject(this, style);
 
      return new (arena) RenderBR(this);

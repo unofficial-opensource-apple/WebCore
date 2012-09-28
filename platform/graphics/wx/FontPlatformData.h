@@ -26,21 +26,36 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
  
-#ifndef FontPlatformData_H
-#define FontPlatformData_H
+#ifndef FontPlatformData_h
+#define FontPlatformData_h
 
 #include "FontDescription.h"
-#include "AtomicString.h"
-#include "CString.h"
-#include "StringImpl.h"
+#include "FontWidthVariant.h"
+#include "FontOrientation.h"
+#include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/AtomicString.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/StringImpl.h>
 
 #include <wx/defs.h>
 #include <wx/font.h>
+#include <wx/gdicmn.h>
+
+#if OS(DARWIN)
+#include <ApplicationServices/ApplicationServices.h>
+
+#if __OBJC__
+@class NSFont;
+#else
+class NSFont;
+#endif
+
+inline CTFontRef toCTFontRef(NSFont *nsFont) { return reinterpret_cast<CTFontRef>(nsFont); }
+
+#endif
 
 namespace WebCore {
-
-class String;
 
 class FontHolder: public WTF::RefCounted<FontHolder>
 {
@@ -64,22 +79,35 @@ public:
     enum FontState { UNINITIALIZED, DELETED, VALID };
 
     FontPlatformData(WTF::HashTableDeletedValueType)
-    : m_fontState(DELETED),
-      m_font(0)
+    : m_fontState(DELETED)
+    , m_font(0)
+    , m_size(0)
+#if OS(DARWIN)
+    , m_atsuFontID(0)
+#endif
     { }
 
     ~FontPlatformData();
 
     FontPlatformData(const FontDescription&, const AtomicString&);
+    
     FontPlatformData(float size, bool bold, bool italic)
     : m_fontState(UNINITIALIZED)
     , m_font(0)
+    , m_size(size)
+#if OS(DARWIN)
+    , m_atsuFontID(0)
+#endif
     {
     }
     
     FontPlatformData() 
     : m_fontState(UNINITIALIZED)
     , m_font(0)
+    , m_size(0)
+#if OS(DARWIN)
+    , m_atsuFontID(0)
+#endif
     {
     }
     
@@ -99,6 +127,8 @@ public:
     }
 
     unsigned computeHash() const;
+    
+    float size() const { return m_size; }
 
     bool operator==(const FontPlatformData& other) const
     { 
@@ -113,13 +143,40 @@ public:
 
     bool isHashTableDeletedValue() const { return m_fontState == DELETED; }
     
+    bool roundsGlyphAdvances() const { return false; }
+    
+    bool allowsLigatures() const { return false; }
+    
+    FontOrientation orientation() const { return Horizontal; } // FIXME: Implement.
+    void setOrientation(FontOrientation) { } // FIXME: Implement.
+
+    // We don't support this yet, so just return the default value for now.
+    FontWidthVariant widthVariant() const { return RegularWidth; }
+
+#if OS(WINDOWS)
+    bool useGDI() const;
+    HFONT hfont() const;
+#endif
+
+#if OS(DARWIN)
+    ATSUFontID m_atsuFontID;
+    CGFontRef cgFont() const;
+    NSFont* nsFont() const { return m_nsFont; }
+    CTFontRef ctFont() const { return reinterpret_cast<CTFontRef>(m_nsFont); }
+    void cacheNSFont();
+#endif
+
 #ifndef NDEBUG
     String description() const;
 #endif
 
 private:
-    WTF::RefPtr<FontHolder> m_font;
     FontState m_fontState;
+    WTF::RefPtr<FontHolder> m_font;
+    float m_size;
+#if OS(DARWIN)
+    NSFont* m_nsFont;
+#endif
 };
 
 }

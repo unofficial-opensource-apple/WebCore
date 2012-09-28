@@ -35,24 +35,26 @@
 
 namespace WebCore {
 
-    class ExceptionBase : public RefCounted<ExceptionBase> {
-    public:
-        unsigned short code() const { return m_code; }
-        String name() const { return m_name; }
-        String message() const { return m_message; }
-        String description() const { return m_description; }
+struct ExceptionCodeDescription;
 
-        String toString() const;
+class ExceptionBase : public RefCounted<ExceptionBase> {
+public:
+    unsigned short code() const { return m_code; }
+    String name() const { return m_name; }
+    String message() const { return m_message; }
+    String description() const { return m_description; }
 
-    protected:
-        ExceptionBase(const ExceptionCodeDescription&);
+    String toString() const;
 
-    private:
-        unsigned short m_code;
-        String m_name;
-        String m_message;
-        String m_description;
-    };
+protected:
+    ExceptionBase(const ExceptionCodeDescription&);
+
+private:
+    unsigned short m_code;
+    String m_name;
+    String m_message;
+    String m_description;
+};
 
 } // namespace WebCore
 

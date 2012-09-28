@@ -25,29 +25,38 @@
 
 #include "config.h"
 
-#if ENABLE(3D_CANVAS)
+#if ENABLE(WEBGL)
 
 #include "WebGLShader.h"
+
+#include "WebGLContextGroup.h"
 #include "WebGLRenderingContext.h"
 
 namespace WebCore {
-    
-PassRefPtr<WebGLShader> WebGLShader::create(WebGLRenderingContext* ctx, GraphicsContext3D::WebGLEnumType type)
+
+PassRefPtr<WebGLShader> WebGLShader::create(WebGLRenderingContext* ctx, GC3Denum type)
 {
     return adoptRef(new WebGLShader(ctx, type));
 }
 
-WebGLShader::WebGLShader(WebGLRenderingContext* ctx, GraphicsContext3D::WebGLEnumType type)
-    : CanvasObject(ctx)
+WebGLShader::WebGLShader(WebGLRenderingContext* ctx, GC3Denum type)
+    : WebGLSharedObject(ctx)
+    , m_type(type)
+    , m_source("")
 {
-    setObject(context()->graphicsContext3D()->createShader(type));
+    setObject(ctx->graphicsContext3D()->createShader(type));
 }
 
-void WebGLShader::_deleteObject(Platform3DObject object)
+WebGLShader::~WebGLShader()
 {
-    context()->graphicsContext3D()->deleteShader(object);
+    deleteObject(0);
+}
+
+void WebGLShader::deleteObjectImpl(GraphicsContext3D* context3d, Platform3DObject object)
+{
+    context3d->deleteShader(object);
 }
 
 }
 
-#endif // ENABLE(3D_CANVAS)
+#endif // ENABLE(WEBGL)

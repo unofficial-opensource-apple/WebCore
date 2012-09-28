@@ -26,7 +26,10 @@
 #include "config.h"
 #include "Logging.h"
 
+#if !LOG_DISABLED
+
 #include "PlatformString.h"
+#include <windows.h>
 #include <wtf/OwnArrayPtr.h>
 
 namespace WebCore {
@@ -37,7 +40,7 @@ static inline void initializeWithUserDefault(WTFLogChannel& channel)
     if (!length)
         return;
 
-    OwnArrayPtr<char> buffer(new char[length]);
+    OwnArrayPtr<char> buffer = adoptArrayPtr(new char[length]);
 
     if (!GetEnvironmentVariableA(channel.defaultName, buffer.get(), length))
         return;
@@ -67,7 +70,7 @@ static inline void initializeWithUserDefault(WTFLogChannel& channel)
         channel.state = WTFLogChannelOff;
 }
 
-void InitializeLoggingChannelsIfNecessary()
+void initializeLoggingChannelsIfNecessary()
 {
     static bool haveInitializedLoggingChannels = false;
     if (haveInitializedLoggingChannels)
@@ -80,7 +83,7 @@ void InitializeLoggingChannelsIfNecessary()
     initializeWithUserDefault(LogPopupBlocking);
     initializeWithUserDefault(LogEvents);
     initializeWithUserDefault(LogEditing);
-    initializeWithUserDefault(LogTextConversion);
+    initializeWithUserDefault(LogLiveConnect);
     initializeWithUserDefault(LogIconDatabase);
     initializeWithUserDefault(LogSQLDatabase);
     initializeWithUserDefault(LogSpellingAndGrammar);
@@ -88,6 +91,7 @@ void InitializeLoggingChannelsIfNecessary()
     initializeWithUserDefault(LogHistory);
     initializeWithUserDefault(LogPageCache);
     initializeWithUserDefault(LogPlatformLeaks);
+    initializeWithUserDefault(LogResourceLoading);
     initializeWithUserDefault(LogNetwork);
     initializeWithUserDefault(LogFTP);
     initializeWithUserDefault(LogThreading);
@@ -95,6 +99,10 @@ void InitializeLoggingChannelsIfNecessary()
     initializeWithUserDefault(LogMedia);
     initializeWithUserDefault(LogPlugins);
     initializeWithUserDefault(LogArchives);
+    initializeWithUserDefault(LogProgress);
+    initializeWithUserDefault(LogFileAPI);
 }
 
 } // namespace WebCore
+
+#endif // !LOG_DISABLED

@@ -27,8 +27,6 @@
 #ifndef XPathPredicate_h
 #define XPathPredicate_h
 
-#if ENABLE(XPATH)
-
 #include "XPathExpressionNode.h"
 #include "XPathValue.h"
 
@@ -105,7 +103,8 @@ namespace WebCore {
             virtual Value::Type resultType() const { return Value::NodeSetValue; }
         };
 
-        class Predicate : public Noncopyable {
+        class Predicate {
+            WTF_MAKE_NONCOPYABLE(Predicate); WTF_MAKE_FAST_ALLOCATED;
         public:
             Predicate(Expression*);
             ~Predicate();
@@ -121,7 +120,5 @@ namespace WebCore {
     }
 
 }
-
-#endif // ENABLE(XPATH)
 
 #endif // XPathPredicate_h

@@ -27,19 +27,19 @@
 #ifndef XPathExpressionNode_h
 #define XPathExpressionNode_h
 
-#if ENABLE(XPATH)
-
-#include "StringHash.h"
 #include "Node.h"
 #include "XPathValue.h"
 #include <wtf/HashMap.h>
 #include <wtf/Vector.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
     namespace XPath {
         
-        struct EvaluationContext : FastAllocBase {
+        struct EvaluationContext {
+            WTF_MAKE_FAST_ALLOCATED;
+        public:
             RefPtr<Node> node;
             unsigned long size;
             unsigned long position;
@@ -53,7 +53,8 @@ namespace WebCore {
             virtual ~ParseNode() { }
         };
 
-        class Expression : public ParseNode, public Noncopyable {
+        class Expression : public ParseNode {
+            WTF_MAKE_NONCOPYABLE(Expression); WTF_MAKE_FAST_ALLOCATED;
         public:
             static EvaluationContext& evaluationContext();
 
@@ -97,7 +98,4 @@ namespace WebCore {
 
 }
 
-#endif // ENABLE(XPATH)
-
 #endif // EXPRESSION_H
-

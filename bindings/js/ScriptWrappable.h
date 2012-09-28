@@ -31,11 +31,32 @@
 #ifndef ScriptWrappable_h
 #define ScriptWrappable_h
 
+#include "JSDOMWrapper.h"
+#include <heap/Weak.h>
+
 namespace WebCore {
 
 class ScriptWrappable {
 public:
-    ScriptWrappable() { }
+    JSDOMWrapper* wrapper() const
+    {
+        return m_wrapper.get();
+    }
+
+    void setWrapper(JSC::JSGlobalData&, JSDOMWrapper* wrapper, JSC::WeakHandleOwner* wrapperOwner, void* context)
+    {
+        ASSERT(!m_wrapper);
+        m_wrapper = JSC::PassWeak<JSDOMWrapper>(wrapper, wrapperOwner, context);
+    }
+
+    void clearWrapper(JSDOMWrapper* wrapper)
+    {
+        ASSERT_UNUSED(wrapper, m_wrapper.was(wrapper));
+        m_wrapper.clear();
+    }
+
+private:
+    JSC::Weak<JSDOMWrapper> m_wrapper;
 };
 
 } // namespace WebCore

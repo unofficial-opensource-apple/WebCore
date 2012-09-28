@@ -29,6 +29,9 @@
  */
 
 #include "config.h"
+
+#if ENABLE(XSLT)
+
 #include "V8XSLTProcessor.h"
 
 #include "Document.h"
@@ -36,8 +39,8 @@
 #include "Node.h"
 
 #include "V8Binding.h"
-#include "V8CustomBinding.h"
 #include "V8Document.h"
+#include "V8DocumentFragment.h"
 #include "V8Node.h"
 #include "V8Proxy.h"
 #include "XSLTProcessor.h"
@@ -45,13 +48,6 @@
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
-
-v8::Handle<v8::Value> V8XSLTProcessor::constructorCallback(const v8::Arguments& args)
-{
-    INC_STATS("DOM.XSLTProcessor.Constructor");
-    return V8Proxy::constructDOMObject<V8ClassIndex::XSLTPROCESSOR, XSLTProcessor>(args);
-}
-
 
 v8::Handle<v8::Value> V8XSLTProcessor::importStylesheetCallback(const v8::Arguments& args)
 {
@@ -78,7 +74,7 @@ v8::Handle<v8::Value> V8XSLTProcessor::transformToFragmentCallback(const v8::Arg
     Node* source = V8Node::toNative(v8::Handle<v8::Object>::Cast(args[0]));
     Document* owner = V8Document::toNative(v8::Handle<v8::Object>::Cast(args[1]));
     RefPtr<DocumentFragment> result = imp->transformToFragment(source, owner);
-    return V8DOMWrapper::convertNodeToV8Object(result.release());
+    return toV8(result.release(), args.GetIsolate());
 }
 
 
@@ -99,7 +95,7 @@ v8::Handle<v8::Value> V8XSLTProcessor::transformToDocumentCallback(const v8::Arg
     if (!result)
         return v8::Undefined();
 
-    return V8DOMWrapper::convertNodeToV8Object(result.release());
+    return toV8(result.release(), args.GetIsolate());
 }
 
 
@@ -152,3 +148,5 @@ v8::Handle<v8::Value> V8XSLTProcessor::removeParameterCallback(const v8::Argumen
 }
 
 } // namespace WebCore
+
+#endif // ENABLE(XSLT)

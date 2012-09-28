@@ -9,6 +9,7 @@
 #define WebCoreThread_h
 
 #import <CoreGraphics/CoreGraphics.h>
+#import <fenv.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -18,7 +19,15 @@ typedef struct {
     CGContextRef currentCGContext;
 } WebThreadContext;
     
-extern bool webThreadShouldYield;
+extern volatile bool webThreadShouldYield;
+
+extern fenv_t mainThreadFEnv;
+
+#ifdef __OBJC__
+@class NSRunLoop;
+#else
+class NSRunLoop;
+#endif
 
 // The lock is automatically freed at the bottom of the runloop. No need to unlock.
 // Note that calling this function may hang your UI for several seconds. Don't use
@@ -30,7 +39,6 @@ void WebThreadUnlock(void);
     
 // Please don't use anything below this line unless you know what you are doing. If unsure, ask.
 // ---------------------------------------------------------------------------------------------
-bool WebTryThreadLock(void);
 bool WebThreadIsLocked(void);
 bool WebThreadIsLockedOrDisabled(void);
     
@@ -48,14 +56,21 @@ void WebThreadLockFromAnyThread();
 void WebThreadLockFromAnyThreadNoLog();
 void WebThreadUnlockFromAnyThread();
 
+// This is for <rdar://problem/8005192> Mail entered a state where message subject and content isn't displayed.
+// It should only be used for MobileMail to work around <rdar://problem/8005192>.
+void WebThreadUnlockGuardForMail();
+
 static inline bool WebThreadShouldYield(void) { return webThreadShouldYield; }
 static inline void WebThreadSetShouldYield() { webThreadShouldYield = true; }
 
 CFRunLoopRef WebThreadRunLoop(void);
+NSRunLoop* WebThreadNSRunLoop(void);
 WebThreadContext *WebThreadCurrentContext(void);
 bool WebThreadContextIsCurrent(void);
 
 void WebThreadPrepareForDrawing(void);
+
+void WebThreadSetDelegateSourceRunLoopMode(CFStringRef mode);
 
 #if defined(__cplusplus)
 }

@@ -20,7 +20,7 @@
  */
 #include "config.h"
 
-#include "Bridge.h"
+#include "BridgeJSC.h"
 #include "JSObject.h"
 #include "JSValue.h"
 #include "interpreter.h"
@@ -391,7 +391,7 @@ int main(int argc, char **argv)
                 
                 if (comp.complType() == Throw) {
                     Value exVal = comp.value();
-                    char *msg = exVal.toString(exec).ascii();
+                    char* msg = exVal.toString(exec)->value(exec).ascii();
                     int lineno = -1;
                     if (exVal.type() == ObjectType) {
                         Value lineVal = Object::dynamicCast(exVal).get(exec,Identifier("line"));

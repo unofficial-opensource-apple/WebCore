@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2009, Google Inc. All rights reserved.
+ * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -36,25 +37,20 @@
 
 namespace WebCore {
 
-HTMLDataListElement::HTMLDataListElement(const QualifiedName& tagName, Document *doc)
-    : HTMLElement(tagName, doc)
+inline HTMLDataListElement::HTMLDataListElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
 {
 }
 
-HTMLDataListElement::~HTMLDataListElement()
+PassRefPtr<HTMLDataListElement> HTMLDataListElement::create(const QualifiedName& tagName, Document* document)
 {
+    return adoptRef(new HTMLDataListElement(tagName, document));
 }
 
-bool HTMLDataListElement::checkDTD(const Node* newChild)
+HTMLCollection* HTMLDataListElement::options()
 {
-    return newChild->hasTagName(HTMLNames::optionTag) || HTMLElement::inInlineTagList(newChild);
-}
-
-PassRefPtr<HTMLCollection> HTMLDataListElement::options()
-{
-    return HTMLCollection::create(this, DataListOptions);
+    return ensureCachedHTMLCollection(DataListOptions);
 }
 
 }  // namespace WebCore
-
 #endif  // ENABLE(DATALIST)

@@ -20,12 +20,14 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "config.h"
 #include "Logging.h"
 #include "PlatformString.h"
+
+#if !LOG_DISABLED
 
 namespace WebCore {
 
@@ -33,13 +35,11 @@ WTFLogChannel LogNotYetImplemented = { 0x00000001, "WebCoreLogLevel", WTFLogChan
 
 WTFLogChannel LogFrames =            { 0x00000010, "WebCoreLogLevel", WTFLogChannelOff };
 WTFLogChannel LogLoading =           { 0x00000020, "WebCoreLogLevel", WTFLogChannelOff };
-
 WTFLogChannel LogPopupBlocking =     { 0x00000040, "WebCoreLogLevel", WTFLogChannelOff };
-
 WTFLogChannel LogEvents =            { 0x00000080, "WebCoreLogLevel", WTFLogChannelOff };
-WTFLogChannel LogEditing =           { 0x00000100, "WebCoreLogLevel", WTFLogChannelOff };
-WTFLogChannel LogTextConversion =    { 0x00000200, "WebCoreLogLevel", WTFLogChannelOff };
 
+WTFLogChannel LogEditing =           { 0x00000100, "WebCoreLogLevel", WTFLogChannelOff };
+WTFLogChannel LogLiveConnect =       { 0x00000200, "WebCoreLogLevel", WTFLogChannelOff };
 WTFLogChannel LogIconDatabase =      { 0x00000400, "WebCoreLogLevel", WTFLogChannelOff };
 WTFLogChannel LogSQLDatabase =       { 0x00000800, "WebCoreLogLevel", WTFLogChannelOff };
 
@@ -49,6 +49,7 @@ WTFLogChannel LogHistory =           { 0x00004000, "WebCoreLogLevel", WTFLogChan
 WTFLogChannel LogPageCache =         { 0x00008000, "WebCoreLogLevel", WTFLogChannelOff };
 
 WTFLogChannel LogPlatformLeaks =     { 0x00010000, "WebCoreLogLevel", WTFLogChannelOff };
+WTFLogChannel LogResourceLoading =   { 0x00020000, "WebCoreLogLevel", WTFLogChannelOff };
 
 WTFLogChannel LogNetwork =           { 0x00100000, "WebCoreLogLevel", WTFLogChannelOff };
 WTFLogChannel LogFTP =               { 0x00200000, "WebCoreLogLevel", WTFLogChannelOff };
@@ -56,9 +57,20 @@ WTFLogChannel LogThreading =         { 0x00400000, "WebCoreLogLevel", WTFLogChan
 WTFLogChannel LogStorageAPI =        { 0x00800000, "WebCoreLogLevel", WTFLogChannelOff };
 
 WTFLogChannel LogMedia =             { 0x01000000, "WebCoreLogLevel", WTFLogChannelOff };
-
 WTFLogChannel LogPlugins =           { 0x02000000, "WebCoreLogLevel", WTFLogChannelOff };
 WTFLogChannel LogArchives =          { 0x04000000, "WebCoreLogLevel", WTFLogChannelOff };
+WTFLogChannel LogProgress =          { 0x08000000, "WebCoreLogLevel", WTFLogChannelOff };
+
+WTFLogChannel LogFileAPI =           { 0x10000000, "WebCoreLogLevel", WTFLogChannelOff };
+
+WTFLogChannel LogWebAudio =          { 0x20000000, "WebCoreLogLevel", WTFLogChannelOff };
+WTFLogChannel LogCompositing =       { 0x40000000, "WebCoreLogLevel", WTFLogChannelOff };
+
+
+#if ENABLE(DISK_IMAGE_CACHE)
+WTFLogChannel LogDiskImageCache =    { 0x00000010, "IOSWebCoreLogLevel", WTFLogChannelOff };
+#endif
+WTFLogChannel LogMemoryPressure =    { 0x00000020, "IOSWebCoreLogLevel", WTFLogChannelOff };
 
 WTFLogChannel* getChannelFromName(const String& channelName)
 {
@@ -104,11 +116,17 @@ WTFLogChannel* getChannelFromName(const String& channelName)
     if (equalIgnoringCase(channelName, String("PlatformLeaks")))
         return &LogPlatformLeaks;
 
+    if (equalIgnoringCase(channelName, String("ResourceLoading")))
+        return &LogResourceLoading;
+
     if (equalIgnoringCase(channelName, String("Plugins")))
         return &LogPlugins;
 
     if (equalIgnoringCase(channelName, String("PopupBlocking")))
         return &LogPopupBlocking;
+
+    if (equalIgnoringCase(channelName, String("Progress")))
+        return &LogProgress;
 
     if (equalIgnoringCase(channelName, String("SpellingAndGrammar")))
         return &LogSpellingAndGrammar;
@@ -119,13 +137,31 @@ WTFLogChannel* getChannelFromName(const String& channelName)
     if (equalIgnoringCase(channelName, String("StorageAPI")))
         return &LogStorageAPI;
 
-    if (equalIgnoringCase(channelName, String("TextConversion")))
-        return &LogTextConversion;
+    if (equalIgnoringCase(channelName, String("LiveConnect")))
+        return &LogLiveConnect;
 
     if (equalIgnoringCase(channelName, String("Threading")))
         return &LogThreading;
+
+    if (equalIgnoringCase(channelName, String("FileAPI")))
+        return &LogFileAPI;
+
+    if (equalIgnoringCase(channelName, String("WebAudio")))
+        return &LogWebAudio;
+
+    if (equalIgnoringCase(channelName, String("Compositing")))
+        return &LogCompositing;
+
+#if ENABLE(DISK_IMAGE_CACHE)
+    if (equalIgnoringCase(channelName, String("DiskImageCache")))
+        return &LogDiskImageCache;
+#endif
+    if (equalIgnoringCase(channelName, String("MemoryPressure")))
+        return &LogMemoryPressure;
 
     return 0;
 }
 
 }
+
+#endif // !LOG_DISABLED

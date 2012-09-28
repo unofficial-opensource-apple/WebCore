@@ -23,52 +23,33 @@
 #include "config.h"
 #include "Navigator.h"
 
-#include "Chrome.h"
 #include "CookieJar.h"
-#include "ExceptionCode.h"
+#include "DOMMimeTypeArray.h"
+#include "DOMPluginArray.h"
+#include "Document.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
 #include "Geolocation.h"
-#include "KURL.h"
 #include "Language.h"
-#include "MimeTypeArray.h"
 #include "Page.h"
-#include "PageGroup.h"
-#include "PlatformString.h"
-#include "PluginArray.h"
 #include "PluginData.h"
-#include "ScriptController.h"
+#include "PointerLock.h"
+#include "SecurityOrigin.h"
 #include "Settings.h"
 #include "StorageNamespace.h"
+#include <wtf/HashSet.h>
+#include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
 Navigator::Navigator(Frame* frame)
-    : m_frame(frame)
+    : DOMWindowProperty(frame)
 {
 }
 
 Navigator::~Navigator()
 {
-    disconnectFrame();
-}
-
-void Navigator::disconnectFrame()
-{
-    if (m_plugins) {
-        m_plugins->disconnectFrame();
-        m_plugins = 0;
-    }
-    if (m_mimeTypes) {
-        m_mimeTypes->disconnectFrame();
-        m_mimeTypes = 0;
-    }
-    if (m_geolocation) {
-        m_geolocation->disconnectFrame();
-        m_geolocation = 0;
-    }
-    m_frame = 0;
 }
 
 // If this function returns true, we need to hide the substring "4." that would otherwise
@@ -116,17 +97,17 @@ String Navigator::userAgent() const
     return m_frame->loader()->userAgent(m_frame->document()->url());
 }
 
-PluginArray* Navigator::plugins() const
+DOMPluginArray* Navigator::plugins() const
 {
     if (!m_plugins)
-        m_plugins = PluginArray::create(m_frame);
+        m_plugins = DOMPluginArray::create(m_frame);
     return m_plugins.get();
 }
 
-MimeTypeArray* Navigator::mimeTypes() const
+DOMMimeTypeArray* Navigator::mimeTypes() const
 {
     if (!m_mimeTypes)
-        m_mimeTypes = MimeTypeArray::create(m_frame);
+        m_mimeTypes = DOMMimeTypeArray::create(m_frame);
     return m_mimeTypes.get();
 }
 
@@ -146,15 +127,22 @@ bool Navigator::javaEnabled() const
     if (!m_frame || !m_frame->settings())
         return false;
 
-    return m_frame->settings()->isJavaEnabled();
+    if (!m_frame->settings()->isJavaEnabled())
+        return false;
+    if (m_frame->document()->securityOrigin()->isLocal() && !m_frame->settings()->isJavaEnabledForLocalFiles())
+        return false;
+
+    return true;
 }
 
-Geolocation* Navigator::geolocation() const
+#if ENABLE(POINTER_LOCK)
+PointerLock* Navigator::webkitPointer() const
 {
-    if (!m_geolocation)
-        m_geolocation = Geolocation::create(m_frame);
-    return m_geolocation.get();
+    if (!m_pointer && m_frame && m_frame->page())
+        m_pointer = PointerLock::create(m_frame);
+    return m_pointer.get();
 }
+#endif
 
 bool Navigator::standalone() const
 {
@@ -166,109 +154,9 @@ bool Navigator::standalone() const
     return settings->standalone();
 }
 
-#if ENABLE(DOM_STORAGE)
 void Navigator::getStorageUpdates()
 {
-    if (!m_frame)
-        return;
-
-    Page* page = m_frame->page();
-    if (!page)
-        return;
-
-    StorageNamespace* localStorage = page->group().localStorage();
-    if (localStorage)
-        localStorage->unlock();
-}
-#endif
-
-static bool verifyCustomHandlerURL(const String& baseURL, const String& url, ExceptionCode& ec)
-{
-    // The specification requires that it is a SYNTAX_ERR if the the "%s" token is not present.
-    static const char token[] = "%s";
-    int index = url.find(token);
-    if (-1 == index) {
-        ec = SYNTAX_ERR;
-        return false;
-    }
-
-    // It is also a SYNTAX_ERR if the custom handler URL, as created by removing
-    // the "%s" token and prepending the base url, does not resolve.
-    String newURL = url;
-    newURL.remove(index, sizeof(token) / sizeof(token[0]));
-
-    KURL base(ParsedURLString, baseURL);
-    KURL kurl(base, newURL);
-
-    if (kurl.isEmpty() || !kurl.isValid()) {
-        ec = SYNTAX_ERR;
-        return false;
-    }
-
-    return true;
-}
-
-static bool verifyProtocolHandlerScheme(const String& scheme, ExceptionCode& ec)
-{
-    // It is a SECURITY_ERR for these schemes to be handled by a custom handler.
-    if (equalIgnoringCase(scheme, "http") || equalIgnoringCase(scheme, "https") || equalIgnoringCase(scheme, "file")) {
-        ec = SECURITY_ERR;
-        return false;
-    }
-    return true;
-}
-
-void Navigator::registerProtocolHandler(const String& scheme, const String& url, const String& title, ExceptionCode& ec)
-{
-    if (!verifyProtocolHandlerScheme(scheme, ec))
-        return;
-
-    if (!m_frame)
-        return;
-
-    Document* document = m_frame->document();
-    if (!document)
-        return;
-
-    String baseURL = document->baseURL().baseAsString();
-
-    if (!verifyCustomHandlerURL(baseURL, url, ec))
-        return;
-
-    if (Page* page = m_frame->page())
-        page->chrome()->registerProtocolHandler(scheme, baseURL, url, m_frame->displayStringModifiedByEncoding(title));
-}
-
-static bool verifyProtocolHandlerMimeType(const String& type, ExceptionCode& ec)
-{
-    // It is a SECURITY_ERR for these mime types to be assigned to a custom
-    // handler.
-    if (equalIgnoringCase(type, "text/html") || equalIgnoringCase(type, "text/css") || equalIgnoringCase(type, "application/x-javascript")) {
-        ec = SECURITY_ERR;
-        return false;
-    }
-    return true;
-}
-
-void Navigator::registerContentHandler(const String& mimeType, const String& url, const String& title, ExceptionCode& ec)
-{
-    if (!verifyProtocolHandlerMimeType(mimeType, ec))
-        return;
-
-    if (!m_frame)
-        return;
-
-    Document* document = m_frame->document();
-    if (!document)
-        return;
-
-    String baseURL = document->baseURL().baseAsString();
-
-    if (!verifyCustomHandlerURL(baseURL, url, ec))
-        return;
-
-    if (Page* page = m_frame->page())
-        page->chrome()->registerContentHandler(mimeType, baseURL, url, m_frame->displayStringModifiedByEncoding(title));
+    // FIXME: Remove this method or rename to yieldForStorageUpdates.
 }
 
 } // namespace WebCore

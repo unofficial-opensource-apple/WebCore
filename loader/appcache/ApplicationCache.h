@@ -26,14 +26,12 @@
 #ifndef ApplicationCache_h
 #define ApplicationCache_h
 
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-
 #include "PlatformString.h"
-#include "StringHash.h"
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
@@ -41,14 +39,17 @@ class ApplicationCacheGroup;
 class ApplicationCacheResource;
 class DocumentLoader;
 class KURL;
-
 class ResourceRequest;
+class SecurityOrigin;
 
 typedef Vector<std::pair<KURL, KURL> > FallbackURLVector;
 
 class ApplicationCache : public RefCounted<ApplicationCache> {
 public:
     static PassRefPtr<ApplicationCache> create() { return adoptRef(new ApplicationCache); }
+    
+    static void deleteCacheForOrigin(SecurityOrigin*);
+    
     ~ApplicationCache();
 
     void addResource(PassRefPtr<ApplicationCacheResource> resource);
@@ -89,6 +90,8 @@ public:
     
     static bool requestIsHTTPOrHTTPSGet(const ResourceRequest&);
 
+    static int64_t diskUsageForOrigin(SecurityOrigin*);
+    
     int64_t estimatedSizeInStorage() const { return m_estimatedSizeInStorage; }
 
 private:
@@ -111,7 +114,5 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // ENABLE(OFFLINE_WEB_APPLICATIONS)
 
 #endif // ApplicationCache_h

@@ -34,6 +34,7 @@
 #include <QtCore/QHash>
 #include <QtCore/QBuffer>
 #include <wtf/OwnPtr.h>
+#include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
@@ -41,14 +42,14 @@ namespace WebCore {
 class ImageDecoderQt : public ImageDecoder
 {
 public:
-    ImageDecoderQt();
+    ImageDecoderQt(ImageSource::AlphaOption, ImageSource::GammaAndColorProfileOption);
     ~ImageDecoderQt();
 
     virtual void setData(SharedBuffer* data, bool allDataReceived);
     virtual bool isSizeAvailable();
     virtual size_t frameCount();
     virtual int repetitionCount() const;
-    virtual RGBA32Buffer* frameBufferAtIndex(size_t index);
+    virtual ImageFrame* frameBufferAtIndex(size_t index);
 
     virtual String filenameExtension() const;
 
@@ -61,9 +62,9 @@ private:
 private:
     void internalDecodeSize();
     void internalReadImage(size_t);
-    void internalHandleCurrentImage(size_t);
+    bool internalHandleCurrentImage(size_t);
     void forceLoadEverything();
-    void failRead();
+    void clearPointers();
 
 private:
     QByteArray m_format;

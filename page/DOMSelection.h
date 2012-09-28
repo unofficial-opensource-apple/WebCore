@@ -30,6 +30,7 @@
 #ifndef DOMSelection_h
 #define DOMSelection_h
 
+#include "DOMWindowProperty.h"
 #include <wtf/Forward.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
@@ -39,17 +40,13 @@ namespace WebCore {
     class Frame;
     class Range;
     class Node;
-    class String;
     class VisibleSelection;
 
     typedef int ExceptionCode;
 
-    class DOMSelection : public RefCounted<DOMSelection> {
+    class DOMSelection : public RefCounted<DOMSelection>, public DOMWindowProperty {
     public:
         static PassRefPtr<DOMSelection> create(Frame* frame) { return adoptRef(new DOMSelection(frame)); }
-
-        Frame* frame() const;
-        void disconnectFrame();
 
         // Safari Selection Object API
         // These methods return the valid equivalents of internal editing positions.
@@ -75,8 +72,8 @@ namespace WebCore {
         bool isCollapsed() const;
         int rangeCount() const;
         void collapse(Node*, int offset, ExceptionCode&);
-        void collapseToEnd();
-        void collapseToStart();
+        void collapseToEnd(ExceptionCode&);
+        void collapseToStart(ExceptionCode&);
         void extend(Node*, int offset, ExceptionCode&);
         PassRefPtr<Range> getRangeAt(int, ExceptionCode&);
         void removeAllRanges();
@@ -91,12 +88,12 @@ namespace WebCore {
         void empty();
 
     private:
-        DOMSelection(Frame*);
+        explicit DOMSelection(Frame*);
 
         // Convenience method for accessors, does not NULL check m_frame.
         const VisibleSelection& visibleSelection() const;
 
-        Frame* m_frame;
+        bool isValidForPosition(Node*) const;
     };
 
 } // namespace WebCore

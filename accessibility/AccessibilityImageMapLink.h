@@ -29,13 +29,13 @@
 #ifndef AccessibilityImageMapLink_h
 #define AccessibilityImageMapLink_h
 
-#include "AccessibilityObject.h"
+#include "AccessibilityMockObject.h"
 #include "HTMLAreaElement.h"
 #include "HTMLMapElement.h"
 
 namespace WebCore {
     
-class AccessibilityImageMapLink : public AccessibilityObject {
+class AccessibilityImageMapLink : public AccessibilityMockObject {
         
 private:
     AccessibilityImageMapLink();
@@ -44,18 +44,17 @@ public:
     virtual ~AccessibilityImageMapLink();
     
     void setHTMLAreaElement(HTMLAreaElement* element) { m_areaElement = element; }
-    HTMLAreaElement* areaElement() const { return m_areaElement; }
+    HTMLAreaElement* areaElement() const { return m_areaElement.get(); }
     
     void setHTMLMapElement(HTMLMapElement* element) { m_mapElement = element; }    
-    HTMLMapElement* mapElement() const { return m_mapElement; }
+    HTMLMapElement* mapElement() const { return m_mapElement.get(); }
     
-    void setParent(AccessibilityObject* parent) { m_parent = parent; }
+    virtual Node* node() const { return m_areaElement.get(); }
         
     virtual AccessibilityRole roleValue() const;
     virtual bool accessibilityIsIgnored() const { return false; }
     virtual bool isEnabled() const { return true; }
     
-    virtual AccessibilityObject* parentObject() const;
     virtual Element* anchorElement() const;
     virtual Element* actionElement() const;
     virtual KURL url() const;
@@ -63,17 +62,16 @@ public:
     virtual bool isLinked() const { return true; }
     virtual String title() const;
     virtual String accessibilityDescription() const;
-
+    virtual AccessibilityObject* parentObject() const;
+    
     virtual String stringValueForMSAA() const;
     virtual String nameForMSAA() const;
 
-    virtual IntSize size() const;
-    virtual IntRect elementRect() const;
+    virtual LayoutRect elementRect() const;
 
 private:    
-    HTMLAreaElement* m_areaElement;
-    HTMLMapElement* m_mapElement;
-    AccessibilityObject* m_parent;
+    RefPtr<HTMLAreaElement> m_areaElement;
+    RefPtr<HTMLMapElement> m_mapElement;
     
     virtual bool isImageMapLink() const { return true; }
 };

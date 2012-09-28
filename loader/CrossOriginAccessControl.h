@@ -24,18 +24,33 @@
  *
  */
 
+#ifndef CrossOriginAccessControl_h
+#define CrossOriginAccessControl_h
+
+#include "ResourceHandle.h"
+#include "ResourceRequest.h"
+#include <wtf/Forward.h>
+#include <wtf/HashSet.h>
+
 namespace WebCore {
 
-    class HTTPHeaderMap;
-    class ResourceResponse;
-    class SecurityOrigin;
-    class String;
+typedef HashSet<String, CaseFoldingHash> HTTPHeaderSet;
 
-    bool isSimpleCrossOriginAccessRequest(const String& method, const HTTPHeaderMap&);
-    bool isOnAccessControlSimpleRequestMethodWhitelist(const String&);
-    bool isOnAccessControlSimpleRequestHeaderWhitelist(const String& name, const String& value);
-    bool isOnAccessControlResponseHeaderWhitelist(const String&);
+class HTTPHeaderMap;
+class ResourceResponse;
+class SecurityOrigin;
 
-    bool passesAccessControlCheck(const ResourceResponse&, bool includeCredentials, SecurityOrigin*);
+bool isSimpleCrossOriginAccessRequest(const String& method, const HTTPHeaderMap&);
+bool isOnAccessControlSimpleRequestMethodWhitelist(const String&);
+bool isOnAccessControlSimpleRequestHeaderWhitelist(const String& name, const String& value);
+bool isOnAccessControlResponseHeaderWhitelist(const String&);
+
+void updateRequestForAccessControl(ResourceRequest&, SecurityOrigin*, StoredCredentials);
+ResourceRequest createAccessControlPreflightRequest(const ResourceRequest&, SecurityOrigin*);
+
+bool passesAccessControlCheck(const ResourceResponse&, StoredCredentials, SecurityOrigin*, String& errorDescription);
+void parseAccessControlExposeHeadersAllowList(const String& headerValue, HTTPHeaderSet&);
 
 } // namespace WebCore
+
+#endif // CrossOriginAccessControl_h

@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,42 +24,36 @@
 #ifndef HTMLOptGroupElement_h
 #define HTMLOptGroupElement_h
 
-#include "HTMLFormControlElement.h"
-#include "OptionGroupElement.h"
+#include "HTMLElement.h"
 
 namespace WebCore {
     
 class HTMLSelectElement;
 
-class HTMLOptGroupElement : public HTMLFormControlElement, public OptionGroupElement {
+class HTMLOptGroupElement : public HTMLElement {
 public:
-    HTMLOptGroupElement(const QualifiedName&, Document*, HTMLFormElement* = 0);
+    static PassRefPtr<HTMLOptGroupElement> create(const QualifiedName&, Document*);
 
-    virtual bool checkDTD(const Node*);
+    HTMLSelectElement* ownerSelectElement() const;
+    
+    String groupLabelText() const;
+
+private:
+    HTMLOptGroupElement(const QualifiedName&, Document*);
+
     virtual const AtomicString& formControlType() const;
     virtual bool supportsFocus() const;
     virtual bool isFocusable() const;
-    virtual void parseMappedAttribute(MappedAttribute*);
-    virtual bool rendererIsNeeded(RenderStyle*) { return false; }
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual bool rendererIsNeeded(const NodeRenderingContext&) { return false; }
     virtual void attach();
     virtual void detach();
     virtual void setRenderStyle(PassRefPtr<RenderStyle>);
 
-    virtual bool insertBefore(PassRefPtr<Node> newChild, Node* refChild, ExceptionCode&, bool shouldLazyAttach = false);
-    virtual bool replaceChild(PassRefPtr<Node> newChild, Node* oldChild, ExceptionCode&, bool shouldLazyAttach = false);
-    virtual bool removeChild(Node* child, ExceptionCode&);
-    virtual bool appendChild(PassRefPtr<Node> newChild, ExceptionCode&, bool shouldLazyAttach = false);
-    virtual bool removeChildren();
     virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
-    String label() const;
-    void setLabel(const String&);
+    virtual void accessKeyAction(bool sendMouseEvents);
     
-    virtual String groupLabelText() const;
-    HTMLSelectElement* ownerSelectElement() const;
-    virtual void accessKeyAction(bool sendToAnyElement);
-    
-private:
     virtual RenderStyle* nonRendererRenderStyle() const;
     
     void recalcSelectOptions();

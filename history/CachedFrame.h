@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2009, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,8 +26,11 @@
 #ifndef CachedFrame_h
 #define CachedFrame_h
 
+#include "DOMWindow.h"
 #include "KURL.h"
 #include "ScriptCachedFrameData.h"
+#include <wtf/PassOwnPtr.h>
+#include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
@@ -48,7 +51,7 @@ public:
     Document* document() const { return m_document.get(); }
     FrameView* view() const { return m_view.get(); }
     const KURL& url() const { return m_url; }
-    DOMWindow* domWindow() const { return m_cachedFrameScriptData->domWindow(); }
+    DOMWindow* domWindow() const { return m_domWindow.get(); }
     bool isMainFrame() { return m_isMainFrame; }
 
 protected:
@@ -57,12 +60,16 @@ protected:
     
     RefPtr<Document> m_document;
     RefPtr<DocumentLoader> m_documentLoader;
+    RefPtr<DOMWindow> m_domWindow;
     RefPtr<FrameView> m_view;
     RefPtr<Node> m_mousePressNode;
     KURL m_url;
     OwnPtr<ScriptCachedFrameData> m_cachedFrameScriptData;
     OwnPtr<CachedFramePlatformData> m_cachedFramePlatformData;
     bool m_isMainFrame;
+#if USE(ACCELERATED_COMPOSITING)
+    bool m_isComposited;
+#endif
     
     CachedFrameVector m_childFrames;
 };
@@ -75,12 +82,12 @@ public:
     void clear();
     void destroy();
 
-    void setCachedFramePlatformData(CachedFramePlatformData* data);
+    void setCachedFramePlatformData(PassOwnPtr<CachedFramePlatformData>);
     CachedFramePlatformData* cachedFramePlatformData();
 
     using CachedFrameBase::document;
     using CachedFrameBase::view;
-    using CachedFrameBase::isMainFrame;
+    using CachedFrameBase::url;
     DocumentLoader* documentLoader() const { return m_documentLoader.get(); }
     Node* mousePressNode() const { return m_mousePressNode.get(); }
 

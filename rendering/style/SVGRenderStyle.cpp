@@ -1,6 +1,7 @@
 /*
     Copyright (C) 2004, 2005, 2007 Nikolas Zimmermann <zimmermann@kde.org>
-                  2004, 2005 Rob Buis <buis@kde.org>
+                  2004, 2005, 2010 Rob Buis <buis@kde.org>
+    Copyright (C) Research In Motion Limited 2010. All rights reserved.
 
     Based on khtml code by:
     Copyright (C) 1999 Antti Koivisto (koivisto@kde.org)
@@ -25,6 +26,7 @@
 */
 
 #include "config.h"
+
 #if ENABLE(SVG)
 #include "SVGRenderStyle.h"
 
@@ -32,8 +34,6 @@
 #include "CSSValueList.h"
 #include "IntRect.h"
 #include "NodeRenderStyle.h"
-#include "RenderObject.h"
-#include "RenderStyle.h"
 #include "SVGStyledElement.h"
 
 using namespace std;
@@ -48,11 +48,10 @@ SVGRenderStyle::SVGRenderStyle()
     stroke = defaultStyle->stroke;
     text = defaultStyle->text;
     stops = defaultStyle->stops;
-    clip = defaultStyle->clip;
-    mask = defaultStyle->mask;
     misc = defaultStyle->misc;
-    markers = defaultStyle->markers;
     shadowSVG = defaultStyle->shadowSVG;
+    inheritedResources = defaultStyle->inheritedResources;
+    resources = defaultStyle->resources;
 
     setBitDefaults();
 }
@@ -65,11 +64,10 @@ SVGRenderStyle::SVGRenderStyle(CreateDefaultType)
     stroke.init();
     text.init();
     stops.init();
-    clip.init();
-    mask.init();
     misc.init();
-    markers.init();
     shadowSVG.init();
+    inheritedResources.init();
+    resources.init();
 }
 
 SVGRenderStyle::SVGRenderStyle(const SVGRenderStyle& other)
@@ -79,11 +77,10 @@ SVGRenderStyle::SVGRenderStyle(const SVGRenderStyle& other)
     stroke = other.stroke;
     text = other.text;
     stops = other.stops;
-    clip = other.clip;
-    mask = other.mask;
     misc = other.misc;
-    markers = other.markers;
     shadowSVG = other.shadowSVG;
+    inheritedResources = other.inheritedResources;
+    resources = other.resources;
 
     svg_inherited_flags = other.svg_inherited_flags;
     svg_noninherited_flags = other.svg_noninherited_flags;
@@ -93,22 +90,27 @@ SVGRenderStyle::~SVGRenderStyle()
 {
 }
 
-bool SVGRenderStyle::operator==(const SVGRenderStyle& o) const
+bool SVGRenderStyle::operator==(const SVGRenderStyle& other) const
 {
-    return (fill == o.fill && stroke == o.stroke && text == o.text &&
-        stops == o.stops && clip == o.clip && mask == o.mask &&
-        misc == o.misc && markers == o.markers && shadowSVG == o.shadowSVG &&
-        svg_inherited_flags == o.svg_inherited_flags &&
-        svg_noninherited_flags == o.svg_noninherited_flags);
+    return fill == other.fill
+        && stroke == other.stroke
+        && text == other.text
+        && stops == other.stops
+        && misc == other.misc
+        && shadowSVG == other.shadowSVG
+        && inheritedResources == other.inheritedResources
+        && resources == other.resources
+        && svg_inherited_flags == other.svg_inherited_flags
+        && svg_noninherited_flags == other.svg_noninherited_flags;
 }
 
 bool SVGRenderStyle::inheritedNotEqual(const SVGRenderStyle* other) const
 {
-    return (fill != other->fill
-            || stroke != other->stroke
-            || markers != other->markers
-            || text != other->text
-            || svg_inherited_flags != other->svg_inherited_flags);
+    return fill != other->fill
+        || stroke != other->stroke
+        || text != other->text
+        || inheritedResources != other->inheritedResources
+        || svg_inherited_flags != other->svg_inherited_flags;
 }
 
 void SVGRenderStyle::inheritFrom(const SVGRenderStyle* svgInheritParent)
@@ -118,84 +120,112 @@ void SVGRenderStyle::inheritFrom(const SVGRenderStyle* svgInheritParent)
 
     fill = svgInheritParent->fill;
     stroke = svgInheritParent->stroke;
-    markers = svgInheritParent->markers;
     text = svgInheritParent->text;
+    inheritedResources = svgInheritParent->inheritedResources;
 
     svg_inherited_flags = svgInheritParent->svg_inherited_flags;
 }
 
-float SVGRenderStyle::cssPrimitiveToLength(const RenderObject* item, CSSValue* value, float defaultValue)
+void SVGRenderStyle::copyNonInheritedFrom(const SVGRenderStyle* other)
 {
-    CSSPrimitiveValue* primitive = static_cast<CSSPrimitiveValue*>(value);
+    svg_noninherited_flags = other->svg_noninherited_flags;
+    stops = other->stops;
+    misc = other->misc;
+    shadowSVG = other->shadowSVG;
+    resources = other->resources;
+}
 
-    unsigned short cssType = (primitive ? primitive->primitiveType() : (unsigned short) CSSPrimitiveValue::CSS_UNKNOWN);
-    if (!(cssType > CSSPrimitiveValue::CSS_UNKNOWN && cssType <= CSSPrimitiveValue::CSS_PC))
-        return defaultValue;
+StyleDifference SVGRenderStyle::diff(const SVGRenderStyle* other) const
+{
+    // NOTE: All comparisions that may return StyleDifferenceLayout have to go before those who return StyleDifferenceRepaint
 
-    if (cssType == CSSPrimitiveValue::CSS_PERCENTAGE) {
-        SVGStyledElement* element = static_cast<SVGStyledElement*>(item->node());
-        SVGElement* viewportElement = (element ? element->viewportElement() : 0);
-        if (viewportElement) {
-            float result = primitive->getFloatValue() / 100.0f;
-            return SVGLength::PercentageOfViewport(result, element, LengthModeOther);
-        }
+    // If kerning changes, we need a relayout, to force SVGCharacterData to be recalculated in the SVGRootInlineBox.
+    if (text != other->text)
+        return StyleDifferenceLayout;
+
+    // If resources change, we need a relayout, as the presence of resources influences the repaint rect.
+    if (resources != other->resources)
+        return StyleDifferenceLayout;
+
+    // If markers change, we need a relayout, as marker boundaries are cached in RenderSVGPath.
+    if (inheritedResources != other->inheritedResources)
+        return StyleDifferenceLayout;
+
+    // All text related properties influence layout.
+    if (svg_inherited_flags._textAnchor != other->svg_inherited_flags._textAnchor
+        || svg_inherited_flags._writingMode != other->svg_inherited_flags._writingMode
+        || svg_inherited_flags._glyphOrientationHorizontal != other->svg_inherited_flags._glyphOrientationHorizontal
+        || svg_inherited_flags._glyphOrientationVertical != other->svg_inherited_flags._glyphOrientationVertical
+        || svg_noninherited_flags.f._alignmentBaseline != other->svg_noninherited_flags.f._alignmentBaseline
+        || svg_noninherited_flags.f._dominantBaseline != other->svg_noninherited_flags.f._dominantBaseline
+        || svg_noninherited_flags.f._baselineShift != other->svg_noninherited_flags.f._baselineShift)
+        return StyleDifferenceLayout;
+
+    // Text related properties influence layout.
+    bool miscNotEqual = misc != other->misc;
+    if (miscNotEqual && misc->baselineShiftValue != other->misc->baselineShiftValue)
+        return StyleDifferenceLayout;
+
+    // These properties affect the cached stroke bounding box rects.
+    if (svg_inherited_flags._capStyle != other->svg_inherited_flags._capStyle
+        || svg_inherited_flags._joinStyle != other->svg_inherited_flags._joinStyle)
+        return StyleDifferenceLayout;
+
+    // Shadow changes require relayouts, as they affect the repaint rects.
+    if (shadowSVG != other->shadowSVG)
+        return StyleDifferenceLayout;
+
+    // Some stroke properties, requires relayouts, as the cached stroke boundaries need to be recalculated.
+    if (stroke != other->stroke) {
+        if (stroke->width != other->stroke->width
+            || stroke->paintType != other->stroke->paintType
+            || stroke->paintColor != other->stroke->paintColor
+            || stroke->paintUri != other->stroke->paintUri
+            || stroke->miterLimit != other->stroke->miterLimit
+            || stroke->dashArray != other->stroke->dashArray
+            || stroke->dashOffset != other->stroke->dashOffset)
+            return StyleDifferenceLayout;
+
+        // Only the stroke-opacity case remains, where we only need a repaint.
+        ASSERT(stroke->opacity != other->stroke->opacity);
+        return StyleDifferenceRepaint;
     }
 
-    return primitive->computeLengthFloat(const_cast<RenderStyle*>(item->style()), item->document()->documentElement()->renderStyle());
-}
+    // NOTE: All comparisions below may only return StyleDifferenceRepaint
 
+    // Painting related properties only need repaints. 
+    if (miscNotEqual) {
+        if (misc->floodColor != other->misc->floodColor
+            || misc->floodOpacity != other->misc->floodOpacity
+            || misc->lightingColor != other->misc->lightingColor)
+            return StyleDifferenceRepaint;
+    }
 
-static void getSVGShadowExtent(ShadowData* shadow, int& top, int& right, int& bottom, int& left)
-{
-    top = 0;
-    right = 0;
-    bottom = 0;
-    left = 0;
+    // If fill changes, we just need to repaint. Fill boundaries are not influenced by this, only by the Path, that RenderSVGPath contains.
+    if (fill->paintType != other->fill->paintType || fill->paintColor != other->fill->paintColor
+        || fill->paintUri != other->fill->paintUri || fill->opacity != other->fill->opacity)
+        return StyleDifferenceRepaint;
 
-    int blurAndSpread = shadow->blur + shadow->spread;
+    // If gradient stops change, we just need to repaint. Style updates are already handled through RenderSVGGradientSTop.
+    if (stops != other->stops)
+        return StyleDifferenceRepaint;
 
-    top = min(top, shadow->y - blurAndSpread);
-    right = max(right, shadow->x + blurAndSpread);
-    bottom = max(bottom, shadow->y + blurAndSpread);
-    left = min(left, shadow->x - blurAndSpread);
-}
+    // Changes of these flags only cause repaints.
+    if (svg_inherited_flags._colorRendering != other->svg_inherited_flags._colorRendering
+        || svg_inherited_flags._shapeRendering != other->svg_inherited_flags._shapeRendering
+        || svg_inherited_flags._clipRule != other->svg_inherited_flags._clipRule
+        || svg_inherited_flags._fillRule != other->svg_inherited_flags._fillRule
+        || svg_inherited_flags._colorInterpolation != other->svg_inherited_flags._colorInterpolation
+        || svg_inherited_flags._colorInterpolationFilters != other->svg_inherited_flags._colorInterpolationFilters)
+        return StyleDifferenceRepaint;
 
-void SVGRenderStyle::inflateForShadow(IntRect& repaintRect) const
-{
-    ShadowData* svgShadow = shadow();
-    if (!svgShadow)
-        return;
+    // FIXME: vector-effect is not taken into account in the layout-phase. Once this is fixed, we should relayout here.
+    if (svg_noninherited_flags.f._vectorEffect != other->svg_noninherited_flags.f._vectorEffect)
+        return StyleDifferenceRepaint;
 
-    FloatRect repaintFloatRect = FloatRect(repaintRect);
-    inflateForShadow(repaintFloatRect);
-    repaintRect = enclosingIntRect(repaintFloatRect);
-}
-
-void SVGRenderStyle::inflateForShadow(FloatRect& repaintRect) const
-{
-    ShadowData* svgShadow = shadow();
-    if (!svgShadow)
-        return;
-
-    int shadowTop;
-    int shadowRight;
-    int shadowBottom;
-    int shadowLeft;
-    getSVGShadowExtent(svgShadow, shadowTop, shadowRight, shadowBottom, shadowLeft);
-
-    int overflowLeft = repaintRect.x() + shadowLeft;
-    int overflowRight = repaintRect.right() + shadowRight;
-    int overflowTop = repaintRect.y() + shadowTop;
-    int overflowBottom = repaintRect.bottom() + shadowBottom;
-
-    repaintRect.setX(overflowLeft);
-    repaintRect.setY(overflowTop);
-    repaintRect.setWidth(overflowRight - overflowLeft);
-    repaintRect.setHeight(overflowBottom - overflowTop);
+    return StyleDifferenceEqual;
 }
 
 }
 
 #endif // ENABLE(SVG)
-
-// vim:ts=4:noet

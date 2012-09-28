@@ -1,6 +1,8 @@
 /*
     Copyright (C) 1999 Lars Knoll (knoll@kde.org)
     Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+    Copyright (C) 2011 Rik Cabanier (cabanier@adobe.com)
+    Copyright (C) 2011 Adobe Systems Incorporated. All rights reserved.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -21,146 +23,197 @@
 #ifndef Length_h
 #define Length_h
 
+#include "AnimationUtilities.h"
+#include "LayoutTypes.h"
 #include <wtf/Assertions.h>
 #include <wtf/FastAllocBase.h>
+#include <wtf/Forward.h>
+#include <wtf/HashMap.h>
 #include <wtf/MathExtras.h>
+#include <wtf/PassOwnArrayPtr.h>
 
 namespace WebCore {
 
-class String;
-
-const int undefinedLength = -1;
-const int percentScaleFactor = 128;
-
-enum LengthType { Auto, Relative, Percent, Fixed, Static, Intrinsic, MinIntrinsic };
-
-struct Length : FastAllocBase {
+enum LengthType { Auto, Relative, Percent, Fixed, Intrinsic, MinIntrinsic, Calculated, ViewportPercentageWidth, ViewportPercentageHeight, ViewportPercentageMin, Undefined };
+ 
+class CalculationValue;    
+    
+struct Length {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
     Length()
-        : m_value(0)
+        :  m_intValue(0), m_quirk(false), m_type(Auto), m_isFloat(false)
     {
     }
 
     Length(LengthType t)
-        : m_value(t)
+        : m_intValue(0), m_quirk(false), m_type(t), m_isFloat(false)
     {
     }
 
     Length(int v, LengthType t, bool q = false)
-        : m_value((v * 16) | (q << 3) | t) // FIXME: Doesn't work if the passed-in value is very large!
+        : m_intValue(v), m_quirk(q), m_type(t), m_isFloat(false)
     {
-        ASSERT(t != Percent);
+    }
+    
+    Length(FractionalLayoutUnit v, LengthType t, bool q = false)
+        : m_floatValue(v.toFloat()), m_quirk(q), m_type(t), m_isFloat(true)
+    {
+    }
+    
+    Length(float v, LengthType t, bool q = false)
+    : m_floatValue(v), m_quirk(q), m_type(t), m_isFloat(true)
+    {
     }
 
     Length(double v, LengthType t, bool q = false)
-        : m_value(static_cast<int>(v * percentScaleFactor) * 16 | (q << 3) | t)
+        : m_quirk(q), m_type(t), m_isFloat(true)
     {
-        ASSERT(t == Percent);
+        m_floatValue = static_cast<float>(v);    
     }
 
-    bool operator==(const Length& o) const { return m_value == o.m_value; }
-    bool operator!=(const Length& o) const { return m_value != o.m_value; }
+    explicit Length(PassRefPtr<CalculationValue>);
 
-    int value() const {
-        ASSERT(type() != Percent);
-        return rawValue();
+    Length(const Length& length)
+    {
+        initFromLength(length);
+    }
+    
+    Length& operator=(const Length& length)
+    {
+        initFromLength(length);
+        return *this;
+    }
+    
+    ~Length()
+    {
+        if (isCalculated())
+            decrementCalculatedRef();
+    }  
+    
+    bool operator==(const Length& o) const { return (m_type == o.m_type) && (m_quirk == o.m_quirk) && (isUndefined() || (getFloatValue() == o.getFloatValue())); }
+    bool operator!=(const Length& o) const { return !(*this == o); }
+
+    const Length& operator*=(float v)
+    {       
+        if (isCalculated()) {
+            ASSERT_NOT_REACHED();
+            return *this;
+        }
+        
+        if (m_isFloat)
+            m_floatValue = static_cast<float>(m_floatValue * v);
+        else        
+            m_intValue = static_cast<int>(m_intValue * v);
+        
+        return *this;
+    }
+    
+    int value() const
+    {
+        if (isCalculated()) {
+            ASSERT_NOT_REACHED();
+            return 0;
+        }
+        return getIntValue();
     }
 
-    int rawValue() const { return (m_value & ~0xF) / 16; }
+    // FIXME: When we switch to sub-pixel layout, value will return float by default, and this will inherit
+    // the current implementation of value().
+    int intValue() const
+    {
+        return value();
+    }
 
-    double percent() const
+    float percent() const
     {
         ASSERT(type() == Percent);
-        return static_cast<double>(rawValue()) / percentScaleFactor;
+        return getFloatValue();
     }
 
-    LengthType type() const { return static_cast<LengthType>(m_value & 7); }
-    bool quirk() const { return (m_value >> 3) & 1; }
+    PassRefPtr<CalculationValue> calculationValue() const;
+
+    LengthType type() const { return static_cast<LengthType>(m_type); }
+    bool quirk() const { return m_quirk; }
+
+    void setQuirk(bool quirk)
+    {
+        m_quirk = quirk;
+    }
 
     void setValue(LengthType t, int value)
     {
-        ASSERT(t != Percent);
-        setRawValue(t, value);
+        m_type = t;
+        m_intValue = value;
+        m_isFloat = false;
     }
-
-    void setRawValue(LengthType t, int value) { m_value = value * 16 | (m_value & 0x8) | t; }
 
     void setValue(int value)
     {
-        ASSERT(!value || type() != Percent);
-        setRawValue(value);
-    }
-
-    void setRawValue(int value) { m_value = value * 16 | (m_value & 0xF); }
-
-    void setValue(LengthType t, double value)
-    {
-        ASSERT(t == Percent);
-        m_value = static_cast<int>(value * percentScaleFactor) * 16 | (m_value & 0x8) | t;
-    }
-
-    void setValue(double value)
-    {
-        ASSERT(type() == Percent);
-        m_value = static_cast<int>(value * percentScaleFactor) * 16 | (m_value & 0xF);
-    }
-
-    // note: works only for certain types, returns undefinedLength otherwise
-    int calcValue(int maxValue, bool roundPercentages = false) const
-    {
-        switch (type()) {
-            case Fixed:
-                return value();
-            case Percent:
-                if (roundPercentages)
-                    return static_cast<int>(round(maxValue * percent() / 100.0));
-                return maxValue * rawValue() / (100 * percentScaleFactor);
-            case Auto:
-                return maxValue;
-            default:
-                return undefinedLength;
+        if (isCalculated()) {
+            ASSERT_NOT_REACHED();
+            return;
         }
+        setValue(Fixed, value);
     }
 
-    int calcMinValue(int maxValue, bool roundPercentages = false) const
+    void setValue(LengthType t, float value)
     {
-        switch (type()) {
-            case Fixed:
-                return value();
-            case Percent:
-                if (roundPercentages)
-                    return static_cast<int>(round(maxValue * percent() / 100.0));
-                return maxValue * rawValue() / (100 * percentScaleFactor);
-            case Auto:
-            default:
-                return 0;
-        }
+        m_type = t;
+        m_floatValue = value;
+        m_isFloat = true;    
     }
 
-    float calcFloatValue(int maxValue) const
+    void setValue(LengthType t, FractionalLayoutUnit value)
     {
-        switch (type()) {
-            case Fixed:
-                return static_cast<float>(value());
-            case Percent:
-                return static_cast<float>(maxValue * percent() / 100.0);
-            case Auto:
-                return static_cast<float>(maxValue);
-            default:
-                return static_cast<float>(undefinedLength);
-        }
+        m_type = t;
+        m_floatValue = value;
+        m_isFloat = true;    
     }
 
-    bool isUndefined() const { return rawValue() == undefinedLength; }
-    bool isZero() const { return !(m_value & ~0xF); }
-    bool isPositive() const { return rawValue() > 0; }
-    bool isNegative() const { return rawValue() < 0; }
+    void setValue(float value)
+    {
+        *this = Length(value, Fixed);
+    }
 
+    bool isUndefined() const { return type() == Undefined; }
+
+    // FIXME calc: https://bugs.webkit.org/show_bug.cgi?id=80357. A calculated Length 
+    // always contains a percentage, and without a maxValue passed to these functions
+    // it's impossible to determine the sign or zero-ness. We assume all calc values
+    // are positive and non-zero for now.    
+    bool isZero() const 
+    {
+        ASSERT(!isUndefined());
+        if (isCalculated())
+            return false;
+            
+        return m_isFloat ? !m_floatValue : !m_intValue;
+    }
+    bool isPositive() const
+    {
+        if (isUndefined())
+            return false;
+        if (isCalculated())
+            return true;
+                
+        return getFloatValue() > 0;
+    }
+    bool isNegative() const
+    {
+        if (isUndefined() || isCalculated())
+            return false;
+            
+        return getFloatValue() < 0;
+    }
+    
     bool isAuto() const { return type() == Auto; }
     bool isRelative() const { return type() == Relative; }
-    bool isPercent() const { return type() == Percent; }
+    bool isPercent() const { return type() == Percent || type() == Calculated; }
     bool isFixed() const { return type() == Fixed; }
-    bool isStatic() const { return type() == Static; }
     bool isIntrinsicOrAuto() const { return type() == Auto || type() == MinIntrinsic || type() == Intrinsic; }
+    bool isSpecified() const { return type() == Fixed || type() == Percent || type() == Calculated || isViewportPercentage(); }
+    bool isCalculated() const { return type() == Calculated; }
 
     Length blend(const Length& from, double progress) const
     {
@@ -176,22 +229,73 @@ struct Length : FastAllocBase {
             resultType = from.type();
         
         if (resultType == Percent) {
-            double fromPercent = from.isZero() ? 0. : from.percent();
-            double toPercent = isZero() ? 0. : percent();
-            return Length(fromPercent + (toPercent - fromPercent) * progress, Percent);
+            float fromPercent = from.isZero() ? 0 : from.percent();
+            float toPercent = isZero() ? 0 : percent();
+            return Length(WebCore::blend(fromPercent, toPercent, progress), Percent);
         } 
-            
-        int fromValue = from.isZero() ? 0 : from.value();
-        int toValue = isZero() ? 0 : value();
-        return Length(int(fromValue + (toValue - fromValue) * progress), resultType);
+
+        float fromValue = from.isZero() ? 0 : from.value();
+        float toValue = isZero() ? 0 : value();
+        return Length(WebCore::blend(fromValue, toValue, progress), resultType);
     }
 
+    float getFloatValue() const
+    {
+        ASSERT(!isUndefined());
+        return m_isFloat ? m_floatValue : m_intValue;
+    }
+    float nonNanCalculatedValue(int maxValue) const;
+
+    bool isViewportPercentage() const
+    {
+        LengthType lengthType = type();
+        return lengthType >= ViewportPercentageWidth && lengthType <= ViewportPercentageMin;
+    }
+    float viewportPercentageLength() const
+    {
+        ASSERT(isViewportPercentage());
+        return getFloatValue();
+    }
 private:
-    int m_value;
+    int getIntValue() const
+    {
+        ASSERT(!isUndefined());
+        return m_isFloat ? static_cast<int>(m_floatValue) : m_intValue;
+    }
+    void initFromLength(const Length &length) 
+    {
+        m_quirk = length.m_quirk;
+        m_type = length.m_type;
+        m_isFloat = length.m_isFloat;
+        
+        if (m_isFloat)
+            m_floatValue = length.m_floatValue;
+        else
+            m_intValue = length.m_intValue;
+        
+        if (isCalculated())
+            incrementCalculatedRef();
+    }
+
+    int calculationHandle() const
+    {
+        ASSERT(isCalculated());
+        return getIntValue();
+    }
+    void incrementCalculatedRef() const;
+    void decrementCalculatedRef() const;    
+    
+    union {
+        int m_intValue;
+        float m_floatValue;
+    };
+    bool m_quirk;
+    unsigned char m_type;
+    bool m_isFloat;
 };
 
-Length* newCoordsArray(const String&, int& len);
-Length* newLengthArray(const String&, int& len);
+PassOwnArrayPtr<Length> newCoordsArray(const String&, int& len);
+PassOwnArrayPtr<Length> newLengthArray(const String&, int& len);
 
 } // namespace WebCore
 

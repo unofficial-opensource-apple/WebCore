@@ -26,29 +26,38 @@
 #ifndef KJS_RUNTIME_OBJECT_H
 #define KJS_RUNTIME_OBJECT_H
 
-#include "Bridge.h"
+#include "BridgeJSC.h"
 #include <runtime/JSGlobalObject.h>
 
 namespace JSC {
+namespace Bindings {
 
-class RuntimeObjectImp : public JSObject {
+class RuntimeObject : public JSNonFinalObject {
 public:
-    RuntimeObjectImp(ExecState*, PassRefPtr<Bindings::Instance>);
-    virtual ~RuntimeObjectImp();
+    typedef JSNonFinalObject Base;
 
-    virtual bool getOwnPropertySlot(ExecState*, const Identifier& propertyName, PropertySlot&);
-    virtual bool getOwnPropertyDescriptor(ExecState*, const Identifier& propertyName, PropertyDescriptor&);
-    virtual void put(ExecState*, const Identifier& propertyName, JSValue, PutPropertySlot&);
-    virtual bool deleteProperty(ExecState*, const Identifier& propertyName);
-    virtual JSValue defaultValue(ExecState*, PreferredPrimitiveType) const;
-    virtual CallType getCallData(CallData&);
-    virtual ConstructType getConstructData(ConstructData&);
+    static RuntimeObject* create(ExecState* exec, JSGlobalObject* globalObject, Structure* structure, PassRefPtr<Instance> instance)
+    {
+        RuntimeObject* object = new (NotNull, allocateCell<RuntimeObject>(*exec->heap())) RuntimeObject(exec, globalObject, structure, instance);
+        object->finishCreation(globalObject);
+        return object;
+    }
 
-    virtual void getOwnPropertyNames(ExecState*, PropertyNameArray&, EnumerationMode mode = ExcludeDontEnumProperties);
+    static void destroy(JSCell*);
+
+    static bool getOwnPropertySlot(JSCell*, ExecState*, const Identifier& propertyName, PropertySlot&);
+    static bool getOwnPropertyDescriptor(JSObject*, ExecState*, const Identifier& propertyName, PropertyDescriptor&);
+    static void put(JSCell*, ExecState*, const Identifier& propertyName, JSValue, PutPropertySlot&);
+    static bool deleteProperty(JSCell*, ExecState*, const Identifier& propertyName);
+    static JSValue defaultValue(const JSObject*, ExecState*, PreferredPrimitiveType);
+    static CallType getCallData(JSCell*, CallData&);
+    static ConstructType getConstructData(JSCell*, ConstructData&);
+
+    static void getOwnPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode);
 
     void invalidate();
 
-    Bindings::Instance* getInternalInstance() const { return m_instance.get(); }
+    Instance* getInternalInstance() const { return m_instance.get(); }
 
     static JSObject* throwInvalidAccessError(ExecState*);
 
@@ -59,25 +68,25 @@ public:
         return globalObject->objectPrototype();
     }
 
-    static PassRefPtr<Structure> createStructure(JSValue prototype)
+    static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype)
     {
-        return Structure::create(prototype, TypeInfo(ObjectType, StructureFlags), AnonymousSlotCount);
+        return Structure::create(globalData, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), &s_info);
     }
 
 protected:
-    static const unsigned StructureFlags = OverridesGetOwnPropertySlot | OverridesGetPropertyNames | JSObject::StructureFlags;
-    RuntimeObjectImp(ExecState*, NonNullPassRefPtr<Structure>, PassRefPtr<Bindings::Instance>);
+    RuntimeObject(ExecState*, JSGlobalObject*, Structure*, PassRefPtr<Instance>);
+    void finishCreation(JSGlobalObject*);
+    static const unsigned StructureFlags = OverridesGetOwnPropertySlot | OverridesGetPropertyNames | Base::StructureFlags;
 
 private:
-    virtual const ClassInfo* classInfo() const { return &s_info; }
-    
-    static JSValue fallbackObjectGetter(ExecState*, const Identifier&, const PropertySlot&);
-    static JSValue fieldGetter(ExecState*, const Identifier&, const PropertySlot&);
-    static JSValue methodGetter(ExecState*, const Identifier&, const PropertySlot&);
+    static JSValue fallbackObjectGetter(ExecState*, JSValue, const Identifier&);
+    static JSValue fieldGetter(ExecState*, JSValue, const Identifier&);
+    static JSValue methodGetter(ExecState*, JSValue, const Identifier&);
 
-    RefPtr<Bindings::Instance> m_instance;
+    RefPtr<Instance> m_instance;
 };
     
-} // namespace
+}
+}
 
 #endif

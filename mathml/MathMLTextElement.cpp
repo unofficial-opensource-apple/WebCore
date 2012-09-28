@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Alex Milowski (alex@milowski.com). All rights reserved.
+ * Copyright (C) 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,29 +31,30 @@
 #include "MathMLTextElement.h"
 
 #include "MathMLNames.h"
-#include "RenderObject.h"
+#include "RenderMathMLOperator.h"
 
 namespace WebCore {
     
 using namespace MathMLNames;
 
-MathMLTextElement::MathMLTextElement(const QualifiedName& tagName, Document* document)
+inline MathMLTextElement::MathMLTextElement(const QualifiedName& tagName, Document* document)
     : MathMLElement(tagName, document)
 {
 }
 
 PassRefPtr<MathMLTextElement> MathMLTextElement::create(const QualifiedName& tagName, Document* document)
 {
-    return new MathMLTextElement(tagName, document);
+    return adoptRef(new MathMLTextElement(tagName, document));
 }
 
-RenderObject* MathMLTextElement::createRenderer(RenderArena* , RenderStyle* style)
+RenderObject* MathMLTextElement::createRenderer(RenderArena* arena, RenderStyle* style)
 {
-    return RenderObject::createObject(this, style);
+    if (hasLocalName(MathMLNames::moTag))
+        return new (arena) RenderMathMLOperator(this);
+
+    return MathMLElement::createRenderer(arena, style);
 }
 
-    
 }
 
 #endif // ENABLE(MATHML)
-

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2003, 2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2009, 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,6 +24,7 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 #include "config.h"
+
 #include "ResourceRequestBase.h"
 #include "ResourceRequest.h"
 
@@ -31,14 +32,23 @@ using namespace std;
 
 namespace WebCore {
 
+#if !PLATFORM(MAC) || USE(CFNETWORK)
+double ResourceRequestBase::s_defaultTimeoutInterval = INT_MAX;
+#else
+// Will use NSURLRequest default timeout unless set to a non-zero value with setDefaultTimeoutInterval().
+double ResourceRequestBase::s_defaultTimeoutInterval = 0;
+#endif
+
+bool ResourceRequestBase::s_defaultAllowCookies = true;
+
 inline const ResourceRequest& ResourceRequestBase::asResourceRequest() const
 {
     return *static_cast<const ResourceRequest*>(this);
 }
 
-auto_ptr<ResourceRequest> ResourceRequestBase::adopt(auto_ptr<CrossThreadResourceRequestData> data)
+PassOwnPtr<ResourceRequest> ResourceRequestBase::adopt(PassOwnPtr<CrossThreadResourceRequestData> data)
 {
-    auto_ptr<ResourceRequest> request(new ResourceRequest());
+    OwnPtr<ResourceRequest> request = adoptPtr(new ResourceRequest());
     request->setURL(data->m_url);
     request->setCachePolicy(data->m_cachePolicy);
     request->setTimeoutInterval(data->m_timeoutInterval);
@@ -47,7 +57,7 @@ auto_ptr<ResourceRequest> ResourceRequestBase::adopt(auto_ptr<CrossThreadResourc
     request->setPriority(data->m_priority);
 
     request->updateResourceRequest();
-    request->m_httpHeaderFields.adopt(auto_ptr<CrossThreadHTTPHeaderMapData>(data->m_httpHeaders.release()));
+    request->m_httpHeaderFields.adopt(data->m_httpHeaders.release());
 
     size_t encodingCount = data->m_responseContentDispositionEncodingFallbackArray.size();
     if (encodingCount > 0) {
@@ -64,29 +74,30 @@ auto_ptr<ResourceRequest> ResourceRequestBase::adopt(auto_ptr<CrossThreadResourc
     }
     request->setHTTPBody(data->m_httpBody);
     request->setAllowCookies(data->m_allowCookies);
-    return request;
+    request->doPlatformAdopt(data);
+    return request.release();
 }
 
-auto_ptr<CrossThreadResourceRequestData> ResourceRequestBase::copyData() const
+PassOwnPtr<CrossThreadResourceRequestData> ResourceRequestBase::copyData() const
 {
-    auto_ptr<CrossThreadResourceRequestData> data(new CrossThreadResourceRequestData());
+    OwnPtr<CrossThreadResourceRequestData> data = adoptPtr(new CrossThreadResourceRequestData());
     data->m_url = url().copy();
     data->m_cachePolicy = cachePolicy();
     data->m_timeoutInterval = timeoutInterval();
     data->m_firstPartyForCookies = firstPartyForCookies().copy();
-    data->m_httpMethod = httpMethod().crossThreadString();
-    data->m_httpHeaders.adopt(httpHeaderFields().copyData());
+    data->m_httpMethod = httpMethod().isolatedCopy();
+    data->m_httpHeaders = httpHeaderFields().copyData();
     data->m_priority = priority();
 
     data->m_responseContentDispositionEncodingFallbackArray.reserveInitialCapacity(m_responseContentDispositionEncodingFallbackArray.size());
     size_t encodingArraySize = m_responseContentDispositionEncodingFallbackArray.size();
     for (size_t index = 0; index < encodingArraySize; ++index) {
-        data->m_responseContentDispositionEncodingFallbackArray.append(m_responseContentDispositionEncodingFallbackArray[index].crossThreadString());
+        data->m_responseContentDispositionEncodingFallbackArray.append(m_responseContentDispositionEncodingFallbackArray[index].isolatedCopy());
     }
     if (m_httpBody)
         data->m_httpBody = m_httpBody->deepCopy();
     data->m_allowCookies = m_allowCookies;
-    return data;
+    return asResourceRequest().doPlatformCopyData(data.release());
 }
 
 bool ResourceRequestBase::isEmpty() const
@@ -142,7 +153,7 @@ void ResourceRequestBase::setCachePolicy(ResourceRequestCachePolicy cachePolicy)
     
     m_cachePolicy = cachePolicy;
     
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
@@ -159,7 +170,7 @@ void ResourceRequestBase::setTimeoutInterval(double timeoutInterval)
     
     m_timeoutInterval = timeoutInterval; 
     
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
@@ -192,7 +203,7 @@ void ResourceRequestBase::setHTTPMethod(const String& httpMethod)
 
     m_httpMethod = httpMethod;
     
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
@@ -223,7 +234,7 @@ void ResourceRequestBase::setHTTPHeaderField(const AtomicString& name, const Str
     
     m_httpHeaderFields.set(name, value); 
     
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
@@ -232,13 +243,33 @@ void ResourceRequestBase::setHTTPHeaderField(const char* name, const String& val
     setHTTPHeaderField(AtomicString(name), value);
 }
 
+void ResourceRequestBase::clearHTTPAuthorization()
+{
+    updateResourceRequest(); 
+
+    m_httpHeaderFields.remove("Authorization");
+
+    if (url().protocolIsInHTTPFamily())
+        m_platformRequestUpdated = false;
+}
+
+void ResourceRequestBase::clearHTTPContentType()
+{
+    updateResourceRequest(); 
+
+    m_httpHeaderFields.remove("Content-Type");
+
+    if (url().protocolIsInHTTPFamily())
+        m_platformRequestUpdated = false;
+}
+
 void ResourceRequestBase::clearHTTPReferrer()
 {
     updateResourceRequest(); 
 
     m_httpHeaderFields.remove("Referer");
 
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
@@ -248,7 +279,27 @@ void ResourceRequestBase::clearHTTPOrigin()
 
     m_httpHeaderFields.remove("Origin");
 
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
+        m_platformRequestUpdated = false;
+}
+
+void ResourceRequestBase::clearHTTPUserAgent()
+{
+    updateResourceRequest(); 
+
+    m_httpHeaderFields.remove("User-Agent");
+
+    if (url().protocolIsInHTTPFamily())
+        m_platformRequestUpdated = false;
+}
+
+void ResourceRequestBase::clearHTTPAccept()
+{
+    updateResourceRequest(); 
+
+    m_httpHeaderFields.remove("Accept");
+
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
@@ -264,7 +315,7 @@ void ResourceRequestBase::setResponseContentDispositionEncodingFallbackArray(con
     if (!encoding3.isNull())
         m_responseContentDispositionEncodingFallbackArray.append(encoding3);
     
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
@@ -281,7 +332,7 @@ void ResourceRequestBase::setHTTPBody(PassRefPtr<FormData> httpBody)
     
     m_httpBody = httpBody; 
     
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 } 
 
@@ -298,18 +349,35 @@ void ResourceRequestBase::setAllowCookies(bool allowCookies)
     
     m_allowCookies = allowCookies;
     
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
+        m_platformRequestUpdated = false;
+}
+
+ResourceLoadPriority ResourceRequestBase::priority() const
+{
+    updateResourceRequest();
+
+    return m_priority;
+}
+
+void ResourceRequestBase::setPriority(ResourceLoadPriority priority)
+{
+    updateResourceRequest();
+
+    m_priority = priority;
+
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
 void ResourceRequestBase::addHTTPHeaderField(const AtomicString& name, const String& value) 
 {
     updateResourceRequest();
-    pair<HTTPHeaderMap::iterator, bool> result = m_httpHeaderFields.add(name, value); 
-    if (!result.second)
-        result.first->second += "," + value;
+    HTTPHeaderMap::AddResult result = m_httpHeaderFields.add(name, value);
+    if (!result.isNewEntry)
+        result.iterator->second += "," + value;
 
-    if (url().protocolInHTTPFamily())
+    if (url().protocolIsInHTTPFamily())
         m_platformRequestUpdated = false;
 }
 
@@ -357,7 +425,7 @@ bool equalIgnoringHeaderFields(const ResourceRequestBase& a, const ResourceReque
     return true;
 }
 
-bool operator==(const ResourceRequestBase& a, const ResourceRequestBase& b)
+bool ResourceRequestBase::compare(const ResourceRequest& a, const ResourceRequest& b)
 {
     if (!equalIgnoringHeaderFields(a, b))
         return false;
@@ -365,7 +433,7 @@ bool operator==(const ResourceRequestBase& a, const ResourceRequestBase& b)
     if (a.httpHeaderFields() != b.httpHeaderFields())
         return false;
         
-    return true;
+    return ResourceRequest::platformCompare(a, b);
 }
 
 bool ResourceRequestBase::isConditional() const
@@ -377,11 +445,22 @@ bool ResourceRequestBase::isConditional() const
             m_httpHeaderFields.contains("If-Unmodified-Since"));
 }
 
+double ResourceRequestBase::defaultTimeoutInterval()
+{
+    return s_defaultTimeoutInterval;
+}
+
+void ResourceRequestBase::setDefaultTimeoutInterval(double timeoutInterval)
+{
+    s_defaultTimeoutInterval = timeoutInterval;
+}
+
 void ResourceRequestBase::updatePlatformRequest() const
 {
     if (m_platformRequestUpdated)
         return;
-    
+
+    ASSERT(m_resourceRequestUpdated);
     const_cast<ResourceRequest&>(asResourceRequest()).doUpdatePlatformRequest();
     m_platformRequestUpdated = true;
 }
@@ -391,11 +470,12 @@ void ResourceRequestBase::updateResourceRequest() const
     if (m_resourceRequestUpdated)
         return;
 
+    ASSERT(m_platformRequestUpdated);
     const_cast<ResourceRequest&>(asResourceRequest()).doUpdateResourceRequest();
     m_resourceRequestUpdated = true;
 }
 
-#if !PLATFORM(MAC) && !USE(CFNETWORK) && !USE(SOUP) && !PLATFORM(CHROMIUM) && !PLATFORM(ANDROID) && !PLATFORM(QT)
+#if !PLATFORM(MAC) && !USE(CFNETWORK) && !USE(SOUP) && !PLATFORM(CHROMIUM) && !PLATFORM(QT) && !PLATFORM(BLACKBERRY)
 unsigned initializeMaximumHTTPConnectionCountPerHost()
 {
     // This is used by the loader to control the number of issued parallel load requests. 
@@ -403,5 +483,15 @@ unsigned initializeMaximumHTTPConnectionCountPerHost()
     return 4;
 }
 #endif
+
+void ResourceRequestBase::setDefaultAllowCookies(bool allowCookies)
+{
+    s_defaultAllowCookies = allowCookies;
+}
+
+bool ResourceRequestBase::defaultAllowCookies()
+{
+    return s_defaultAllowCookies;
+}
 
 }

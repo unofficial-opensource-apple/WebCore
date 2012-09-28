@@ -26,20 +26,23 @@
 #include "config.h"
 #include "CachedPage.h"
 
+#include "Document.h"
+#include "Element.h"
 #include "FocusController.h"
 #include "Frame.h"
 #include "FrameView.h"
+#include "Node.h"
 #include "Page.h"
+#include "StyleResolver.h"
 #include <wtf/CurrentTime.h>
 #include <wtf/RefCountedLeakCounter.h>
+#include <wtf/StdLibExtras.h>
 
 using namespace JSC;
 
 namespace WebCore {
 
-#ifndef NDEBUG
-static WTF::RefCountedLeakCounter cachedPageCounter("CachedPage");
-#endif
+DEFINE_DEBUG_ONLY_GLOBAL(WTF::RefCountedLeakCounter, cachedPageCounter, ("CachedPage"));
 
 PassRefPtr<CachedPage> CachedPage::create(Page* page)
 {
@@ -49,6 +52,8 @@ PassRefPtr<CachedPage> CachedPage::create(Page* page)
 CachedPage::CachedPage(Page* page)
     : m_timeStamp(currentTime())
     , m_cachedMainFrame(CachedFrame::create(page->mainFrame()))
+    , m_needStyleRecalcForVisitedLinks(false)
+    , m_needsFullStyleRecalc(false)
 {
 #ifndef NDEBUG
     cachedPageCounter.increment();
@@ -77,10 +82,24 @@ void CachedPage::restore(Page* page)
     // FIXME: Right now we don't support pages w/ frames in the b/f cache.  This may need to be tweaked when we add support for that.
     Document* focusedDocument = page->focusController()->focusedOrMainFrame()->document();
     if (Node* node = focusedDocument->focusedNode()) {
+        // We don't want focused nodes changing scroll position when restoring from the cache
+        // as it can cause ugly jumps before we manage to restore the cached position.
+        page->mainFrame()->selection()->suppressScrolling();
         if (node->isElementNode())
             static_cast<Element*>(node)->updateFocusAppearance(true);
+        page->mainFrame()->selection()->restoreScrolling();
     }
-    
+
+    if (m_needStyleRecalcForVisitedLinks) {
+        for (Frame* frame = page->mainFrame(); frame; frame = frame->tree()->traverseNext()) {
+            if (StyleResolver* styleResolver = frame->document()->styleResolver())
+                styleResolver->allVisitedStateChanged();
+        }
+    }
+
+    if (m_needsFullStyleRecalc)
+        page->setNeedsRecalcStyleInAllFrames();
+
     clear();
 }
 
@@ -89,6 +108,8 @@ void CachedPage::clear()
     ASSERT(m_cachedMainFrame);
     m_cachedMainFrame->clear();
     m_cachedMainFrame = 0;
+    m_needStyleRecalcForVisitedLinks = false;
+    m_needsFullStyleRecalc = false;
 }
 
 void CachedPage::destroy()

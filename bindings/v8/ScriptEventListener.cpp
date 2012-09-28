@@ -36,12 +36,18 @@
 #include "EventListener.h"
 #include "Frame.h"
 #include "ScriptScope.h"
-#include "Tokenizer.h"
+#include "DocumentParser.h"
 #include "V8AbstractEventListener.h"
 #include "V8Binding.h"
-#include "XSSAuditor.h"
 
 namespace WebCore {
+
+static const String& eventParameterName(bool isSVGEvent)
+{
+    DEFINE_STATIC_LOCAL(const String, eventString, ("event"));
+    DEFINE_STATIC_LOCAL(const String, evtString, ("evt"));
+    return isSVGEvent ? evtString : eventString;
+}
 
 PassRefPtr<V8LazyEventListener> createAttributeEventListener(Node* node, Attribute* attr)
 {
@@ -50,29 +56,19 @@ PassRefPtr<V8LazyEventListener> createAttributeEventListener(Node* node, Attribu
     if (attr->isNull())
         return 0;
 
-    int lineNumber = 1;
-    int columnNumber = 0;
+    // FIXME: Very strange: we initialize zero-based number with '1'.
+    TextPosition position(OrdinalNumber::fromZeroBasedInt(1), OrdinalNumber::first());
     String sourceURL;
 
     if (Frame* frame = node->document()->frame()) {
         ScriptController* scriptController = frame->script();
-        if (!scriptController->canExecuteScripts())
+        if (!scriptController->canExecuteScripts(AboutToExecuteScript))
             return 0;
-
-        if (!scriptController->xssAuditor()->canCreateInlineEventListener(attr->localName().string(), attr->value())) {
-            // This script is not safe to execute.
-            return 0;
-        }
-
-        if (frame->document()->tokenizer()) {
-            // FIXME: Change to use script->eventHandlerLineNumber() when implemented.
-            lineNumber = frame->document()->tokenizer()->lineNumber();
-            columnNumber = frame->document()->tokenizer()->columnNumber();
-        }
+        position = scriptController->eventHandlerPosition();
         sourceURL = node->document()->url().string();
     }
 
-    return V8LazyEventListener::create(attr->localName().string(), node->isSVGElement(), attr->value(), sourceURL, lineNumber, columnNumber, WorldContextHandle(UseMainWorld));
+    return V8LazyEventListener::create(attr->localName().string(), eventParameterName(node->isSVGElement()), attr->value(), sourceURL, position, node, WorldContextHandle(UseMainWorld));
 }
 
 PassRefPtr<V8LazyEventListener> createAttributeEventListener(Frame* frame, Attribute* attr)
@@ -84,40 +80,53 @@ PassRefPtr<V8LazyEventListener> createAttributeEventListener(Frame* frame, Attri
     if (attr->isNull())
         return 0;
 
-    int lineNumber = 1;
-    int columnNumber = 0;
-    String sourceURL;
-
     ScriptController* scriptController = frame->script();
-    if (!scriptController->canExecuteScripts())
+    if (!scriptController->canExecuteScripts(AboutToExecuteScript))
         return 0;
 
-    if (!scriptController->xssAuditor()->canCreateInlineEventListener(attr->localName().string(), attr->value())) {
-        // This script is not safe to execute.
-        return 0;
-    }
+    TextPosition position = scriptController->eventHandlerPosition();
+    String sourceURL = frame->document()->url().string();
 
-    if (frame->document()->tokenizer()) {
-        // FIXME: Change to use script->eventHandlerLineNumber() when implemented.
-        lineNumber = frame->document()->tokenizer()->lineNumber();
-        columnNumber = frame->document()->tokenizer()->columnNumber();
-    }
-    sourceURL = frame->document()->url().string();
-    return V8LazyEventListener::create(attr->localName().string(), frame->document()->isSVGDocument(), attr->value(), sourceURL, lineNumber, columnNumber, WorldContextHandle(UseMainWorld));
+    return V8LazyEventListener::create(attr->localName().string(), eventParameterName(frame->document()->isSVGDocument()), attr->value(), sourceURL, position, 0, WorldContextHandle(UseMainWorld));
 }
 
-String getEventListenerHandlerBody(ScriptExecutionContext* context, ScriptState* scriptState, EventListener* listener)
+String eventListenerHandlerBody(Document* document, EventListener* listener)
 {
     if (listener->type() != EventListener::JSEventListenerType)
         return "";
 
-    ScriptScope scope(scriptState);
+    v8::HandleScope scope;
     V8AbstractEventListener* v8Listener = static_cast<V8AbstractEventListener*>(listener);
-    v8::Handle<v8::Object> function = v8Listener->getListenerObject(context);
+    v8::Handle<v8::Context> context = toV8Context(document, v8Listener->worldContext());
+    v8::Context::Scope contextScope(context);
+    v8::Handle<v8::Object> function = v8Listener->getListenerObject(document);
     if (function.IsEmpty())
         return "";
 
     return toWebCoreStringWithNullCheck(function);
+}
+
+bool eventListenerHandlerLocation(Document* document, EventListener* listener, String& sourceName, int& lineNumber)
+{
+    if (listener->type() != EventListener::JSEventListenerType)
+        return false;
+
+    v8::HandleScope scope;
+    V8AbstractEventListener* v8Listener = static_cast<V8AbstractEventListener*>(listener);
+    v8::Handle<v8::Context> context = toV8Context(document, v8Listener->worldContext());
+    v8::Context::Scope contextScope(context);
+    v8::Handle<v8::Object> object = v8Listener->getListenerObject(document);
+    if (object.IsEmpty() || !object->IsFunction())
+        return false;
+
+    v8::Handle<v8::Function> function = v8::Handle<v8::Function>::Cast(object);
+    v8::ScriptOrigin origin = function->GetScriptOrigin();
+    if (!origin.ResourceName().IsEmpty()) {
+        sourceName = toWebCoreString(origin.ResourceName());
+        lineNumber = function->GetScriptLineNumber() + 1;
+        return true;
+    }
+    return false;
 }
 
 } // namespace WebCore

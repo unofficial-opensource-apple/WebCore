@@ -27,13 +27,13 @@
 #define IntPoint_h
 
 #include "IntSize.h"
-#include <wtf/Platform.h>
+#include <wtf/MathExtras.h>
 
 #if PLATFORM(QT)
 #include <QDataStream>
 #endif
 
-#if PLATFORM(CG)
+#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM)
 typedef struct CGPoint CGPoint;
 #endif
 
@@ -48,15 +48,21 @@ class QPoint;
 QT_END_NAMESPACE
 #elif PLATFORM(GTK)
 typedef struct _GdkPoint GdkPoint;
-#elif PLATFORM(HAIKU)
-class BPoint;
+#elif PLATFORM(BLACKBERRY)
+namespace BlackBerry {
+namespace Platform {
+class IntPoint;
+}
+}
+#elif PLATFORM(EFL)
+typedef struct _Evas_Point Evas_Point;
 #endif
 
 #if PLATFORM(WX)
 class wxPoint;
 #endif
 
-#if PLATFORM(SKIA)
+#if USE(SKIA)
 struct SkPoint;
 struct SkIPoint;
 #endif
@@ -69,6 +75,8 @@ public:
     IntPoint(int x, int y) : m_x(x), m_y(y) { }
     explicit IntPoint(const IntSize& size) : m_x(size.width()), m_y(size.height()) { }
 
+    static IntPoint zero() { return IntPoint(); }
+
     int x() const { return m_x; }
     int y() const { return m_y; }
 
@@ -76,7 +84,13 @@ public:
     void setY(int y) { m_y = y; }
 
     void move(const IntSize& s) { move(s.width(), s.height()); } 
+    void moveBy(const IntPoint& offset) { move(offset.x(), offset.y()); }
     void move(int dx, int dy) { m_x += dx; m_y += dy; }
+    void scale(float sx, float sy)
+    {
+        m_x = lroundf(static_cast<float>(m_x * sx));
+        m_y = lroundf(static_cast<float>(m_y * sy));
+    }
     
     IntPoint expandedTo(const IntPoint& other) const
     {
@@ -90,12 +104,19 @@ public:
             m_y < other.m_y ? m_y : other.m_y);
     }
 
+    int distanceSquaredToPoint(const IntPoint&) const;
+
     void clampNegativeToZero()
     {
-        *this = expandedTo(IntPoint());
+        *this = expandedTo(zero());
     }
 
-#if PLATFORM(CG)
+    IntPoint transposedPoint() const
+    {
+        return IntPoint(m_y, m_x);
+    }
+
+#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM)
     explicit IntPoint(const CGPoint&); // don't do this implicitly since it's lossy
     operator CGPoint() const;
 #endif
@@ -112,9 +133,12 @@ public:
 #elif PLATFORM(GTK)
     IntPoint(const GdkPoint&);
     operator GdkPoint() const;
-#elif PLATFORM(HAIKU)
-    explicit IntPoint(const BPoint&);
-    operator BPoint() const;
+#elif PLATFORM(BLACKBERRY)
+    IntPoint(const BlackBerry::Platform::IntPoint&);
+    operator BlackBerry::Platform::IntPoint() const;
+#elif PLATFORM(EFL)
+    explicit IntPoint(const Evas_Point&);
+    operator Evas_Point() const;
 #endif
 
 #if PLATFORM(WX)
@@ -122,7 +146,7 @@ public:
     operator wxPoint() const;
 #endif
 
-#if PLATFORM(SKIA)
+#if USE(SKIA)
     IntPoint(const SkIPoint&);
     operator SkIPoint() const;
     operator SkPoint() const;
@@ -149,6 +173,11 @@ inline IntPoint operator+(const IntPoint& a, const IntSize& b)
     return IntPoint(a.x() + b.width(), a.y() + b.height());
 }
 
+inline IntPoint operator+(const IntPoint& a, const IntPoint& b)
+{
+    return IntPoint(a.x() + b.x(), a.y() + b.y());
+}
+
 inline IntSize operator-(const IntPoint& a, const IntPoint& b)
 {
     return IntSize(a.x() - b.x(), a.y() - b.y());
@@ -159,6 +188,11 @@ inline IntPoint operator-(const IntPoint& a, const IntSize& b)
     return IntPoint(a.x() - b.width(), a.y() - b.height());
 }
 
+inline IntPoint operator-(const IntPoint& point)
+{
+    return IntPoint(-point.x(), -point.y());
+}
+
 inline bool operator==(const IntPoint& a, const IntPoint& b)
 {
     return a.x() == b.x() && a.y() == b.y();
@@ -167,6 +201,21 @@ inline bool operator==(const IntPoint& a, const IntPoint& b)
 inline bool operator!=(const IntPoint& a, const IntPoint& b)
 {
     return a.x() != b.x() || a.y() != b.y();
+}
+
+inline IntPoint toPoint(const IntSize& size)
+{
+    return IntPoint(size.width(), size.height());
+}
+
+inline IntSize toSize(const IntPoint& a)
+{
+    return IntSize(a.x(), a.y());
+}
+
+inline int IntPoint::distanceSquaredToPoint(const IntPoint& point) const
+{
+    return ((*this) - point).diagonalLengthSquared();
 }
 
 #if PLATFORM(QT)

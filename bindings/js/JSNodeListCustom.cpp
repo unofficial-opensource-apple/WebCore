@@ -26,40 +26,35 @@
 #include "config.h"
 #include "JSNodeList.h"
 
-#include "AtomicString.h"
+#include "DynamicNodeList.h"
 #include "JSNode.h"
 #include "Node.h"
 #include "NodeList.h"
+#include <wtf/text/AtomicString.h>
 
 using namespace JSC;
 
 namespace WebCore {
 
-// Need to support call so that list(0) works.
-static JSValue JSC_HOST_CALL callNodeList(ExecState* exec, JSObject* function, JSValue, const ArgList& args)
+bool JSNodeListOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
 {
-    bool ok;
-    unsigned index = args.at(0).toString(exec).toUInt32(&ok);
-    if (!ok)
-        return jsUndefined();
-    return toJS(exec, static_cast<JSNodeList*>(function)->impl()->item(index));
-}
-
-CallType JSNodeList::getCallData(CallData& callData)
-{
-    callData.native.function = callNodeList;
-    return CallTypeHost;
+    JSNodeList* jsNodeList = jsCast<JSNodeList*>(handle.get().asCell());
+    if (!jsNodeList->hasCustomProperties())
+        return false;
+    if (!jsNodeList->impl()->isDynamicNodeList())
+        return false;
+    return visitor.containsOpaqueRoot(root(static_cast<DynamicNodeList*>(jsNodeList->impl())->node()));
 }
 
 bool JSNodeList::canGetItemsForName(ExecState*, NodeList* impl, const Identifier& propertyName)
 {
-    return impl->itemWithName(propertyName);
+    return impl->itemWithName(identifierToAtomicString(propertyName));
 }
 
-JSValue JSNodeList::nameGetter(ExecState* exec, const Identifier& propertyName, const PropertySlot& slot)
+JSValue JSNodeList::nameGetter(ExecState* exec, JSValue slotBase, const Identifier& propertyName)
 {
-    JSNodeList* thisObj = static_cast<JSNodeList*>(asObject(slot.slotBase()));
-    return toJS(exec, thisObj->impl()->itemWithName(propertyName));
+    JSNodeList* thisObj = jsCast<JSNodeList*>(asObject(slotBase));
+    return toJS(exec, thisObj->globalObject(), thisObj->impl()->itemWithName(identifierToAtomicString(propertyName)));
 }
 
 } // namespace WebCore

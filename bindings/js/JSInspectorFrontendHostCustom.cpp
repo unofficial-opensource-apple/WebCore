@@ -31,15 +31,17 @@
  */
 
 #include "config.h"
-#include "JSInspectorFrontendHost.h"
 
 #if ENABLE(INSPECTOR)
+
+#include "JSInspectorFrontendHost.h"
 
 #include "ContextMenuItem.h"
 #include "InspectorController.h"
 #include "InspectorFrontendHost.h"
 #include "JSEvent.h"
 #include "MouseEvent.h"
+#include "PlatformString.h"
 #include <runtime/JSArray.h>
 #include <runtime/JSLock.h>
 #include <runtime/JSObject.h>
@@ -49,34 +51,93 @@ using namespace JSC;
 
 namespace WebCore {
 
-JSValue JSInspectorFrontendHost::showContextMenu(ExecState* execState, const ArgList& args)
+JSValue JSInspectorFrontendHost::platform(ExecState* execState)
 {
-    if (args.size() < 2)
+#if PLATFORM(MAC)
+    DEFINE_STATIC_LOCAL(const String, platform, ("mac"));
+#elif OS(WINDOWS)
+    DEFINE_STATIC_LOCAL(const String, platform, ("windows"));
+#elif OS(LINUX)
+    DEFINE_STATIC_LOCAL(const String, platform, ("linux"));
+#elif OS(FREEBSD)
+    DEFINE_STATIC_LOCAL(const String, platform, ("freebsd"));
+#elif OS(OPENBSD)
+    DEFINE_STATIC_LOCAL(const String, platform, ("openbsd"));
+#elif OS(SOLARIS)
+    DEFINE_STATIC_LOCAL(const String, platform, ("solaris"));
+#else
+    DEFINE_STATIC_LOCAL(const String, platform, ("unknown"));
+#endif
+    return jsString(execState, platform);
+}
+
+JSValue JSInspectorFrontendHost::port(ExecState* execState)
+{
+#if PLATFORM(QT)
+    DEFINE_STATIC_LOCAL(const String, port, ("qt"));
+#elif PLATFORM(GTK)
+    DEFINE_STATIC_LOCAL(const String, port, ("gtk"));
+#elif PLATFORM(WX)
+    DEFINE_STATIC_LOCAL(const String, port, ("wx"));
+#else
+    DEFINE_STATIC_LOCAL(const String, port, ("unknown"));
+#endif
+    return jsString(execState, port);
+}
+
+JSValue JSInspectorFrontendHost::showContextMenu(ExecState* exec)
+{
+    if (exec->argumentCount() < 2)
         return jsUndefined();
-
 #if ENABLE(CONTEXT_MENUS)
-    Event* event = toEvent(args.at(0));
+    Event* event = toEvent(exec->argument(0));
 
-    JSArray* array = asArray(args.at(1));
+    JSArray* array = asArray(exec->argument(1));
     Vector<ContextMenuItem*> items;
 
     for (size_t i = 0; i < array->length(); ++i) {
         JSObject* item = asObject(array->getIndex(i));
-        JSValue label = item->get(execState, Identifier(execState, "label"));
-        JSValue id = item->get(execState, Identifier(execState, "id"));
-        if (label.isUndefined() || id.isUndefined())
-            items.append(new ContextMenuItem(SeparatorType, ContextMenuItemTagNoAction, String()));
-        else {
-            ContextMenuAction typedId = static_cast<ContextMenuAction>(ContextMenuItemBaseCustomTag + id.toInt32(execState));
-            items.append(new ContextMenuItem(ActionType, typedId, label.toString(execState)));
+        JSValue label = item->get(exec, Identifier(exec, "label"));
+        JSValue type = item->get(exec, Identifier(exec, "type"));
+        JSValue id = item->get(exec, Identifier(exec, "id"));
+        JSValue enabled = item->get(exec, Identifier(exec, "enabled"));
+        JSValue checked = item->get(exec, Identifier(exec, "checked"));
+        if (!type.isString())
+            continue;
+
+        String typeString = ustringToString(type.toString(exec)->value(exec));
+        if (typeString == "separator") {
+            items.append(new ContextMenuItem(SeparatorType,
+                                             ContextMenuItemCustomTagNoAction,
+                                             String()));
+        } else {
+            ContextMenuAction typedId = static_cast<ContextMenuAction>(ContextMenuItemBaseCustomTag + id.toInt32(exec));
+            ContextMenuItem* menuItem = new ContextMenuItem((typeString == "checkbox" ? CheckableActionType : ActionType), typedId, ustringToString(label.toString(exec)->value(exec)));
+            if (!enabled.isUndefined())
+                menuItem->setEnabled(enabled.toBoolean(exec));
+            if (!checked.isUndefined())
+                menuItem->setChecked(checked.toBoolean(exec));
+            items.append(menuItem);
         }
     }
 
     impl()->showContextMenu(event, items);
-#else
-    UNUSED_PARAM(execState);
 #endif
+    return jsUndefined();
+}
 
+JSValue JSInspectorFrontendHost::recordActionTaken(ExecState*)
+{
+    return jsUndefined();
+}
+
+JSValue JSInspectorFrontendHost::recordPanelShown(ExecState*)
+{
+    return jsUndefined();
+}
+
+JSValue JSInspectorFrontendHost::recordSettingChanged(ExecState*)
+{
     return jsUndefined();
 }
 

@@ -1,5 +1,6 @@
 /*
  *  Copyright (C) 2007 Holger Hans Peter Freyther
+ * Portions Copyright (c) 2010 Motorola Mobility, Inc.  All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -17,49 +18,38 @@
  */
 
 #include "config.h"
+
+#if ENABLE(CONTEXT_MENUS)
+
 #include "ContextMenu.h"
 
-#include "ContextMenuController.h"
-
+#include <wtf/gobject/GOwnPtr.h>
 #include <gtk/gtk.h>
 
 namespace WebCore {
 
-// TODO: ref-counting correctness checking.
-// See http://bugs.webkit.org/show_bug.cgi?id=16115
-
-static void menuItemActivated(GtkMenuItem* item, ContextMenuController* controller)
-{
-    ContextMenuItem contextItem(item);
-    controller->contextMenuItemSelected(&contextItem);
-}
-
-ContextMenu::ContextMenu(const HitTestResult& result)
-    : m_hitTestResult(result)
+ContextMenu::ContextMenu()
 {
     m_platformDescription = GTK_MENU(gtk_menu_new());
+}
 
-    g_object_ref_sink(G_OBJECT(m_platformDescription));
+ContextMenu::ContextMenu(const PlatformMenuDescription menu)
+    : m_platformDescription(menu)
+{
 }
 
 ContextMenu::~ContextMenu()
 {
     if (m_platformDescription)
-        g_object_unref(m_platformDescription);
+        gtk_widget_destroy(GTK_WIDGET(m_platformDescription));
 }
 
 void ContextMenu::appendItem(ContextMenuItem& item)
 {
     ASSERT(m_platformDescription);
-    checkOrEnableIfNeeded(item);
 
-    ContextMenuItemType type = item.type();
-    GtkMenuItem* platformItem = ContextMenuItem::createNativeMenuItem(item.releasePlatformDescription());
+    GtkMenuItem* platformItem = item.releasePlatformDescription();
     ASSERT(platformItem);
-
-    if (type == ActionType || type == CheckableActionType)
-        g_signal_connect(platformItem, "activate", G_CALLBACK(menuItemActivated), controller());
-
     gtk_menu_shell_append(GTK_MENU_SHELL(m_platformDescription), GTK_WIDGET(platformItem));
     gtk_widget_show(GTK_WIDGET(platformItem));
 }
@@ -67,11 +57,12 @@ void ContextMenu::appendItem(ContextMenuItem& item)
 void ContextMenu::setPlatformDescription(PlatformMenuDescription menu)
 {
     ASSERT(menu);
+    if (m_platformDescription == menu)
+        return;
     if (m_platformDescription)
-        g_object_unref(m_platformDescription);
+        gtk_widget_destroy(GTK_WIDGET(m_platformDescription));
 
     m_platformDescription = menu;
-    g_object_ref(m_platformDescription);
 }
 
 PlatformMenuDescription ContextMenu::platformDescription() const
@@ -87,4 +78,43 @@ PlatformMenuDescription ContextMenu::releasePlatformDescription()
     return description;
 }
 
+unsigned ContextMenu::itemCount() const
+{
+    ASSERT(m_platformDescription);
+
+    GOwnPtr<GList> children(gtk_container_get_children(GTK_CONTAINER(m_platformDescription)));
+    return g_list_length(children.get());
 }
+
+Vector<ContextMenuItem> contextMenuItemVector(const PlatformMenuDescription menu)
+{
+    Vector<ContextMenuItem> menuItemVector;
+
+    GOwnPtr<GList> children(gtk_container_get_children(GTK_CONTAINER(menu)));
+    int itemCount = g_list_length(children.get());
+    menuItemVector.reserveCapacity(itemCount);
+
+    for (GList* item = children.get(); item; item = g_list_next(item)) {
+        GtkWidget* widget = static_cast<GtkWidget*>(item->data);
+        if (!GTK_IS_MENU_ITEM(widget))
+            continue;
+        menuItemVector.append(ContextMenuItem(GTK_MENU_ITEM(widget)));
+    }
+
+    return menuItemVector;
+}
+
+PlatformMenuDescription platformMenuDescription(Vector<ContextMenuItem>& subMenuItems)
+{
+    GtkMenu* menu = GTK_MENU(gtk_menu_new());
+    for (size_t i = 0; i < subMenuItems.size(); i++) {
+        GtkWidget* platformItem = GTK_WIDGET(subMenuItems[i].releasePlatformDescription());
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu), platformItem);
+        gtk_widget_show(platformItem);
+    }
+    return menu;
+}
+
+}
+
+#endif // ENABLE(CONTEXT_MENUS)

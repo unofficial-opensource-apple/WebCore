@@ -27,11 +27,12 @@
 #include "config.h"
 #include "CrossOriginAccessControl.h"
 
-#include "AtomicString.h"
 #include "HTTPParsers.h"
 #include "ResourceResponse.h"
 #include "SecurityOrigin.h"
 #include <wtf/Threading.h>
+#include <wtf/text/AtomicString.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
@@ -42,7 +43,11 @@ bool isOnAccessControlSimpleRequestMethodWhitelist(const String& method)
 
 bool isOnAccessControlSimpleRequestHeaderWhitelist(const String& name, const String& value)
 {
-    if (equalIgnoringCase(name, "accept") || equalIgnoringCase(name, "accept-language") || equalIgnoringCase(name, "content-language"))
+    if (equalIgnoringCase(name, "accept")
+        || equalIgnoringCase(name, "accept-language")
+        || equalIgnoringCase(name, "content-language")
+        || equalIgnoringCase(name, "origin")
+        || equalIgnoringCase(name, "referer"))
         return true;
 
     // Preflight is required for MIME types that can not be sent via form submission.
@@ -70,10 +75,9 @@ bool isSimpleCrossOriginAccessRequest(const String& method, const HTTPHeaderMap&
     return true;
 }
 
-typedef HashSet<String, CaseFoldingHash> HTTPHeaderSet;
-static HTTPHeaderSet* createAllowedCrossOriginResponseHeadersSet()
+static PassOwnPtr<HTTPHeaderSet> createAllowedCrossOriginResponseHeadersSet()
 {
-    HTTPHeaderSet* headerSet = new HashSet<String, CaseFoldingHash>;
+    OwnPtr<HTTPHeaderSet> headerSet = adoptPtr(new HashSet<String, CaseFoldingHash>);
     
     headerSet->add("cache-control");
     headerSet->add("content-language");
@@ -82,38 +86,97 @@ static HTTPHeaderSet* createAllowedCrossOriginResponseHeadersSet()
     headerSet->add("last-modified");
     headerSet->add("pragma");
 
-    return headerSet;
+    return headerSet.release();
 }
 
 bool isOnAccessControlResponseHeaderWhitelist(const String& name)
 {
-    AtomicallyInitializedStatic(HTTPHeaderSet*, allowedCrossOriginResponseHeaders = createAllowedCrossOriginResponseHeadersSet());
+    AtomicallyInitializedStatic(HTTPHeaderSet*, allowedCrossOriginResponseHeaders = createAllowedCrossOriginResponseHeadersSet().leakPtr());
 
     return allowedCrossOriginResponseHeaders->contains(name);
 }
 
-bool passesAccessControlCheck(const ResourceResponse& response, bool includeCredentials, SecurityOrigin* securityOrigin)
+void updateRequestForAccessControl(ResourceRequest& request, SecurityOrigin* securityOrigin, StoredCredentials allowCredentials)
 {
+    request.removeCredentials();
+    request.setAllowCookies(allowCredentials == AllowStoredCredentials);
+    request.setHTTPOrigin(securityOrigin->toString());
+}
+
+ResourceRequest createAccessControlPreflightRequest(const ResourceRequest& request, SecurityOrigin* securityOrigin)
+{
+    ResourceRequest preflightRequest(request.url());
+    updateRequestForAccessControl(preflightRequest, securityOrigin, DoNotAllowStoredCredentials);
+    preflightRequest.setHTTPMethod("OPTIONS");
+    preflightRequest.setHTTPHeaderField("Access-Control-Request-Method", request.httpMethod());
+    preflightRequest.setPriority(request.priority());
+
+    const HTTPHeaderMap& requestHeaderFields = request.httpHeaderFields();
+
+    if (requestHeaderFields.size() > 0) {
+        StringBuilder headerBuffer;
+        HTTPHeaderMap::const_iterator it = requestHeaderFields.begin();
+        headerBuffer.append(it->first);
+        ++it;
+
+        HTTPHeaderMap::const_iterator end = requestHeaderFields.end();
+        for (; it != end; ++it) {
+            headerBuffer.append(',');
+            headerBuffer.append(' ');
+            headerBuffer.append(it->first);
+        }
+
+        preflightRequest.setHTTPHeaderField("Access-Control-Request-Headers", headerBuffer.toString().lower());
+    }
+
+    return preflightRequest;
+}
+
+bool passesAccessControlCheck(const ResourceResponse& response, StoredCredentials includeCredentials, SecurityOrigin* securityOrigin, String& errorDescription)
+{
+    AtomicallyInitializedStatic(AtomicString&, accessControlAllowOrigin = *new AtomicString("access-control-allow-origin"));
+    AtomicallyInitializedStatic(AtomicString&, accessControlAllowCredentials = *new AtomicString("access-control-allow-credentials"));
+
     // A wildcard Access-Control-Allow-Origin can not be used if credentials are to be sent,
     // even with Access-Control-Allow-Credentials set to true.
-    const String& accessControlOriginString = response.httpHeaderField("Access-Control-Allow-Origin");
-    if (accessControlOriginString == "*" && !includeCredentials)
+    const String& accessControlOriginString = response.httpHeaderField(accessControlAllowOrigin);
+    if (accessControlOriginString == "*" && includeCredentials == DoNotAllowStoredCredentials)
         return true;
 
-    if (securityOrigin->isUnique())
+    if (securityOrigin->isUnique()) {
+        errorDescription = "Cannot make any requests from " + securityOrigin->toString() + ".";
         return false;
+    }
 
-    RefPtr<SecurityOrigin> accessControlOrigin = SecurityOrigin::createFromString(accessControlOriginString);
-    if (!accessControlOrigin->isSameSchemeHostPort(securityOrigin))
+    // FIXME: Access-Control-Allow-Origin can contain a list of origins.
+    if (accessControlOriginString != securityOrigin->toString()) {
+        if (accessControlOriginString == "*")
+            errorDescription = "Cannot use wildcard in Access-Control-Allow-Origin when credentials flag is true.";
+        else
+            errorDescription =  "Origin " + securityOrigin->toString() + " is not allowed by Access-Control-Allow-Origin.";
         return false;
+    }
 
-    if (includeCredentials) {
-        const String& accessControlCredentialsString = response.httpHeaderField("Access-Control-Allow-Credentials");
-        if (accessControlCredentialsString != "true")
+    if (includeCredentials == AllowStoredCredentials) {
+        const String& accessControlCredentialsString = response.httpHeaderField(accessControlAllowCredentials);
+        if (accessControlCredentialsString != "true") {
+            errorDescription = "Credentials flag is true, but Access-Control-Allow-Credentials is not \"true\".";
             return false;
+        }
     }
 
     return true;
+}
+
+void parseAccessControlExposeHeadersAllowList(const String& headerValue, HTTPHeaderSet& headerSet)
+{
+    Vector<String> headers;
+    headerValue.split(',', false, headers);
+    for (unsigned headerCount = 0; headerCount < headers.size(); headerCount++) {
+        String strippedHeader = headers[headerCount].stripWhiteSpace();
+        if (!strippedHeader.isEmpty())
+            headerSet.add(strippedHeader);
+    }
 }
 
 } // namespace WebCore

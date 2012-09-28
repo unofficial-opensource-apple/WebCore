@@ -35,18 +35,51 @@
 #include "JSSharedWorker.h"
 
 #include "JSDOMGlobalObject.h"
+#include "JSDOMWindowCustom.h"
 #include "SharedWorker.h"
+#include <runtime/Error.h>
 
 using namespace JSC;
 
 namespace WebCore {
 
-void JSSharedWorker::markChildren(MarkStack& markStack)
+void JSSharedWorker::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
-    Base::markChildren(markStack);
+    JSSharedWorker* thisObject = jsCast<JSSharedWorker*>(cell);
+    ASSERT_GC_OBJECT_INHERITS(thisObject, &s_info);
+    COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
+    ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
+    Base::visitChildren(thisObject, visitor);
 
-    if (MessagePort* port = impl()->port())
-        markDOMObjectWrapper(markStack, *Heap::heap(this)->globalData(), port);
+    if (MessagePort* port = thisObject->impl()->port())
+        visitor.addOpaqueRoot(port);
+}
+
+EncodedJSValue JSC_HOST_CALL JSSharedWorkerConstructor::constructJSSharedWorker(ExecState* exec)
+{
+    JSSharedWorkerConstructor* jsConstructor = jsCast<JSSharedWorkerConstructor*>(exec->callee());
+
+    if (exec->argumentCount() < 1)
+        return throwVMError(exec, createNotEnoughArgumentsError(exec));
+
+    UString scriptURL = exec->argument(0).toString(exec)->value(exec);
+    UString name;
+    if (exec->argumentCount() > 1)
+        name = exec->argument(1).toString(exec)->value(exec);
+
+    if (exec->hadException())
+        return JSValue::encode(JSValue());
+
+    // FIXME: We need to use both the dynamic scope and the lexical scope (dynamic scope for resolving the worker URL)
+    DOMWindow* window = asJSDOMWindow(exec->lexicalGlobalObject())->impl();
+    ExceptionCode ec = 0;
+    RefPtr<SharedWorker> worker = SharedWorker::create(window->document(), ustringToString(scriptURL), ustringToString(name), ec);
+    if (ec) {
+        setDOMException(exec, ec);
+        return JSValue::encode(JSValue());
+    }
+
+    return JSValue::encode(asObject(toJS(exec, jsConstructor->globalObject(), worker.release())));
 }
 
 } // namespace WebCore

@@ -28,31 +28,32 @@
 
 namespace WebCore {
 
-class CSSMutableStyleDeclaration;
+class CSSStyleDeclaration;
+class CSSStyleSheet;
+class StyleRulePage;
+class StyleRuleCSSStyleDeclaration;
 
 class CSSPageRule : public CSSRule {
 public:
-    static PassRefPtr<CSSPageRule> create(CSSStyleSheet* parent)
-    {
-        return adoptRef(new CSSPageRule(parent));
-    }
+    static PassRefPtr<CSSPageRule> create(StyleRulePage* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSPageRule(rule, sheet)); }
 
-    virtual ~CSSPageRule();
+    ~CSSPageRule();
+
+    CSSStyleDeclaration* style() const;
 
     String selectorText() const;
-    void setSelectorText(const String&, ExceptionCode&);
+    void setSelectorText(const String&);
 
-    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
+    String cssText() const;
 
-    virtual String cssText() const;
+    void reattach(StyleRulePage*);
 
 private:
-    CSSPageRule(CSSStyleSheet* parent);
+    CSSPageRule(StyleRulePage*, CSSStyleSheet*);
+    
+    RefPtr<StyleRulePage> m_pageRule;
 
-    // Inherited from CSSRule
-    virtual unsigned short type() const { return PAGE_RULE; }
-
-    RefPtr<CSSMutableStyleDeclaration> m_style;
+    mutable RefPtr<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;
 };
 
 } // namespace WebCore

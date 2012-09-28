@@ -42,7 +42,7 @@ MergeIdenticalElementsCommand::MergeIdenticalElementsCommand(PassRefPtr<Element>
 
 void MergeIdenticalElementsCommand::doApply()
 {
-    if (m_element1->nextSibling() != m_element2 || !m_element1->isContentEditable() || !m_element2->isContentEditable())
+    if (m_element1->nextSibling() != m_element2 || !m_element1->rendererIsEditable() || !m_element2->rendererIsEditable())
         return;
 
     m_atChild = m_element2->firstChild();
@@ -67,8 +67,8 @@ void MergeIdenticalElementsCommand::doUnapply()
 
     RefPtr<Node> atChild = m_atChild.release();
 
-    Node* parent = m_element2->parent();
-    if (!parent || !parent->isContentEditable())
+    ContainerNode* parent = m_element2->parentNode();
+    if (!parent || !parent->rendererIsEditable())
         return;
 
     ExceptionCode ec = 0;
@@ -85,5 +85,13 @@ void MergeIdenticalElementsCommand::doUnapply()
     for (size_t i = 0; i < size; ++i)
         m_element1->appendChild(children[i].release(), ec);
 }
+
+#ifndef NDEBUG
+void MergeIdenticalElementsCommand::getNodesInCommand(HashSet<Node*>& nodes)
+{
+    addNodeAndDescendants(m_element1.get(), nodes);
+    addNodeAndDescendants(m_element2.get(), nodes);
+}
+#endif
 
 } // namespace WebCore

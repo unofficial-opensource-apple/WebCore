@@ -33,10 +33,9 @@
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
-
-    class String;
 
     class WorkerLocation : public RefCounted<WorkerLocation> {
     public:
@@ -58,7 +57,7 @@ namespace WebCore {
         String search() const;
         String hash() const;
 
-        String toString() const;
+        String toString() const { return href(); }
 
     private:
         WorkerLocation(const KURL& url) : m_url(url) { }

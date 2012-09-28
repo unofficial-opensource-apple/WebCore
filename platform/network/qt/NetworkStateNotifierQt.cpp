@@ -20,10 +20,10 @@
 #include "config.h"
 #include "NetworkStateNotifier.h"
 
+#if (PLATFORM(QT) && !defined(QT_NO_BEARERMANAGEMENT))
+
 #include "NetworkStateNotifierPrivate.h"
 #include "qnetworkconfigmanager.h"
-
-using namespace QtMobility;
 
 namespace WebCore {
 
@@ -88,3 +88,5 @@ void NetworkStateNotifier::setNetworkAccessAllowed(bool isAllowed)
 } // namespace WebCore
 
 #include "moc_NetworkStateNotifierPrivate.cpp"
+
+#endif

@@ -28,7 +28,6 @@
 #include "config.h"
 #include "PluginPackage.h"
 
-#include "CString.h"
 #include "MIMETypeRegistry.h"
 #include "PluginDatabase.h"
 #include "PluginDebug.h"
@@ -36,6 +35,7 @@
 #include "npruntime_impl.h"
 #include <string.h>
 #include <wtf/OwnArrayPtr.h>
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -108,12 +108,14 @@ PluginPackage::PluginPackage(const String& path, const time_t& lastModified)
     , m_module(0)
     , m_lastModified(lastModified)
     , m_freeLibraryTimer(this, &PluginPackage::freeLibraryTimerFired)
+#if ENABLE(NETSCAPE_PLUGIN_METADATA_CACHE)
+    , m_infoIsFromCache(true)
+#endif
 {
     m_fileName = pathGetFileName(m_path);
     m_parentDirectory = m_path.left(m_path.length() - m_fileName.length() - 1);
 }
 
-#if !OS(SYMBIAN)
 void PluginPackage::unload()
 {
     if (!m_isLoaded)
@@ -126,7 +128,6 @@ void PluginPackage::unload()
 
     unloadWithoutShutdown();
 }
-#endif // !OS(SYMBIAN)
 
 void PluginPackage::unloadWithoutShutdown()
 {
@@ -162,6 +163,19 @@ PassRefPtr<PluginPackage> PluginPackage::createPackage(const String& path, const
     return package.release();
 }
 
+#if ENABLE(NETSCAPE_PLUGIN_METADATA_CACHE)
+PassRefPtr<PluginPackage> PluginPackage::createPackageFromCache(const String& path, const time_t& lastModified, const String& name, const String& description, const String& mimeDescription)
+{
+    RefPtr<PluginPackage> package = adoptRef(new PluginPackage(path, lastModified));
+    package->m_name = name;
+    package->m_description = description;
+    package->determineModuleVersionFromDescription();
+    package->setMIMEDescription(mimeDescription);
+    package->m_infoIsFromCache = true;
+    return package.release();
+}
+#endif
+
 #if defined(XP_UNIX)
 void PluginPackage::determineQuirks(const String& mimeType)
 {
@@ -185,12 +199,22 @@ void PluginPackage::determineQuirks(const String& mimeType)
 #if PLATFORM(QT)
             m_quirks.add(PluginQuirkRequiresGtkToolKit);
 #endif
-            m_quirks.add(PluginQuirkRequiresDefaultScreenDepth);
         } else {
             // Flash 9 and older requests windowless plugins if we return a mozilla user agent
             m_quirks.add(PluginQuirkWantsMozillaUserAgent);
         }
 
+#if PLATFORM(QT)
+        // Flash will crash on repeated calls to SetWindow in windowed mode
+        m_quirks.add(PluginQuirkDontCallSetWindowMoreThanOnce);
+#endif
+
+#if CPU(X86_64)
+        // 64-bit Flash freezes if right-click is sent in windowless mode
+        m_quirks.add(PluginQuirkIgnoreRightClickInWindowlessMode);
+#endif
+
+        m_quirks.add(PluginQuirkRequiresDefaultScreenDepth);
         m_quirks.add(PluginQuirkThrottleInvalidate);
         m_quirks.add(PluginQuirkThrottleWMUserPlusOneMessages);
         m_quirks.add(PluginQuirkFlashURLNotifyBug);
@@ -253,7 +277,7 @@ void PluginPackage::initializeBrowserFuncs()
 {
     memset(&m_browserFuncs, 0, sizeof(m_browserFuncs));
     m_browserFuncs.size = sizeof(m_browserFuncs);
-    m_browserFuncs.version = NP_VERSION_MINOR;
+    m_browserFuncs.version = NPVersion();
 
     m_browserFuncs.geturl = NPN_GetURL;
     m_browserFuncs.posturl = NPN_PostURL;
@@ -301,18 +325,24 @@ void PluginPackage::initializeBrowserFuncs()
     m_browserFuncs.setexception = _NPN_SetException;
     m_browserFuncs.enumerate = _NPN_Enumerate;
     m_browserFuncs.construct = _NPN_Construct;
+    m_browserFuncs.getvalueforurl = NPN_GetValueForURL;
+    m_browserFuncs.setvalueforurl = NPN_SetValueForURL;
+    m_browserFuncs.getauthenticationinfo = NPN_GetAuthenticationInfo;
 }
 #endif
 
 #if ENABLE(PLUGIN_PACKAGE_SIMPLE_HASH)
 unsigned PluginPackage::hash() const
 {
-    unsigned hashCodes[] = {
-        m_path.impl()->hash(),
-        m_lastModified
-    };
+    struct HashCodes {
+        unsigned hash;
+        time_t modifiedDate;
+    } hashCodes;
 
-    return StringImpl::computeHash(reinterpret_cast<UChar*>(hashCodes), sizeof(hashCodes) / sizeof(UChar));
+    hashCodes.hash = m_path.impl()->hash();
+    hashCodes.modifiedDate = m_lastModified;
+
+    return StringHasher::hashMemory<sizeof(hashCodes)>(&hashCodes);
 }
 
 bool PluginPackage::equal(const PluginPackage& a, const PluginPackage& b)
@@ -338,5 +368,21 @@ int PluginPackage::compareFileVersion(const PlatformModuleVersion& compareVersio
 
     return 0;
 }
+
+#if ENABLE(NETSCAPE_PLUGIN_METADATA_CACHE)
+bool PluginPackage::ensurePluginLoaded()
+{
+    if (!m_infoIsFromCache)
+        return m_isLoaded;
+
+    m_quirks = PluginQuirkSet();
+    m_name = String();
+    m_description = String();
+    m_fullMIMEDescription = String();
+    m_moduleVersion = 0;
+
+    return fetchInfo();
+}
+#endif
 
 }

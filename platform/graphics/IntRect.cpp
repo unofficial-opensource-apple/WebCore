@@ -26,6 +26,7 @@
 #include "config.h"
 #include "IntRect.h"
 
+#include "FractionalLayoutRect.h"
 #include "FloatRect.h"
 #include <algorithm>
 
@@ -40,26 +41,32 @@ IntRect::IntRect(const FloatRect& r)
 {
 }
 
+IntRect::IntRect(const FractionalLayoutRect& r)
+    : m_location(flooredIntPoint(r.location()))
+    , m_size(flooredIntSize(r.size()))
+{
+}
+
 bool IntRect::intersects(const IntRect& other) const
 {
     // Checking emptiness handles negative widths as well as zero.
     return !isEmpty() && !other.isEmpty()
-        && x() < other.right() && other.x() < right()
-        && y() < other.bottom() && other.y() < bottom();
+        && x() < other.maxX() && other.x() < maxX()
+        && y() < other.maxY() && other.y() < maxY();
 }
 
 bool IntRect::contains(const IntRect& other) const
 {
-    return x() <= other.x() && right() >= other.right()
-        && y() <= other.y() && bottom() >= other.bottom();
+    return x() <= other.x() && maxX() >= other.maxX()
+        && y() <= other.y() && maxY() >= other.maxY();
 }
 
 void IntRect::intersect(const IntRect& other)
 {
     int l = max(x(), other.x());
     int t = max(y(), other.y());
-    int r = min(right(), other.right());
-    int b = min(bottom(), other.bottom());
+    int r = min(maxX(), other.maxX());
+    int b = min(maxY(), other.maxY());
 
     // Return a clean empty rectangle for non-intersecting cases.
     if (l >= r || t >= b) {
@@ -87,13 +94,34 @@ void IntRect::unite(const IntRect& other)
 
     int l = min(x(), other.x());
     int t = min(y(), other.y());
-    int r = max(right(), other.right());
-    int b = max(bottom(), other.bottom());
+    int r = max(maxX(), other.maxX());
+    int b = max(maxY(), other.maxY());
 
     m_location.setX(l);
     m_location.setY(t);
     m_size.setWidth(r - l);
     m_size.setHeight(b - t);
+}
+
+void IntRect::uniteIfNonZero(const IntRect& other)
+{
+    // Handle empty special cases first.
+    if (!other.width() && !other.height())
+        return;
+    if (!width() && !height()) {
+        *this = other;
+        return;
+    }
+
+    int left = min(x(), other.x());
+    int top = min(y(), other.y());
+    int right = max(maxX(), other.maxX());
+    int bottom = max(maxY(), other.maxY());
+
+    m_location.setX(left);
+    m_location.setY(top);
+    m_size.setWidth(right - left);
+    m_size.setHeight(bottom - top);
 }
 
 void IntRect::scale(float s)
@@ -102,6 +130,35 @@ void IntRect::scale(float s)
     m_location.setY((int)(y() * s));
     m_size.setWidth((int)(width() * s));
     m_size.setHeight((int)(height() * s));
+}
+
+static inline int distanceToInterval(int pos, int start, int end)
+{
+    if (pos < start)
+        return start - pos;
+    if (pos > end)
+        return end - pos;
+    return 0;
+}
+
+IntSize IntRect::differenceToPoint(const IntPoint& point) const
+{
+    int xdistance = distanceToInterval(point.x(), x(), maxX());
+    int ydistance = distanceToInterval(point.y(), y(), maxY());
+    return IntSize(xdistance, ydistance);
+}
+
+IntSize IntRect::differenceFromCenterLineToPoint(const IntPoint& point) const
+{
+    // The center-line is the natural center of a rectangle. It has an equal distance to all sides of the rectangle.
+    IntPoint centerPoint = center();
+    int xdistance = centerPoint.x() - point.x();
+    int ydistance = centerPoint.y() - point.y();
+    if (width() > height())
+        xdistance = distanceToInterval(point.x(), x() + (height() / 2), maxX() - (height() / 2));
+    else
+        ydistance = distanceToInterval(point.y(), y() + (width() / 2), maxY() - (width() / 2));
+    return IntSize(xdistance, ydistance);
 }
 
 IntRect unionRect(const Vector<IntRect>& rects)

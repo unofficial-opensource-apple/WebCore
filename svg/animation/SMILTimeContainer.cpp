@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,11 +27,8 @@
 #include "SMILTimeContainer.h"
 
 #if ENABLE(SVG)
-
-#include "CSSComputedStyleDeclaration.h"
-#include "CSSParser.h"
 #include "Document.h"
-#include "SVGAnimationElement.h"
+#include "SVGNames.h"
 #include "SVGSMILElement.h"
 #include "SVGSVGElement.h"
 #include <wtf/CurrentTime.h>
@@ -46,22 +43,13 @@ SMILTimeContainer::SMILTimeContainer(SVGSVGElement* owner)
     : m_beginTime(0)
     , m_pauseTime(0)
     , m_accumulatedPauseTime(0)
-    , m_nextManualSampleTime(0)
+    , m_presetStartTime(0)
     , m_documentOrderIndexesDirty(false)
     , m_timer(this, &SMILTimeContainer::timerFired)
     , m_ownerSVGElement(owner)
 {
 }
-    
-#if !ENABLE(SVG_ANIMATION)
-void SMILTimeContainer::begin() {}
-void SMILTimeContainer::pause() {}
-void SMILTimeContainer::resume() {}
-SMILTime SMILTimeContainer::elapsed() const { return 0; }
-bool SMILTimeContainer::isPaused() const { return false; }
-void SMILTimeContainer::timerFired(Timer<SMILTimeContainer>*) {}
-#else
-    
+
 void SMILTimeContainer::schedule(SVGSMILElement* animation)
 {
     ASSERT(animation->timeContainer() == this);
@@ -99,17 +87,27 @@ bool SMILTimeContainer::isPaused() const
 void SMILTimeContainer::begin()
 {
     ASSERT(!m_beginTime);
-    m_beginTime = currentTime();
-    updateAnimations(0);
+    double now = currentTime();
+
+    // If 'm_presetStartTime' is set, the timeline was modified via setElapsed() before the document began.
+    // In this case pass on 'seekToTime=true' to updateAnimations().
+    m_beginTime = now - m_presetStartTime;
+    updateAnimations(SMILTime(m_presetStartTime), m_presetStartTime ? true : false);
+    m_presetStartTime = 0;
+
+    if (m_pauseTime) {
+        m_pauseTime = now;
+        m_timer.stop();
+    }
 }
 
 void SMILTimeContainer::pause()
 {
-    if (!m_beginTime)
-        return;
     ASSERT(!isPaused());
     m_pauseTime = currentTime();
-    m_timer.stop();
+
+    if (m_beginTime)
+        m_timer.stop();
 }
 
 void SMILTimeContainer::resume()
@@ -120,6 +118,28 @@ void SMILTimeContainer::resume()
     m_accumulatedPauseTime += currentTime() - m_pauseTime;
     m_pauseTime = 0;
     startTimer(0);
+}
+
+void SMILTimeContainer::setElapsed(SMILTime time)
+{
+    // If the documment didn't begin yet, record a new start time, we'll seek to once its possible.
+    if (!m_beginTime) {
+        m_presetStartTime = time.value();
+        return;
+    }
+
+    if (m_beginTime)
+        m_timer.stop();
+
+    m_beginTime = currentTime() - time.value();
+    m_accumulatedPauseTime = 0;
+
+    Vector<SVGSMILElement*> toReset;
+    copyToVector(m_scheduledAnimations, toReset);
+    for (unsigned n = 0; n < toReset.size(); ++n)
+        toReset[n]->reset();
+
+    updateAnimations(time, true);
 }
 
 void SMILTimeContainer::startTimer(SMILTime fireTime, SMILTime minimumDelay)
@@ -133,15 +153,14 @@ void SMILTimeContainer::startTimer(SMILTime fireTime, SMILTime minimumDelay)
     SMILTime delay = max(fireTime - elapsed(), minimumDelay);
     m_timer.startOneShot(delay.value());
 }
-    
+
 void SMILTimeContainer::timerFired(Timer<SMILTimeContainer>*)
 {
     ASSERT(m_beginTime);
     ASSERT(!m_pauseTime);
-    SMILTime elapsed = this->elapsed();
-    updateAnimations(elapsed);
+    updateAnimations(elapsed());
 }
- 
+
 void SMILTimeContainer::updateDocumentOrderIndexes()
 {
     unsigned timingElementCount = 0;
@@ -188,64 +207,12 @@ static void sortByApplyOrder(Vector<SVGSMILElement*>& smilElements)
     std::sort(smilElements.begin(), smilElements.end(), applyOrderSortFunction);
 }
 
-String SMILTimeContainer::baseValueFor(ElementAttributePair key)
-{
-    // FIXME: We wouldn't need to do this if we were keeping base values around properly in DOM.
-    // Currently animation overwrites them so we need to save them somewhere.
-    BaseValueMap::iterator it = m_savedBaseValues.find(key);
-    if (it != m_savedBaseValues.end())
-        return it->second;
-    
-    SVGElement* target = key.first;
-    String attributeName = key.second;
-    ASSERT(target);
-    ASSERT(!attributeName.isEmpty());
-    String baseValue;
-    if (SVGAnimationElement::attributeIsCSS(attributeName))
-        baseValue = computedStyle(target)->getPropertyValue(cssPropertyID(attributeName));
-    else
-        baseValue = target->getAttribute(attributeName);
-    m_savedBaseValues.add(key, baseValue);
-    return baseValue;
-}
-
-void SMILTimeContainer::sampleAnimationAtTime(const String& elementId, double newTime)
-{
-    ASSERT(m_beginTime);
-    ASSERT(!isPaused());
-
-    // Fast-forward to the time DRT wants to sample
-    m_timer.stop();
-    m_nextSamplingTarget = elementId;
-    m_nextManualSampleTime = newTime;
-
-    updateAnimations(elapsed());
-}
-
-void SMILTimeContainer::updateAnimations(SMILTime elapsed)
+void SMILTimeContainer::updateAnimations(SMILTime elapsed, bool seekToTime)
 {
     SMILTime earliersFireTime = SMILTime::unresolved();
 
     Vector<SVGSMILElement*> toAnimate;
     copyToVector(m_scheduledAnimations, toAnimate);
-
-    if (m_nextManualSampleTime) {
-        SMILTime samplingDiff;
-        for (unsigned n = 0; n < toAnimate.size(); ++n) {
-            SVGSMILElement* animation = toAnimate[n];
-            ASSERT(animation->timeContainer() == this);
-
-            SVGElement* targetElement = animation->targetElement();
-            if (!targetElement || targetElement->getIDAttribute() != m_nextSamplingTarget)
-                continue;
-
-            samplingDiff = animation->intervalBegin();
-            break;
-        }
-
-        elapsed = SMILTime(m_nextManualSampleTime) + samplingDiff;
-        m_nextManualSampleTime = 0;
-    }
 
     // Sort according to priority. Elements with later begin time have higher priority.
     // In case of a tie, document order decides. 
@@ -254,7 +221,8 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed)
     sortByPriority(toAnimate, elapsed);
     
     // Calculate animation contributions.
-    typedef HashMap<ElementAttributePair, SVGSMILElement*> ResultElementMap;
+    typedef pair<SVGElement*, QualifiedName> ElementAttributePair;
+    typedef HashMap<ElementAttributePair, RefPtr<SVGSMILElement> > ResultElementMap;
     ResultElementMap resultsElements;
     for (unsigned n = 0; n < toAnimate.size(); ++n) {
         SVGSMILElement* animation = toAnimate[n];
@@ -263,40 +231,38 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed)
         SVGElement* targetElement = animation->targetElement();
         if (!targetElement)
             continue;
-        String attributeName = animation->attributeName();
-        if (attributeName.isEmpty()) {
+        
+        QualifiedName attributeName = animation->attributeName();
+        if (attributeName == anyQName()) {
             if (animation->hasTagName(SVGNames::animateMotionTag))
-                attributeName = SVGNames::animateMotionTag.localName();
+                attributeName = SVGNames::animateMotionTag;
             else
                 continue;
         }
         
         // Results are accumulated to the first animation that animates a particular element/attribute pair.
         ElementAttributePair key(targetElement, attributeName); 
-        SVGSMILElement* resultElement = resultsElements.get(key);
+        SVGSMILElement* resultElement = resultsElements.get(key).get();
         if (!resultElement) {
+            if (!animation->hasValidAttributeType())
+                continue;
             resultElement = animation;
-            resultElement->resetToBaseValue(baseValueFor(key));
+            resultElement->resetToBaseValue();
             resultsElements.add(key, resultElement);
         }
 
         // This will calculate the contribution from the animation and add it to the resultsElement.
-        animation->progress(elapsed, resultElement);
+        animation->progress(elapsed, resultElement, seekToTime);
 
         SMILTime nextFireTime = animation->nextProgressTime();
         if (nextFireTime.isFinite())
             earliersFireTime = min(nextFireTime, earliersFireTime);
-        else if (!animation->isContributing(elapsed)) {
-            m_scheduledAnimations.remove(animation);
-            if (m_scheduledAnimations.isEmpty())
-                m_savedBaseValues.clear();
-        }
     }
     
     Vector<SVGSMILElement*> animationsToApply;
     ResultElementMap::iterator end = resultsElements.end();
     for (ResultElementMap::iterator it = resultsElements.begin(); it != end; ++it)
-        animationsToApply.append(it->second);
+        animationsToApply.append(it->second.get());
 
     // Sort <animateTranform> to be the last one to be applied. <animate> may change transform attribute as
     // well (directly or indirectly by modifying <use> x/y) and this way transforms combine properly.
@@ -310,8 +276,6 @@ void SMILTimeContainer::updateAnimations(SMILTime elapsed)
     
     Document::updateStyleForAllDocuments();
 }
-
-#endif
 
 }
 

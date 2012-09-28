@@ -34,11 +34,10 @@
 #if ENABLE(WORKERS)
 
 #include "ScriptExecutionContext.h"
+#include <wtf/Forward.h>
 #include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
-
-    class String;
 
     // A proxy to talk to the loader context. Normally, the document on the main thread
     // provides loading services for the subordinate workers. This interface provides 2-way
@@ -54,7 +53,8 @@ namespace WebCore {
 
         // Posts callbacks from loading code to the WorkerContext. The 'mode' is used to differentiate
         // specific synchronous loading requests so they can be 'nested', per spec.
-        virtual void postTaskForModeToWorkerContext(PassOwnPtr<ScriptExecutionContext::Task>, const String& mode) = 0;
+        // Returns true if the task was posted successfully.
+        virtual bool postTaskForModeToWorkerContext(PassOwnPtr<ScriptExecutionContext::Task>, const String& mode) = 0;
     };
 
 } // namespace WebCore

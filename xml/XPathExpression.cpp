@@ -27,9 +27,8 @@
 #include "config.h"
 #include "XPathExpression.h"
 
-#if ENABLE(XPATH)
-
 #include "Document.h"
+#include "ExceptionCode.h"
 #include "PlatformString.h"
 #include "XPathException.h"
 #include "XPathExpressionNode.h"
@@ -92,5 +91,3 @@ PassRefPtr<XPathResult> XPathExpression::evaluate(Node* contextNode, unsigned sh
 }
 
 }
-
-#endif // ENABLE(XPATH)

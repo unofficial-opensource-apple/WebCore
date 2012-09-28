@@ -30,14 +30,20 @@
 #import "WebLayer.h"
 
 #import "GraphicsContext.h"
-#import "GraphicsLayer.h"
+#import "GraphicsLayerCA.h"
+#import "PlatformCALayer.h"
+#import <objc/objc-runtime.h>
 #import <QuartzCore/QuartzCore.h>
 #import <wtf/UnusedParam.h>
+#import "WebCoreSystemInterface.h"
 
 #import "WKGraphics.h"
 #import "WAKWindow.h"
 #import "WebCoreThread.h"
-#import <QuartzCore/QuartzCorePrivate.h>
+
+@interface CALayer(WebCoreCALayerPrivate)
+- (void)reloadValueForKeyPath:(NSString *)keyPath;
+@end
 
 using namespace WebCore;
 
@@ -47,8 +53,9 @@ using namespace WebCore;
 
 @implementation WebLayer
 
-+ (void)drawContents:(WebCore::GraphicsLayer*)layerContents ofLayer:(CALayer*)layer intoContext:(CGContextRef)context
+void drawLayerContents(CGContextRef context, CALayer *layer, WebCore::PlatformCALayer* platformLayer)
 {
+    WebCore::PlatformCALayerClient* layerContents = platformLayer->owner();
     if (!layerContents)
         return;
 
@@ -56,144 +63,156 @@ using namespace WebCore;
 
     CGContextSaveGState(context);
 
-    CGContextSetShouldAntialias(context, NO);
-
     CGRect layerBounds = [layer bounds];
-    if (layerContents->contentsOrientation() == WebCore::GraphicsLayer::CompositingCoordinatesBottomUp) {
+    if (layerContents->platformCALayerContentsOrientation() == WebCore::GraphicsLayer::CompositingCoordinatesBottomUp) {
         CGContextScaleCTM(context, 1, -1);
         CGContextTranslateCTM(context, 0, -layerBounds.size.height);
     }
 
-    if (layerContents->client()) {
-        WKFontAntialiasingStateSaver fontAntialiasingState(true);
-        fontAntialiasingState.setup([WAKWindow hasLandscapeOrientation]);
+    WKFontAntialiasingStateSaver fontAntialiasingState(context, [layer isOpaque]);
+    fontAntialiasingState.setup([WAKWindow hasLandscapeOrientation]);
 
-        GraphicsContext graphicsContext(context);
+    GraphicsContext graphicsContext(context);
+    graphicsContext.setIsCALayerContext(true);
+    graphicsContext.setIsAcceleratedContext(platformLayer->acceleratesDrawing());
 
-        // It's important to get the clip from the context, because it may be significantly
-        // smaller than the layer bounds (e.g. tiled layers)
-        CGRect clipBounds = CGContextGetClipBoundingBox(context);
-        IntRect clip(enclosingIntRect(clipBounds));
-        layerContents->paintGraphicsLayerContents(graphicsContext, clip);
-
-        fontAntialiasingState.restore();
+    if (!layerContents->platformCALayerContentsOpaque()) {
+        // Turn off font smoothing to improve the appearance of text rendered onto a transparent background.
+        graphicsContext.setShouldSmoothFonts(false);
     }
-#ifndef NDEBUG
-    else {
-        ASSERT_NOT_REACHED();
+    
+    // It's important to get the clip from the context, because it may be significantly
+    // smaller than the layer bounds (e.g. tiled layers)
+    FloatRect clipBounds = CGContextGetClipBoundingBox(context);
 
-        // FIXME: ideally we'd avoid calling -setNeedsDisplay on a layer that is a plain color,
-        // so CA never makes backing store for it (which is what -setNeedsDisplay will do above).
-        CGContextSetRGBFillColor(context, 0.0f, 1.0f, 0.0f, 1.0f);
-        CGContextFillRect(context, layerBounds);
-    }
+
+#if !defined(BUILDING_ON_SNOW_LEOPARD)
+    __block GraphicsContext* ctx = &graphicsContext;
+
+    wkCALayerEnumerateRectsBeingDrawnWithBlock(layer, context, ^(CGRect rect){
+        FloatRect rectBeingDrawn(rect);
+        rectBeingDrawn.intersect(clipBounds);
+        
+        GraphicsContextStateSaver stateSaver(*ctx);
+        ctx->clip(rectBeingDrawn);
+        
+        layerContents->platformCALayerPaintContents(*ctx, enclosingIntRect(rectBeingDrawn));
+    });
+
+#else
+    IntRect clip(enclosingIntRect(clipBounds));
+    layerContents->platformCALayerPaintContents(graphicsContext, clip);
 #endif
 
-    if (layerContents->showRepaintCounter()) {
+    fontAntialiasingState.restore();
+
+    // Re-fetch the layer owner, since <rdar://problem/9125151> indicates that it might have been destroyed during painting.
+    layerContents = platformLayer->owner();
+    ASSERT(layerContents);
+    if (
+        layerContents && layerContents->platformCALayerShowRepaintCounter()) {
         bool isTiledLayer = [layer isKindOfClass:[CATiledLayer class]];
 
         char text[16]; // that's a lot of repaints
-        snprintf(text, sizeof(text), "%d", layerContents->incrementRepaintCount());
+        snprintf(text, sizeof(text), "%d", layerContents->platformCALayerIncrementRepaintCount());
 
+        CGRect indicatorBox = layerBounds;
+        indicatorBox.size.width = 12 + 10 * strlen(text);
+        indicatorBox.size.height = 27;
         CGContextSaveGState(context);
+        
+        CGContextSetAlpha(context, 0.5f);
+        CGContextBeginTransparencyLayerWithRect(context, indicatorBox, 0);
+
         if (isTiledLayer)
-            CGContextSetRGBFillColor(context, 0.0f, 1.0f, 0.0f, 0.8f);
+            CGContextSetRGBFillColor(context, 1, 0.5f, 0, 1);
         else
-            CGContextSetRGBFillColor(context, 1.0f, 0.0f, 0.0f, 0.8f);
+            CGContextSetRGBFillColor(context, 0, 0.5f, 0.25f, 1);
         
-        CGRect aBounds = layerBounds;
+        CGContextFillRect(context, indicatorBox);
+        
+        if (platformLayer->acceleratesDrawing())
+            CGContextSetRGBFillColor(context, 1, 0, 0, 1);
+        else
+            CGContextSetRGBFillColor(context, 1, 1, 1, 1);
 
-        aBounds.size.width = 10 + 12 * strlen(text);
-        aBounds.size.height = 25;
-        CGContextFillRect(context, aBounds);
+        CGContextSetTextMatrix(context, CGAffineTransformMakeScale(1, -1));
+        CGContextSelectFont(context, "Helvetica", 22, kCGEncodingMacRoman);
+        CGContextShowTextAtPoint(context, indicatorBox.origin.x + 5, indicatorBox.origin.y + 22, text, strlen(text));
         
-        CGContextSetRGBFillColor(context, 0.0f, 0.0f, 0.0f, 1.0f);
-
-        CGContextSetTextMatrix(context, CGAffineTransformMakeScale(1.0f, -1.0f));
-        CGContextSelectFont(context, "Helvetica", 25, kCGEncodingMacRoman);
-        CGContextShowTextAtPoint(context, aBounds.origin.x + 3.0f, aBounds.origin.y + 20.0f, text, strlen(text));
-        
+        CGContextEndTransparencyLayer(context);
         CGContextRestoreGState(context);        
     }
 
     CGContextRestoreGState(context);
 }
 
-// Disable default animations
+
 - (id<CAAction>)actionForKey:(NSString *)key
 {
-    UNUSED_PARAM(key);
+    // Fix for <rdar://problem/9015675>: Force the layer content to be updated when the tree is reparented.
+    if ([key isEqualToString:@"onOrderIn"])
+        [self reloadValueForKeyPath:@"contents"];
+
     return nil;
-}
-
-// Implement this so presentationLayer can get our custom attributes
-- (id)initWithLayer:(id)layer
-{
-    if ((self = [super initWithLayer:layer])) {
-        m_layerOwner = [(WebLayer*)layer layerOwner];
-    }
-
-    return self;
 }
 
 - (void)setNeedsDisplay
 {
-    if (m_layerOwner && m_layerOwner->client() && m_layerOwner->drawsContent())
+    PlatformCALayer* layer = PlatformCALayer::platformCALayer(self);
+    if (layer && layer->owner() && layer->owner()->platformCALayerDrawsContent())
         [super setNeedsDisplay];
 }
 
 - (void)setNeedsDisplayInRect:(CGRect)dirtyRect
 {
-    if (m_layerOwner && m_layerOwner->client() && m_layerOwner->drawsContent()) {
-#if defined(BUILDING_ON_LEOPARD)
-        dirtyRect = CGRectApplyAffineTransform(dirtyRect, [self contentsTransform]);
-#endif
+    PlatformCALayer* platformLayer = PlatformCALayer::platformCALayer(self);
+    if (!platformLayer) {
         [super setNeedsDisplayInRect:dirtyRect];
+        return;
+    }
 
-#ifndef NDEBUG
-        if (m_layerOwner->showRepaintCounter()) {
-            CGRect bounds = [self bounds];
-            CGRect indicatorRect = CGRectMake(bounds.origin.x, bounds.origin.y, 46, 25);
-#if defined(BUILDING_ON_LEOPARD)
-            indicatorRect = CGRectApplyAffineTransform(indicatorRect, [self contentsTransform]);
-#endif
-            [super setNeedsDisplayInRect:indicatorRect];
+    if (PlatformCALayerClient* layerOwner = platformLayer->owner()) {
+        if (layerOwner->platformCALayerDrawsContent()) {
+            if (layerOwner->platformCALayerContentsOrientation() == WebCore::GraphicsLayer::CompositingCoordinatesBottomUp)
+                dirtyRect.origin.y = [self bounds].size.height - dirtyRect.origin.y - dirtyRect.size.height;
+
+            [super setNeedsDisplayInRect:dirtyRect];
+
+            if (layerOwner->platformCALayerShowRepaintCounter()) {
+                CGRect bounds = [self bounds];
+                CGRect indicatorRect = CGRectMake(bounds.origin.x, bounds.origin.y, 52, 27);
+                if (layerOwner->platformCALayerContentsOrientation() == WebCore::GraphicsLayer::CompositingCoordinatesBottomUp)
+                    indicatorRect.origin.y = [self bounds].size.height - indicatorRect.origin.y - indicatorRect.size.height;
+
+                [super setNeedsDisplayInRect:indicatorRect];
+            }
         }
-#endif
     }
 }
 
 - (void)display
 {
+    if (pthread_main_np())
+        WebThreadLock();
     [super display];
-    if (m_layerOwner)
-        m_layerOwner->didDisplay(self);
+    PlatformCALayer* layer = PlatformCALayer::platformCALayer(self);
+    if (layer && layer->owner())
+        layer->owner()->platformCALayerLayerDidDisplay(self);
 }
 
 - (void)drawInContext:(CGContextRef)context
 {
-    [WebLayer drawContents:m_layerOwner ofLayer:self intoContext:context];
+    if (pthread_main_np())
+        WebThreadLock();
+    PlatformCALayer* layer = PlatformCALayer::platformCALayer(self);
+    if (layer)
+        drawLayerContents(context, self, layer);
 }
 
 @end // implementation WebLayer
 
-#pragma mark -
-
-@implementation WebLayer(WebLayerAdditions)
-
-- (void)setLayerOwner:(GraphicsLayer*)aLayer
-{
-    m_layerOwner = aLayer;
-}
-
-- (GraphicsLayer*)layerOwner
-{
-    return m_layerOwner;
-}
-
-@end
-
-#pragma mark -
+// MARK: -
 
 #ifndef NDEBUG
 
@@ -203,16 +222,15 @@ using namespace WebCore;
 {
     CGRect aBounds = [self bounds];
     CGPoint aPos = [self position];
-    CATransform3D t = [self transform];
 
-    NSString* selfString = [NSString stringWithFormat:@"%@<%@ 0x%08x> \"%@\" bounds(%.1f, %.1f, %.1f, %.1f) pos(%.1f, %.1f), sublayers=%d masking=%d",
+    NSString* selfString = [NSString stringWithFormat:@"%@<%@ 0x%p> \"%@\" bounds(%.1f, %.1f, %.1f, %.1f) pos(%.1f, %.1f), sublayers=%lu masking=%d",
             inPrefix,
             [self class],
             self,
             [self name],
             aBounds.origin.x, aBounds.origin.y, aBounds.size.width, aBounds.size.height, 
             aPos.x, aPos.y,
-            [[self sublayers] count],
+            static_cast<unsigned long>([[self sublayers] count]),
             [self masksToBounds]];
     
     NSMutableString* curDesc = [NSMutableString stringWithString:selfString];

@@ -39,10 +39,18 @@ namespace WebCore {
 
 static void parseCacheHeader(const String& header, Vector<pair<String, String> >& result);
 
+inline const ResourceResponse& ResourceResponseBase::asResourceResponse() const
+{
+    return *static_cast<const ResourceResponse*>(this);
+}
+
 ResourceResponseBase::ResourceResponseBase()  
     : m_expectedContentLength(0)
     , m_httpStatusCode(0)
     , m_lastModifiedDate(0)
+    , m_wasCached(false)
+    , m_connectionID(0)
+    , m_connectionReused(false)
     , m_isNull(true)
     , m_haveParsedCacheControlHeader(false)
     , m_haveParsedAgeHeader(false)
@@ -68,6 +76,9 @@ ResourceResponseBase::ResourceResponseBase(const KURL& url, const String& mimeTy
     , m_suggestedFilename(filename)
     , m_httpStatusCode(0)
     , m_lastModifiedDate(0)
+    , m_wasCached(false)
+    , m_connectionID(0)
+    , m_connectionReused(false)
     , m_isNull(false)
     , m_haveParsedCacheControlHeader(false)
     , m_haveParsedAgeHeader(false)
@@ -85,9 +96,9 @@ ResourceResponseBase::ResourceResponseBase(const KURL& url, const String& mimeTy
 {
 }
 
-auto_ptr<ResourceResponse> ResourceResponseBase::adopt(auto_ptr<CrossThreadResourceResponseData> data)
+PassOwnPtr<ResourceResponse> ResourceResponseBase::adopt(PassOwnPtr<CrossThreadResourceResponseData> data)
 {
-    auto_ptr<ResourceResponse> response(new ResourceResponse());
+    OwnPtr<ResourceResponse> response = adoptPtr(new ResourceResponse);
     response->setURL(data->m_url);
     response->setMimeType(data->m_mimeType);
     response->setExpectedContentLength(data->m_expectedContentLength);
@@ -97,31 +108,34 @@ auto_ptr<ResourceResponse> ResourceResponseBase::adopt(auto_ptr<CrossThreadResou
     response->setHTTPStatusCode(data->m_httpStatusCode);
     response->setHTTPStatusText(data->m_httpStatusText);
 
-    response->lazyInit();
-    response->m_httpHeaderFields.adopt(std::auto_ptr<CrossThreadHTTPHeaderMapData>(data->m_httpHeaders.release()));
+    response->lazyInit(CommonAndUncommonFields);
+    response->m_httpHeaderFields.adopt(data->m_httpHeaders.release());
     response->setLastModifiedDate(data->m_lastModifiedDate);
-
-    return response;
+    response->setResourceLoadTiming(data->m_resourceLoadTiming.release());
+    response->doPlatformAdopt(data);
+    return response.release();
 }
 
-auto_ptr<CrossThreadResourceResponseData> ResourceResponseBase::copyData() const
+PassOwnPtr<CrossThreadResourceResponseData> ResourceResponseBase::copyData() const
 {
-    auto_ptr<CrossThreadResourceResponseData> data(new CrossThreadResourceResponseData());
+    OwnPtr<CrossThreadResourceResponseData> data = adoptPtr(new CrossThreadResourceResponseData);
     data->m_url = url().copy();
-    data->m_mimeType = mimeType().crossThreadString();
+    data->m_mimeType = mimeType().isolatedCopy();
     data->m_expectedContentLength = expectedContentLength();
-    data->m_textEncodingName = textEncodingName().crossThreadString();
-    data->m_suggestedFilename = suggestedFilename().crossThreadString();
+    data->m_textEncodingName = textEncodingName().isolatedCopy();
+    data->m_suggestedFilename = suggestedFilename().isolatedCopy();
     data->m_httpStatusCode = httpStatusCode();
-    data->m_httpStatusText = httpStatusText().crossThreadString();
-    data->m_httpHeaders.adopt(httpHeaderFields().copyData());
+    data->m_httpStatusText = httpStatusText().isolatedCopy();
+    data->m_httpHeaders = httpHeaderFields().copyData();
     data->m_lastModifiedDate = lastModifiedDate();
-    return data;
+    if (m_resourceLoadTiming)
+        data->m_resourceLoadTiming = m_resourceLoadTiming->deepCopy();
+    return asResourceResponse().doPlatformCopyData(data.release());
 }
 
 bool ResourceResponseBase::isHTTP() const
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     String protocol = m_url.protocol();
 
@@ -130,126 +144,140 @@ bool ResourceResponseBase::isHTTP() const
 
 const KURL& ResourceResponseBase::url() const
 {
-    lazyInit();
-    
+    lazyInit(CommonFieldsOnly);
+
     return m_url; 
 }
 
 void ResourceResponseBase::setURL(const KURL& url)
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
     m_isNull = false;
-    
+
     m_url = url; 
 }
 
 const String& ResourceResponseBase::mimeType() const
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     return m_mimeType; 
 }
 
 void ResourceResponseBase::setMimeType(const String& mimeType)
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
     m_isNull = false;
-    
+
     m_mimeType = mimeType; 
 }
 
 long long ResourceResponseBase::expectedContentLength() const 
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     return m_expectedContentLength;
 }
 
 void ResourceResponseBase::setExpectedContentLength(long long expectedContentLength)
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
     m_isNull = false;
-    
+
     m_expectedContentLength = expectedContentLength; 
 }
 
 const String& ResourceResponseBase::textEncodingName() const
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     return m_textEncodingName;
 }
 
 void ResourceResponseBase::setTextEncodingName(const String& encodingName)
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
     m_isNull = false;
-    
+
     m_textEncodingName = encodingName; 
 }
 
 // FIXME should compute this on the fly
 const String& ResourceResponseBase::suggestedFilename() const
 {
-    lazyInit();
+    lazyInit(AllFields);
 
     return m_suggestedFilename;
 }
 
 void ResourceResponseBase::setSuggestedFilename(const String& suggestedName)
 {
-    lazyInit();
+    lazyInit(AllFields);
     m_isNull = false;
-    
+
     m_suggestedFilename = suggestedName; 
 }
 
 int ResourceResponseBase::httpStatusCode() const
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     return m_httpStatusCode;
 }
 
 void ResourceResponseBase::setHTTPStatusCode(int statusCode)
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     m_httpStatusCode = statusCode;
 }
 
 const String& ResourceResponseBase::httpStatusText() const 
 {
-    lazyInit();
+    lazyInit(CommonAndUncommonFields);
 
     return m_httpStatusText; 
 }
 
 void ResourceResponseBase::setHTTPStatusText(const String& statusText) 
 {
-    lazyInit();
+    lazyInit(CommonAndUncommonFields);
 
     m_httpStatusText = statusText; 
 }
 
 String ResourceResponseBase::httpHeaderField(const AtomicString& name) const
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
+
+    // If we already have the header, just return it instead of consuming memory by grabing all headers.
+    String value = m_httpHeaderFields.get(name);
+    if (!value.isEmpty())        
+        return value;
+
+    lazyInit(CommonAndUncommonFields);
 
     return m_httpHeaderFields.get(name); 
 }
 
 String ResourceResponseBase::httpHeaderField(const char* name) const
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
+
+    // If we already have the header, just return it instead of consuming memory by grabing all headers.
+    String value = m_httpHeaderFields.get(name);
+    if (!value.isEmpty())
+        return value;
+
+    lazyInit(CommonAndUncommonFields);
 
     return m_httpHeaderFields.get(name); 
 }
 
 void ResourceResponseBase::setHTTPHeaderField(const AtomicString& name, const String& value)
 {
-    lazyInit();
-    
+    lazyInit(CommonAndUncommonFields);
+
     DEFINE_STATIC_LOCAL(const AtomicString, ageHeader, ("age"));
     DEFINE_STATIC_LOCAL(const AtomicString, cacheControlHeader, ("cache-control"));
     DEFINE_STATIC_LOCAL(const AtomicString, dateHeader, ("date"));
@@ -272,7 +300,7 @@ void ResourceResponseBase::setHTTPHeaderField(const AtomicString& name, const St
 
 const HTTPHeaderMap& ResourceResponseBase::httpHeaderFields() const
 {
-    lazyInit();
+    lazyInit(CommonAndUncommonFields);
 
     return m_httpHeaderFields;
 }
@@ -281,7 +309,7 @@ void ResourceResponseBase::parseCacheControlDirectives() const
 {
     ASSERT(!m_haveParsedCacheControlHeader);
 
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     m_haveParsedCacheControlHeader = true;
 
@@ -311,6 +339,10 @@ void ResourceResponseBase::parseCacheControlDirectives() const
             else if (equalIgnoringCase(directives[i].first, mustRevalidateDirective))
                 m_cacheControlContainsMustRevalidate = true;
             else if (equalIgnoringCase(directives[i].first, maxAgeDirective)) {
+                if (!isnan(m_cacheControlMaxAge)) {
+                    // First max-age directive wins if there are multiple ones.
+                    continue;
+                }
                 bool ok;
                 double maxAge = directives[i].second.toDouble(&ok);
                 if (ok)
@@ -318,13 +350,14 @@ void ResourceResponseBase::parseCacheControlDirectives() const
             }
         }
     }
-        
+
     if (!m_cacheControlContainsNoCache) {
         // Handle Pragma: no-cache
         // This is deprecated and equivalent to Cache-control: no-cache
         // Don't bother tokenizing the value, it is not important
         DEFINE_STATIC_LOCAL(const AtomicString, pragmaHeader, ("pragma"));
         String pragmaValue = m_httpHeaderFields.get(pragmaHeader);
+
         m_cacheControlContainsNoCache = pragmaValue.lower().contains(noCacheDirective);
     }
 }
@@ -348,6 +381,15 @@ bool ResourceResponseBase::cacheControlContainsMustRevalidate() const
     if (!m_haveParsedCacheControlHeader)
         parseCacheControlDirectives();
     return m_cacheControlContainsMustRevalidate;
+}
+
+bool ResourceResponseBase::hasCacheValidatorFields() const
+{
+    lazyInit(CommonFieldsOnly);
+
+    DEFINE_STATIC_LOCAL(const AtomicString, lastModifiedHeader, ("last-modified"));
+    DEFINE_STATIC_LOCAL(const AtomicString, eTagHeader, ("etag"));
+    return !m_httpHeaderFields.get(lastModifiedHeader).isEmpty() || !m_httpHeaderFields.get(eTagHeader).isEmpty();
 }
 
 double ResourceResponseBase::cacheControlMaxAge() const
@@ -374,7 +416,7 @@ static double parseDateValueInHeader(const HTTPHeaderMap& headers, const AtomicS
 
 double ResourceResponseBase::date() const
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     if (!m_haveParsedDateHeader) {
         DEFINE_STATIC_LOCAL(const AtomicString, headerName, ("date"));
@@ -386,8 +428,8 @@ double ResourceResponseBase::date() const
 
 double ResourceResponseBase::age() const
 {
-    lazyInit();
-    
+    lazyInit(CommonFieldsOnly);
+
     if (!m_haveParsedAgeHeader) {
         DEFINE_STATIC_LOCAL(const AtomicString, headerName, ("age"));
         String headerValue = m_httpHeaderFields.get(headerName);
@@ -402,7 +444,7 @@ double ResourceResponseBase::age() const
 
 double ResourceResponseBase::expires() const
 {
-    lazyInit();
+    lazyInit(CommonFieldsOnly);
 
     if (!m_haveParsedExpiresHeader) {
         DEFINE_STATIC_LOCAL(const AtomicString, headerName, ("expires"));
@@ -414,8 +456,8 @@ double ResourceResponseBase::expires() const
 
 double ResourceResponseBase::lastModified() const
 {
-    lazyInit();
-    
+    lazyInit(CommonFieldsOnly);
+
     if (!m_haveParsedLastModifiedHeader) {
         DEFINE_STATIC_LOCAL(const AtomicString, headerName, ("last-modified"));
         m_lastModified = parseDateValueInHeader(m_httpHeaderFields, headerName);
@@ -426,12 +468,12 @@ double ResourceResponseBase::lastModified() const
 
 bool ResourceResponseBase::isAttachment() const
 {
-    lazyInit();
+    lazyInit(CommonAndUncommonFields);
 
     DEFINE_STATIC_LOCAL(const AtomicString, headerName, ("content-disposition"));
     String value = m_httpHeaderFields.get(headerName);
-    int loc = value.find(';');
-    if (loc != -1)
+    size_t loc = value.find(';');
+    if (loc != notFound)
         value = value.left(loc);
     value = value.stripWhiteSpace();
     DEFINE_STATIC_LOCAL(const AtomicString, attachmentString, ("attachment"));
@@ -440,23 +482,91 @@ bool ResourceResponseBase::isAttachment() const
   
 void ResourceResponseBase::setLastModifiedDate(time_t lastModifiedDate)
 {
-    lazyInit();
+    lazyInit(CommonAndUncommonFields);
 
     m_lastModifiedDate = lastModifiedDate;
 }
 
 time_t ResourceResponseBase::lastModifiedDate() const
 {
-    lazyInit();
+    lazyInit(CommonAndUncommonFields);
 
     return m_lastModifiedDate;
 }
 
-void ResourceResponseBase::lazyInit() const
+bool ResourceResponseBase::wasCached() const
 {
-    const_cast<ResourceResponse*>(static_cast<const ResourceResponse*>(this))->platformLazyInit();
+    lazyInit(CommonAndUncommonFields);
+
+    return m_wasCached;
 }
 
+void ResourceResponseBase::setWasCached(bool value)
+{
+    m_wasCached = value;
+}
+
+bool ResourceResponseBase::connectionReused() const
+{
+    lazyInit(CommonAndUncommonFields);
+
+    return m_connectionReused;
+}
+
+void ResourceResponseBase::setConnectionReused(bool connectionReused)
+{
+    lazyInit(CommonAndUncommonFields);
+
+    m_connectionReused = connectionReused;
+}
+
+unsigned ResourceResponseBase::connectionID() const
+{
+    lazyInit(CommonAndUncommonFields);
+
+    return m_connectionID;
+}
+
+void ResourceResponseBase::setConnectionID(unsigned connectionID)
+{
+    lazyInit(CommonAndUncommonFields);
+
+    m_connectionID = connectionID;
+}
+
+ResourceLoadTiming* ResourceResponseBase::resourceLoadTiming() const
+{
+    lazyInit(CommonAndUncommonFields);
+
+    return m_resourceLoadTiming.get();
+}
+
+void ResourceResponseBase::setResourceLoadTiming(PassRefPtr<ResourceLoadTiming> resourceLoadTiming)
+{
+    lazyInit(CommonAndUncommonFields);
+
+    m_resourceLoadTiming = resourceLoadTiming;
+}
+
+PassRefPtr<ResourceLoadInfo> ResourceResponseBase::resourceLoadInfo() const
+{
+    lazyInit(CommonAndUncommonFields);
+
+    return m_resourceLoadInfo.get();
+}
+
+void ResourceResponseBase::setResourceLoadInfo(PassRefPtr<ResourceLoadInfo> loadInfo)
+{
+    lazyInit(CommonAndUncommonFields);
+
+    m_resourceLoadInfo = loadInfo;
+}
+
+void ResourceResponseBase::lazyInit(InitLevel initLevel) const
+{
+    const_cast<ResourceResponse*>(static_cast<const ResourceResponse*>(this))->platformLazyInit(initLevel);
+}
+    
 bool ResourceResponseBase::compare(const ResourceResponse& a, const ResourceResponse& b)
 {
     if (a.isNull() != b.isNull())
@@ -476,6 +586,10 @@ bool ResourceResponseBase::compare(const ResourceResponse& a, const ResourceResp
     if (a.httpStatusText() != b.httpStatusText())
         return false;
     if (a.httpHeaderFields() != b.httpHeaderFields())
+        return false;
+    if (a.resourceLoadTiming() && b.resourceLoadTiming() && *a.resourceLoadTiming() == *b.resourceLoadTiming())
+        return ResourceResponse::platformCompare(a, b);
+    if (a.resourceLoadTiming() != b.resourceLoadTiming())
         return false;
     return ResourceResponse::platformCompare(a, b);
 }
@@ -516,7 +630,7 @@ static bool isControlCharacter(UChar c)
 
 static inline String trimToNextSeparator(const String& str)
 {
-    return str.substring(0, str.find(isCacheHeaderSeparator, 0));
+    return str.substring(0, str.find(isCacheHeaderSeparator));
 }
 
 static void parseCacheHeader(const String& header, Vector<pair<String, String> >& result)
@@ -524,9 +638,9 @@ static void parseCacheHeader(const String& header, Vector<pair<String, String> >
     const String safeHeader = header.removeCharacters(isControlCharacter);
     unsigned max = safeHeader.length();
     for (unsigned pos = 0; pos < max; /* pos incremented in loop */) {
-        int nextCommaPosition = safeHeader.find(',', pos);
-        int nextEqualSignPosition = safeHeader.find('=', pos);
-        if (nextEqualSignPosition >= 0 && (nextEqualSignPosition < nextCommaPosition || nextCommaPosition < 0)) {
+        size_t nextCommaPosition = safeHeader.find(',', pos);
+        size_t nextEqualSignPosition = safeHeader.find('=', pos);
+        if (nextEqualSignPosition != notFound && (nextEqualSignPosition < nextCommaPosition || nextCommaPosition == notFound)) {
             // Get directive name, parse right hand side of equal sign, then add to map
             String directive = trimToNextSeparator(safeHeader.substring(pos, nextEqualSignPosition - pos).stripWhiteSpace());
             pos += nextEqualSignPosition - pos + 1;
@@ -534,14 +648,14 @@ static void parseCacheHeader(const String& header, Vector<pair<String, String> >
             String value = safeHeader.substring(pos, max - pos).stripWhiteSpace();
             if (value[0] == '"') {
                 // The value is a quoted string
-                int nextDoubleQuotePosition = value.find('"', 1);
-                if (nextDoubleQuotePosition >= 0) {
+                size_t nextDoubleQuotePosition = value.find('"', 1);
+                if (nextDoubleQuotePosition != notFound) {
                     // Store the value as a quoted string without quotes
                     result.append(pair<String, String>(directive, value.substring(1, nextDoubleQuotePosition - 1).stripWhiteSpace()));
                     pos += (safeHeader.find('"', pos) - pos) + nextDoubleQuotePosition + 1;
                     // Move past next comma, if there is one
-                    int nextCommaPosition2 = safeHeader.find(',', pos);
-                    if (nextCommaPosition2 >= 0)
+                    size_t nextCommaPosition2 = safeHeader.find(',', pos);
+                    if (nextCommaPosition2 != notFound)
                         pos += nextCommaPosition2 - pos + 1;
                     else
                         return; // Parse error if there is anything left with no comma
@@ -552,8 +666,8 @@ static void parseCacheHeader(const String& header, Vector<pair<String, String> >
                 }
             } else {
                 // The value is a token until the next comma
-                int nextCommaPosition2 = value.find(',', 0);
-                if (nextCommaPosition2 >= 0) {
+                size_t nextCommaPosition2 = value.find(',');
+                if (nextCommaPosition2 != notFound) {
                     // The value is delimited by the next comma
                     result.append(pair<String, String>(directive, trimToNextSeparator(value.substring(0, nextCommaPosition2).stripWhiteSpace())));
                     pos += (safeHeader.find(',', pos) - pos) + 1;
@@ -563,7 +677,7 @@ static void parseCacheHeader(const String& header, Vector<pair<String, String> >
                     return;
                 }
             }
-        } else if (nextCommaPosition >= 0 && (nextCommaPosition < nextEqualSignPosition || nextEqualSignPosition < 0)) {
+        } else if (nextCommaPosition != notFound && (nextCommaPosition < nextEqualSignPosition || nextEqualSignPosition == notFound)) {
             // Add directive to map with empty string as value
             result.append(pair<String, String>(trimToNextSeparator(safeHeader.substring(pos, nextCommaPosition - pos).stripWhiteSpace()), ""));
             pos += nextCommaPosition - pos + 1;

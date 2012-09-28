@@ -26,11 +26,13 @@
 #include "config.h"
 #include "TextCodecLatin1.h"
 
-#include "CString.h"
 #include "PlatformString.h"
-#include "StringBuffer.h"
-#include <stdio.h>
+#include "TextCodecASCIIFastPath.h"
+#include <wtf/text/CString.h>
+#include <wtf/text/StringBuffer.h>
 #include <wtf/PassOwnPtr.h>
+
+using namespace WTF;
 
 namespace WebCore {
 
@@ -79,7 +81,6 @@ void TextCodecLatin1::registerEncodingNames(EncodingNameRegistrar registrar)
     registrar("ibm-1252", "windows-1252");
     registrar("ibm-1252_P100-2000", "windows-1252");
 
-    registrar("8859-1", "ISO-8859-1");
     registrar("CP819", "ISO-8859-1");
     registrar("IBM819", "ISO-8859-1");
     registrar("csISOLatin1", "ISO-8859-1");
@@ -105,7 +106,7 @@ void TextCodecLatin1::registerEncodingNames(EncodingNameRegistrar registrar)
 
 static PassOwnPtr<TextCodec> newStreamingTextDecoderWindowsLatin1(const TextEncoding&, const void*)
 {
-    return new TextCodecLatin1;
+    return adoptPtr(new TextCodecLatin1);
 }
 
 void TextCodecLatin1::registerCodecs(TextCodecRegistrar registrar)
@@ -122,21 +123,37 @@ String TextCodecLatin1::decode(const char* bytes, size_t length, bool, bool, boo
     UChar* characters;
     String result = String::createUninitialized(length, characters);
 
-    // Convert the string a fast way and simultaneously do an efficient check to see if it's all ASCII.
-    unsigned char ored = 0;
-    for (size_t i = 0; i < length; ++i) {
-        unsigned char c = bytes[i];
-        characters[i] = c;
-        ored |= c;
-    }
+    const uint8_t* source = reinterpret_cast<const uint8_t*>(bytes);
+    const uint8_t* end = reinterpret_cast<const uint8_t*>(bytes + length);
+    const uint8_t* alignedEnd = alignToMachineWord(end);
+    UChar* destination = characters;
 
-    if (!(ored & 0x80))
-        return result;
+    while (source < end) {
+        if (isASCII(*source)) {
+            // Fast path for ASCII. Most Latin-1 text will be ASCII.
+            if (isAlignedToMachineWord(source)) {
+                while (source < alignedEnd) {
+                    MachineWord chunk = *reinterpret_cast_ptr<const MachineWord*>(source);
 
-    // Convert the slightly slower way when there are non-ASCII characters.
-    for (size_t i = 0; i < length; ++i) {
-        unsigned char c = bytes[i];
-        characters[i] = table[c];
+                    if (!isAllASCII<LChar>(chunk))
+                        goto useLookupTable;
+
+                    copyASCIIMachineWord(destination, source);
+                    source += sizeof(MachineWord);
+                    destination += sizeof(MachineWord);
+                }
+
+                if (source == end)
+                    break;
+            }
+            *destination = *source;
+        } else {
+useLookupTable:
+            *destination = table[*source];
+        }
+
+        ++source;
+        ++destination;
     }
 
     return result;

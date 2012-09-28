@@ -27,8 +27,6 @@
 #ifndef XPathStep_h
 #define XPathStep_h
 
-#if ENABLE(XPATH)
-
 #include "Node.h"
 #include "XPathExpressionNode.h"
 #include "XPathNodeSet.h"
@@ -39,7 +37,8 @@ namespace WebCore {
 
         class Predicate;
         
-        class Step : public ParseNode, public Noncopyable {
+        class Step : public ParseNode {
+            WTF_MAKE_NONCOPYABLE(Step); WTF_MAKE_FAST_ALLOCATED;
         public:
             enum Axis {
                 AncestorAxis, AncestorOrSelfAxis, AttributeAxis,
@@ -49,7 +48,8 @@ namespace WebCore {
                 SelfAxis
             };
             
-            class NodeTest : public FastAllocBase {
+            class NodeTest {
+                WTF_MAKE_FAST_ALLOCATED;
             public:
                 enum Kind {
                     TextNodeTest, CommentNodeTest, ProcessingInstructionNodeTest, AnyNodeTest, NameTest
@@ -101,7 +101,5 @@ namespace WebCore {
     }
 
 }
-
-#endif // ENABLE(XPATH)
 
 #endif // XPathStep_h

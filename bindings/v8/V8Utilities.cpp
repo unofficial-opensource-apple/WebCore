@@ -31,14 +31,17 @@
 #include "config.h"
 #include "V8Utilities.h"
 
-#include <v8.h>
-
+#include <wtf/ArrayBuffer.h>
 #include "Document.h"
+#include "ExceptionCode.h"
 #include "Frame.h"
+#include "MessagePort.h"
 #include "ScriptExecutionContext.h"
 #include "ScriptState.h"
-#include "V8CustomBinding.h"
+#include "V8ArrayBuffer.h"
 #include "V8Binding.h"
+#include "V8BindingState.h"
+#include "V8MessagePort.h"
 #include "V8Proxy.h"
 #include "WorkerContext.h"
 #include "WorkerContextExecutionProxy.h"
@@ -46,7 +49,27 @@
 #include <wtf/Assertions.h>
 #include "Frame.h"
 
+#include <v8.h>
+
 namespace WebCore {
+
+V8AuxiliaryContext::V8AuxiliaryContext()
+{
+    auxiliaryContext()->Enter();
+}
+
+V8AuxiliaryContext::~V8AuxiliaryContext()
+{
+    auxiliaryContext()->Exit();
+}
+
+v8::Persistent<v8::Context>& V8AuxiliaryContext::auxiliaryContext()
+{
+    v8::Persistent<v8::Context>& context = V8BindingPerIsolateData::current()->auxiliaryContext();
+    if (context.IsEmpty())
+        context = v8::Context::New();
+    return context;
+}
 
 // Use an array to hold dependents. It works like a ref-counted scheme.
 // A value can be added more than once to the DOM object.
@@ -60,6 +83,68 @@ void createHiddenDependency(v8::Handle<v8::Object> object, v8::Local<v8::Value> 
 
     v8::Local<v8::Array> cacheArray = v8::Local<v8::Array>::Cast(cache);
     cacheArray->Set(v8::Integer::New(cacheArray->Length()), value);
+}
+
+bool extractTransferables(v8::Local<v8::Value> value, MessagePortArray& ports, ArrayBufferArray& arrayBuffers)
+{
+    if (isUndefinedOrNull(value)) {
+        ports.resize(0);
+        arrayBuffers.resize(0);
+        return true;
+    }
+
+    if (!value->IsObject()) {
+        throwError("TransferArray argument must be an object");
+        return false;
+    }
+    uint32_t length = 0;
+    v8::Local<v8::Object> transferrables = v8::Local<v8::Object>::Cast(value);
+
+    if (value->IsArray()) {
+        v8::Local<v8::Array> array = v8::Local<v8::Array>::Cast(value);
+        length = array->Length();
+    } else {
+        // Sequence-type object - get the length attribute
+        v8::Local<v8::Value> sequenceLength = transferrables->Get(v8::String::New("length"));
+        if (!sequenceLength->IsNumber()) {
+            throwError("TransferArray argument has no length attribute");
+            return false;
+        }
+        length = sequenceLength->Uint32Value();
+    }
+
+    // Validate the passed array of transferrables.
+    for (unsigned int i = 0; i < length; ++i) {
+        v8::Local<v8::Value> transferrable = transferrables->Get(i);
+        // Validation of non-null objects, per HTML5 spec 10.3.3.
+        if (isUndefinedOrNull(transferrable)) {
+            throwError(DATA_CLONE_ERR);
+            return false;
+        }
+        // Validation of Objects implementing an interface, per WebIDL spec 4.1.15.
+        if (V8MessagePort::HasInstance(transferrable))
+            ports.append(V8MessagePort::toNative(v8::Handle<v8::Object>::Cast(transferrable)));
+        else if (V8ArrayBuffer::HasInstance(transferrable))
+            arrayBuffers.append(V8ArrayBuffer::toNative(v8::Handle<v8::Object>::Cast(transferrable)));
+        else {
+            throwError("TransferArray argument must contain only Transferables");
+            return false;
+        }
+    }
+    return true;
+}
+
+bool getMessagePortArray(v8::Local<v8::Value> value, MessagePortArray& ports)
+{
+    ArrayBufferArray arrayBuffers;
+    bool result = extractTransferables(value, ports, arrayBuffers);
+    if (!result)
+        return false;
+    if (arrayBuffers.size() > 0) {
+        throwError("MessagePortArray argument must contain only MessagePorts");
+        return false;
+    }
+    return true;
 }
 
 void removeHiddenDependency(v8::Handle<v8::Object> object, v8::Local<v8::Value> value, int cacheIndex)
@@ -93,87 +178,33 @@ void transferHiddenDependency(v8::Handle<v8::Object> object,
     if (!newValue->IsNull() && !newValue->IsUndefined())
         createHiddenDependency(object, newValue, cacheIndex);
 }
-    
 
-bool processingUserGesture()
+Frame* callingOrEnteredFrame()
 {
-    Frame* frame = V8Proxy::retrieveFrameForEnteredContext();
-    return frame && frame->script()->processingUserGesture();
-}
-
-bool shouldAllowNavigation(Frame* frame)
-{
-    Frame* callingFrame = V8Proxy::retrieveFrameForCallingContext();
-    return callingFrame && callingFrame->loader()->shouldAllowNavigation(frame);
+    return V8BindingState::Only()->activeFrame();
 }
 
 KURL completeURL(const String& relativeURL)
 {
-    // For histoical reasons, we need to complete the URL using the dynamic frame.
-    Frame* frame = V8Proxy::retrieveFrameForEnteredContext();
-    if (!frame)
-        return KURL();
-    return frame->loader()->completeURL(relativeURL);
+    return completeURL(V8BindingState::Only(), relativeURL);
 }
 
-void navigateIfAllowed(Frame* frame, const KURL& url, bool lockHistory, bool lockBackForwardList)
-{
-    Frame* callingFrame = V8Proxy::retrieveFrameForCallingContext();
-    if (!callingFrame)
-        return;
-
-    if (!protocolIsJavaScript(url) || ScriptController::isSafeScript(frame))
-        frame->redirectScheduler()->scheduleLocationChange(url.string(), callingFrame->loader()->outgoingReferrer(), lockHistory, lockBackForwardList, processingUserGesture());
-}
-
-ScriptExecutionContext* getScriptExecutionContext(ScriptState* scriptState)
+ScriptExecutionContext* getScriptExecutionContext()
 {
 #if ENABLE(WORKERS)
-    WorkerContextExecutionProxy* proxy = WorkerContextExecutionProxy::retrieve();
-    if (proxy)
-        return proxy->workerContext()->scriptExecutionContext();
+    if (WorkerScriptController* controller = WorkerScriptController::controllerForContext())
+        return controller->workerContext();
 #endif
 
-    Frame* frame;
-    if (scriptState) {
-        v8::HandleScope handleScope;
-        frame = V8Proxy::retrieveFrame(scriptState->context());
-    } else
-        frame = V8Proxy::retrieveFrameForCurrentContext();
-
-    if (frame)
+    if (Frame* frame = V8Proxy::retrieveFrameForCurrentContext())
         return frame->document()->scriptExecutionContext();
 
     return 0;
 }
 
-void reportException(ScriptState* scriptState, v8::TryCatch& exceptionCatcher)
+void throwTypeMismatchException()
 {
-    String errorMessage;
-    int lineNumber = 0;
-    String sourceURL;
-
-    // There can be a situation that an exception is thrown without setting a message.
-    v8::Local<v8::Message> message = exceptionCatcher.Message();
-    if (message.IsEmpty()) {
-        v8::Local<v8::String> exceptionString = exceptionCatcher.Exception()->ToString();
-        // Conversion of the exception object to string can fail if an
-        // exception is thrown during conversion.
-        if (!exceptionString.IsEmpty())
-            errorMessage = toWebCoreString(exceptionString);
-    } else {
-        errorMessage = toWebCoreString(message->Get());
-        lineNumber = message->GetLineNumber();
-        sourceURL = toWebCoreString(message->GetScriptResourceName());
-    }
-
-    // Do not report the exception if the current execution context is Document because we do not want to lead to duplicate error messages in the console.
-    // FIXME (31171): need better design to solve the duplicate error message reporting problem.
-    ScriptExecutionContext* context = getScriptExecutionContext(scriptState);
-    // During the frame teardown, there may not be a valid context.
-    if (context && !context->isDocument())
-        context->reportException(errorMessage, lineNumber, sourceURL);
-    exceptionCatcher.Reset();
+    V8Proxy::throwError(V8Proxy::GeneralError, "TYPE_MISMATCH_ERR: DOM Exception 17");
 }
 
 } // namespace WebCore

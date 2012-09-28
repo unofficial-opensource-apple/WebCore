@@ -35,7 +35,6 @@
 namespace WebCore {
 
 class StyleImage;
-class CursorList;
 
 class StyleInheritedData : public RefCounted<StyleInheritedData> {
 public:
@@ -49,27 +48,20 @@ public:
         return !(*this == o);
     }
 
-    Length indent;
+    short horizontal_border_spacing;
+    short vertical_border_spacing;
+
     // could be packed in a short but doesn't
     // make a difference currently because of padding
     Length line_height;
     Length specified_line_height;
 
     RefPtr<StyleImage> list_style_image;
-    RefPtr<CursorList> cursorData;
 
     Font font;
     Color color;
-    
-    float m_effectiveZoom;
+    Color visitedLinkColor;
 
-    short horizontal_border_spacing;
-    short vertical_border_spacing;
-    
-    // Paged media properties.
-    short widows;
-    short orphans;
-    
 private:
     StyleInheritedData();
     StyleInheritedData(const StyleInheritedData&);

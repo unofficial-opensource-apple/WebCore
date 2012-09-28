@@ -1,10 +1,10 @@
 /*
  * Copyright (c) 2008, Google Inc. All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -32,16 +32,21 @@
 #define PlatformContextSkia_h
 
 #include "GraphicsContext.h"
-#include "Noncopyable.h"
+#include "OpaqueRegionSkia.h"
 
+#include "SkCanvas.h"
 #include "SkDashPathEffect.h"
 #include "SkDrawLooper.h"
-#include "SkDeque.h"
-#include "skia/ext/platform_canvas.h"
 #include "SkPaint.h"
 #include "SkPath.h"
 
+#include <wtf/Noncopyable.h>
 #include <wtf/Vector.h>
+
+namespace WebCore {
+
+enum CompositeOperator;
+class Texture;
 
 // This class holds the platform-specific state for GraphicsContext. We put
 // most of our Skia wrappers on this class. In theory, a lot of this stuff could
@@ -60,18 +65,22 @@
 // responsible for managing the painting state which is store in separate
 // SkPaint objects. This class provides the adaptor that allows the painting
 // state to be pushed and popped along with the bitmap.
-class PlatformContextSkia : public Noncopyable {
+class PlatformContextSkia {
+    WTF_MAKE_NONCOPYABLE(PlatformContextSkia);
 public:
     // For printing, there shouldn't be any canvas. canvas can be NULL. If you
     // supply a NULL canvas, you can also call setCanvas later.
-    PlatformContextSkia(skia::PlatformCanvas*);
+    PlatformContextSkia(SkCanvas*);
     ~PlatformContextSkia();
+
+    // Sets the graphics context associated with this context.
+    // GraphicsContextSkia calls this from its constructor.
+    void setGraphicsContext(const GraphicsContext* gc) { m_gc = gc; }
 
     // Sets the canvas associated with this context. Use when supplying NULL
     // to the constructor.
-    void setCanvas(skia::PlatformCanvas*);
+    void setCanvas(SkCanvas*);
 
-#if OS(WINDOWS)
     // If false we're rendering to a GraphicsContext for a web page, if false
     // we're not (as is the case when rendering to a canvas object).
     // If this is true the contents have not been marked up with the magic
@@ -79,19 +88,19 @@ public:
     // correctly updated.
     void setDrawingToImageBuffer(bool);
     bool isDrawingToImageBuffer() const;
-#endif
 
     void save();
     void restore();
+
+    void saveLayer(const SkRect* bounds, const SkPaint*);
+    void saveLayer(const SkRect* bounds, const SkPaint*, SkCanvas::SaveFlags);
+    void restoreLayer();
 
     // Begins a layer that is clipped to the image |imageBuffer| at the location
     // |rect|. This layer is implicitly restored when the next restore is
     // invoked.
     // NOTE: |imageBuffer| may be deleted before the |restore| is invoked.
-#if OS(LINUX) || OS(WINDOWS)
-    void beginLayerClippedToImage(const WebCore::FloatRect&,
-                                  const WebCore::ImageBuffer*);
-#endif
+    void beginLayerClippedToImage(const FloatRect&, const ImageBuffer*);
     void clipPathAntiAliased(const SkPath&);
 
     // Sets up the common flags on a paint for antialiasing, effects, etc.
@@ -115,27 +124,24 @@ public:
     void setAlpha(float);
     void setLineCap(SkPaint::Cap);
     void setLineJoin(SkPaint::Join);
-    void setFillRule(SkPath::FillType);
     void setXfermodeMode(SkXfermode::Mode);
     void setFillColor(SkColor);
-    void setFillShader(SkShader*);
-    void setStrokeStyle(WebCore::StrokeStyle);
+    void setStrokeStyle(StrokeStyle);
     void setStrokeColor(SkColor);
     void setStrokeThickness(float thickness);
-    void setStrokeShader(SkShader*);
-    void setTextDrawingMode(int mode);
+    void setTextDrawingMode(TextDrawingModeFlags mode);
     void setUseAntialiasing(bool enable);
     void setDashPathEffect(SkDashPathEffect*);
 
     SkDrawLooper* getDrawLooper() const;
-    WebCore::StrokeStyle getStrokeStyle() const;
+    StrokeStyle getStrokeStyle() const;
     float getStrokeThickness() const;
-    int getTextDrawingMode() const;
+    TextDrawingModeFlags getTextDrawingMode() const;
     float getAlpha() const;
+    int getNormalizedAlpha() const;
+    SkXfermode::Mode getXfermodeMode() const;
 
-    void beginPath();
-    void addPath(const SkPath&);
-    SkPath currentPathInLocalCoordinates() const;
+    void canvasClipPath(const SkPath&);
 
     // Returns the fill color. The returned color has it's alpha adjusted
     // by the current alpha.
@@ -145,7 +151,12 @@ public:
     // by the current alpha.
     SkColor effectiveStrokeColor() const;
 
-    skia::PlatformCanvas* canvas() { return m_canvas; }
+    // Returns the canvas used for painting, NOT guaranteed to be non-null.
+    SkCanvas* canvas() { return m_canvas; }
+    const SkCanvas* canvas() const { return m_canvas; }
+
+    InterpolationQuality interpolationQuality() const;
+    void setInterpolationQuality(InterpolationQuality interpolationQuality);
 
     // FIXME: This should be pushed down to GraphicsContext.
     void drawRect(SkRect rect);
@@ -155,31 +166,63 @@ public:
 
     const SkBitmap* bitmap() const;
 
-    // Returns the canvas used for painting, NOT guaranteed to be non-NULL.
-    //
-    // Warning: This function is deprecated so the users are reminded that they
-    // should use this layer of indirection instead of using the canvas
-    // directly. This is to help with the eventual serialization.
-    skia::PlatformCanvas* canvas() const;
-
     // Returns if the context is a printing context instead of a display
     // context. Bitmap shouldn't be resampled when printing to keep the best
     // possible quality.
-    bool isPrinting();
+    bool printing() const { return m_printing; }
+    void setPrinting(bool p) { m_printing = p; }
+
+    // Returns if the context allows rendering of fonts using native platform
+    // APIs. If false is returned font rendering is performed using the skia
+    // text drawing APIs.
+    // if USE(SKIA_TEXT) is enabled, this always returns false
+    bool isNativeFontRenderingAllowed();
+
+    void getImageResamplingHint(IntSize* srcSize, FloatSize* dstSize) const;
+    void setImageResamplingHint(const IntSize& srcSize, const FloatSize& dstSize);
+    void clearImageResamplingHint();
+    bool hasImageResamplingHint() const;
+
+    bool isAccelerated() const { return m_accelerated; }
+    void setAccelerated(bool accelerated) { m_accelerated = accelerated; }
+
+    // True if this context is deferring draw calls to be executed later.
+    // We need to know this for context-to-context draws, in order to know if
+    // the source bitmap needs to be copied.
+    bool isDeferred() const { return m_deferred; }
+    void setDeferred(bool deferred) { m_deferred = deferred; }
+
+    void setTrackOpaqueRegion(bool track) { m_trackOpaqueRegion = track; }
+
+    // This will be an empty region unless tracking is enabled.
+    const OpaqueRegionSkia& opaqueRegion() const { return m_opaqueRegion; }
+
+    // After drawing in the context's canvas, use these functions to notify the context so it can track the opaque region.
+    void didDrawRect(const SkRect&, const SkPaint&, const SkBitmap* = 0);
+    void didDrawPath(const SkPath&, const SkPaint&);
+    void didDrawPoints(SkCanvas::PointMode, int numPoints, const SkPoint[], const SkPaint&);
+    // For drawing operations that do not fill the entire rect.
+    void didDrawBounded(const SkRect&, const SkPaint&);
+
+    // Turn off LCD text for the paint if not supported on this context.
+    void adjustTextRenderMode(SkPaint*);
+    bool couldUseLCDRenderedText();
 
 private:
-#if OS(LINUX) || OS(WINDOWS)
     // Used when restoring and the state has an image clip. Only shows the pixels in
     // m_canvas that are also in imageBuffer.
-    void applyClipFromImage(const WebCore::FloatRect&, const SkBitmap&);
-#endif
-    void applyAntiAliasedClipPaths(WTF::Vector<SkPath>& paths);
+    // The clipping rectangle is given in absolute coordinates.
+    void applyClipFromImage(const SkRect&, const SkBitmap&);
+
+    // common code between setupPaintFor[Filling,Stroking]
+    void setupShader(SkPaint*, Gradient*, Pattern*, SkColor) const;
 
     // Defines drawing style.
     struct State;
 
     // NULL indicates painting is disabled. Never delete this object.
-    skia::PlatformCanvas* m_canvas;
+    SkCanvas* m_canvas;
+    const GraphicsContext* m_gc;
 
     // States stack. Enables local drawing state change with save()/restore()
     // calls.
@@ -188,12 +231,19 @@ private:
     // mStateStack.back().
     State* m_state;
 
-    // Current path in global coordinates.
-    SkPath m_path;
+    // Tracks the region painted opaque via the GraphicsContext.
+    OpaqueRegionSkia m_opaqueRegion;
+    bool m_trackOpaqueRegion;
 
-#if OS(WINDOWS)
+    // Stores image sizes for a hint to compute image resampling modes.
+    // Values are used in ImageSkia.cpp
+    IntSize m_imageResamplingHintSrcSize;
+    FloatSize m_imageResamplingHintDstSize;
+    bool m_printing;
+    bool m_accelerated;
+    bool m_deferred;
     bool m_drawingToImageBuffer;
-#endif
 };
 
-#endif  // PlatformContextSkia_h
+}
+#endif // PlatformContextSkia_h

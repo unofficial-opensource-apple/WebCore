@@ -29,14 +29,15 @@
 #ifndef AnimationControllerPrivate_h
 #define AnimationControllerPrivate_h
 
-#include "AtomicString.h"
 #include "CSSPropertyNames.h"
 #include "PlatformString.h"
 #include "Timer.h"
 #include <wtf/HashMap.h>
+#include <wtf/HashSet.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
+#include <wtf/text/AtomicString.h>
 
 namespace WebCore {
 
@@ -48,17 +49,25 @@ class Frame;
 class Node;
 class RenderObject;
 class RenderStyle;
+class WebKitAnimationList;
 
-class AnimationControllerPrivate : public Noncopyable {
+enum SetChanged {
+    DoNotCallSetChanged = 0,
+    CallSetChanged = 1
+};
+
+class AnimationControllerPrivate {
+    WTF_MAKE_NONCOPYABLE(AnimationControllerPrivate); WTF_MAKE_FAST_ALLOCATED;
 public:
     AnimationControllerPrivate(Frame*);
     ~AnimationControllerPrivate();
 
+    // Returns the time until the next animation needs to be serviced, or -1 if there are none.
+    double updateAnimations(SetChanged callSetChanged = DoNotCallSetChanged);
+    void updateAnimationTimer(SetChanged callSetChanged = DoNotCallSetChanged);
+
     PassRefPtr<CompositeAnimation> accessCompositeAnimation(RenderObject*);
     bool clear(RenderObject*);
-
-    void animationTimerFired(Timer<AnimationControllerPrivate>*);
-    void updateAnimationTimer(bool callSetChanged = false);
 
     void updateStyleIfNeededDispatcherFired(Timer<AnimationControllerPrivate>*);
     void startUpdateStyleIfNeededDispatcher();
@@ -67,14 +76,21 @@ public:
 
     bool hasAnimations() const { return !m_compositeAnimations.isEmpty(); }
 
-    void suspendAnimations(Document*);
-    void resumeAnimations(Document*);
+    void suspendAnimations();
+    void resumeAnimations();
+#if ENABLE(REQUEST_ANIMATION_FRAME)
+    void animationFrameCallbackFired();
+#endif
 
-    bool isAnimatingPropertyOnRenderer(RenderObject*, CSSPropertyID, bool isRunningNow) const;
+    void suspendAnimationsForDocument(Document*);
+    void resumeAnimationsForDocument(Document*);
+
+    bool isRunningAnimationOnRenderer(RenderObject*, CSSPropertyID, bool isRunningNow) const;
+    bool isRunningAcceleratedAnimationOnRenderer(RenderObject*, CSSPropertyID, bool isRunningNow) const;
 
     bool pauseAnimationAtTime(RenderObject*, const String& name, double t);
     bool pauseTransitionAtTime(RenderObject*, const String& property, double t);
-    unsigned numberOfActiveAnimations() const;
+    unsigned numberOfActiveAnimations(Document*) const;
 
     PassRefPtr<RenderStyle> getAnimatedStyleForRenderer(RenderObject* renderer);
 
@@ -83,16 +99,24 @@ public:
     void endAnimationUpdate();
     void receivedStartTimeResponse(double);
     
-    void addToStyleAvailableWaitList(AnimationBase*);
-    void removeFromStyleAvailableWaitList(AnimationBase*);    
-    
-    void addToStartTimeResponseWaitList(AnimationBase*, bool willGetResponse);
-    void removeFromStartTimeResponseWaitList(AnimationBase*);    
-    void startTimeResponse(double t);
+    void addToAnimationsWaitingForStyle(AnimationBase*);
+    void removeFromAnimationsWaitingForStyle(AnimationBase*);
+
+    void addToAnimationsWaitingForStartTimeResponse(AnimationBase*, bool willGetResponse);
+    void removeFromAnimationsWaitingForStartTimeResponse(AnimationBase*);
+
+    void animationWillBeRemoved(AnimationBase*);
+
+    PassRefPtr<WebKitAnimationList> animationsForRenderer(RenderObject*) const;
+
+    void updateAnimationTimerForRenderer(RenderObject*);
     
 private:
+    void animationTimerFired(Timer<AnimationControllerPrivate>*);
+
     void styleAvailable();
     void fireEventsAndUpdateStyle();
+    void startTimeResponse(double t);
 
     typedef HashMap<RenderObject*, RefPtr<CompositeAnimation> > RenderObjectAnimationMap;
 
@@ -113,12 +137,11 @@ private:
     Vector<RefPtr<Node> > m_nodeChangesToDispatch;
     
     double m_beginAnimationUpdateTime;
-    AnimationBase* m_styleAvailableWaiters;
-    AnimationBase* m_lastStyleAvailableWaiter;
-    
-    AnimationBase* m_responseWaiters;
-    AnimationBase* m_lastResponseWaiter;
-    bool m_waitingForResponse;
+
+    typedef HashSet<RefPtr<AnimationBase> > WaitingAnimationsSet;
+    WaitingAnimationsSet m_animationsWaitingForStyle;
+    WaitingAnimationsSet m_animationsWaitingForStartTimeResponse;
+    bool m_waitingForAsyncStartNotification;
 };
 
 } // namespace WebCore

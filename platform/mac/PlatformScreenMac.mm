@@ -28,10 +28,23 @@
 
 #import "FloatRect.h"
 #import "Frame.h"
-#import "FrameView.h"
 #import "Page.h"
+#import "Widget.h"
+#import "NotImplemented.h"
 
 namespace WebCore {
+
+int screenHorizontalDPI(Widget*)
+{
+    notImplemented();
+    return 0;
+}
+
+int screenVerticalDPI(Widget*)
+{
+    notImplemented();
+    return 0;
+}
 
 int screenDepth(Widget*)
 {
@@ -80,16 +93,12 @@ FloatRect toUserSpace(const NSRect& rect, NSWindow *destination)
 {
     FloatRect userRect = rect;
     userRect.setY(NSMaxY([screenForWindow(destination) frame]) - (userRect.y() + userRect.height())); // flip
-    if (destination)
-        userRect.scale(1 / [destination userSpaceScaleFactor]); // scale down
     return userRect;
 }
 
 NSRect toDeviceSpace(const FloatRect& rect, NSWindow *source)
 {
     FloatRect deviceRect = rect;
-    if (source)
-        deviceRect.scale([source userSpaceScaleFactor]); // scale up
     deviceRect.setY(NSMaxY([screenForWindow(source) frame]) - (deviceRect.y() + deviceRect.height())); // flip
     return deviceRect;
 }

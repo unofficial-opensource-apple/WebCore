@@ -36,6 +36,7 @@
 #include "GCController.h"
 #include "Page.h"
 #include "PageGroup.h"
+#include <heap/StrongInlines.h>
 #include <runtime/JSLock.h>
 #include "ScriptController.h"
 
@@ -44,9 +45,8 @@ using namespace JSC;
 namespace WebCore {
 
 ScriptCachedFrameData::ScriptCachedFrameData(Frame* frame)
-    : m_domWindow(0)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindowBase::commonJSGlobalData());
 
     ScriptController* scriptController = frame->script();
     ScriptController::ShellMap& windowShells = scriptController->m_windowShells;
@@ -54,16 +54,10 @@ ScriptCachedFrameData::ScriptCachedFrameData(Frame* frame)
     ScriptController::ShellMap::iterator windowShellsEnd = windowShells.end();
     for (ScriptController::ShellMap::iterator iter = windowShells.begin(); iter != windowShellsEnd; ++iter) {
         JSDOMWindow* window = iter->second->window();
-        m_windows.add(iter->first.get(), window);
-        m_domWindow = window->impl();
+        m_windows.add(iter->first.get(), Strong<JSDOMWindow>(window->globalData(), window));
     }
 
     scriptController->attachDebugger(0);
-}
-
-DOMWindow* ScriptCachedFrameData::domWindow() const
-{
-    return m_domWindow;
 }
 
 ScriptCachedFrameData::~ScriptCachedFrameData()
@@ -73,7 +67,7 @@ ScriptCachedFrameData::~ScriptCachedFrameData()
 
 void ScriptCachedFrameData::restore(Frame* frame)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindowBase::commonJSGlobalData());
 
     ScriptController* scriptController = frame->script();
     ScriptController::ShellMap& windowShells = scriptController->m_windowShells;
@@ -83,8 +77,8 @@ void ScriptCachedFrameData::restore(Frame* frame)
         DOMWrapperWorld* world = iter->first.get();
         JSDOMWindowShell* windowShell = iter->second.get();
 
-        if (JSDOMWindow* window = m_windows.get(world))
-            windowShell->setWindow(window);
+        if (JSDOMWindow* window = m_windows.get(world).get())
+            windowShell->setWindow(window->globalData(), window);
         else {
             windowShell->setWindow(frame->domWindow());
 
@@ -101,7 +95,7 @@ void ScriptCachedFrameData::clear()
     if (m_windows.isEmpty())
         return;
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindowBase::commonJSGlobalData());
     m_windows.clear();
     gcController().garbageCollectSoon();
 }

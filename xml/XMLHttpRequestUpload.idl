@@ -29,25 +29,26 @@
 module xml {
 
     interface [
-        CustomMarkFunction,
+        JSGenerateIsReachable=Impl,
         EventTarget,
-        NoStaticTables
+        JSNoStaticTables
     ] XMLHttpRequestUpload {
         // From XMLHttpRequestEventTarget
         // event handler attributes
         attribute EventListener onabort;
         attribute EventListener onerror;
         attribute EventListener onload;
+        attribute EventListener onloadend;
         attribute EventListener onloadstart;
         attribute EventListener onprogress;
 
         // EventTarget interface
-        [Custom] void addEventListener(in DOMString type, 
-                                      in EventListener listener, 
-                                      in boolean useCapture);
-        [Custom] void removeEventListener(in DOMString type, 
-                                          in EventListener listener, 
-                                          in boolean useCapture);
+        void addEventListener(in DOMString type, 
+                              in EventListener listener, 
+                              in [Optional] boolean useCapture);
+        void removeEventListener(in DOMString type, 
+                                 in EventListener listener, 
+                                 in [Optional] boolean useCapture);
         boolean dispatchEvent(in Event evt)
             raises(EventException);
     };

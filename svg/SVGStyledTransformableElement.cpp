@@ -1,95 +1,141 @@
 /*
-    Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
-                  2004, 2005, 2006 Rob Buis <buis@kde.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005, 2008 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006 Rob Buis <buis@kde.org>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
 
 #if ENABLE(SVG)
 #include "SVGStyledTransformableElement.h"
 
-#include "Attr.h"
-#include "MappedAttribute.h"
-#include "RenderPath.h"
-#include "SVGDocument.h"
-#include "SVGStyledElement.h"
-#include "SVGTransformList.h"
-#include "TransformationMatrix.h"
+#include "AffineTransform.h"
+#include "Attribute.h"
+#include "RenderSVGPath.h"
+#include "RenderSVGResource.h"
+#include "SVGElementInstance.h"
+#include "SVGNames.h"
+#include "SVGPathData.h"
 
 namespace WebCore {
 
-SVGStyledTransformableElement::SVGStyledTransformableElement(const QualifiedName& tagName, Document* doc)
-    : SVGStyledLocatableElement(tagName, doc)
-    , SVGTransformable()
-    , m_transform(SVGTransformList::create(SVGNames::transformAttr))
+// Animated property definitions
+DEFINE_ANIMATED_TRANSFORM_LIST(SVGStyledTransformableElement, SVGNames::transformAttr, Transform, transform)
+
+BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGStyledTransformableElement)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(transform)
+    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGStyledLocatableElement)
+END_REGISTER_ANIMATED_PROPERTIES
+
+SVGStyledTransformableElement::SVGStyledTransformableElement(const QualifiedName& tagName, Document* document, ConstructionType constructionType)
+    : SVGStyledLocatableElement(tagName, document, constructionType)
 {
+    registerAnimatedPropertiesForSVGStyledTransformableElement();
 }
 
 SVGStyledTransformableElement::~SVGStyledTransformableElement()
 {
 }
 
-TransformationMatrix SVGStyledTransformableElement::getCTM() const
+AffineTransform SVGStyledTransformableElement::getCTM(StyleUpdateStrategy styleUpdateStrategy)
 {
-    return SVGTransformable::getCTM(this);
+    return SVGLocatable::computeCTM(this, SVGLocatable::NearestViewportScope, styleUpdateStrategy);
 }
 
-TransformationMatrix SVGStyledTransformableElement::getScreenCTM() const
+AffineTransform SVGStyledTransformableElement::getScreenCTM(StyleUpdateStrategy styleUpdateStrategy)
 {
-    return SVGTransformable::getScreenCTM(this);
+    return SVGLocatable::computeCTM(this, SVGLocatable::ScreenScope, styleUpdateStrategy);
 }
 
-TransformationMatrix SVGStyledTransformableElement::animatedLocalTransform() const
+AffineTransform SVGStyledTransformableElement::animatedLocalTransform() const
 {
-    return m_supplementalTransform ? transform()->concatenate().matrix() * *m_supplementalTransform : transform()->concatenate().matrix();
+    AffineTransform matrix;
+    RenderStyle* style = renderer() ? renderer()->style() : 0;
+
+    // If CSS property was set, use that, otherwise fallback to attribute (if set).
+    if (style && style->hasTransform()) {
+        // Note: objectBoundingBox is an emptyRect for elements like pattern or clipPath.
+        // See the "Object bounding box units" section of http://dev.w3.org/csswg/css3-transforms/
+        TransformationMatrix transform;
+        style->applyTransform(transform, renderer()->objectBoundingBox());
+
+        // Flatten any 3D transform.
+        matrix = transform.toAffineTransform();
+    } else
+        transform().concatenate(matrix);
+
+    if (m_supplementalTransform)
+        return *m_supplementalTransform * matrix;
+    return matrix;
 }
-    
-TransformationMatrix* SVGStyledTransformableElement::supplementalTransform()
+
+AffineTransform* SVGStyledTransformableElement::supplementalTransform()
 {
     if (!m_supplementalTransform)
-        m_supplementalTransform.set(new TransformationMatrix());
+        m_supplementalTransform = adoptPtr(new AffineTransform);
     return m_supplementalTransform.get();
 }
 
-void SVGStyledTransformableElement::parseMappedAttribute(MappedAttribute* attr)
+bool SVGStyledTransformableElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    if (SVGTransformable::isKnownAttribute(attr->name())) {
-        SVGTransformList* localTransforms = transformBaseValue();
-        if (!SVGTransformable::parseTransformAttribute(localTransforms, attr->value())) {
-            ExceptionCode ec = 0;
-            localTransforms->clear(ec);
-        }
-    } else 
-        SVGStyledLocatableElement::parseMappedAttribute(attr);
+    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
+    if (supportedAttributes.isEmpty())
+        supportedAttributes.add(SVGNames::transformAttr);
+    return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGStyledTransformableElement::synchronizeProperty(const QualifiedName& attrName)
+void SVGStyledTransformableElement::parseAttribute(Attribute* attr)
 {
-    SVGStyledLocatableElement::synchronizeProperty(attrName);
+    if (!isSupportedAttribute(attr->name())) {
+        SVGStyledLocatableElement::parseAttribute(attr);
+        return;
+    }
 
-    if (attrName == anyQName() || SVGTransformable::isKnownAttribute(attrName))
-        synchronizeTransform();
+    if (attr->name() == SVGNames::transformAttr) {
+        SVGTransformList newList;
+        newList.parse(attr->value());
+        detachAnimatedTransformListWrappers(newList.size());
+        setTransformBaseValue(newList);
+        return;
+    }
+
+    ASSERT_NOT_REACHED();
 }
 
-bool SVGStyledTransformableElement::isKnownAttribute(const QualifiedName& attrName)
+void SVGStyledTransformableElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    return SVGTransformable::isKnownAttribute(attrName) ||
-           SVGStyledLocatableElement::isKnownAttribute(attrName);
+    if (!isSupportedAttribute(attrName)) {
+        SVGStyledLocatableElement::svgAttributeChanged(attrName);
+        return;
+    }
+
+    SVGElementInstance::InvalidationGuard invalidationGuard(this);
+
+    RenderObject* object = renderer();
+    if (!object)
+        return;
+
+    if (attrName == SVGNames::transformAttr) {
+        object->setNeedsTransformUpdate();
+        RenderSVGResource::markForLayoutAndParentResourceInvalidation(object);
+        return;
+    }
+
+    ASSERT_NOT_REACHED();
 }
 
 SVGElement* SVGStyledTransformableElement::nearestViewportElement() const
@@ -102,23 +148,22 @@ SVGElement* SVGStyledTransformableElement::farthestViewportElement() const
     return SVGTransformable::farthestViewportElement(this);
 }
 
-FloatRect SVGStyledTransformableElement::getBBox() const
+FloatRect SVGStyledTransformableElement::getBBox(StyleUpdateStrategy styleUpdateStrategy)
 {
-    return SVGTransformable::getBBox(this);
+    return SVGTransformable::getBBox(this, styleUpdateStrategy);
 }
 
 RenderObject* SVGStyledTransformableElement::createRenderer(RenderArena* arena, RenderStyle*)
 {
     // By default, any subclass is expected to do path-based drawing
-    return new (arena) RenderPath(this);
+    return new (arena) RenderSVGPath(this);
 }
 
-Path SVGStyledTransformableElement::toClipPath() const
+void SVGStyledTransformableElement::toClipPath(Path& path)
 {
-    Path pathData = toPathData();
+    updatePathFromGraphicsElement(this, path);
     // FIXME: How do we know the element has done a layout?
-    pathData.transform(animatedLocalTransform());
-    return pathData;
+    path.transform(animatedLocalTransform());
 }
 
 }

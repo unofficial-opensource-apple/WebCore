@@ -50,7 +50,7 @@ DragImageRef dissolveDragImageToFraction(DragImageRef image, float)
     return image;
 }
 
-DragImageRef createDragImageFromImage(Image*)
+DragImageRef createDragImageFromImage(Image*, RespectImageOrientationEnum)
 {
     return 0;
 }
@@ -60,4 +60,4 @@ DragImageRef createDragImageIconForCachedImage(CachedImage*)
     return 0;
 }
 
-}
+} // namespace WebCore

@@ -19,17 +19,13 @@
 #ifndef DataObjectGtk_h
 #define DataObjectGtk_h
 
-#include "CString.h"
 #include "FileList.h"
 #include "KURL.h"
 #include "Range.h"
-#include "StringHash.h"
 #include <wtf/RefCounted.h>
-#include <wtf/gtk/GRefPtr.h>
-
-typedef struct _GdkPixbuf GdkPixbuf;
-typedef struct _GdkDragContext GdkDragContext;
-typedef struct _GtkClipboard GtkClipboard;
+#include <wtf/gobject/GRefPtr.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
@@ -40,36 +36,44 @@ public:
         return adoptRef(new DataObjectGtk());
     }
 
-    Vector<KURL> uriList() { return m_uriList; }
-    GdkPixbuf* image() { return m_image.get(); }
+    const KURL& url() const { return m_url; }
+    const String& uriList() const { return m_uriList; }
+    const Vector<String>& filenames() const { return m_filenames; }
+    GdkPixbuf* image() const { return m_image.get(); }
     void setRange(PassRefPtr<Range> newRange) { m_range = newRange; }
-    void setURIList(const Vector<KURL>& newURIList) {  m_uriList = newURIList; }
     void setImage(GdkPixbuf* newImage) { m_image = newImage; }
-    void setDragContext(GdkDragContext* newDragContext) { m_dragContext = newDragContext; }
-    bool hasText() { return m_range || !m_text.isEmpty(); }
-    bool hasMarkup() { return m_range || !m_markup.isEmpty(); }
-    bool hasURIList() { return !m_uriList.isEmpty(); }
-    bool hasImage() { return m_image; }
-    GdkDragContext* dragContext() { return m_dragContext.get(); }
+    void setURL(const KURL&, const String&);
+    bool hasText() const { return m_range || !m_text.isEmpty(); }
+    bool hasMarkup() const { return m_range || !m_markup.isEmpty(); }
+    bool hasURIList() const { return !m_uriList.isEmpty(); }
+    bool hasURL() const { return !m_url.isEmpty() && m_url.isValid(); }
+    bool hasFilenames() const { return !m_filenames.isEmpty(); }
+    bool hasImage() const { return m_image; }
+    void clearURIList() { m_uriList = ""; }
+    void clearURL() { m_url = KURL(); }
+    void clearImage() { m_image = 0; }
 
-    String text();
-    String markup();
-    Vector<String> files();
-    void setText(const String& newText);
-    void setMarkup(const String& newMarkup);
-    bool hasURL();
-    String url();
-    String urlLabel();
-    void clear();
+    String text() const;
+    String markup() const;
+    void setText(const String&);
+    void setMarkup(const String&);
+    void setURIList(const String&);
+    String urlLabel() const;
+
+    void clearAllExceptFilenames();
+    void clearAll();
+    void clearText();
+    void clearMarkup();
 
     static DataObjectGtk* forClipboard(GtkClipboard*);
 
 private:
     String m_text;
     String m_markup;
-    Vector<KURL> m_uriList;
+    KURL m_url;
+    String m_uriList;
+    Vector<String> m_filenames;
     GRefPtr<GdkPixbuf> m_image;
-    GRefPtr<GdkDragContext> m_dragContext;
     RefPtr<Range> m_range;
 };
 

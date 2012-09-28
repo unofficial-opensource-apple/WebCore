@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple, Inc.
+ * Copyright (C) 2006, 2007, 2010 Apple, Inc. All rights reserved.
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -21,21 +21,22 @@
 module html {
 
     interface [
-        GenerateNativeConverter
+        JSGenerateToNativeObject,
+        NamedConstructor=Option(in [Optional=DefaultIsNullString] DOMString data, in [Optional=DefaultIsNullString] DOMString value, in [Optional=DefaultIsUndefined] boolean defaultSelected, in [Optional=DefaultIsUndefined] boolean selected),
+        ConstructorRaisesException
     ] HTMLOptionElement : HTMLElement {
-        readonly attribute  HTMLFormElement      form;
-                 attribute  boolean              defaultSelected;
-#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
-                 attribute  [ConvertNullToNullString] DOMString            text
-                     setter raises(DOMException);
-#else
-        readonly attribute  DOMString            text;
-#endif
-        readonly attribute  long                 index;
-                 attribute  boolean              disabled;
-                 attribute  [ConvertNullToNullString] DOMString            label;
-                 attribute  boolean selected;
-                 attribute  [ConvertNullToNullString] DOMString            value;
-    };
+        attribute [Reflect] boolean disabled;
+        readonly attribute HTMLFormElement form;
+        attribute DOMString label;
+        attribute [Reflect=selected] boolean defaultSelected;
+        attribute boolean selected;
+        attribute DOMString value;
 
+#if defined(LANGUAGE_JAVASCRIPT) && LANGUAGE_JAVASCRIPT
+        attribute DOMString text setter raises(DOMException);
+#else
+        readonly attribute DOMString text;
+#endif
+        readonly attribute long index;
+    };
 }

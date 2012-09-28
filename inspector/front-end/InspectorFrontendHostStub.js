@@ -30,15 +30,25 @@
 
 if (!window.InspectorFrontendHost) {
 
+/**
+ * @constructor
+ */
 WebInspector.InspectorFrontendHostStub = function()
 {
     this._attachedWindowHeight = 0;
+    this.isStub = true;
 }
 
 WebInspector.InspectorFrontendHostStub.prototype = {
     platform: function()
     {
-        return "mac-leopard";
+        var match = navigator.userAgent.match(/Windows NT/);
+        if (match)
+            return "windows";
+        match = navigator.userAgent.match(/Mac OS X/);
+        if (match)
+            return "mac";
+        return "linux";
     },
 
     port: function()
@@ -46,20 +56,25 @@ WebInspector.InspectorFrontendHostStub.prototype = {
         return "unknown";
     },
 
+    bringToFront: function()
+    {
+        this._windowVisible = true;
+    },
+
     closeWindow: function()
     {
         this._windowVisible = false;
     },
 
-    attach: function()
+    requestAttachWindow: function()
     {
     },
 
-    detach: function()
+    requestDetachWindow: function()
     {
     },
 
-    search: function(sourceRow, query)
+    requestSetDockSide: function()
     {
     },
 
@@ -68,6 +83,10 @@ WebInspector.InspectorFrontendHostStub.prototype = {
     },
 
     moveWindowBy: function(x, y)
+    {
+    },
+
+    setInjectedScriptForOrigin: function(origin, script)
     {
     },
 
@@ -85,15 +104,66 @@ WebInspector.InspectorFrontendHostStub.prototype = {
         return "";
     },
 
-    windowUnloading: function()
+    inspectedURLChanged: function(url)
     {
+        document.title = WebInspector.UIString(Preferences.applicationTitle, url);
     },
 
     copyText: function()
     {
+    },
+
+    openInNewTab: function(url)
+    {
+        window.open(url, "_blank");
+    },
+
+    canSave: function()
+    {
+        return true;
+    },
+
+    save: function(url, content, forceSaveAs)
+    {
+        var builder = new WebKitBlobBuilder();
+        builder.append(content);
+        var blob = builder.getBlob("application/octet-stream");
+
+        var fr = new FileReader();
+        fr.onload = function(e) {
+            // Force download
+            window.location = this.result;
+        }
+        fr.readAsDataURL(blob);
+    },
+
+    sendMessageToBackend: function(message)
+    {
+    },
+
+    recordActionTaken: function(actionCode)
+    {
+    },
+
+    recordPanelShown: function(panelCode)
+    {
+    },
+
+    recordSettingChanged: function(settingCode)
+    {
+    },
+
+    loadResourceSynchronously: function(url)
+    {
+        return "";
+    },
+
+    setZoomFactor: function(zoom)
+    {
     }
 }
 
-InspectorFrontendHost = new WebInspector.InspectorFrontendHostStub();
+var InspectorFrontendHost = new WebInspector.InspectorFrontendHostStub();
+Preferences.localizeUI = false;
 
 }

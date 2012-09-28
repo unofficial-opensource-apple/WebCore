@@ -56,6 +56,12 @@ PassRefPtr<AccessibilityTableCell> AccessibilityTableCell::create(RenderObject* 
 
 bool AccessibilityTableCell::accessibilityIsIgnored() const
 {
+    AccessibilityObjectInclusion decision = accessibilityIsIgnoredBase();
+    if (decision == IncludeObject)
+        return false;
+    if (decision == IgnoreObject)
+        return true;
+    
     if (!isTableCell())
         return AccessibilityRenderObject::accessibilityIsIgnored();
     
@@ -65,15 +71,20 @@ bool AccessibilityTableCell::accessibilityIsIgnored() const
 AccessibilityObject* AccessibilityTableCell::parentTable() const
 {
     if (!m_renderer || !m_renderer->isTableCell())
-        return false;
+        return 0;
     
-    return axObjectCache()->getOrCreate(toRenderTableCell(m_renderer)->table());
+    // Do not use getOrCreate. parentTable() can be called while the render tree is being modified 
+    // by javascript, and creating a table element may try to access the render tree while in a bad state.
+    // By using only get() implies that the AXTable must be created before AXTableCells. This should
+    // always be the case when AT clients access a table.
+    // https://bugs.webkit.org/show_bug.cgi?id=42652    
+    return axObjectCache()->get(toRenderTableCell(m_renderer)->table());
 }
     
 bool AccessibilityTableCell::isTableCell() const
 {
     AccessibilityObject* table = parentTable();
-    if (!table || !table->isDataTable())
+    if (!table || !table->isAccessibilityTable())
         return false;
     
     return true;
@@ -93,7 +104,7 @@ void AccessibilityTableCell::rowIndexRange(pair<int, int>& rowRange)
         return;
     
     RenderTableCell* renderCell = toRenderTableCell(m_renderer);
-    rowRange.first = renderCell->row();
+    rowRange.first = renderCell->rowIndex();
     rowRange.second = renderCell->rowSpan();
     
     // since our table might have multiple sections, we have to offset our row appropriately
@@ -101,7 +112,8 @@ void AccessibilityTableCell::rowIndexRange(pair<int, int>& rowRange)
     RenderTable* table = renderCell->table();
     if (!table || !section)
         return;
-    
+
+    // FIXME: This will skip a table with just a tfoot. Should fix by using RenderTable::topSection.
     RenderTableSection* tableSection = table->header();
     if (!tableSection)
         tableSection = table->firstBody();
@@ -111,7 +123,7 @@ void AccessibilityTableCell::rowIndexRange(pair<int, int>& rowRange)
         if (tableSection == section)
             break;
         rowOffset += tableSection->numRows();
-        tableSection = table->sectionBelow(tableSection, true); 
+        tableSection = table->sectionBelow(tableSection, SkipEmptySections);
     }
 
     rowRange.first += rowOffset;
@@ -148,13 +160,13 @@ AccessibilityObject* AccessibilityTableCell::titleUIElement() const
     if (!col)
         return 0;
 
-    int row = renderCell->row();
+    int row = renderCell->rowIndex();
 
     RenderTableSection* section = renderCell->section();
     if (!section)
         return 0;
     
-    RenderTableCell* headerCell = section->cellAt(row, 0).cell;
+    RenderTableCell* headerCell = section->primaryCellAt(row, 0);
     if (!headerCell || headerCell == renderCell)
         return 0;
 

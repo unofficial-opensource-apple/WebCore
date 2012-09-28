@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,42 +29,58 @@
 #ifndef Location_h
 #define Location_h
 
+#include "DOMStringList.h"
+#include "DOMWindowProperty.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-    class Frame;
-    class KURL;
-    class String;
+class DOMWindow;
+class Frame;
+class KURL;
 
-    class Location : public RefCounted<Location> {
-    public:
-        static PassRefPtr<Location> create(Frame* frame) { return adoptRef(new Location(frame)); }
+typedef int ExceptionCode;
 
-        Frame* frame() const { return m_frame; }
-        void disconnectFrame();
+class Location : public RefCounted<Location>, public DOMWindowProperty {
+public:
+    static PassRefPtr<Location> create(Frame* frame) { return adoptRef(new Location(frame)); }
 
-        String href() const;
+    void setHref(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow);
+    String href() const;
 
-        // URI decomposition attributes
-        String protocol() const;
-        String host() const;
-        String hostname() const;
-        String port() const;
-        String pathname() const;
-        String search() const;
-        String hash() const;
+    void assign(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow);
+    void replace(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow);
+    void reload(DOMWindow* activeWindow);
 
-        String toString() const;
+    void setProtocol(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow, ExceptionCode&);
+    String protocol() const;
+    void setHost(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow); 
+    String host() const;
+    void setHostname(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow); 
+    String hostname() const;
+    void setPort(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow); 
+    String port() const;
+    void setPathname(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow); 
+    String pathname() const;
+    void setSearch(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow); 
+    String search() const;
+    void setHash(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow); 
+    String hash() const;
+    String origin() const;
 
-    private:
-        Location(Frame*);
+    String toString() const { return href(); }
 
-        const KURL& url() const;
+    PassRefPtr<DOMStringList> ancestorOrigins() const;
 
-        Frame* m_frame;
-    };
+private:
+    explicit Location(Frame*);
+
+    void setLocation(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow);
+
+    const KURL& url() const;
+};
 
 } // namespace WebCore
 

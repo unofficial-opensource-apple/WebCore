@@ -23,26 +23,17 @@
 #ifndef HTMLObjectElement_h
 #define HTMLObjectElement_h
 
+#include "FormAssociatedElement.h"
 #include "HTMLPlugInImageElement.h"
 
 namespace WebCore {
 
-class HTMLObjectElement : public HTMLPlugInImageElement {
+class HTMLFormElement;
+
+class HTMLObjectElement : public HTMLPlugInImageElement, public FormAssociatedElement {
 public:
-    static PassRefPtr<HTMLObjectElement> create(const QualifiedName&, Document*, bool createdByParser);
-
-    void setNeedWidgetUpdate(bool needWidgetUpdate) { m_needWidgetUpdate = needWidgetUpdate; }
-
-    void renderFallbackContent();
-
-    bool declare() const;
-    void setDeclare(bool);
-
-    int hspace() const;
-    void setHspace(int);
-
-    int vspace() const;
-    void setVspace(int);
+    static PassRefPtr<HTMLObjectElement> create(const QualifiedName&, Document*, HTMLFormElement*, bool createdByParser);
+    virtual ~HTMLObjectElement();
 
     bool isDocNamedItem() const { return m_docNamedItem; }
 
@@ -50,40 +41,78 @@ public:
 
     bool containsJavaApplet() const;
 
+    virtual bool useFallbackContent() const { return m_useFallbackContent; }
+    void renderFallbackContent();
+
+    // Implementations of FormAssociatedElement
+    HTMLFormElement* form() const { return FormAssociatedElement::form(); }
+
+    virtual bool isFormControlElement() const { return false; }
+
+    virtual bool isEnumeratable() const { return true; }
+    virtual bool appendFormData(FormDataList&, bool);
+
+    // Implementations of constraint validation API.
+    // Note that the object elements are always barred from constraint validation.
+    String validationMessage() { return String(); }
+    bool checkValidity() { return true; }
+    void setCustomValidity(const String&) { }
+
+    using TreeShared<ContainerNode>::ref;
+    using TreeShared<ContainerNode>::deref;
+
+    virtual bool canContainRangeEndPoint() const { return useFallbackContent(); }
+
 private:
-    HTMLObjectElement(const QualifiedName&, Document*, bool createdByParser);
+    HTMLObjectElement(const QualifiedName&, Document*, HTMLFormElement*, bool createdByParser);
 
-    virtual int tagPriority() const { return 5; }
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
 
-    virtual void parseMappedAttribute(MappedAttribute*);
+    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void removedFrom(Node*) OVERRIDE;
 
-    virtual void attach();
-    virtual bool canLazyAttach() { return false; }
-    virtual bool rendererIsNeeded(RenderStyle*);
-    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual void finishParsingChildren();
-    virtual void detach();
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
-    
-    virtual void recalcStyle(StyleChange);
+    virtual bool rendererIsNeeded(const NodeRenderingContext&);
+    virtual void didMoveToNewDocument(Document* oldDocument) OVERRIDE;
+
     virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
     virtual bool isURLAttribute(Attribute*) const;
     virtual const QualifiedName& imageSourceAttributeName() const;
 
-    virtual void updateWidget();
-
-    virtual RenderWidget* renderWidgetForJSBindings() const;
+    virtual RenderWidget* renderWidgetForJSBindings();
 
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
+    virtual void updateWidget(PluginCreationOption);
     void updateDocNamedItem();
 
-    AtomicString m_id;
+    bool hasFallbackContent() const;
+    
+    // FIXME: This function should not deal with url or serviceType
+    // so that we can better share code between <object> and <embed>.
+    void parametersForPlugin(Vector<String>& paramNames, Vector<String>& paramValues, String& url, String& serviceType);
+    
+    bool shouldAllowQuickTimeClassIdQuirk();
+    bool hasValidClassId();
+
+    virtual void refFormAssociatedElement() { ref(); }
+    virtual void derefFormAssociatedElement() { deref(); }
+    virtual HTMLFormElement* virtualForm() const;
+
+    virtual const AtomicString& formControlName() const;
+
+#if ENABLE(MICRODATA)
+    virtual String itemValueText() const OVERRIDE;
+    virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;
+#endif
+
+    virtual bool shouldRegisterAsNamedItem() const OVERRIDE { return isDocNamedItem(); }
+    virtual bool shouldRegisterAsExtraNamedItem() const OVERRIDE { return isDocNamedItem(); }
+
     String m_classId;
     bool m_docNamedItem : 1;
-    bool m_needWidgetUpdate : 1;
     bool m_useFallbackContent : 1;
 };
 

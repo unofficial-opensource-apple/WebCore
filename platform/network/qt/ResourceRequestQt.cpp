@@ -18,7 +18,9 @@
 */
 
 #include "config.h"
+#include "NetworkingContext.h"
 #include "ResourceRequest.h"
+#include "ThirdPartyCookiesQt.h"
 
 #include <qglobal.h>
 
@@ -27,27 +29,22 @@
 
 namespace WebCore {
 
-// Currently Qt allows three connections per host on symbian and six
-// for everyone else. The limit can be found in qhttpnetworkconnection.cpp.
+// The limit can be found in qhttpnetworkconnection.cpp.
 // To achieve the best result we want WebKit to schedule the jobs so we
 // are using the limit as found in Qt. To allow Qt to fill its queue
 // and prepare jobs we will schedule two more downloads.
+// Per TCP connection there is 1 current processed, 3 possibly pipelined
+// and 2 ready to re-fill the pipeline.
 unsigned initializeMaximumHTTPConnectionCountPerHost()
 {
-#ifdef Q_OS_SYMBIAN
-    return 3 + 2;
-#else
-    return 6 + 2;
-#endif
+    return 6 * (1 + 3 + 2);
 }
 
-QNetworkRequest ResourceRequest::toNetworkRequest(QObject* originatingFrame) const
+QNetworkRequest ResourceRequest::toNetworkRequest(NetworkingContext *context) const
 {
     QNetworkRequest request;
     request.setUrl(url());
-#if QT_VERSION >= QT_VERSION_CHECK(4, 6, 0)
-    request.setOriginatingObject(originatingFrame);
-#endif
+    request.setOriginatingObject(context ? context->originatingObject() : 0);
 
     const HTTPHeaderMap &headers = httpHeaderFields();
     for (HTTPHeaderMap::const_iterator it = headers.begin(), end = headers.end();
@@ -61,6 +58,11 @@ QNetworkRequest ResourceRequest::toNetworkRequest(QObject* originatingFrame) con
         else
             request.setRawHeader(name, "");
     }
+
+    // Make sure we always have an Accept header; some sites require this to
+    // serve subresources
+    if (!request.hasRawHeader("Accept"))
+        request.setRawHeader("Accept", "*/*");
 
     switch (cachePolicy()) {
     case ReloadIgnoringCacheData:
@@ -77,6 +79,14 @@ QNetworkRequest ResourceRequest::toNetworkRequest(QObject* originatingFrame) con
     default:
         break;
     }
+
+    if (!allowCookies() || !thirdPartyCookiePolicyPermits(context, url(), firstPartyForCookies())) {
+        request.setAttribute(QNetworkRequest::CookieSaveControlAttribute, QNetworkRequest::Manual);
+        request.setAttribute(QNetworkRequest::CookieLoadControlAttribute, QNetworkRequest::Manual);
+    }
+
+    if (!allowCookies())
+        request.setAttribute(QNetworkRequest::AuthenticationReuseAttribute, QNetworkRequest::Manual);
 
     return request;
 }

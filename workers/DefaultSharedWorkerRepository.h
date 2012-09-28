@@ -33,14 +33,15 @@
 
 #if ENABLE(SHARED_WORKERS)
 
-#include "ExceptionCode.h"
-#include "StringHash.h"
+#include "ContentSecurityPolicy.h"
+#include <wtf/Forward.h>
 #include <wtf/HashMap.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Threading.h>
+#include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
@@ -50,13 +51,15 @@ namespace WebCore {
     class ScriptExecutionContext;
     class SharedWorker;
     class SharedWorkerProxy;
-    class String;
+
+    typedef int ExceptionCode;
 
     // Platform-specific implementation of the SharedWorkerRepository static interface.
-    class DefaultSharedWorkerRepository : public Noncopyable {
+    class DefaultSharedWorkerRepository {
+        WTF_MAKE_NONCOPYABLE(DefaultSharedWorkerRepository); WTF_MAKE_FAST_ALLOCATED;
     public:
         // Invoked once the worker script has been loaded to fire up the worker thread.
-        void workerScriptLoaded(SharedWorkerProxy&, const String& userAgent, const String& workerScript, PassOwnPtr<MessagePortChannel>);
+        void workerScriptLoaded(SharedWorkerProxy&, const String& userAgent, const String& workerScript, PassOwnPtr<MessagePortChannel>, const String& contentSecurityPolicy, ContentSecurityPolicy::HeaderType);
 
         // Internal implementation of SharedWorkerRepository::connect()
         void connectToWorker(PassRefPtr<SharedWorker>, PassOwnPtr<MessagePortChannel>, const KURL&, const String& name, ExceptionCode&);

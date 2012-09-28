@@ -29,17 +29,20 @@
 
 namespace WebCore {
 
+const char* const errorDomainWebKitInternal = "WebKitInternal";
+
 ResourceError ResourceErrorBase::copy() const
 {
     lazyInit();
 
     ResourceError errorCopy;
-    errorCopy.m_domain = m_domain.crossThreadString();
+    errorCopy.m_domain = m_domain.isolatedCopy();
     errorCopy.m_errorCode = m_errorCode;
-    errorCopy.m_failingURL = m_failingURL.crossThreadString();
-    errorCopy.m_localizedDescription = m_localizedDescription.crossThreadString();
+    errorCopy.m_failingURL = m_failingURL.isolatedCopy();
+    errorCopy.m_localizedDescription = m_localizedDescription.isolatedCopy();
     errorCopy.m_isNull = m_isNull;
     errorCopy.m_isCancellation = m_isCancellation;
+    platformCopy(errorCopy);
     return errorCopy;
 }
 

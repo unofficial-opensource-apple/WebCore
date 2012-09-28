@@ -64,7 +64,7 @@ void WrapContentsInDummySpanCommand::doUnapply()
 {
     ASSERT(m_element);
 
-    if (!m_dummySpan || !m_element->isContentEditable())
+    if (!m_dummySpan || !m_element->rendererIsEditable())
         return;
 
     Vector<RefPtr<Node> > children;
@@ -84,10 +84,18 @@ void WrapContentsInDummySpanCommand::doReapply()
 {
     ASSERT(m_element);
     
-    if (!m_dummySpan || !m_element->isContentEditable())
+    if (!m_dummySpan || !m_element->rendererIsEditable())
         return;
 
     executeApply();
 }
+
+#ifndef NDEBUG
+void WrapContentsInDummySpanCommand::getNodesInCommand(HashSet<Node*>& nodes)
+{
+    addNodeAndDescendants(m_element.get(), nodes);
+    addNodeAndDescendants(m_dummySpan.get(), nodes);
+}
+#endif
     
 } // namespace WebCore

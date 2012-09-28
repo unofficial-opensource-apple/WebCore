@@ -31,19 +31,20 @@
 #include "config.h"
 #include "Pasteboard.h"
 
-#include "ChromiumBridge.h"
 #include "ClipboardUtilitiesChromium.h"
-#include "DocumentFragment.h"
 #include "Document.h"
+#include "DocumentFragment.h"
 #include "Element.h"
 #include "Frame.h"
 #include "HTMLNames.h"
+#include "HTMLParserIdioms.h"
 #include "Image.h"
 #include "KURL.h"
-#include "markup.h"
 #include "NativeImageSkia.h"
+#include "PlatformSupport.h"
 #include "Range.h"
 #include "RenderImage.h"
+#include "markup.h"
 
 #if ENABLE(SVG)
 #include "SVGNames.h"
@@ -81,19 +82,16 @@ void Pasteboard::setSelectionMode(bool selectionMode)
 
 void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
-    String html = createMarkup(selectedRange, 0, AnnotateForInterchange);
-#if OS(DARWIN)
-    html = String("<meta charset='utf-8' id='webkit-interchange-charset'>") + html;
-#endif
+    String html = createMarkup(selectedRange, 0, AnnotateForInterchange, false, ResolveNonLocalURLs);
     ExceptionCode ec = 0;
     KURL url = selectedRange->startContainer(ec)->document()->url();
-    String plainText = frame->selectedText();
+    String plainText = frame->editor()->selectedText();
 #if OS(WINDOWS)
     replaceNewlinesWithWindowsStyleNewlines(plainText);
 #endif
     replaceNBSPWithSpace(plainText);
 
-    ChromiumBridge::clipboardWriteSelection(html, url, plainText, canSmartCopyOrDelete);
+    PlatformSupport::clipboardWriteSelection(html, url, plainText, canSmartCopyOrDelete);
 }
 
 void Pasteboard::writePlainText(const String& text)
@@ -101,9 +99,9 @@ void Pasteboard::writePlainText(const String& text)
 #if OS(WINDOWS)
     String plainText(text);
     replaceNewlinesWithWindowsStyleNewlines(plainText);
-    ChromiumBridge::clipboardWritePlainText(plainText);
+    PlatformSupport::clipboardWritePlainText(plainText);
 #else
-    ChromiumBridge::clipboardWritePlainText(text);
+    PlatformSupport::clipboardWritePlainText(text);
 #endif
 }
 
@@ -118,19 +116,26 @@ void Pasteboard::writeURL(const KURL& url, const String& titleStr, Frame* frame)
             title = url.host();
     }
 
-    ChromiumBridge::clipboardWriteURL(url, title);
+    PlatformSupport::clipboardWriteURL(url, title);
 }
 
 void Pasteboard::writeImage(Node* node, const KURL&, const String& title)
 {
     ASSERT(node);
-    ASSERT(node->renderer());
-    ASSERT(node->renderer()->isImage());
+
+    if (!(node->renderer() && node->renderer()->isImage()))
+        return;
+
     RenderImage* renderer = toRenderImage(node->renderer());
     CachedImage* cachedImage = renderer->cachedImage();
-    ASSERT(cachedImage);
-    Image* image = cachedImage->image();
+    if (!cachedImage || cachedImage->errorOccurred())
+        return;
+    Image* image = cachedImage->imageForRenderer(renderer);
     ASSERT(image);
+
+    NativeImagePtr bitmap = image->nativeImageForCurrentFrame();
+    if (!bitmap)
+        return;
 
     // If the image is wrapped in a link, |url| points to the target of the
     // link.  This isn't useful to us, so get the actual image URL.
@@ -145,20 +150,24 @@ void Pasteboard::writeImage(Node* node, const KURL&, const String& title)
         Element* element = static_cast<Element*>(node);
         urlString = element->getAttribute(element->imageSourceAttributeName());
     }
-    KURL url = urlString.isEmpty() ? KURL() : node->document()->completeURL(deprecatedParseURL(urlString));
+    KURL url = urlString.isEmpty() ? KURL() : node->document()->completeURL(stripLeadingAndTrailingHTMLSpaces(urlString));
 
-    NativeImagePtr bitmap = image->nativeImageForCurrentFrame();
-    ChromiumBridge::clipboardWriteImage(bitmap, url, title);
+    PlatformSupport::clipboardWriteImage(bitmap, url, title);
+}
+
+void Pasteboard::writeClipboard(Clipboard* clipboard)
+{
+    PlatformSupport::clipboardWriteDataObject(clipboard);
 }
 
 bool Pasteboard::canSmartReplace()
 {
-    return ChromiumBridge::clipboardIsFormatAvailable(PasteboardPrivate::WebSmartPasteFormat, m_selectionMode ? PasteboardPrivate::SelectionBuffer : PasteboardPrivate::StandardBuffer);
+    return PlatformSupport::clipboardIsFormatAvailable(PasteboardPrivate::WebSmartPasteFormat, m_selectionMode ? PasteboardPrivate::SelectionBuffer : PasteboardPrivate::StandardBuffer);
 }
 
 String Pasteboard::plainText(Frame* frame)
 {
-    return ChromiumBridge::clipboardReadPlainText(m_selectionMode ? PasteboardPrivate::SelectionBuffer : PasteboardPrivate::StandardBuffer);
+    return PlatformSupport::clipboardReadPlainText(m_selectionMode ? PasteboardPrivate::SelectionBuffer : PasteboardPrivate::StandardBuffer);
 }
 
 PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefPtr<Range> context, bool allowPlainText, bool& chosePlainText)
@@ -166,24 +175,23 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
     chosePlainText = false;
     PasteboardPrivate::ClipboardBuffer buffer = m_selectionMode ? PasteboardPrivate::SelectionBuffer : PasteboardPrivate::StandardBuffer;
 
-    if (ChromiumBridge::clipboardIsFormatAvailable(PasteboardPrivate::HTMLFormat, buffer)) {
+    if (PlatformSupport::clipboardIsFormatAvailable(PasteboardPrivate::HTMLFormat, buffer)) {
         String markup;
         KURL srcURL;
-        ChromiumBridge::clipboardReadHTML(buffer, &markup, &srcURL);
-#if OS(DARWIN)
-        DEFINE_STATIC_LOCAL(const String, forceUtf8String, ("<meta charset='utf-8' id='webkit-interchange-charset'>"));
-        if (markup.startsWith(forceUtf8String))
-            markup = markup.substring(forceUtf8String.length());
-#endif
+        unsigned fragmentStart = 0;
+        unsigned fragmentEnd = 0;
+        PlatformSupport::clipboardReadHTML(buffer, &markup, &srcURL, &fragmentStart, &fragmentEnd);
 
-        RefPtr<DocumentFragment> fragment =
-            createFragmentFromMarkup(frame->document(), markup, srcURL, FragmentScriptingNotAllowed);
-        if (fragment)
-            return fragment.release();
+        if (!markup.isEmpty()) {
+          RefPtr<DocumentFragment> fragment =
+              createFragmentFromMarkupWithContext(frame->document(), markup, fragmentStart, fragmentEnd, srcURL, FragmentScriptingNotAllowed);
+          if (fragment)
+              return fragment.release();
+        }
     }
 
     if (allowPlainText) {
-        String markup = ChromiumBridge::clipboardReadPlainText(buffer);
+        String markup = PlatformSupport::clipboardReadPlainText(buffer);
         if (!markup.isEmpty()) {
             chosePlainText = true;
 

@@ -1,80 +1,76 @@
 /*
-    Copyright (C) 2005 Alexander Kellett <lypanov@kde.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2005 Alexander Kellett <lypanov@kde.org>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #ifndef SVGMaskElement_h
 #define SVGMaskElement_h
 
 #if ENABLE(SVG)
-#include "RenderObject.h"
-#include "SVGResourceMasker.h"
+#include "SVGAnimatedBoolean.h"
+#include "SVGAnimatedEnumeration.h"
+#include "SVGAnimatedLength.h"
 #include "SVGExternalResourcesRequired.h"
 #include "SVGLangSpace.h"
 #include "SVGStyledLocatableElement.h"
 #include "SVGTests.h"
-#include "SVGURIReference.h"
-#include <wtf/HashMap.h>
-#include <wtf/PassOwnPtr.h>
+#include "SVGUnitTypes.h"
 
 namespace WebCore {
 
-    class SVGLength;
-    class SVGResourceMasker;
+class SVGMaskElement : public SVGStyledLocatableElement,
+                       public SVGTests,
+                       public SVGLangSpace,
+                       public SVGExternalResourcesRequired {
+public:
+    static PassRefPtr<SVGMaskElement> create(const QualifiedName&, Document*);
 
-    class SVGMaskElement : public SVGStyledLocatableElement,
-                           public SVGURIReference,
-                           public SVGTests,
-                           public SVGLangSpace,
-                           public SVGExternalResourcesRequired {
-    public:
-        SVGMaskElement(const QualifiedName&, Document*);
-        virtual ~SVGMaskElement();
-        virtual bool isValid() const { return SVGTests::isValid(); }
+private:
+    SVGMaskElement(const QualifiedName&, Document*);
 
-        FloatRect maskBoundingBox(const FloatRect&) const;
-        virtual void parseMappedAttribute(MappedAttribute*);
-        virtual void svgAttributeChanged(const QualifiedName&);
-        virtual void synchronizeProperty(const QualifiedName&);
-        virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
+    virtual bool isValid() const { return SVGTests::isValid(); }
+    virtual bool needsPendingResourceHandling() const { return false; }
 
-        virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-        virtual SVGResource* canvasResource(const RenderObject*);
+    bool isSupportedAttribute(const QualifiedName&);
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual void svgAttributeChanged(const QualifiedName&);
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
-        PassOwnPtr<ImageBuffer> drawMaskerContent(const RenderObject*, FloatRect& maskRect, bool& emptyMask) const;
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
-    private:
-        DECLARE_ANIMATED_PROPERTY(SVGMaskElement, SVGNames::maskUnitsAttr, int, MaskUnits, maskUnits)
-        DECLARE_ANIMATED_PROPERTY(SVGMaskElement, SVGNames::maskContentUnitsAttr, int, MaskContentUnits, maskContentUnits)
-        DECLARE_ANIMATED_PROPERTY(SVGMaskElement, SVGNames::xAttr, SVGLength, X, x)
-        DECLARE_ANIMATED_PROPERTY(SVGMaskElement, SVGNames::yAttr, SVGLength, Y, y)
-        DECLARE_ANIMATED_PROPERTY(SVGMaskElement, SVGNames::widthAttr, SVGLength, Width, width)
-        DECLARE_ANIMATED_PROPERTY(SVGMaskElement, SVGNames::heightAttr, SVGLength, Height, height)
+    virtual bool selfHasRelativeLengths() const;
 
-        // SVGURIReference
-        DECLARE_ANIMATED_PROPERTY(SVGMaskElement, XLinkNames::hrefAttr, String, Href, href)
+    BEGIN_DECLARE_ANIMATED_PROPERTIES(SVGMaskElement)
+        DECLARE_ANIMATED_ENUMERATION(MaskUnits, maskUnits, SVGUnitTypes::SVGUnitType)
+        DECLARE_ANIMATED_ENUMERATION(MaskContentUnits, maskContentUnits, SVGUnitTypes::SVGUnitType)
+        DECLARE_ANIMATED_LENGTH(X, x)
+        DECLARE_ANIMATED_LENGTH(Y, y)
+        DECLARE_ANIMATED_LENGTH(Width, width)
+        DECLARE_ANIMATED_LENGTH(Height, height)
+        DECLARE_ANIMATED_BOOLEAN(ExternalResourcesRequired, externalResourcesRequired)
+    END_DECLARE_ANIMATED_PROPERTIES
 
-        // SVGExternalResourcesRequired
-        DECLARE_ANIMATED_PROPERTY(SVGMaskElement, SVGNames::externalResourcesRequiredAttr, bool, ExternalResourcesRequired, externalResourcesRequired)
+    // SVGTests
+    virtual void synchronizeRequiredFeatures() { SVGTests::synchronizeRequiredFeatures(this); }
+    virtual void synchronizeRequiredExtensions() { SVGTests::synchronizeRequiredExtensions(this); }
+    virtual void synchronizeSystemLanguage() { SVGTests::synchronizeSystemLanguage(this); }
+};
 
-        HashMap<const RenderObject*, RefPtr<SVGResourceMasker> > m_masker;
-    };
+}
 
-} // namespace WebCore
-
-#endif // ENABLE(SVG)
+#endif
 #endif

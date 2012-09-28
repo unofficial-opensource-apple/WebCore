@@ -29,16 +29,18 @@
  */
 
 #include "config.h"
-#include "V8Binding.h"
 #include "V8CustomVoidCallback.h"
 
-#include "Frame.h"
+#include "ScriptExecutionContext.h"
+#include "V8Binding.h"
+#include "V8Proxy.h"
 
 namespace WebCore {
 
-V8CustomVoidCallback::V8CustomVoidCallback(v8::Local<v8::Object> callback, Frame* frame)
+V8CustomVoidCallback::V8CustomVoidCallback(v8::Local<v8::Object> callback, ScriptExecutionContext *context)
     : m_callback(v8::Persistent<v8::Object>::New(callback))
-    , m_frame(frame)
+    , m_scriptExecutionContext(context)
+    , m_worldContext(UseCurrentWorld)
 {
 }
 
@@ -51,53 +53,44 @@ void V8CustomVoidCallback::handleEvent()
 {
     v8::HandleScope handleScope;
 
-    v8::Handle<v8::Context> context = V8Proxy::context(m_frame.get());
-    if (context.IsEmpty())
+    v8::Handle<v8::Context> v8Context = toV8Context(m_scriptExecutionContext.get(), m_worldContext);
+    if (v8Context.IsEmpty())
         return;
 
-    v8::Context::Scope scope(context);
-
-    // Protect the frame until the callback returns.
-    RefPtr<Frame> protector(m_frame);
+    v8::Context::Scope scope(v8Context);
 
     bool callbackReturnValue = false;
-    invokeCallback(m_callback, 0, 0, callbackReturnValue);
+    invokeCallback(m_callback, 0, 0, callbackReturnValue, m_scriptExecutionContext.get());
 }
 
-bool invokeCallback(v8::Persistent<v8::Object> callback, int argc, v8::Handle<v8::Value> argv[], bool& callbackReturnValue)
+bool invokeCallback(v8::Persistent<v8::Object> callback, int argc, v8::Handle<v8::Value> argv[], bool& callbackReturnValue, ScriptExecutionContext* scriptExecutionContext)
+{
+    return invokeCallback(callback, v8::Context::GetCurrent()->Global(), argc, argv, callbackReturnValue, scriptExecutionContext);
+}
+
+bool invokeCallback(v8::Persistent<v8::Object> callback, v8::Handle<v8::Object> thisObject, int argc, v8::Handle<v8::Value> argv[], bool& callbackReturnValue, ScriptExecutionContext* scriptExecutionContext)
 {
     v8::TryCatch exceptionCatcher;
+    exceptionCatcher.SetVerbose(true);
 
     v8::Local<v8::Function> callbackFunction;
     if (callback->IsFunction()) {
         callbackFunction = v8::Local<v8::Function>::New(v8::Persistent<v8::Function>::Cast(callback));
     } else if (callback->IsObject()) {
         v8::Local<v8::Value> handleEventFunction = callback->Get(v8::String::NewSymbol("handleEvent"));
-        if (handleEventFunction->IsFunction()) {
+        if (handleEventFunction->IsFunction())
             callbackFunction = v8::Local<v8::Function>::Cast(handleEventFunction);
-        }
     } else
         return false;
 
     if (callbackFunction.IsEmpty())
         return false;
 
-    v8::Handle<v8::Object> thisObject = v8::Context::GetCurrent()->Global();
+    Frame* frame = scriptExecutionContext && scriptExecutionContext->isDocument() ? static_cast<Document*>(scriptExecutionContext)->frame() : 0;
+    v8::Handle<v8::Value> result = V8Proxy::instrumentedCallFunction(frame, callbackFunction, thisObject, argc, argv);
 
-    V8Proxy* proxy = V8Proxy::retrieve();
-    ASSERT(proxy);
-
-    v8::Handle<v8::Value> result = proxy->callFunction(callbackFunction, thisObject, argc, argv);
-
-    callbackReturnValue = !result.IsEmpty() && result->IsBoolean() && result->BooleanValue();
-
-    if (exceptionCatcher.HasCaught()) {
-        v8::Local<v8::Message> message = exceptionCatcher.Message();
-        proxy->frame()->document()->reportException(toWebCoreString(message->Get()), message->GetLineNumber(), toWebCoreString(message->GetScriptResourceName()));
-        return true;
-    }
-
-    return false;
+    callbackReturnValue = !result.IsEmpty() && result->BooleanValue();
+    return exceptionCatcher.HasCaught();
 }
 
 } // namespace WebCore

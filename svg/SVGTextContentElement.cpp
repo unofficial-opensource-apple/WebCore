@@ -1,22 +1,22 @@
 /*
-    Copyright (C) 2004, 2005, 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
-                  2004, 2005, 2006, 2007, 2008 Rob Buis <buis@kde.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005, 2007, 2008 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008 Rob Buis <buis@kde.org>
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
 
@@ -25,365 +25,99 @@
 
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
-#include "ExceptionCode.h"
-#include "FloatPoint.h"
-#include "FloatRect.h"
 #include "Frame.h"
-#include "MappedAttribute.h"
-#include "Position.h"
+#include "FrameSelection.h"
+#include "RenderObject.h"
+#include "RenderSVGResource.h"
 #include "RenderSVGText.h"
-#include "SVGCharacterLayoutInfo.h"
-#include "SVGInlineTextBox.h"
-#include "SVGLength.h"
+#include "SVGDocumentExtensions.h"
+#include "SVGElementInstance.h"
 #include "SVGNames.h"
-#include "SVGRootInlineBox.h"
-#include "SelectionController.h"
+#include "SVGTextQuery.h"
 #include "XMLNames.h"
-#include <wtf/StdLibExtras.h>
 
 namespace WebCore {
+ 
+// Define custom animated property 'textLength'.
+const SVGPropertyInfo* SVGTextContentElement::textLengthPropertyInfo()
+{
+    static const SVGPropertyInfo* s_propertyInfo = 0;
+    if (!s_propertyInfo) {
+        s_propertyInfo = new SVGPropertyInfo(AnimatedLength,
+                                             SVGNames::textLengthAttr,
+                                             SVGNames::textLengthAttr.localName(),
+                                             &SVGTextContentElement::synchronizeTextLength,
+                                             &SVGTextContentElement::lookupOrCreateTextLengthWrapper);
+    }
+    return s_propertyInfo;
+}
 
-SVGTextContentElement::SVGTextContentElement(const QualifiedName& tagName, Document* doc)
-    : SVGStyledElement(tagName, doc)
-    , SVGTests()
-    , SVGLangSpace()
-    , SVGExternalResourcesRequired()
+// Animated property definitions
+DEFINE_ANIMATED_ENUMERATION(SVGTextContentElement, SVGNames::lengthAdjustAttr, LengthAdjust, lengthAdjust, SVGLengthAdjustType)
+DEFINE_ANIMATED_BOOLEAN(SVGTextContentElement, SVGNames::externalResourcesRequiredAttr, ExternalResourcesRequired, externalResourcesRequired)
+
+BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGTextContentElement)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(textLength)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(lengthAdjust)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(externalResourcesRequired)
+    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGStyledElement)
+    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGTests)
+END_REGISTER_ANIMATED_PROPERTIES
+
+SVGTextContentElement::SVGTextContentElement(const QualifiedName& tagName, Document* document)
+    : SVGStyledElement(tagName, document)
     , m_textLength(LengthModeOther)
-    , m_lengthAdjust(LENGTHADJUST_SPACING)
+    , m_specifiedTextLength(LengthModeOther)
+    , m_lengthAdjust(SVGLengthAdjustSpacing)
 {
+    registerAnimatedPropertiesForSVGTextContentElement();
 }
 
-SVGTextContentElement::~SVGTextContentElement()
+void SVGTextContentElement::synchronizeTextLength(void* contextElement)
 {
+    ASSERT(contextElement);
+    SVGTextContentElement* ownerType = static_cast<SVGTextContentElement*>(contextElement);
+    if (!ownerType->m_textLength.shouldSynchronize)
+        return;
+    AtomicString value(SVGPropertyTraits<SVGLength>::toString(ownerType->m_specifiedTextLength));
+    SVGAnimatedPropertySynchronizer<true>::synchronize(ownerType, textLengthPropertyInfo()->attributeName, value);
 }
 
-static inline float cumulativeCharacterRangeLength(const Vector<SVGChar>::iterator& start, const Vector<SVGChar>::iterator& end, SVGInlineTextBox* textBox,
-                                                   int startOffset, long startPosition, long length, bool isVerticalText, long& atCharacter)
+PassRefPtr<SVGAnimatedProperty> SVGTextContentElement::lookupOrCreateTextLengthWrapper(void* contextElement)
 {
-    if (!length)
-        return 0.0f;
-
-    float textLength = 0.0f;
-    RenderStyle* style = textBox->textRenderer()->style();
-
-    bool usesFullRange = (startPosition == -1 && length == -1);
-
-    for (Vector<SVGChar>::iterator it = start; it != end; ++it) {
-        if (usesFullRange || (atCharacter >= startPosition && atCharacter <= startPosition + length)) {
-            unsigned int newOffset = textBox->start() + (it - start) + startOffset;
-
-            // Take RTL text into account and pick right glyph width/height.
-            if (textBox->direction() == RTL)
-                newOffset = textBox->start() + textBox->end() - newOffset;
-
-            // FIXME: does this handle multichar glyphs ok? not sure
-            int charsConsumed = 0;
-            String glyphName;
-            if (isVerticalText)
-                textLength += textBox->calculateGlyphHeight(style, newOffset, 0);
-            else
-                textLength += textBox->calculateGlyphWidth(style, newOffset, 0, charsConsumed, glyphName);
-        }
-
-        if (!usesFullRange) {
-            if (atCharacter == startPosition + length - 1)
-                break;
-
-            atCharacter++;
-        }
-    }
-
-    return textLength;
+    ASSERT(contextElement);
+    SVGTextContentElement* ownerType = static_cast<SVGTextContentElement*>(contextElement);
+    return SVGAnimatedProperty::lookupOrCreateWrapper<SVGTextContentElement, SVGAnimatedLength, SVGLength, true>
+           (ownerType, textLengthPropertyInfo(), ownerType->m_textLength.value);
 }
 
-// Helper class for querying certain glyph information
-struct SVGInlineTextBoxQueryWalker {
-    typedef enum {
-        NumberOfCharacters,
-        TextLength,
-        SubStringLength,
-        StartPosition,
-        EndPosition,
-        Extent,
-        Rotation,
-        CharacterNumberAtPosition
-    } QueryMode;
-
-    SVGInlineTextBoxQueryWalker(const SVGTextContentElement* reference, QueryMode mode)
-        : m_reference(reference)
-        , m_mode(mode)
-        , m_queryStartPosition(0)
-        , m_queryLength(0)
-        , m_queryPointInput()
-        , m_queryLongResult(0)
-        , m_queryFloatResult(0.0f)
-        , m_queryPointResult()
-        , m_queryRectResult()
-        , m_stopProcessing(true)    
-        , m_atCharacter(0)
-    {
-    }
-
-    void chunkPortionCallback(SVGInlineTextBox* textBox, int startOffset, const TransformationMatrix&,
-                              const Vector<SVGChar>::iterator& start, const Vector<SVGChar>::iterator& end)
-    {
-        RenderStyle* style = textBox->textRenderer()->style();
-        bool isVerticalText = style->svgStyle()->writingMode() == WM_TBRL || style->svgStyle()->writingMode() == WM_TB;
-
-        switch (m_mode) {
-        case NumberOfCharacters:
-        {    
-            m_queryLongResult += (end - start);
-            m_stopProcessing = false;
-            return;
-        }
-        case TextLength:
-        {
-            float textLength = cumulativeCharacterRangeLength(start, end, textBox, startOffset, -1, -1, isVerticalText, m_atCharacter);
-
-            if (isVerticalText)
-                m_queryFloatResult += textLength;
-            else
-                m_queryFloatResult += textLength;
-
-            m_stopProcessing = false;
-            return;
-        }
-        case SubStringLength:
-        {
-            long startPosition = m_queryStartPosition;
-            long length = m_queryLength;
-
-            float textLength = cumulativeCharacterRangeLength(start, end, textBox, startOffset, startPosition, length, isVerticalText, m_atCharacter);
-
-            if (isVerticalText)
-                m_queryFloatResult += textLength;
-            else
-                m_queryFloatResult += textLength;
-
-            if (m_atCharacter == startPosition + length)
-                m_stopProcessing = true;
-            else
-                m_stopProcessing = false;
-
-            return;
-        }
-        case StartPosition:
-        {
-            for (Vector<SVGChar>::iterator it = start; it != end; ++it) {
-                if (m_atCharacter == m_queryStartPosition) {
-                    m_queryPointResult = FloatPoint(it->x, it->y);
-                    m_stopProcessing = true;
-                    return;
-                }
-
-                m_atCharacter++;
-            }
-
-            m_stopProcessing = false;
-            return;
-        }
-        case EndPosition:
-        {
-            for (Vector<SVGChar>::iterator it = start; it != end; ++it) {
-                if (m_atCharacter == m_queryStartPosition) {
-                    unsigned int newOffset = textBox->start() + (it - start) + startOffset;
-
-                    // Take RTL text into account and pick right glyph width/height.
-                    if (textBox->direction() == RTL)
-                        newOffset = textBox->start() + textBox->end() - newOffset;
-
-                    int charsConsumed;
-                    String glyphName;
-                    // calculateGlyph{Height,Width} will consume at least one character. This is the number of characters available
-                    // to them beyond that first one.
-                    int extraCharactersAvailable = end - it - 1;
-                    if (isVerticalText)
-                        m_queryPointResult.move(it->x, it->y + textBox->calculateGlyphHeight(style, newOffset, extraCharactersAvailable));
-                    else
-                        m_queryPointResult.move(it->x + textBox->calculateGlyphWidth(style, newOffset, extraCharactersAvailable, charsConsumed, glyphName), it->y);
-
-                    m_stopProcessing = true;
-                    return;
-                }
-
-                m_atCharacter++;
-            }
-
-            m_stopProcessing = false;
-            return;
-        }
-        case Extent:
-        {
-            for (Vector<SVGChar>::iterator it = start; it != end; ++it) {
-                if (m_atCharacter == m_queryStartPosition) {
-                    unsigned int newOffset = textBox->start() + (it - start) + startOffset;
-                    m_queryRectResult = textBox->calculateGlyphBoundaries(style, newOffset, *it);
-                    m_stopProcessing = true;
-                    return;
-                }
-
-                m_atCharacter++;
-            }
-
-            m_stopProcessing = false;
-            return;
-        }
-        case Rotation:
-        {
-            for (Vector<SVGChar>::iterator it = start; it != end; ++it) {
-                if (m_atCharacter == m_queryStartPosition) {
-                    m_queryFloatResult = it->angle;
-                    m_stopProcessing = true;
-                    return;
-                }
-
-                m_atCharacter++;
-            }
-
-            m_stopProcessing = false;
-            return;
-        }
-        case CharacterNumberAtPosition:
-        {
-            int offset = 0;
-            SVGChar* charAtPos = textBox->closestCharacterToPosition(m_queryPointInput.x(), m_queryPointInput.y(), offset);
-
-            offset += m_atCharacter;
-            if (charAtPos && offset > m_queryLongResult)
-                m_queryLongResult = offset;
-
-            m_atCharacter += end - start;
-            m_stopProcessing = false;
-            return;
-        }
-        default:
-            ASSERT_NOT_REACHED();
-            m_stopProcessing = true;
-            return;
-        }
-    }
-
-    void setQueryInputParameters(long startPosition, long length, FloatPoint referencePoint)
-    {
-        m_queryStartPosition = startPosition;
-        m_queryLength = length;
-        m_queryPointInput = referencePoint;
-    }
-
-    long longResult() const { return m_queryLongResult; }
-    float floatResult() const { return m_queryFloatResult; }
-    FloatPoint pointResult() const { return m_queryPointResult; }
-    FloatRect rectResult() const { return m_queryRectResult; }
-    bool stopProcessing() const { return m_stopProcessing; }
-
-private:
-    const SVGTextContentElement* m_reference;
-    QueryMode m_mode;
-
-    long m_queryStartPosition;
-    long m_queryLength;
-    FloatPoint m_queryPointInput;
-
-    long m_queryLongResult;
-    float m_queryFloatResult;
-    FloatPoint m_queryPointResult;
-    FloatRect m_queryRectResult;
-
-    bool m_stopProcessing;
-    long m_atCharacter;
-};
-
-static Vector<SVGInlineTextBox*> findInlineTextBoxInTextChunks(const SVGTextContentElement* element, const Vector<SVGTextChunk>& chunks)
-{   
-    Vector<SVGTextChunk>::const_iterator it = chunks.begin();
-    const Vector<SVGTextChunk>::const_iterator end = chunks.end();
-
-    Vector<SVGInlineTextBox*> boxes;
-
-    for (; it != end; ++it) {
-        Vector<SVGInlineBoxCharacterRange>::const_iterator boxIt = it->boxes.begin();
-        const Vector<SVGInlineBoxCharacterRange>::const_iterator boxEnd = it->boxes.end();
-
-        for (; boxIt != boxEnd; ++boxIt) {
-            SVGInlineTextBox* textBox = static_cast<SVGInlineTextBox*>(boxIt->box);
-
-            Node* textElement = textBox->textRenderer()->parent()->node();
-            ASSERT(textElement);
-
-            if (textElement == element || textElement->parent() == element)
-                boxes.append(textBox);
-        }
-    }
-
-    return boxes;
-}
-
-static inline SVGRootInlineBox* rootInlineBoxForTextContentElement(const SVGTextContentElement* element)
+PassRefPtr<SVGAnimatedLength> SVGTextContentElement::textLengthAnimated()
 {
-    RenderObject* object = element->renderer();
-    
-    if (!object || !object->isSVGText() || object->isText())
-        return 0;
-
-    RenderBlock* svgText = toRenderBlock(object);
-
-    // Find root inline box
-    SVGRootInlineBox* rootBox = static_cast<SVGRootInlineBox*>(svgText->firstRootBox());
-    if (!rootBox) {
-        // Layout is not sync yet!
-        element->document()->updateLayoutIgnorePendingStylesheets();
-        rootBox = static_cast<SVGRootInlineBox*>(svgText->firstRootBox());
+    DEFINE_STATIC_LOCAL(SVGLength, defaultTextLength, (LengthModeOther));
+    if (m_specifiedTextLength == defaultTextLength) {
+        ExceptionCode ec = 0;
+        m_textLength.value.newValueSpecifiedUnits(LengthTypeNumber, getComputedTextLength(), ec);
+        ASSERT(!ec);
     }
 
-    ASSERT(rootBox);
-    return rootBox;
+    m_textLength.shouldSynchronize = true;
+    return static_pointer_cast<SVGAnimatedLength>(lookupOrCreateTextLengthWrapper(this));
+
 }
 
-static inline SVGInlineTextBoxQueryWalker executeTextQuery(const SVGTextContentElement* element, SVGInlineTextBoxQueryWalker::QueryMode mode,
-                                                           long startPosition = 0, long length = 0, FloatPoint referencePoint = FloatPoint())
-{
-    SVGRootInlineBox* rootBox = rootInlineBoxForTextContentElement(element);
-    if (!rootBox)
-        return SVGInlineTextBoxQueryWalker(0, mode);
-
-    // Find all inline text box associated with our renderer
-    Vector<SVGInlineTextBox*> textBoxes = findInlineTextBoxInTextChunks(element, rootBox->svgTextChunks());
-
-    // Walk text chunks to find chunks associated with our inline text box
-    SVGInlineTextBoxQueryWalker walkerCallback(element, mode);
-    walkerCallback.setQueryInputParameters(startPosition, length, referencePoint);
-
-    SVGTextChunkWalker<SVGInlineTextBoxQueryWalker> walker(&walkerCallback, &SVGInlineTextBoxQueryWalker::chunkPortionCallback);
-
-    Vector<SVGInlineTextBox*>::iterator it = textBoxes.begin();
-    Vector<SVGInlineTextBox*>::iterator end = textBoxes.end();
-
-    for (; it != end; ++it) {
-        rootBox->walkTextChunks(&walker, *it);
-
-        if (walkerCallback.stopProcessing())
-            break;
-    }
-
-    return walkerCallback;
-}
-
-unsigned SVGTextContentElement::getNumberOfChars() const
+unsigned SVGTextContentElement::getNumberOfChars()
 {
     document()->updateLayoutIgnorePendingStylesheets();
-
-    return executeTextQuery(this, SVGInlineTextBoxQueryWalker::NumberOfCharacters).longResult();
+    return SVGTextQuery(renderer()).numberOfCharacters();
 }
 
-float SVGTextContentElement::getComputedTextLength() const
+float SVGTextContentElement::getComputedTextLength()
 {
     document()->updateLayoutIgnorePendingStylesheets();
-
-    return executeTextQuery(this, SVGInlineTextBoxQueryWalker::TextLength).floatResult();
+    return SVGTextQuery(renderer()).textLength();
 }
 
-float SVGTextContentElement::getSubStringLength(unsigned charnum, unsigned nchars, ExceptionCode& ec) const
+float SVGTextContentElement::getSubStringLength(unsigned charnum, unsigned nchars, ExceptionCode& ec)
 {
     document()->updateLayoutIgnorePendingStylesheets();
 
@@ -393,10 +127,10 @@ float SVGTextContentElement::getSubStringLength(unsigned charnum, unsigned nchar
         return 0.0f;
     }
 
-    return executeTextQuery(this, SVGInlineTextBoxQueryWalker::SubStringLength, charnum, nchars).floatResult();
+    return SVGTextQuery(renderer()).subStringLength(charnum, nchars);
 }
 
-FloatPoint SVGTextContentElement::getStartPositionOfChar(unsigned charnum, ExceptionCode& ec) const
+FloatPoint SVGTextContentElement::getStartPositionOfChar(unsigned charnum, ExceptionCode& ec)
 {
     document()->updateLayoutIgnorePendingStylesheets();
 
@@ -405,10 +139,10 @@ FloatPoint SVGTextContentElement::getStartPositionOfChar(unsigned charnum, Excep
         return FloatPoint();
     }
 
-    return executeTextQuery(this, SVGInlineTextBoxQueryWalker::StartPosition, charnum).pointResult();
+    return SVGTextQuery(renderer()).startPositionOfCharacter(charnum);
 }
 
-FloatPoint SVGTextContentElement::getEndPositionOfChar(unsigned charnum, ExceptionCode& ec) const
+FloatPoint SVGTextContentElement::getEndPositionOfChar(unsigned charnum, ExceptionCode& ec)
 {
     document()->updateLayoutIgnorePendingStylesheets();
 
@@ -417,10 +151,10 @@ FloatPoint SVGTextContentElement::getEndPositionOfChar(unsigned charnum, Excepti
         return FloatPoint();
     }
 
-    return executeTextQuery(this, SVGInlineTextBoxQueryWalker::EndPosition, charnum).pointResult();
+    return SVGTextQuery(renderer()).endPositionOfCharacter(charnum);
 }
 
-FloatRect SVGTextContentElement::getExtentOfChar(unsigned charnum, ExceptionCode& ec) const
+FloatRect SVGTextContentElement::getExtentOfChar(unsigned charnum, ExceptionCode& ec)
 {
     document()->updateLayoutIgnorePendingStylesheets();
 
@@ -429,10 +163,10 @@ FloatRect SVGTextContentElement::getExtentOfChar(unsigned charnum, ExceptionCode
         return FloatRect();
     }
 
-    return executeTextQuery(this, SVGInlineTextBoxQueryWalker::Extent, charnum).rectResult();
+    return SVGTextQuery(renderer()).extentOfCharacter(charnum);
 }
 
-float SVGTextContentElement::getRotationOfChar(unsigned charnum, ExceptionCode& ec) const
+float SVGTextContentElement::getRotationOfChar(unsigned charnum, ExceptionCode& ec)
 {
     document()->updateLayoutIgnorePendingStylesheets();
 
@@ -441,17 +175,16 @@ float SVGTextContentElement::getRotationOfChar(unsigned charnum, ExceptionCode& 
         return 0.0f;
     }
 
-    return executeTextQuery(this, SVGInlineTextBoxQueryWalker::Rotation, charnum).floatResult();
+    return SVGTextQuery(renderer()).rotationOfCharacter(charnum);
 }
 
-int SVGTextContentElement::getCharNumAtPosition(const FloatPoint& point) const
+int SVGTextContentElement::getCharNumAtPosition(const FloatPoint& point)
 {
     document()->updateLayoutIgnorePendingStylesheets();
-
-    return executeTextQuery(this, SVGInlineTextBoxQueryWalker::CharacterNumberAtPosition, 0.0f, 0.0f, point).longResult();
+    return SVGTextQuery(renderer()).characterNumberAtPosition(point);
 }
 
-void SVGTextContentElement::selectSubString(unsigned charnum, unsigned nchars, ExceptionCode& ec) const
+void SVGTextContentElement::selectSubString(unsigned charnum, unsigned nchars, ExceptionCode& ec)
 {
     unsigned numberOfChars = getNumberOfChars();
     if (charnum >= numberOfChars) {
@@ -465,12 +198,12 @@ void SVGTextContentElement::selectSubString(unsigned charnum, unsigned nchars, E
     ASSERT(document());
     ASSERT(document()->frame());
 
-    SelectionController* controller = document()->frame()->selection();
-    if (!controller)
+    FrameSelection* selection = document()->frame()->selection();
+    if (!selection)
         return;
 
     // Find selection start
-    VisiblePosition start(const_cast<SVGTextContentElement*>(this), 0, SEL_DEFAULT_AFFINITY);
+    VisiblePosition start(firstPositionInNode(const_cast<SVGTextContentElement*>(this)));
     for (unsigned i = 0; i < charnum; ++i)
         start = start.next();
 
@@ -479,68 +212,126 @@ void SVGTextContentElement::selectSubString(unsigned charnum, unsigned nchars, E
     for (unsigned i = 0; i < nchars; ++i)
         end = end.next();
 
-    controller->setSelection(VisibleSelection(start, end));
+    selection->setSelection(VisibleSelection(start, end));
 }
 
-void SVGTextContentElement::parseMappedAttribute(MappedAttribute* attr)
+bool SVGTextContentElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    if (attr->name() == SVGNames::lengthAdjustAttr) {
-        if (attr->value() == "spacing")
-            setLengthAdjustBaseValue(LENGTHADJUST_SPACING);
-        else if (attr->value() == "spacingAndGlyphs")
-            setLengthAdjustBaseValue(LENGTHADJUST_SPACINGANDGLYPHS);
-    } else if (attr->name() == SVGNames::textLengthAttr) {
-        setTextLengthBaseValue(SVGLength(LengthModeOther, attr->value()));
-        if (textLengthBaseValue().value(this) < 0.0)
-            document()->accessSVGExtensions()->reportError("A negative value for text attribute <textLength> is not allowed");
-    } else {
-        if (SVGTests::parseMappedAttribute(attr))
-            return;
-        if (SVGLangSpace::parseMappedAttribute(attr)) {
-            if (attr->name().matches(XMLNames::spaceAttr)) {
-                DEFINE_STATIC_LOCAL(const AtomicString, preserveString, ("preserve"));
+    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
+    if (supportedAttributes.isEmpty()) {
+        SVGTests::addSupportedAttributes(supportedAttributes);
+        SVGLangSpace::addSupportedAttributes(supportedAttributes);
+        SVGExternalResourcesRequired::addSupportedAttributes(supportedAttributes);
+        supportedAttributes.add(SVGNames::lengthAdjustAttr);
+        supportedAttributes.add(SVGNames::textLengthAttr);
+    }
+    return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
+}
 
-                if (attr->value() == preserveString)
-                    addCSSProperty(attr, CSSPropertyWhiteSpace, CSSValuePre);
-                else
-                    addCSSProperty(attr, CSSPropertyWhiteSpace, CSSValueNowrap);
-            }
-            return;
-        }
-        if (SVGExternalResourcesRequired::parseMappedAttribute(attr))
-            return;
+bool SVGTextContentElement::isPresentationAttribute(const QualifiedName& name) const
+{
+    if (name.matches(XMLNames::spaceAttr))
+        return true;
+    return SVGStyledElement::isPresentationAttribute(name);
+}
 
-        SVGStyledElement::parseMappedAttribute(attr);
+void SVGTextContentElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
+{
+    if (!isSupportedAttribute(attr->name()))
+        SVGStyledElement::collectStyleForAttribute(attr, style);
+    else if (attr->name().matches(XMLNames::spaceAttr)) {
+        DEFINE_STATIC_LOCAL(const AtomicString, preserveString, ("preserve"));
+
+        if (attr->value() == preserveString)
+            addPropertyToAttributeStyle(style, CSSPropertyWhiteSpace, CSSValuePre);
+        else
+            addPropertyToAttributeStyle(style, CSSPropertyWhiteSpace, CSSValueNowrap);
     }
 }
 
-void SVGTextContentElement::synchronizeProperty(const QualifiedName& attrName)
+void SVGTextContentElement::parseAttribute(Attribute* attr)
 {
-    SVGStyledElement::synchronizeProperty(attrName);
+    SVGParsingError parseError = NoError;
 
-    if (attrName == anyQName()) {
-        synchronizeLengthAdjust();
-        synchronizeTextLength();
-        synchronizeExternalResourcesRequired();
+    if (!isSupportedAttribute(attr->name()))
+        SVGStyledElement::parseAttribute(attr);
+    else if (attr->name() == SVGNames::lengthAdjustAttr) {
+        SVGLengthAdjustType propertyValue = SVGPropertyTraits<SVGLengthAdjustType>::fromString(attr->value());
+        if (propertyValue > 0)
+            setLengthAdjustBaseValue(propertyValue);
+    } else if (attr->name() == SVGNames::textLengthAttr) {
+        m_textLength.value = SVGLength::construct(LengthModeOther, attr->value(), parseError, ForbidNegativeLengths);
+    } else if (SVGTests::parseAttribute(attr)
+               || SVGExternalResourcesRequired::parseAttribute(attr)) {
+    } else if (SVGLangSpace::parseAttribute(attr)) {
+    } else
+        ASSERT_NOT_REACHED();
+
+    reportAttributeParsingError(parseError, attr);
+}
+
+void SVGTextContentElement::svgAttributeChanged(const QualifiedName& attrName)
+{
+    if (!isSupportedAttribute(attrName)) {
+        SVGStyledElement::svgAttributeChanged(attrName);
         return;
     }
 
-    if (attrName == SVGNames::lengthAdjustAttr)
-        synchronizeLengthAdjust();
-    else if (attrName == SVGNames::textLengthAttr)
-        synchronizeTextLength();
-    else if (SVGExternalResourcesRequired::isKnownAttribute(attrName))
-        synchronizeExternalResourcesRequired();
+    SVGElementInstance::InvalidationGuard invalidationGuard(this);
+
+    if (SVGTests::handleAttributeChange(this, attrName))
+        return;
+
+    if (attrName == SVGNames::textLengthAttr)
+        m_specifiedTextLength = m_textLength.value;
+
+    if (RenderObject* renderer = this->renderer())
+        RenderSVGResource::markForLayoutAndParentResourceInvalidation(renderer);
 }
 
-bool SVGTextContentElement::isKnownAttribute(const QualifiedName& attrName)
+bool SVGTextContentElement::selfHasRelativeLengths() const
 {
-    return (attrName.matches(SVGNames::lengthAdjustAttr) ||
-            attrName.matches(SVGNames::textLengthAttr) ||
-            SVGTests::isKnownAttribute(attrName) ||
-            SVGLangSpace::isKnownAttribute(attrName) ||
-            SVGExternalResourcesRequired::isKnownAttribute(attrName) ||
-            SVGStyledElement::isKnownAttribute(attrName));
+    // Any element of the <text> subtree is advertized as using relative lengths.
+    // On any window size change, we have to relayout the text subtree, as the
+    // effective 'on-screen' font size may change.
+    return true;
+}
+
+SVGTextContentElement* SVGTextContentElement::elementFromRenderer(RenderObject* renderer)
+{
+    if (!renderer)
+        return 0;
+
+    if (!renderer->isSVGText() && !renderer->isSVGInline())
+        return 0;
+
+    Node* node = renderer->node();
+    ASSERT(node);
+    ASSERT(node->isSVGElement());
+
+    if (!node->hasTagName(SVGNames::textTag)
+        && !node->hasTagName(SVGNames::tspanTag)
+#if ENABLE(SVG_FONTS)
+        && !node->hasTagName(SVGNames::altGlyphTag)
+#endif
+        && !node->hasTagName(SVGNames::trefTag)
+        && !node->hasTagName(SVGNames::textPathTag))
+        return 0;
+
+    return static_cast<SVGTextContentElement*>(node);
+}
+
+void SVGTextContentElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
+{
+    SVGStyledElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+
+    if (changedByParser || !renderer())
+        return;
+
+    // Invalidate the TextPosition cache in SVGTextLayoutAttributesBuilder as it may now point
+    // to no-longer existing SVGTextPositioningElements and thus needs to be rebuilt.
+    if (RenderSVGText* textRenderer = RenderSVGText::locateRenderSVGTextAncestor(renderer()))
+        textRenderer->invalidateTextPositioningElements();
 }
 
 }

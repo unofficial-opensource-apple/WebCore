@@ -26,29 +26,37 @@
 #ifndef NetworkStateNotifier_h
 #define NetworkStateNotifier_h
 
+#include <wtf/FastAllocBase.h>
 #include <wtf/Noncopyable.h>
 
 
 namespace WebCore {
 
-#if (PLATFORM(QT) && ENABLE(QT_BEARER))
+#if (PLATFORM(QT) && !defined(QT_NO_BEARERMANAGEMENT))
 class NetworkStateNotifierPrivate;
 #endif
 
-class NetworkStateNotifier : public Noncopyable {
+class NetworkStateNotifier {
+    WTF_MAKE_NONCOPYABLE(NetworkStateNotifier); WTF_MAKE_FAST_ALLOCATED;
 public:
     NetworkStateNotifier();
     void setNetworkStateChangedFunction(void (*)());
-    
+
     bool onLine() const { return m_isOnLine; }
     
     void setIsOnLine(bool isOnLine);
 
-#if (PLATFORM(QT) && ENABLE(QT_BEARER))
+#if (PLATFORM(QT) && !defined(QT_NO_BEARERMANAGEMENT))
     void setNetworkAccessAllowed(bool);
+#elif PLATFORM(CHROMIUM) || PLATFORM(EFL)
+    void setOnLine(bool);
 #endif
 
-private:    
+#if PLATFORM(BLACKBERRY)
+    void networkStateChange(bool online);
+#endif
+
+private:
     bool m_isOnLine;
     void (*m_networkStateChangedFunction)();
 
@@ -56,9 +64,20 @@ private:
 
 };
 
+#if !PLATFORM(MAC) && !PLATFORM(WIN) && !(PLATFORM(QT) && !defined(QT_NO_BEARERMANAGEMENT)) && !PLATFORM(BLACKBERRY)
+
+inline NetworkStateNotifier::NetworkStateNotifier()
+    : m_isOnLine(true)
+    , m_networkStateChangedFunction(0)
+{
+}
+
+inline void NetworkStateNotifier::updateState() { }
+
+#endif
 
 NetworkStateNotifier& networkStateNotifier();
-    
+
 };
 
 #endif // NetworkStateNotifier_h

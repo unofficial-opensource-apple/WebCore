@@ -1,174 +1,159 @@
 /*
-    Copyright (C) 2004, 2005, 2006, 2008 Nikolas Zimmermann <zimmermann@kde.org>
-                  2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
-                  2008 Eric Seidel <eric@webkit.org>
-                  2008 Dirk Schulze <krit@webkit.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005, 2006, 2008 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
+ * Copyright (C) 2008 Eric Seidel <eric@webkit.org>
+ * Copyright (C) 2008 Dirk Schulze <krit@webkit.org>
+ * Copyright (C) Research In Motion Limited 2010. All rights reserved.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
 
 #if ENABLE(SVG)
 #include "SVGLinearGradientElement.h"
 
+#include "Attribute.h"
 #include "Document.h"
 #include "FloatPoint.h"
 #include "LinearGradientAttributes.h"
-#include "MappedAttribute.h"
+#include "RenderSVGResourceLinearGradient.h"
+#include "SVGElementInstance.h"
 #include "SVGLength.h"
 #include "SVGNames.h"
-#include "SVGPaintServerLinearGradient.h"
 #include "SVGTransform.h"
 #include "SVGTransformList.h"
 #include "SVGUnitTypes.h"
 
 namespace WebCore {
 
-SVGLinearGradientElement::SVGLinearGradientElement(const QualifiedName& tagName, Document* doc)
-    : SVGGradientElement(tagName, doc)
+// Animated property definitions
+DEFINE_ANIMATED_LENGTH(SVGLinearGradientElement, SVGNames::x1Attr, X1, x1)
+DEFINE_ANIMATED_LENGTH(SVGLinearGradientElement, SVGNames::y1Attr, Y1, y1)
+DEFINE_ANIMATED_LENGTH(SVGLinearGradientElement, SVGNames::x2Attr, X2, x2)
+DEFINE_ANIMATED_LENGTH(SVGLinearGradientElement, SVGNames::y2Attr, Y2, y2)
+
+BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGLinearGradientElement)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(x1)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(y1)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(x2)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(y2)
+    REGISTER_PARENT_ANIMATED_PROPERTIES(SVGGradientElement)
+END_REGISTER_ANIMATED_PROPERTIES
+
+inline SVGLinearGradientElement::SVGLinearGradientElement(const QualifiedName& tagName, Document* document)
+    : SVGGradientElement(tagName, document)
     , m_x1(LengthModeWidth)
     , m_y1(LengthModeHeight)
     , m_x2(LengthModeWidth, "100%")
     , m_y2(LengthModeHeight)
 {
     // Spec: If the x2 attribute is not specified, the effect is as if a value of "100%" were specified.
+    ASSERT(hasTagName(SVGNames::linearGradientTag));
+    registerAnimatedPropertiesForSVGLinearGradientElement();
 }
 
-SVGLinearGradientElement::~SVGLinearGradientElement()
+PassRefPtr<SVGLinearGradientElement> SVGLinearGradientElement::create(const QualifiedName& tagName, Document* document)
 {
+    return adoptRef(new SVGLinearGradientElement(tagName, document));
 }
 
-void SVGLinearGradientElement::parseMappedAttribute(MappedAttribute* attr)
+bool SVGLinearGradientElement::isSupportedAttribute(const QualifiedName& attrName)
 {
-    if (attr->name() == SVGNames::x1Attr)
-        setX1BaseValue(SVGLength(LengthModeWidth, attr->value()));
+    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
+    if (supportedAttributes.isEmpty()) {
+        supportedAttributes.add(SVGNames::x1Attr);
+        supportedAttributes.add(SVGNames::x2Attr);
+        supportedAttributes.add(SVGNames::y1Attr);
+        supportedAttributes.add(SVGNames::y2Attr);
+    }
+    return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
+}
+
+void SVGLinearGradientElement::parseAttribute(Attribute* attr)
+{
+    SVGParsingError parseError = NoError;
+
+    if (!isSupportedAttribute(attr->name()))
+        SVGGradientElement::parseAttribute(attr);
+    else if (attr->name() == SVGNames::x1Attr)
+        setX1BaseValue(SVGLength::construct(LengthModeWidth, attr->value(), parseError));
     else if (attr->name() == SVGNames::y1Attr)
-        setY1BaseValue(SVGLength(LengthModeHeight, attr->value()));
+        setY1BaseValue(SVGLength::construct(LengthModeHeight, attr->value(), parseError));
     else if (attr->name() == SVGNames::x2Attr)
-        setX2BaseValue(SVGLength(LengthModeWidth, attr->value()));
+        setX2BaseValue(SVGLength::construct(LengthModeWidth, attr->value(), parseError));
     else if (attr->name() == SVGNames::y2Attr)
-        setY2BaseValue(SVGLength(LengthModeHeight, attr->value()));
+        setY2BaseValue(SVGLength::construct(LengthModeHeight, attr->value(), parseError));
     else
-        SVGGradientElement::parseMappedAttribute(attr);
+        ASSERT_NOT_REACHED();
+
+    reportAttributeParsingError(parseError, attr);
 }
 
 void SVGLinearGradientElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    SVGGradientElement::svgAttributeChanged(attrName);
-
-    if (!m_resource)
-        return;
-
-    if (attrName == SVGNames::x1Attr || attrName == SVGNames::y1Attr ||
-        attrName == SVGNames::x2Attr || attrName == SVGNames::y2Attr)
-        m_resource->invalidate();
-}
-
-void SVGLinearGradientElement::synchronizeProperty(const QualifiedName& attrName)
-{
-    SVGGradientElement::synchronizeProperty(attrName);
-
-    if (attrName == anyQName()) {
-        synchronizeX1();
-        synchronizeY1();
-        synchronizeX2();
-        synchronizeY2();
+    if (!isSupportedAttribute(attrName)) {
+        SVGGradientElement::svgAttributeChanged(attrName);
         return;
     }
 
-    if (attrName == SVGNames::x1Attr)
-        synchronizeX1();
-    else if (attrName == SVGNames::y1Attr)
-        synchronizeY1();
-    else if (attrName == SVGNames::x2Attr)
-        synchronizeX2();
-    else if (attrName == SVGNames::y2Attr)
-        synchronizeY2();
+    SVGElementInstance::InvalidationGuard invalidationGuard(this);
+    
+    updateRelativeLengthsInformation();
+
+    if (RenderObject* object = renderer())
+        object->setNeedsLayout(true);
 }
 
-void SVGLinearGradientElement::buildGradient() const
+RenderObject* SVGLinearGradientElement::createRenderer(RenderArena* arena, RenderStyle*)
 {
-    LinearGradientAttributes attributes = collectGradientProperties();
-
-    RefPtr<SVGPaintServerLinearGradient> linearGradient = WTF::static_pointer_cast<SVGPaintServerLinearGradient>(m_resource);
-
-    FloatPoint startPoint;
-    FloatPoint endPoint;
-    if (attributes.boundingBoxMode()) {
-        startPoint = FloatPoint(attributes.x1().valueAsPercentage(), attributes.y1().valueAsPercentage());
-        endPoint = FloatPoint(attributes.x2().valueAsPercentage(), attributes.y2().valueAsPercentage());
-    } else {
-        startPoint = FloatPoint(attributes.x1().value(this), attributes.y1().value(this));
-        endPoint = FloatPoint(attributes.x2().value(this), attributes.y2().value(this));
-    }
-
-    RefPtr<Gradient> gradient = Gradient::create(startPoint, endPoint);
-    gradient->setSpreadMethod(attributes.spreadMethod());
-
-    Vector<SVGGradientStop> m_stops = attributes.stops();
-    float previousOffset = 0.0f;
-    for (unsigned i = 0; i < m_stops.size(); ++i) {
-        float offset = std::min(std::max(previousOffset, m_stops[i].first), 1.0f);
-        previousOffset = offset;
-        gradient->addColorStop(offset, m_stops[i].second);
-    }
-
-    linearGradient->setGradient(gradient);
-
-    if (attributes.stops().isEmpty())
-        return;
-
-    // This code should go away.  PaintServers should go away too.
-    // Only this code should care about bounding boxes
-    linearGradient->setBoundingBoxMode(attributes.boundingBoxMode());
-    linearGradient->setGradientStops(attributes.stops());
-
-    // These should possibly be supported on Gradient
-    linearGradient->setGradientTransform(attributes.gradientTransform());
-    linearGradient->setGradientStart(startPoint);
-    linearGradient->setGradientEnd(endPoint);
+    return new (arena) RenderSVGResourceLinearGradient(this);
 }
 
-LinearGradientAttributes SVGLinearGradientElement::collectGradientProperties() const
+bool SVGLinearGradientElement::collectGradientAttributes(LinearGradientAttributes& attributes)
 {
-    LinearGradientAttributes attributes;
-    HashSet<const SVGGradientElement*> processedGradients;
+    HashSet<SVGGradientElement*> processedGradients;
 
     bool isLinear = true;
-    const SVGGradientElement* current = this;
+    SVGGradientElement* current = this;
 
     while (current) {
+        if (!current->renderer())
+            return false;
+
         if (!attributes.hasSpreadMethod() && current->hasAttribute(SVGNames::spreadMethodAttr))
-            attributes.setSpreadMethod((GradientSpreadMethod) current->spreadMethod());
+            attributes.setSpreadMethod(current->spreadMethod());
 
-        if (!attributes.hasBoundingBoxMode() && current->hasAttribute(SVGNames::gradientUnitsAttr))
-            attributes.setBoundingBoxMode(current->gradientUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX);
+        if (!attributes.hasGradientUnits() && current->hasAttribute(SVGNames::gradientUnitsAttr))
+            attributes.setGradientUnits(current->gradientUnits());
 
-        if (!attributes.hasGradientTransform() && current->hasAttribute(SVGNames::gradientTransformAttr))
-            attributes.setGradientTransform(current->gradientTransform()->consolidate().matrix());
+        if (!attributes.hasGradientTransform() && current->hasAttribute(SVGNames::gradientTransformAttr)) {
+            AffineTransform transform;
+            current->gradientTransform().concatenate(transform);
+            attributes.setGradientTransform(transform);
+        }
 
         if (!attributes.hasStops()) {
-            const Vector<SVGGradientStop>& stops(current->buildStops());
+            const Vector<Gradient::ColorStop>& stops(current->buildStops());
             if (!stops.isEmpty())
                 attributes.setStops(stops);
         }
 
         if (isLinear) {
-            const SVGLinearGradientElement* linear = static_cast<const SVGLinearGradientElement*>(current);
+            SVGLinearGradientElement* linear = static_cast<SVGLinearGradientElement*>(current);
 
             if (!attributes.hasX1() && current->hasAttribute(SVGNames::x1Attr))
                 attributes.setX1(linear->x1());
@@ -186,20 +171,30 @@ LinearGradientAttributes SVGLinearGradientElement::collectGradientProperties() c
         processedGradients.add(current);
 
         // Respect xlink:href, take attributes from referenced element
-        Node* refNode = ownerDocument()->getElementById(SVGURIReference::getTarget(current->href()));
+        Node* refNode = SVGURIReference::targetElementFromIRIString(current->href(), document());
         if (refNode && (refNode->hasTagName(SVGNames::linearGradientTag) || refNode->hasTagName(SVGNames::radialGradientTag))) {
-            current = static_cast<const SVGGradientElement*>(const_cast<const Node*>(refNode));
+            current = static_cast<SVGGradientElement*>(refNode);
 
             // Cycle detection
-            if (processedGradients.contains(current))
-                return LinearGradientAttributes();
+            if (processedGradients.contains(current)) {
+                current = 0;
+                break;
+            }
 
-            isLinear = current->gradientType() == LinearGradientPaintServer;
+            isLinear = current->hasTagName(SVGNames::linearGradientTag);
         } else
             current = 0;
     }
 
-    return attributes;
+    return true;
+}
+
+bool SVGLinearGradientElement::selfHasRelativeLengths() const
+{
+    return x1().isRelative()
+        || y1().isRelative()
+        || x2().isRelative()
+        || y2().isRelative();
 }
 
 }

@@ -53,7 +53,7 @@ Pasteboard* Pasteboard::generalPasteboard()
 void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
     if (wxTheClipboard->Open()) {
-        wxTheClipboard->SetData( new wxTextDataObject(frame->selectedText()) );
+        wxTheClipboard->SetData( new wxTextDataObject(frame->editor()->selectedText()) );
         wxTheClipboard->Close();
     }
 }
@@ -103,6 +103,11 @@ void Pasteboard::writeURL(const KURL& url, const String&, Frame*)
         wxTheClipboard->SetData( new wxTextDataObject( url.string() ) );
         wxTheClipboard->Close();
     }
+}
+
+void Pasteboard::writeClipboard(Clipboard*)
+{
+    notImplemented();
 }
 
 void Pasteboard::clear()

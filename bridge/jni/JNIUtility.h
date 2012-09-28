@@ -26,35 +26,19 @@
 #ifndef JNIUtility_h
 #define JNIUtility_h
 
-#if ENABLE(MAC_JAVA_BRIDGE)
+#if ENABLE(JAVA_BRIDGE)
 
+#include "JavaType.h"
+
+#if OS(MAC_OS_X)
 #include <JavaVM/jni.h>
-
-// The order of these items can not be modified as they are tightly
-// bound with the JVM on Mac OSX. If new types need to be added, they
-// should be added to the end. It is used in jni_obc.mm when calling
-// through to the JVM. Newly added items need to be made compatible
-// in that file.
-typedef enum {
-    invalid_type = 0,
-    void_type,
-    object_type,
-    boolean_type,
-    byte_type,
-    char_type,
-    short_type,
-    int_type,
-    long_type,
-    float_type,
-    double_type,
-    array_type
-} JNIType;
+#else
+#include <jni.h>
+#endif
 
 namespace JSC {
 
 namespace Bindings {
-
-class JavaParameter;
 
 const char* getCharactersFromJString(jstring);
 void releaseCharactersForJString(jstring, const char*);
@@ -64,11 +48,12 @@ void releaseCharactersForJStringInEnv(JNIEnv*, jstring, const char*);
 const jchar* getUCharactersFromJStringInEnv(JNIEnv*, jstring);
 void releaseUCharactersForJStringInEnv(JNIEnv*, jstring, const jchar*);
 
-JNIType JNITypeFromClassName(const char* name);
-JNIType JNITypeFromPrimitiveType(char type);
-const char* signatureFromPrimitiveType(JNIType);
+JavaType javaTypeFromClassName(const char* name);
+JavaType javaTypeFromPrimitiveType(char type);
+const char* signatureFromJavaType(JavaType);
 
-jvalue getJNIField(jobject, JNIType, const char* name, const char* signature);
+jvalue getJNIField(jobject, JavaType, const char* name, const char* signature);
+jvalue callJNIMethod(jobject, JavaType returnType, const char* name, const char* signature, jvalue* args);
 
 jmethodID getMethodID(jobject, const char* name, const char* sig);
 JNIEnv* getJNIEnv();
@@ -212,14 +197,14 @@ static T callJNIMethodV(jobject obj, const char* name, const char* sig, va_list 
                 env->DeleteLocalRef(cls);
                 return JNICaller<T>::callV(obj, mid, args);
             }
-            fprintf(stderr, "%s: Could not find method: %s for %p\n", __PRETTY_FUNCTION__, name, obj);
+            LOG_ERROR("Could not find method: %s for %p", name, obj);
             env->ExceptionDescribe();
             env->ExceptionClear();
             fprintf(stderr, "\n");
 
             env->DeleteLocalRef(cls);
         } else
-            fprintf(stderr, "%s: Could not find class for %p\n", __PRETTY_FUNCTION__, obj);
+            LOG_ERROR("Could not find class for %p", obj);
     }
 
     return 0;
@@ -254,7 +239,7 @@ T callJNIStaticMethod(jclass cls, const char* methodName, const char* methodSign
         if (mid)
             result = JNICaller<T>::callStaticV(cls, mid, args);
         else {
-            fprintf(stderr, "%s: Could not find method: %s for %p\n", __PRETTY_FUNCTION__, methodName, cls);
+            LOG_ERROR("Could not find method: %s for %p", methodName, cls);
             env->ExceptionDescribe();
             env->ExceptionClear();
             fprintf(stderr, "\n");
@@ -270,6 +255,6 @@ T callJNIStaticMethod(jclass cls, const char* methodName, const char* methodSign
 
 } // namespace JSC
 
-#endif // ENABLE(MAC_JAVA_BRIDGE)
+#endif // ENABLE(JAVA_BRIDGE)
 
 #endif // JNIUtility_h

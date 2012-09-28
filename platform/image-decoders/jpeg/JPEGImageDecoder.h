@@ -37,29 +37,30 @@ namespace WebCore {
     // This class decodes the JPEG image format.
     class JPEGImageDecoder : public ImageDecoder {
     public:
-        JPEGImageDecoder();
-        ~JPEGImageDecoder();
+        JPEGImageDecoder(ImageSource::AlphaOption, ImageSource::GammaAndColorProfileOption);
+        virtual ~JPEGImageDecoder();
 
+        // ImageDecoder
         virtual String filenameExtension() const { return "jpg"; }
-
-        // Take the data and store it.
-        virtual void setData(SharedBuffer* data, bool allDataReceived);
-
-        // Whether or not the size information has been decoded yet.
         virtual bool isSizeAvailable();
-
         virtual bool setSize(unsigned width, unsigned height);
-
-        virtual RGBA32Buffer* frameBufferAtIndex(size_t index);
-        
-        virtual bool supportsAlpha() const { return false; }
-
-        void decode(bool sizeOnly = false);
+        virtual ImageFrame* frameBufferAtIndex(size_t index);
+        // CAUTION: setFailed() deletes |m_reader|.  Be careful to avoid
+        // accessing deleted memory, especially when calling this from inside
+        // JPEGImageReader!
+        virtual bool setFailed();
 
         bool outputScanlines();
         void jpegComplete();
 
+        void setColorProfile(const ColorProfile& colorProfile) { m_colorProfile = colorProfile; }
+
     private:
+        // Decodes the image.  If |onlySize| is true, stops decoding after
+        // calculating the image size.  If decoding fails but there is no more
+        // data coming, sets the "decode failure" flag.
+        void decode(bool onlySize);
+
         OwnPtr<JPEGImageReader> m_reader;
     };
 

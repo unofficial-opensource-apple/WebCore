@@ -29,22 +29,17 @@
 #include "JSDOMWindow.h"
 #include <runtime/JSGlobalData.h>
 #include <runtime/JSLock.h>
-#include <runtime/Collector.h>
+#include <heap/Heap.h>
 #include <wtf/StdLibExtras.h>
-
-#if USE(PTHREADS)
-#include <pthread.h>
-#endif
 
 using namespace JSC;
 
 namespace WebCore {
 
-static void* collect(void*)
+static void collect(void*)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     JSDOMWindow::commonJSGlobalData()->heap.collectAllGarbage();
-    return 0;
 }
 
 GCController& gcController()
@@ -54,37 +49,80 @@ GCController& gcController()
 }
 
 GCController::GCController()
+#if !USE(CF)
     : m_GCTimer(this, &GCController::gcTimerFired)
+#endif
 {
 }
 
 void GCController::garbageCollectSoon()
 {
+    // We only use reportAbandonedObjectGraph on systems with CoreFoundation 
+    // since it uses a runloop-based timer that is currently only available on 
+    // systems with CoreFoundation. If and when the notion of a run loop is pushed 
+    // down into WTF so that more platforms can take advantage of it, we will be 
+    // able to use reportAbandonedObjectGraph on more platforms.
+#if USE(CF)
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
+    JSDOMWindow::commonJSGlobalData()->heap.reportAbandonedObjectGraph();
+#else
     if (!m_GCTimer.isActive())
-        m_GCTimer.startOneShot(0.5);
+        m_GCTimer.startOneShot(0);
+#endif
 }
 
+#if !USE(CF)
 void GCController::gcTimerFired(Timer<GCController>*)
 {
     collect(0);
 }
+#endif
 
 void GCController::garbageCollectNow()
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
+    // If JavaScript was never run in this process, there's no need to call GC which will
+    // end up creating a JSGlobalData unnecessarily.
+    if (!JSDOMWindow::commonJSGlobalDataExists())
+        return;
     if (!JSDOMWindow::commonJSGlobalData()->heap.isBusy())
-        collect(0);
+        JSDOMWindow::commonJSGlobalData()->heap.collectAllGarbage();
 }
 
 void GCController::garbageCollectOnAlternateThreadForDebugging(bool waitUntilDone)
 {
-#if USE(PTHREADS)
-    pthread_t thread;
-    pthread_create(&thread, NULL, collect, NULL);
+    ThreadIdentifier threadID = createThread(collect, 0, "WebCore: GCController");
 
-    if (waitUntilDone)
-        pthread_join(thread, NULL);
-#endif
+    if (waitUntilDone) {
+        waitForThreadCompletion(threadID);
+        return;
+    }
+
+    detachThread(threadID);
+}
+
+void GCController::releaseExecutableMemory()
+{
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
+
+    if (!JSDOMWindow::commonJSGlobalDataExists())
+        return;
+
+    // We shouldn't have any javascript running on our stack when this function is called. The
+    // following line asserts that.
+    ASSERT(!JSDOMWindow::commonJSGlobalData()->dynamicGlobalObject);
+
+    // But be safe in release builds just in case...
+    if (JSDOMWindow::commonJSGlobalData()->dynamicGlobalObject)
+        return;
+
+    JSDOMWindow::commonJSGlobalData()->releaseExecutableMemory();
+}
+
+void GCController::discardAllCompiledCode()
+{
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
+    JSDOMWindow::commonJSGlobalData()->heap.discardAllCompiledCode();
 }
 
 } // namespace WebCore

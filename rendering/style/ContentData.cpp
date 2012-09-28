@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,75 +22,68 @@
 #include "config.h"
 #include "ContentData.h"
 
-#include "CounterContent.h"
-#include "StringImpl.h"
 #include "StyleImage.h"
 
 namespace WebCore {
 
-void ContentData::clear()
+PassOwnPtr<ContentData> ContentData::create(PassRefPtr<StyleImage> image)
 {
-    deleteContent();
-
-    ContentData* n = m_next;
-    m_next = 0;
-
-    // Reverse the list so we can delete without recursing.
-    ContentData* last = 0;
-    ContentData* c;
-    while ((c = n)) {
-        n = c->m_next;
-        c->m_next = last;
-        last = c;
-    }
-    for (c = last; c; c = n) {
-        n = c->m_next;
-        c->m_next = 0;
-        delete c;
-    }
+    return adoptPtr(new ImageContentData(image));
 }
 
-bool ContentData::dataEquivalent(const ContentData& other) const
+PassOwnPtr<ContentData> ContentData::create(const String& text)
 {
-    if (type() != other.type())
+    return adoptPtr(new TextContentData(text));
+}
+
+PassOwnPtr<ContentData> ContentData::create(PassOwnPtr<CounterContent> counter)
+{
+    return adoptPtr(new CounterContentData(counter));
+}
+
+PassOwnPtr<ContentData> ContentData::create(QuoteType quote)
+{
+    return adoptPtr(new QuoteContentData(quote));
+}
+
+PassOwnPtr<ContentData> ContentData::clone() const
+{
+    OwnPtr<ContentData> result = cloneInternal();
+    
+    ContentData* lastNewData = result.get();
+    for (const ContentData* contentData = next(); contentData; contentData = contentData->next()) {
+        OwnPtr<ContentData> newData = contentData->cloneInternal();
+        lastNewData->setNext(newData.release());
+        lastNewData = lastNewData->next();
+    }
+        
+    return result.release();
+}
+
+bool operator==(const ContentData& a, const ContentData& b)
+{
+    if (a.type() != b.type())
         return false;
 
-    switch (type()) {
-        case CONTENT_NONE:
-            return true;
-            break;
-        case CONTENT_TEXT:
-            return equal(text(), other.text());
-            break;
-        case CONTENT_OBJECT:
-            return StyleImage::imagesEquivalent(image(), other.image());
-            break;
-        case CONTENT_COUNTER:
-            return *counter() == *other.counter();
-            break;
+    switch (a.type()) {
+    case CONTENT_NONE:
+        return true;
+    case CONTENT_OBJECT:
+        return static_cast<const ImageContentData*>(&a)->image() == static_cast<const ImageContentData*>(&b)->image();
+    case CONTENT_TEXT:
+        return static_cast<const TextContentData*>(&a)->text() == static_cast<const TextContentData*>(&b)->text();
+    case CONTENT_COUNTER:
+        return static_cast<const CounterContentData*>(&a)->counter() == static_cast<const CounterContentData*>(&b)->counter();
+    case CONTENT_QUOTE:
+        return static_cast<const QuoteContentData*>(&a)->quote() == static_cast<const QuoteContentData*>(&b)->quote();
     }
-
     ASSERT_NOT_REACHED();
     return false;
 }
 
-void ContentData::deleteContent()
+bool operator!=(const ContentData& a, const ContentData& b)
 {
-    switch (m_type) {
-        case CONTENT_NONE:
-            break;
-        case CONTENT_OBJECT:
-            m_content.m_image->deref();
-            break;
-        case CONTENT_TEXT:
-            m_content.m_text->deref();
-            break;
-        case CONTENT_COUNTER:
-            delete m_content.m_counter;
-            break;
-    }
-
-    m_type = CONTENT_NONE;
+    return !(a == b);
 }
 
 } // namespace WebCore

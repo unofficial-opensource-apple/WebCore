@@ -34,37 +34,16 @@ namespace WebCore {
         RenderSlider(HTMLInputElement*);
         virtual ~RenderSlider();
 
-        void forwardEvent(Event*);
         bool inDragMode() const;
-        IntRect thumbRect();
 
     private:
         virtual const char* renderName() const { return "RenderSlider"; }
         virtual bool isSlider() const { return true; }
 
-        virtual int baselinePosition(bool, bool) const;
-        virtual void calcPrefWidths();
+        virtual LayoutUnit baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
+        virtual void computePreferredLogicalWidths();
+        virtual bool requiresForcedStyleRecalcPropagation() const { return true; }
         virtual void layout();
-        virtual void updateFromElement();
-
-        bool mouseEventIsInThumb(MouseEvent*);
-        FloatPoint mouseEventOffsetToThumb(MouseEvent*);
-
-        void setValueForPosition(int position);
-        void setPositionFromValue();
-        int positionForOffset(const IntPoint&);
-
-        int currentPosition();
-
-        virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
-
-        PassRefPtr<RenderStyle> createThumbStyle(const RenderStyle* parentStyle);
-
-        int trackSize();
-
-        RefPtr<SliderThumbElement> m_thumb;
-
-        friend class SliderThumbElement;
     };
 
     inline RenderSlider* toRenderSlider(RenderObject* object)

@@ -29,21 +29,22 @@
 #ifndef FormDataStreamMac_h
 #define FormDataStreamMac_h
 
-#include "FormData.h"
+#if !USE(CFNETWORK)
 
+#include <wtf/Forward.h>
+
+@class NSInputStream;
 @class NSMutableURLRequest;
 
 namespace WebCore {
 
     class FormData;
-    class ResourceHandle;
 
     void setHTTPBody(NSMutableURLRequest *, PassRefPtr<FormData>);
     FormData* httpBodyFromStream(NSInputStream *);
 
-    void associateStreamWithResourceHandle(NSInputStream *, ResourceHandle*);
-    void disassociateStreamWithResourceHandle(NSInputStream *);
-
 } // namespace WebCore
+
+#endif // !USE(CFNETWORK)
 
 #endif // FormDataStreamMac_h

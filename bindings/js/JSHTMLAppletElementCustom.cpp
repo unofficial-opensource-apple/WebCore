@@ -45,22 +45,12 @@ bool JSHTMLAppletElement::getOwnPropertyDescriptorDelegate(ExecState* exec, cons
 
 bool JSHTMLAppletElement::putDelegate(ExecState* exec, const Identifier& propertyName, JSValue value, PutPropertySlot& slot)
 {
-    return runtimeObjectCustomPut(exec, propertyName, value, impl(), slot);
+    return runtimeObjectCustomPut(exec, propertyName, value, this, slot);
 }
 
-CallType JSHTMLAppletElement::getCallData(CallData& callData)
+CallType JSHTMLAppletElement::getCallData(JSCell* cell, CallData& callData)
 {
-    return runtimeObjectGetCallData(impl(), callData);
-}
-
-bool JSHTMLAppletElement::canGetItemsForName(ExecState*, HTMLAppletElement*, const Identifier& propertyName)
-{
-    return propertyName == "__apple_runtime_object";
-}
-
-JSValue JSHTMLAppletElement::nameGetter(ExecState* exec, const Identifier& propertyName, const PropertySlot& slot)
-{
-    return runtimeObjectGetter(exec, propertyName, slot);
+    return runtimeObjectGetCallData(jsCast<JSHTMLAppletElement*>(cell), callData);
 }
 
 } // namespace WebCore

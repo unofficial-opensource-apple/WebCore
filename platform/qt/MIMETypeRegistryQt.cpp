@@ -29,6 +29,9 @@
 #include "config.h"
 #include "MIMETypeRegistry.h"
 
+#include <wtf/Assertions.h>
+#include <wtf/MainThread.h>
+
 namespace WebCore {
 
 struct ExtensionMap {
@@ -47,6 +50,18 @@ static const ExtensionMap extensionMap[] = {
     { "jpg", "image/jpeg" },
     { "js", "application/x-javascript" },
     { "mng", "video/x-mng" },
+    { "mp4", "video/mp4" },
+    { "m4v", "video/mp4" },
+    { "m4a", "audio/x-m4a" },
+    { "mp3", "audio/mp3" },
+    { "ogv", "video/ogg" },
+    { "oga", "audio/ogg" },
+    { "ogm", "audio/ogg" },
+    { "ogg", "audio/ogg" },
+    { "webm", "video/webm" },
+    { "webm", "audio/webm" },
+    { "wav", "audio/wav" },
+    { "mov", "video/quicktime" },
     { "pbm", "image/x-portable-bitmap" },
     { "pgm", "image/x-portable-graymap" },
     { "pdf", "application/pdf" },
@@ -70,6 +85,8 @@ static const ExtensionMap extensionMap[] = {
 
 String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
 {
+    ASSERT(isMainThread());
+
     String s = ext.lower();
 
     const ExtensionMap *e = extensionMap;
@@ -79,7 +96,13 @@ String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
         ++e;
     }
 
-    return "application/octet-stream";
+    return String();
+}
+
+bool MIMETypeRegistry::isApplicationPluginMIMEType(const String& mimeType)
+{
+    return mimeType.startsWith("application/x-qt-plugin", false)
+        || mimeType.startsWith("application/x-qt-styled-widget", false);
 }
 
 }

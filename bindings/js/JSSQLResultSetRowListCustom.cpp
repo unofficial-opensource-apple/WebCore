@@ -27,9 +27,10 @@
  */
 
 #include "config.h"
-#include "JSSQLResultSetRowList.h"
 
-#if ENABLE(DATABASE)
+#if ENABLE(SQL_DATABASE)
+
+#include "JSSQLResultSetRowList.h"
 
 #include "ExceptionCode.h"
 #include "SQLValue.h"
@@ -39,10 +40,10 @@ using namespace JSC;
 
 namespace WebCore {
 
-JSValue JSSQLResultSetRowList::item(ExecState* exec, const ArgList& args)
+JSValue JSSQLResultSetRowList::item(ExecState* exec)
 {
     bool indexOk;
-    int index = args.at(0).toInt32(exec, indexOk);
+    int index = finiteInt32Value(exec->argument(0), exec, indexOk);
     if (!indexOk) {
         setDOMException(exec, TYPE_MISMATCH_ERR);
         return jsUndefined();
@@ -68,18 +69,18 @@ JSValue JSSQLResultSetRowList::item(ExecState* exec, const ArgList& args)
               jsValue = jsNull();
               break;
           case SQLValue::NumberValue:
-              jsValue = jsNumber(exec, value.number());
+              jsValue = jsNumber(value.number());
               break;
           default:
               ASSERT_NOT_REACHED();
         }
 
-        object->putDirect(Identifier(exec, m_impl->columnNames()[i]), jsValue, DontDelete | ReadOnly);
+        object->putDirect(exec->globalData(), Identifier(exec, stringToUString(m_impl->columnNames()[i])), jsValue, DontDelete | ReadOnly);
     }
 
     return object;
 }
 
-}
+} // namespace WebCore
 
-#endif
+#endif // ENABLE(SQL_DATABASE)

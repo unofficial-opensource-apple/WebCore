@@ -46,12 +46,14 @@
 #endif
 
 #if USE(SOUP)
+#include <wtf/gobject/GRefPtr.h>
+#define LIBSOUP_USE_UNSTABLE_REQUEST_API
+#include <libsoup/soup-request.h>
 #include <libsoup/soup.h>
 class Frame;
 #endif
 
 #if PLATFORM(QT)
-class QWebFrame;
 class QWebNetworkJob;
 namespace WebCore {
 class QNetworkReplyHandler;
@@ -59,21 +61,12 @@ class QNetworkReplyHandler;
 #endif
 
 #if PLATFORM(MAC)
-#ifdef __OBJC__
-@class NSURLAuthenticationChallenge;
-@class NSURLConnection;
-#else
-class NSURLAuthenticationChallenge;
-class NSURLConnection;
-#endif
+OBJC_CLASS NSURLAuthenticationChallenge;
+OBJC_CLASS NSURLConnection;
 #endif
 
 #ifndef __OBJC__
 class NSObject;
-#endif
-
-#if PLATFORM(ANDROID)
-#include "ResourceLoaderAndroid.h"
 #endif
 
 // The allocations and releases in ResourceHandleInternal are
@@ -83,31 +76,28 @@ class NSObject;
 namespace WebCore {
     class ResourceHandleClient;
 
-    class ResourceHandleInternal : public Noncopyable {
+    class ResourceHandleInternal {
+        WTF_MAKE_NONCOPYABLE(ResourceHandleInternal); WTF_MAKE_FAST_ALLOCATED;
     public:
-        ResourceHandleInternal(ResourceHandle* loader, const ResourceRequest& request, ResourceHandleClient* c, bool defersLoading, bool shouldContentSniff, bool mightDownloadFromHandle)
+        ResourceHandleInternal(ResourceHandle* loader, const ResourceRequest& request, ResourceHandleClient* c, bool defersLoading, bool shouldContentSniff)
             : m_client(c)
-            , m_request(request)
+            , m_firstRequest(request)
+            , m_lastHTTPMethod(request.httpMethod())
             , status(0)
             , m_defersLoading(defersLoading)
             , m_shouldContentSniff(shouldContentSniff)
-            , m_mightDownloadFromHandle(mightDownloadFromHandle)
 #if USE(CFNETWORK)
             , m_connection(0)
 #endif
 #if USE(WININET)
-            , m_fileHandle(INVALID_HANDLE_VALUE)
             , m_fileLoadTimer(loader, &ResourceHandle::fileLoadTimer)
-            , m_resourceHandle(0)
-            , m_secondaryHandle(0)
-            , m_jobId(0)
-            , m_threadId(0)
-            , m_writing(false)
-            , m_formDataString(0)
-            , m_formDataLength(0)
+            , m_internetHandle(0)
+            , m_connectHandle(0)
+            , m_requestHandle(0)
+            , m_sentEndRequest(false)
             , m_bytesRemainingToWrite(0)
+            , m_loadSynchronously(false)
             , m_hasReceivedResponse(false)
-            , m_resend(false)
 #endif
 #if USE(CURL)
             , m_handle(0)
@@ -117,32 +107,26 @@ namespace WebCore {
             , m_formDataStream(loader)
 #endif
 #if USE(SOUP)
-            , m_msg(0)
             , m_cancelled(false)
-            , m_gfile(0)
-            , m_inputStream(0)
-            , m_cancellable(0)
             , m_buffer(0)
-            , m_bufferSize(0)
-            , m_total(0)
-            , m_idleHandler(0)
-            , m_frame(0)
+            , m_bodySize(0)
+            , m_bodyDataSent(0)
 #endif
 #if PLATFORM(QT)
             , m_job(0)
-            , m_frame(0)
 #endif
 #if PLATFORM(MAC)
             , m_startWhenScheduled(false)
             , m_needsSiteSpecificQuirks(false)
             , m_currentMacChallenge(nil)
 #endif
+            , m_scheduledFailureType(ResourceHandle::NoFailure)
             , m_failureTimer(loader, &ResourceHandle::fireFailure)
         {
-            const KURL& url = m_request.url();
+            const KURL& url = m_firstRequest.url();
             m_user = url.user();
             m_pass = url.pass();
-            m_request.removeCredentials();
+            m_firstRequest.removeCredentials();
         }
         
         ~ResourceHandleInternal();
@@ -150,7 +134,8 @@ namespace WebCore {
         ResourceHandleClient* client() { return m_client; }
         ResourceHandleClient* m_client;
         
-        ResourceRequest m_request;
+        ResourceRequest m_firstRequest;
+        String m_lastHTTPMethod;
 
         // Suggested credentials for the current redirection step.
         String m_user;
@@ -162,30 +147,29 @@ namespace WebCore {
 
         bool m_defersLoading;
         bool m_shouldContentSniff;
-        bool m_mightDownloadFromHandle;
 #if USE(CFNETWORK)
         RetainPtr<CFURLConnectionRef> m_connection;
-#elif PLATFORM(MAC)
+#endif
+#if PLATFORM(MAC) && !USE(CFNETWORK)
         RetainPtr<NSURLConnection> m_connection;
         RetainPtr<WebCoreResourceHandleAsDelegate> m_delegate;
         RetainPtr<id> m_proxy;
+#endif
+#if PLATFORM(MAC)
         bool m_startWhenScheduled;
         bool m_needsSiteSpecificQuirks;
 #endif
 #if USE(WININET)
-        HANDLE m_fileHandle;
         Timer<ResourceHandle> m_fileLoadTimer;
-        HINTERNET m_resourceHandle;
-        HINTERNET m_secondaryHandle;
-        unsigned m_jobId;
-        DWORD m_threadId;
-        bool m_writing;
-        char* m_formDataString;
-        int m_formDataLength;
-        int m_bytesRemainingToWrite;
-        String m_postReferrer;
+        HINTERNET m_internetHandle;
+        HINTERNET m_connectHandle;
+        HINTERNET m_requestHandle;
+        bool m_sentEndRequest;
+        Vector<char> m_formData;
+        size_t m_bytesRemainingToWrite;
+        bool m_loadSynchronously;
         bool m_hasReceivedResponse;
-        bool m_resend;
+        String m_redirectUrl;
 #endif
 #if USE(CURL)
         CURL* m_handle;
@@ -198,20 +182,22 @@ namespace WebCore {
         Vector<char> m_postBytes;
 #endif
 #if USE(SOUP)
-        SoupMessage* m_msg;
+        GRefPtr<SoupMessage> m_soupMessage;
         ResourceResponse m_response;
         bool m_cancelled;
-        GFile* m_gfile;
-        GInputStream* m_inputStream;
-        GCancellable* m_cancellable;
+        GRefPtr<SoupRequest> m_soupRequest;
+        GRefPtr<GInputStream> m_inputStream;
+        GRefPtr<GCancellable> m_cancellable;
+        GRefPtr<GAsyncResult> m_deferredResult;
         char* m_buffer;
-        gsize m_bufferSize, m_total;
-        guint m_idleHandler;
-        Frame* m_frame;
+        unsigned long m_bodySize;
+        unsigned long m_bodyDataSent;
+        RefPtr<NetworkingContext> m_context;
+        SoupSession* soupSession();
 #endif
 #if PLATFORM(QT)
         QNetworkReplyHandler* m_job;
-        QWebFrame* m_frame;
+        RefPtr<NetworkingContext> m_context;
 #endif
 
 #if PLATFORM(MAC)
@@ -219,12 +205,9 @@ namespace WebCore {
         // It is almost identical to m_currentWebChallenge.nsURLAuthenticationChallenge(), but has a different sender.
         NSURLAuthenticationChallenge *m_currentMacChallenge;
 #endif
-#if PLATFORM(ANDROID)
-        RefPtr<ResourceLoaderAndroid> m_loader;
-#endif
         AuthenticationChallenge m_currentWebChallenge;
 
-        ResourceHandle::FailureType m_failureType;
+        ResourceHandle::FailureType m_scheduledFailureType;
         Timer<ResourceHandle> m_failureTimer;
     };
 

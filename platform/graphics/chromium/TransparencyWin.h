@@ -33,10 +33,11 @@
 
 #include <windows.h>
 
+#include "AffineTransform.h"
 #include "ImageBuffer.h"
-#include "Noncopyable.h"
-#include "TransformationMatrix.h"
-#include "wtf/OwnPtr.h"
+ 
+#include <wtf/Noncopyable.h>
+#include <wtf/OwnPtr.h>
 
 class SkBitmap;
 class SkCanvas;
@@ -54,7 +55,8 @@ class TransparencyWin_OpaqueCompositeLayer_Test;
 // that is composited later manually. This is to get around Windows' inability
 // to handle the alpha channel, semitransparent text, and transformed form
 // controls.
-class TransparencyWin : public Noncopyable {
+class TransparencyWin {
+    WTF_MAKE_NONCOPYABLE(TransparencyWin);
 public:
     enum LayerMode {
         // No extra layer is created. Drawing will happen to the source.
@@ -193,7 +195,7 @@ private:
     GraphicsContext* m_destContext;
 
     // The original transform from the destination context.
-    TransformationMatrix m_orgTransform;
+    AffineTransform m_orgTransform;
 
     LayerMode m_layerMode;
     TransformMode m_transformMode;

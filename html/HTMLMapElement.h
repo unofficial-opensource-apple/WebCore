@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004 Apple Computer, Inc.
+ * Copyright (C) 2004, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -27,32 +27,30 @@
 
 namespace WebCore {
 
-class IntSize;
 class HitTestResult;
 class HTMLImageElement;
     
 class HTMLMapElement : public HTMLElement {
 public:
-    HTMLMapElement(const QualifiedName&, Document*);
-    ~HTMLMapElement();
-
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
-    virtual int tagPriority() const { return 1; }
-    virtual bool checkDTD(const Node*);
+    static PassRefPtr<HTMLMapElement> create(Document*);
+    static PassRefPtr<HTMLMapElement> create(const QualifiedName&, Document*);
+    virtual ~HTMLMapElement();
 
     const AtomicString& getName() const { return m_name; }
 
-    virtual void parseMappedAttribute(MappedAttribute*);
-
-    bool mapMouseEvent(int x, int y, const IntSize&, HitTestResult&);
+    bool mapMouseEvent(LayoutPoint location, const LayoutSize&, HitTestResult&);
     
-    HTMLImageElement* imageElement() const;
-    PassRefPtr<HTMLCollection> areas();
-
-    String name() const;
-    void setName(const String&);
+    HTMLImageElement* imageElement();
+    HTMLCollection* areas();
 
 private:
+    HTMLMapElement(const QualifiedName&, Document*);
+
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+
+    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void removedFrom(Node*) OVERRIDE;
+
     AtomicString m_name;
 };
 

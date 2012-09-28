@@ -31,8 +31,9 @@
 #include "config.h"
 #include "DateExtension.h"
 
-#include "V8Proxy.h"
 #include "V8HiddenPropertyName.h"
+#include "V8Proxy.h"
+#include "V8RecursionScope.h"
 
 namespace WebCore {
 
@@ -76,7 +77,7 @@ DateExtension* DateExtension::get()
 void DateExtension::setAllowSleep(bool allow)
 {
     v8::Local<v8::Value> result = V8Proxy::currentContext()->Global()->Get(v8::String::New("Date"));
-    if (result.IsEmpty())
+    if (result.IsEmpty() || !result->IsObject())
         return;
 
     v8::Handle<v8::Object> dateObject = v8::Handle<v8::Object>::Cast(result);
@@ -88,7 +89,8 @@ void DateExtension::setAllowSleep(bool allow)
         return;
 
     v8::Handle<v8::Value> argv[1];
-    argv[0] = v8::String::New(allow ? "false" : "true");
+    argv[0] = v8::Boolean::New(!allow);
+    V8RecursionScope::MicrotaskSuppression scope;
     v8::Handle<v8::Function>::Cast(sleepFunctionHandle)->Call(v8::Object::New(), 1, argv);
 }
 

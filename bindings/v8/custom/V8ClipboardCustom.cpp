@@ -39,7 +39,6 @@
 #include "Element.h"
 
 #include "V8Binding.h"
-#include "V8CustomBinding.h"
 #include "V8Node.h"
 #include "V8Proxy.h"
 
@@ -81,41 +80,12 @@ v8::Handle<v8::Value> V8Clipboard::clearDataCallback(const v8::Arguments& args)
     return v8::Undefined();
 }
 
-v8::Handle<v8::Value> V8Clipboard::getDataCallback(const v8::Arguments& args)
-{
-    INC_STATS("DOM.Clipboard.getData()");
-    Clipboard* clipboard = V8Clipboard::toNative(args.Holder());
-
-    if (args.Length() != 1)
-        return throwError("getData: Invalid number of arguments", V8Proxy::SyntaxError);
-
-    bool success;
-    String result = clipboard->getData(toWebCoreString(args[0]), success);
-    if (success)
-        return v8String(result);
-
-    return v8::Undefined();
-}
-
-v8::Handle<v8::Value> V8Clipboard::setDataCallback(const v8::Arguments& args)
-{
-    INC_STATS("DOM.Clipboard.setData()");
-    Clipboard* clipboard = V8Clipboard::toNative(args.Holder());
-
-    if (args.Length() != 2)
-        return throwError("setData: Invalid number of arguments", V8Proxy::SyntaxError);
-
-    String type = toWebCoreString(args[0]);
-    String data = toWebCoreString(args[1]);
-    return v8Boolean(clipboard->setData(type, data));
-}
-
 v8::Handle<v8::Value> V8Clipboard::setDragImageCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Clipboard.setDragImage()");
     Clipboard* clipboard = V8Clipboard::toNative(args.Holder());
 
-    if (!clipboard->isForDragging())
+    if (!clipboard->isForDragAndDrop())
         return v8::Undefined();
 
     if (args.Length() != 3)

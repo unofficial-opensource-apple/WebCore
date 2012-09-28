@@ -29,41 +29,46 @@
 #include "Event.h"
 
 namespace WebCore {
-    
-    class ProgressEvent : public Event {
-    public:
-        static PassRefPtr<ProgressEvent> create()
-        {
-            return adoptRef(new ProgressEvent);
-        }
-        static PassRefPtr<ProgressEvent> create(const AtomicString& type, bool lengthComputable, unsigned loaded, unsigned total)
-        {
-            return adoptRef(new ProgressEvent(type, lengthComputable, loaded, total));
-        }
 
-        void initProgressEvent(const AtomicString& typeArg, 
-                               bool canBubbleArg,
-                               bool cancelableArg,
-                               bool lengthComputableArg,
-                               unsigned loadedArg,
-                               unsigned totalArg);
-        
-        bool lengthComputable() const { return m_lengthComputable; }
-        unsigned loaded() const { return m_loaded; }
-        unsigned total() const { return m_total; }
-        
-        virtual bool isProgressEvent() const { return true; }
-        
-    protected:
-        ProgressEvent();
-        ProgressEvent(const AtomicString& type, bool lengthComputable, unsigned loaded, unsigned total);
+struct ProgressEventInit : public EventInit {
+    ProgressEventInit();
 
-    private:
-        bool m_lengthComputable;
-        unsigned m_loaded;
-        unsigned m_total;
-    };
+    bool lengthComputable;
+    unsigned long long loaded;
+    unsigned long long total;
+};
+
+class ProgressEvent : public Event {
+public:
+    static PassRefPtr<ProgressEvent> create()
+    {
+        return adoptRef(new ProgressEvent);
+    }
+    static PassRefPtr<ProgressEvent> create(const AtomicString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total)
+    {
+        return adoptRef(new ProgressEvent(type, lengthComputable, loaded, total));
+    }
+    static PassRefPtr<ProgressEvent> create(const AtomicString& type, const ProgressEventInit& initializer)
+    {
+        return adoptRef(new ProgressEvent(type, initializer));
+    }
+
+    bool lengthComputable() const { return m_lengthComputable; }
+    unsigned long long loaded() const { return m_loaded; }
+    unsigned long long total() const { return m_total; }
+
+    virtual const AtomicString& interfaceName() const;
+
+protected:
+    ProgressEvent();
+    ProgressEvent(const AtomicString& type, bool lengthComputable, unsigned long long loaded, unsigned long long total);
+    ProgressEvent(const AtomicString&, const ProgressEventInit&);
+
+private:
+    bool m_lengthComputable;
+    unsigned long long m_loaded;
+    unsigned long long m_total;
+};
 }
 
 #endif // ProgressEvent_h
-

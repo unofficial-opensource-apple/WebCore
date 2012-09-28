@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Alexey Proskuryakov (ap@webkit.org)
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,8 +32,11 @@
 #include "Chrome.h"
 #include "ChromeClient.h"
 #include "Cursor.h"
+#include "CursorList.h"
 #include "Document.h"
+#include "DocumentEventQueue.h"
 #include "DragController.h"
+#include "DragState.h"
 #include "Editor.h"
 #include "EventNames.h"
 #include "FloatPoint.h"
@@ -41,8 +44,10 @@
 #include "FocusController.h"
 #include "Frame.h"
 #include "FrameLoader.h"
+#include "FrameSelection.h"
 #include "FrameTree.h"
 #include "FrameView.h"
+#include "htmlediting.h"
 #include "HTMLFrameElementBase.h"
 #include "HTMLFrameSetElement.h"
 #include "HTMLInputElement.h"
@@ -50,26 +55,46 @@
 #include "HitTestRequest.h"
 #include "HitTestResult.h"
 #include "Image.h"
-#include "InspectorController.h"
+#include "InspectorInstrumentation.h"
 #include "KeyboardEvent.h"
 #include "MouseEvent.h"
 #include "MouseEventWithHitTestResults.h"
 #include "Page.h"
+#include "PlatformEvent.h"
 #include "PlatformKeyboardEvent.h"
 #include "PlatformWheelEvent.h"
+#include "PluginDocument.h"
 #include "RenderFrameSet.h"
+#include "RenderLayer.h"
 #include "RenderTextControlSingleLine.h"
 #include "RenderView.h"
 #include "RenderWidget.h"
+#include "ScrollAnimator.h"
 #include "Scrollbar.h"
-#include "SelectionController.h"
 #include "Settings.h"
+#include "SpatialNavigation.h"
+#include "StaticHashSetNodeList.h"
+#include "StyleCachedImage.h"
 #include "TextEvent.h"
+#include "TextIterator.h"
 #include "UserGestureIndicator.h"
-#include "htmlediting.h" // for comparePositions()
+#include "UserTypingGestureIndicator.h"
+#include "WheelEvent.h"
+#include "WindowsKeyboardCodes.h"
+#include <wtf/Assertions.h>
+#include <wtf/CurrentTime.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/TemporaryChange.h>
 
 #include <wtf/UnusedParam.h>
+
+#if ENABLE(GESTURE_EVENTS)
+#include "PlatformGestureEvent.h"
+#endif
+
+#if ENABLE(TOUCH_ADJUSTMENT)
+#include "TouchAdjustment.h"
+#endif
 
 #if ENABLE(SVG)
 #include "SVGDocument.h"
@@ -79,8 +104,9 @@
 #endif
 
 #include "Touch.h"
-#include "PlatformTouchEvent.h"
+#include "PlatformTouchEventIOS.h"
 #include "TouchEvent.h"
+#include "TouchList.h"
 
 namespace WebCore {
 
@@ -109,28 +135,71 @@ using namespace SVGNames;
 // When the autoscroll or the panScroll is triggered when do the scroll every 0.05s to make it smooth
 const double autoscrollInterval = 0.05;
 
-static Frame* subframeForHitTestResult(const MouseEventWithHitTestResults&);
+// The amount of time to wait before sending a fake mouse event, triggered
+// during a scroll. The short interval is used if the content responds to the mouse events quickly enough,
+// otherwise the long interval is used.
+const double fakeMouseMoveShortInterval = 0.1;
+const double fakeMouseMoveLongInterval = 0.250;
 
-static inline void scrollAndAcceptEvent(float delta, ScrollDirection positiveDirection, ScrollDirection negativeDirection, PlatformWheelEvent& e, Node* node, Node** stopNode)
-{
-    if (!delta)
-        return;
-        
-    // Find the nearest enclosing box.
-    RenderBox* enclosingBox = node->renderer()->enclosingBox();
+enum NoCursorChangeType { NoCursorChange };
 
-    if (e.granularity() == ScrollByPageWheelEvent) {
-        if (enclosingBox->scroll(delta < 0 ? negativeDirection : positiveDirection, ScrollByPage, 1, stopNode))
-            e.accept();
-        return;
+class OptionalCursor {
+public:
+    OptionalCursor(NoCursorChangeType) : m_isCursorChange(false) { }
+    OptionalCursor(const Cursor& cursor) : m_isCursorChange(true), m_cursor(cursor) { }
+
+    bool isCursorChange() const { return m_isCursorChange; }
+    const Cursor& cursor() const { return m_cursor; }
+
+private:
+    bool m_isCursorChange;
+    Cursor m_cursor;
+};
+
+class MaximumDurationTracker {
+public:
+    explicit MaximumDurationTracker(double *maxDuration)
+        : m_maxDuration(maxDuration)
+        , m_start(monotonicallyIncreasingTime())
+    {
     }
 
-    float pixelsToScroll = delta > 0 ? delta : -delta;
-    if (enclosingBox->scroll(delta < 0 ? negativeDirection : positiveDirection, ScrollByPixel, pixelsToScroll, stopNode))
-        e.accept();
+    ~MaximumDurationTracker()
+    {
+        *m_maxDuration = max(*m_maxDuration, monotonicallyIncreasingTime() - m_start);
+    }
+
+private:
+    double* m_maxDuration;
+    double m_start;
+};
+
+
+static inline ScrollGranularity wheelGranularityToScrollGranularity(WheelEvent::Granularity granularity)
+{
+    switch (granularity) {
+    case WheelEvent::Page:
+        return ScrollByPage;
+    case WheelEvent::Line:
+        return ScrollByLine;
+    case WheelEvent::Pixel:
+        return ScrollByPixel;
+    }
+    return ScrollByPixel;
 }
 
-#if !PLATFORM(MAC) || ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
+static inline bool scrollNode(float delta, ScrollGranularity granularity, ScrollDirection positiveDirection, ScrollDirection negativeDirection, Node* node, Node** stopNode)
+{
+    if (!delta)
+        return false;
+    if (!node->renderer())
+        return false;
+    RenderBox* enclosingBox = node->renderer()->enclosingBox();
+    float absDelta = delta > 0 ? delta : -delta;
+    return enclosingBox->scroll(delta < 0 ? negativeDirection : positiveDirection, granularity, absDelta, stopNode);
+}
+
+#if !PLATFORM(MAC)
 
 inline bool EventHandler::eventLoopHandleMouseUp(const MouseEventWithHitTestResults&)
 {
@@ -153,9 +222,10 @@ EventHandler::EventHandler(Frame* frame)
     , m_mouseDownMayStartSelect(false)
 #if ENABLE(DRAG_SUPPORT)
     , m_mouseDownMayStartDrag(false)
+    , m_dragMayStartSelectionInstead(false)
 #endif
     , m_mouseDownWasSingleClickInSelection(false)
-    , m_beganSelectingText(false)
+    , m_selectionInitiationState(HaveNotStartedSelection)
     , m_panScrollInProgress(false)
     , m_panScrollButtonPressed(false)
     , m_springLoadedPanScrollInProgress(false)
@@ -165,34 +235,39 @@ EventHandler::EventHandler(Frame* frame)
     , m_autoscrollInProgress(false)
     , m_mouseDownMayStartAutoscroll(false)
     , m_mouseDownWasInSubframe(false)
+    , m_fakeMouseMoveEventTimer(this, &EventHandler::fakeMouseMoveEventTimerFired)
 #if ENABLE(SVG)
     , m_svgPan(false)
 #endif
     , m_resizeLayer(0)
-    , m_capturingMouseEventsNode(0)
+    , m_eventHandlerWillResetCapturingMouseEventsNode(0)
     , m_clickCount(0)
     , m_gestureInitialDiameter(GestureUnknown)
     , m_gestureLastDiameter(GestureUnknown)
     , m_gestureInitialRotation(GestureUnknown)
     , m_gestureLastRotation(GestureUnknown)
+    , m_touchEventTargetSubframe(0)
     , m_mouseDownTimestamp(0)
     , m_useLatchedWheelEventNode(false)
     , m_widgetIsLatched(false)
-#if PLATFORM(MAC) && !ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
+#if PLATFORM(MAC)
     , m_mouseDownView(nil)
     , m_sendingEventToSubview(false)
 #endif
+    , m_maxMouseMovedDuration(0)
+    , m_baseEventType(PlatformEvent::NoType)
 {
 }
 
 EventHandler::~EventHandler()
 {
+    ASSERT(!m_fakeMouseMoveEventTimer.isActive());
 }
     
 #if ENABLE(DRAG_SUPPORT)
-EventHandler::EventHandlerDragState& EventHandler::dragState()
+DragState& EventHandler::dragState()
 {
-    DEFINE_STATIC_LOCAL(EventHandlerDragState, state, ());
+    DEFINE_STATIC_LOCAL(DragState, state, ());
     return state;
 }
 #endif // ENABLE(DRAG_SUPPORT)
@@ -200,6 +275,7 @@ EventHandler::EventHandlerDragState& EventHandler::dragState()
 void EventHandler::clear()
 {
     m_hoverTimer.stop();
+    m_fakeMouseMoveEventTimer.stop();
     m_resizeLayer = 0;
     m_nodeUnderMouse = 0;
     m_lastNodeUnderMouse = 0;
@@ -215,8 +291,9 @@ void EventHandler::clear()
     m_gestureLastDiameter = GestureUnknown;
     m_gestureInitialRotation = GestureUnknown;
     m_gestureLastRotation = GestureUnknown;
-    m_touchesByID.clear();
+    m_touches.clear();
     m_gestureTargets.clear();
+    m_touchEventTargetSubframe = 0;
     m_frameSetBeingResized = 0;
 #if ENABLE(DRAG_SUPPORT)
     m_dragTarget = 0;
@@ -229,11 +306,56 @@ void EventHandler::clear()
     m_capturingMouseEventsNode = 0;
     m_latchedWheelEventNode = 0;
     m_previousWheelScrolledNode = 0;
+    m_maxMouseMovedDuration = 0;
+#if ENABLE(GESTURE_EVENTS)
+    m_baseEventType = PlatformEvent::NoType;
+#endif
+}
+
+void EventHandler::nodeWillBeRemoved(Node* nodeToBeRemoved)
+{
+    if (nodeToBeRemoved->contains(m_clickNode.get()))
+        m_clickNode = 0;
+}
+
+static void setSelectionIfNeeded(FrameSelection* selection, const VisibleSelection& newSelection)
+{
+    ASSERT(selection);
+    if (selection->selection() != newSelection && selection->shouldChangeSelection(newSelection))
+        selection->setSelection(newSelection);
+}
+
+static inline bool dispatchSelectStart(Node* node)
+{
+    if (!node || !node->renderer())
+        return true;
+
+    return node->dispatchEvent(Event::create(eventNames().selectstartEvent, true, true));
+}
+
+bool EventHandler::updateSelectionForMouseDownDispatchingSelectStart(Node* targetNode, const VisibleSelection& newSelection, TextGranularity granularity)
+{
+    if (Position::nodeIsUserSelectNone(targetNode))
+        return false;
+
+    if (!dispatchSelectStart(targetNode))
+        return false;
+
+    if (newSelection.isRange())
+        m_selectionInitiationState = ExtendedSelection;
+    else {
+        granularity = CharacterGranularity;
+        m_selectionInitiationState = PlacedCaret;
+    }
+
+    m_frame->selection()->setNonDirectionalSelectionIfNeeded(newSelection, granularity);
+
+    return true;
 }
 
 void EventHandler::selectClosestWordFromMouseEvent(const MouseEventWithHitTestResults& result)
 {
-    Node* innerNode = result.targetNode();
+    Node* innerNode = targetNode(result);
     VisibleSelection newSelection;
 
     if (innerNode && innerNode->renderer() && m_mouseDownMayStartSelect) {
@@ -242,16 +364,11 @@ void EventHandler::selectClosestWordFromMouseEvent(const MouseEventWithHitTestRe
             newSelection = VisibleSelection(pos);
             newSelection.expandUsingGranularity(WordGranularity);
         }
-    
-        if (newSelection.isRange()) {
-            m_frame->setSelectionGranularity(WordGranularity);
-            m_beganSelectingText = true;
-            if (result.event().clickCount() == 2 && m_frame->editor()->isSelectTrailingWhitespaceEnabled()) 
-                newSelection.appendTrailingWhitespace();            
-        }
-        
-        if (m_frame->shouldChangeSelection(newSelection))
-            m_frame->selection()->setSelection(newSelection);
+
+        if (newSelection.isRange() && result.event().clickCount() == 2 && m_frame->editor()->isSelectTrailingWhitespaceEnabled()) 
+            newSelection.appendTrailingWhitespace();
+
+        updateSelectionForMouseDownDispatchingSelectStart(innerNode, newSelection, WordGranularity);
     }
 }
 
@@ -260,22 +377,16 @@ void EventHandler::selectClosestWordOrLinkFromMouseEvent(const MouseEventWithHit
     if (!result.hitTestResult().isLiveLink())
         return selectClosestWordFromMouseEvent(result);
 
-    Node* innerNode = result.targetNode();
+    Node* innerNode = targetNode(result);
 
     if (innerNode && innerNode->renderer() && m_mouseDownMayStartSelect) {
         VisibleSelection newSelection;
         Element* URLElement = result.hitTestResult().URLElement();
         VisiblePosition pos(innerNode->renderer()->positionForPoint(result.localPoint()));
-        if (pos.isNotNull() && pos.deepEquivalent().node()->isDescendantOf(URLElement))
+        if (pos.isNotNull() && pos.deepEquivalent().deprecatedNode()->isDescendantOf(URLElement))
             newSelection = VisibleSelection::selectionFromContentsOfNode(URLElement);
-    
-        if (newSelection.isRange()) {
-            m_frame->setSelectionGranularity(WordGranularity);
-            m_beganSelectingText = true;
-        }
 
-        if (m_frame->shouldChangeSelection(newSelection))
-            m_frame->selection()->setSelection(newSelection);
+        updateSelectionForMouseDownDispatchingSelectStart(innerNode, newSelection, WordGranularity);
     }
 }
 
@@ -290,7 +401,7 @@ bool EventHandler::handleMousePressEventDoubleClick(const MouseEventWithHitTestR
         // selectClosestWordFromMouseEvent, but do set
         // m_beganSelectingText to prevent handleMouseReleaseEvent
         // from setting caret selection.
-        m_beganSelectingText = true;
+        m_selectionInitiationState = ExtendedSelection;
     else
         selectClosestWordFromMouseEvent(event);
 
@@ -302,7 +413,7 @@ bool EventHandler::handleMousePressEventTripleClick(const MouseEventWithHitTestR
     if (event.event().button() != LeftButton)
         return false;
     
-    Node* innerNode = event.targetNode();
+    Node* innerNode = targetNode(event);
     if (!(innerNode && innerNode->renderer() && m_mouseDownMayStartSelect))
         return false;
 
@@ -312,20 +423,19 @@ bool EventHandler::handleMousePressEventTripleClick(const MouseEventWithHitTestR
         newSelection = VisibleSelection(pos);
         newSelection.expandUsingGranularity(ParagraphGranularity);
     }
-    if (newSelection.isRange()) {
-        m_frame->setSelectionGranularity(ParagraphGranularity);
-        m_beganSelectingText = true;
-    }
-    
-    if (m_frame->shouldChangeSelection(newSelection))
-        m_frame->selection()->setSelection(newSelection);
 
-    return true;
+    return updateSelectionForMouseDownDispatchingSelectStart(innerNode, newSelection, ParagraphGranularity);
+}
+
+static int textDistance(const Position& start, const Position& end)
+{
+     RefPtr<Range> range = Range::create(start.anchorNode()->document(), start, end);
+     return TextIterator::rangeLength(range.get(), true);
 }
 
 bool EventHandler::handleMousePressEventSingleClick(const MouseEventWithHitTestResults& event)
 {
-    Node* innerNode = event.targetNode();
+    Node* innerNode = targetNode(event);
     if (!(innerNode && innerNode->renderer() && m_mouseDownMayStartSelect))
         return false;
 
@@ -335,7 +445,7 @@ bool EventHandler::handleMousePressEventSingleClick(const MouseEventWithHitTestR
     // Don't restart the selection when the mouse is pressed on an
     // existing selection so we can allow for text dragging.
     if (FrameView* view = m_frame->view()) {
-        IntPoint vPoint = view->windowToContents(event.event().pos());
+        LayoutPoint vPoint = view->windowToContents(event.event().position());
         if (!extendSelection && m_frame->selection()->contains(vPoint)) {
             m_mouseDownWasSingleClickInSelection = true;
             return false;
@@ -344,32 +454,45 @@ bool EventHandler::handleMousePressEventSingleClick(const MouseEventWithHitTestR
 
     VisiblePosition visiblePos(innerNode->renderer()->positionForPoint(event.localPoint()));
     if (visiblePos.isNull())
-        visiblePos = VisiblePosition(innerNode, 0, DOWNSTREAM);
+        visiblePos = VisiblePosition(firstPositionInOrBeforeNode(innerNode), DOWNSTREAM);
     Position pos = visiblePos.deepEquivalent();
-    
-    VisibleSelection newSelection = m_frame->selection()->selection();
-    if (extendSelection && newSelection.isCaretOrRange()) {
-        m_frame->selection()->setLastChangeWasHorizontalExtension(false);
-        
-        // See <rdar://problem/3668157> REGRESSION (Mail): shift-click deselects when selection 
-        // was created right-to-left
-        Position start = newSelection.start();
-        Position end = newSelection.end();
-        if (comparePositions(pos, start) <= 0)
-            newSelection = VisibleSelection(pos, end);
-        else
-            newSelection = VisibleSelection(start, pos);
 
-        if (m_frame->selectionGranularity() != CharacterGranularity)
-            newSelection.expandUsingGranularity(m_frame->selectionGranularity());
-        m_beganSelectingText = true;
-    } else {
+    VisibleSelection newSelection = m_frame->selection()->selection();
+    TextGranularity granularity = CharacterGranularity;
+
+    if (extendSelection && newSelection.isCaretOrRange()) {
+        ASSERT(m_frame->settings());
+        if (m_frame->settings()->editingBehaviorType() == EditingMacBehavior) {
+            // See <rdar://problem/3668157> REGRESSION (Mail): shift-click deselects when selection
+            // was created right-to-left
+            Position start = newSelection.start();
+            Position end = newSelection.end();
+            int distanceToStart = textDistance(start, pos);
+            int distanceToEnd = textDistance(pos, end);
+            if (distanceToStart <= distanceToEnd)
+                newSelection = VisibleSelection(end, pos);
+            else
+                newSelection = VisibleSelection(start, pos);
+        } else
+            newSelection.setExtent(pos);
+
+        if (m_frame->selection()->granularity() != CharacterGranularity) {
+            granularity = m_frame->selection()->granularity();
+            newSelection.expandUsingGranularity(m_frame->selection()->granularity());
+        }
+    } else
         newSelection = VisibleSelection(visiblePos);
-        m_frame->setSelectionGranularity(CharacterGranularity);
-    }
     
-    if (m_frame->shouldChangeSelection(newSelection))
-        m_frame->selection()->setSelection(newSelection);
+    return updateSelectionForMouseDownDispatchingSelectStart(innerNode, newSelection, granularity);
+}
+
+static inline bool canMouseDownStartSelect(Node* node)
+{
+    if (!node || !node->renderer())
+        return true;
+
+    if (!node->canStartSelection())
+        return false;
 
     return true;
 }
@@ -381,8 +504,12 @@ bool EventHandler::handleMousePressEvent(const MouseEventWithHitTestResults& eve
     dragState().m_dragSrc = 0;
 #endif
 
+    cancelFakeMouseMoveEvent();
+
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
+
     if (ScrollView* scrollView = m_frame->view()) {
-        if (scrollView->isPointInScrollbarCorner(event.event().pos()))
+        if (scrollView->isPointInScrollbarCorner(event.event().position()))
             return false;
     }
 
@@ -390,7 +517,7 @@ bool EventHandler::handleMousePressEvent(const MouseEventWithHitTestResults& eve
 
     // If we got the event back, that must mean it wasn't prevented,
     // so it's allowed to start a drag or selection.
-    m_mouseDownMayStartSelect = canMouseDownStartSelect(event.targetNode());
+    m_mouseDownMayStartSelect = canMouseDownStartSelect(targetNode(event));
     
 #if ENABLE(DRAG_SUPPORT)
     // Careful that the drag starting logic stays in sync with eventMayStartDrag()
@@ -405,11 +532,11 @@ bool EventHandler::handleMousePressEvent(const MouseEventWithHitTestResults& eve
         return true;
 
 #if ENABLE(SVG)
-    if (m_frame->document()->isSVGDocument() &&
-       static_cast<SVGDocument*>(m_frame->document())->zoomAndPanEnabled()) {
+    if (m_frame->document()->isSVGDocument()
+        && static_cast<SVGDocument*>(m_frame->document())->zoomAndPanEnabled()) {
         if (event.event().shiftKey() && singleClick) {
             m_svgPan = true;
-            static_cast<SVGDocument*>(m_frame->document())->startPan(event.event().pos());
+            static_cast<SVGDocument*>(m_frame->document())->startPan(m_frame->view()->windowToContents(event.event().position()));
             return true;
         }
     }
@@ -420,17 +547,16 @@ bool EventHandler::handleMousePressEvent(const MouseEventWithHitTestResults& eve
     if (singleClick)
         focusDocumentView();
 
-    Node* innerNode = event.targetNode();
+    Node* innerNode = targetNode(event);
 
     m_mousePressNode = innerNode;
 #if ENABLE(DRAG_SUPPORT)
-    m_dragStartPos = event.event().pos();
+    m_dragStartPos = event.event().position();
 #endif
 
     bool swallowEvent = false;
-    m_frame->selection()->setCaretBlinkingSuspended(true);
     m_mousePressed = true;
-    m_beganSelectingText = false;
+    m_selectionInitiationState = HaveNotStartedSelection;
 
     if (event.event().clickCount() == 2)
         swallowEvent = handleMousePressEventDoubleClick(event);
@@ -439,10 +565,34 @@ bool EventHandler::handleMousePressEvent(const MouseEventWithHitTestResults& eve
     else
         swallowEvent = handleMousePressEventSingleClick(event);
     
-    m_mouseDownMayStartAutoscroll = m_mouseDownMayStartSelect || 
-        (m_mousePressNode && m_mousePressNode->renderBox() && m_mousePressNode->renderBox()->canBeProgramaticallyScrolled(true));
+    m_mouseDownMayStartAutoscroll = m_mouseDownMayStartSelect
+        || (m_mousePressNode && m_mousePressNode->renderBox() && m_mousePressNode->renderBox()->canBeProgramaticallyScrolled());
 
     return swallowEvent;
+}
+
+// There are two kinds of renderer that can autoscroll.
+static bool canAutoscroll(RenderObject* renderer)
+{
+    if (!renderer->isBox())
+        return false;
+
+    // Check for a box that can be scrolled in its own right.
+    if (toRenderBox(renderer)->canBeScrolledAndHasScrollableArea())
+        return true;
+
+    // Check for a box that represents the top level of a web page.
+    // This can be scrolled by calling Chrome::scrollRectIntoView.
+    // This only has an effect on the Mac platform in applications
+    // that put web views into scrolling containers, such as Mac OS X Mail.
+    // The code for this is in RenderLayer::scrollRectToVisible.
+    if (renderer->node() != renderer->document())
+        return false;
+    Frame* frame = renderer->frame();
+    if (!frame)
+        return false;
+    Page* page = frame->page();
+    return page && page->mainFrame() == frame;
 }
 
 #if ENABLE(DRAG_SUPPORT)
@@ -454,9 +604,16 @@ bool EventHandler::handleMouseDraggedEvent(const MouseEventWithHitTestResults& e
     if (!m_mousePressed)
         return false;
 
-    Node* targetNode = event.targetNode();
-    if (event.event().button() != LeftButton || !targetNode || !targetNode->renderer())
+    Node* targetNode = EventHandler::targetNode(event);
+    if (event.event().button() != LeftButton || !targetNode)
         return false;
+
+    RenderObject* renderer = targetNode->renderer();
+    if (!renderer) {
+        renderer = targetNode->parentNode() ? targetNode->parentNode()->renderer() : 0;
+        if (!renderer || !renderer->isListBox())
+            return false;
+    }
 
 #if PLATFORM(MAC) // FIXME: Why does this assertion fire on other platforms?
     ASSERT(m_mouseDownMayStartSelect || m_mouseDownMayStartAutoscroll);
@@ -465,10 +622,8 @@ bool EventHandler::handleMouseDraggedEvent(const MouseEventWithHitTestResults& e
     m_mouseDownMayStartDrag = false;
 
     if (m_mouseDownMayStartAutoscroll && !m_panScrollInProgress) {            
-        // If the selection is contained in a layer that can scroll, that layer should handle the autoscroll
-        // Otherwise, let the bridge handle it so the view can scroll itself.
-        RenderObject* renderer = targetNode->renderer();
-        while (renderer && (!renderer->isBox() || !toRenderBox(renderer)->canBeScrolledAndHasScrollableArea())) {
+        // Find a renderer that can autoscroll.
+        while (renderer && !canAutoscroll(renderer)) {
             if (!renderer->parent() && renderer->node() == renderer->document() && renderer->document()->ownerElement())
                 renderer = renderer->document()->ownerElement()->renderer();
             else
@@ -482,8 +637,15 @@ bool EventHandler::handleMouseDraggedEvent(const MouseEventWithHitTestResults& e
         
         m_mouseDownMayStartAutoscroll = false;
     }
-    
-    updateSelectionForMouseDrag(targetNode, event.localPoint());
+
+    if (m_selectionInitiationState != ExtendedSelection) {
+        HitTestRequest request(HitTestRequest::ReadOnly | HitTestRequest::Active);
+        HitTestResult result(m_mouseDownPos);
+        m_frame->document()->renderView()->hitTest(request, result);
+
+        updateSelectionForMouseDrag(result);
+    }
+    updateSelectionForMouseDrag(event.hitTestResult());
     return true;
 }
     
@@ -499,21 +661,20 @@ bool EventHandler::eventMayStartDrag(const PlatformMouseEvent& event) const
     if (event.button() != LeftButton || event.clickCount() != 1)
         return false;
     
-    bool DHTMLFlag;
-    bool UAFlag;
-    allowDHTMLDrag(DHTMLFlag, UAFlag);
-    if (!DHTMLFlag && !UAFlag)
-        return false;
-
     FrameView* view = m_frame->view();
     if (!view)
         return false;
 
+    Page* page = m_frame->page();
+    if (!page)
+        return false;
+
+    updateDragSourceActionsAllowed();
     HitTestRequest request(HitTestRequest::ReadOnly);
-    HitTestResult result(view->windowToContents(event.pos()));
-    m_frame->contentRenderer()->layer()->hitTest(request, result);
-    bool srcIsDHTML;
-    return result.innerNode() && result.innerNode()->renderer()->draggableNode(DHTMLFlag, UAFlag, result.point().x(), result.point().y(), srcIsDHTML);
+    HitTestResult result(view->windowToContents(event.position()));
+    m_frame->contentRenderer()->hitTest(request, result);
+    DragState state;
+    return result.innerNode() && page->dragController()->draggableNode(m_frame, result.innerNode(), roundedIntPoint(result.point()), state);
 }
 
 void EventHandler::updateSelectionForMouseDrag()
@@ -524,34 +685,45 @@ void EventHandler::updateSelectionForMouseDrag()
     RenderView* renderer = m_frame->contentRenderer();
     if (!renderer)
         return;
-    RenderLayer* layer = renderer->layer();
-    if (!layer)
-        return;
 
     HitTestRequest request(HitTestRequest::ReadOnly |
                            HitTestRequest::Active |
-                           HitTestRequest::MouseMove);
+                           HitTestRequest::Move);
     HitTestResult result(view->windowToContents(m_currentMousePosition));
-    layer->hitTest(request, result);
-    updateSelectionForMouseDrag(result.innerNode(), result.localPoint());
+    renderer->hitTest(request, result);
+    updateSelectionForMouseDrag(result);
 }
 
-void EventHandler::updateSelectionForMouseDrag(Node* targetNode, const IntPoint& localPoint)
+static VisiblePosition selectionExtentRespectingEditingBoundary(const VisibleSelection& selection, const LayoutPoint& localPoint, Node* targetNode)
+{
+    LayoutPoint selectionEndPoint = localPoint;
+    Element* editableElement = selection.rootEditableElement();
+
+    if (!targetNode->renderer())
+        return VisiblePosition();
+
+    if (editableElement && !editableElement->contains(targetNode)) {
+        if (!editableElement->renderer())
+            return VisiblePosition();
+
+        FloatPoint absolutePoint = targetNode->renderer()->localToAbsolute(FloatPoint(selectionEndPoint));
+        selectionEndPoint = roundedLayoutPoint(editableElement->renderer()->absoluteToLocal(absolutePoint));
+        targetNode = editableElement;
+    }
+
+    return targetNode->renderer()->positionForPoint(selectionEndPoint);
+}
+
+void EventHandler::updateSelectionForMouseDrag(const HitTestResult& hitTestResult)
 {
     if (!m_mouseDownMayStartSelect)
         return;
 
-    if (!targetNode)
+    Node* target = targetNode(hitTestResult);
+    if (!target)
         return;
 
-    RenderObject* targetRenderer = targetNode->renderer();
-    if (!targetRenderer)
-        return;
-        
-    if (!canMouseDragExtendSelect(targetNode))
-        return;
-
-    VisiblePosition targetPosition(targetRenderer->positionForPoint(localPoint));
+    VisiblePosition targetPosition = selectionExtentRespectingEditingBoundary(m_frame->selection()->selection(), hitTestResult.localPoint(), target);
 
     // Don't modify the selection if we're not on a node.
     if (targetPosition.isNull())
@@ -564,29 +736,36 @@ void EventHandler::updateSelectionForMouseDrag(Node* targetNode, const IntPoint&
 #if ENABLE(SVG)
     // Special case to limit selection to the containing block for SVG text.
     // FIXME: Isn't there a better non-SVG-specific way to do this?
-    if (Node* selectionBaseNode = newSelection.base().node())
+    if (Node* selectionBaseNode = newSelection.base().deprecatedNode())
         if (RenderObject* selectionBaseRenderer = selectionBaseNode->renderer())
             if (selectionBaseRenderer->isSVGText())
-                if (targetNode->renderer()->containingBlock() != selectionBaseRenderer->containingBlock())
+                if (target->renderer()->containingBlock() != selectionBaseRenderer->containingBlock())
                     return;
 #endif
 
-    if (!m_beganSelectingText) {
-        m_beganSelectingText = true;
+    if (m_selectionInitiationState == HaveNotStartedSelection && !dispatchSelectStart(target))
+        return;
+
+    if (m_selectionInitiationState != ExtendedSelection) {
+        // Always extend selection here because it's caused by a mouse drag
+        m_selectionInitiationState = ExtendedSelection;
         newSelection = VisibleSelection(targetPosition);
     }
 
     newSelection.setExtent(targetPosition);
-    if (m_frame->selectionGranularity() != CharacterGranularity)
-        newSelection.expandUsingGranularity(m_frame->selectionGranularity());
+    if (m_frame->selection()->granularity() != CharacterGranularity)
+        newSelection.expandUsingGranularity(m_frame->selection()->granularity());
 
-    if (m_frame->shouldChangeSelection(newSelection)) {
-        m_frame->selection()->setLastChangeWasHorizontalExtension(false);
-        m_frame->selection()->setSelection(newSelection);
-    }
+    m_frame->selection()->setNonDirectionalSelectionIfNeeded(newSelection, m_frame->selection()->granularity(),
+        FrameSelection::AdjustEndpointsAtBidiBoundary);
 }
 #endif // ENABLE(DRAG_SUPPORT)
-    
+
+void EventHandler::lostMouseCapture()
+{
+    m_frame->selection()->setCaretBlinkingSuspended(false);
+}
+
 bool EventHandler::handleMouseUp(const MouseEventWithHitTestResults& event)
 {
     if (eventLoopHandleMouseUp(event))
@@ -626,26 +805,26 @@ bool EventHandler::handleMouseReleaseEvent(const MouseEventWithHitTestResults& e
     // press and it's not a context menu click.  We do this so when clicking
     // on the selection, the selection goes away.  However, if we are
     // editing, place the caret.
-    if (m_mouseDownWasSingleClickInSelection && !m_beganSelectingText
+    if (m_mouseDownWasSingleClickInSelection && m_selectionInitiationState != ExtendedSelection
 #if ENABLE(DRAG_SUPPORT)
-            && m_dragStartPos == event.event().pos()
+            && m_dragStartPos == event.event().position()
 #endif
             && m_frame->selection()->isRange()
             && event.event().button() != RightButton) {
         VisibleSelection newSelection;
-        Node *node = event.targetNode();
-        bool caretBrowsing = m_frame->settings()->caretBrowsingEnabled();
-        if (node && (caretBrowsing || node->isContentEditable()) && node->renderer()) {
+        Node* node = targetNode(event);
+        bool caretBrowsing = m_frame->settings() && m_frame->settings()->caretBrowsingEnabled();
+        if (node && (caretBrowsing || node->rendererIsEditable()) && node->renderer()) {
             VisiblePosition pos = node->renderer()->positionForPoint(event.localPoint());
             newSelection = VisibleSelection(pos);
         }
-        if (m_frame->shouldChangeSelection(newSelection))
-            m_frame->selection()->setSelection(newSelection);
+
+        setSelectionIfNeeded(m_frame->selection(), newSelection);
 
         handled = true;
     }
 
-    m_frame->notifyRendererOfSelectionChange(true);
+    m_frame->selection()->notifyRendererOfSelectionChange(UserTriggered);
 
     m_frame->selection()->selectFrameElementInParentIfFullySelected();
 
@@ -669,7 +848,7 @@ void EventHandler::handleAutoscroll(RenderObject* renderer)
         if (Page* page = m_frame->page()) {
             Frame* mainFrame = page->mainFrame();
             if (m_frame != mainFrame)
-                mainFrame->eventHandler()->setPanScrollInProgress(true);
+                mainFrame->eventHandler()->m_panScrollInProgress = true;
         }
     }
 #endif
@@ -694,7 +873,7 @@ void EventHandler::autoscrollTimerFired(Timer<EventHandler>*)
     } else {
         // we verify that the main frame hasn't received the order to stop the panScroll
         if (Page* page = m_frame->page()) {
-            if (!page->mainFrame()->eventHandler()->panScrollInProgress()) {
+            if (!page->mainFrame()->eventHandler()->m_panScrollInProgress) {
                 stopAutoscrollTimer();
                 return;
             }
@@ -720,7 +899,7 @@ void EventHandler::updatePanScrollState()
 {
 }
 
-#endif  // ENABLE(PAN_SCROLLING)
+#endif // ENABLE(PAN_SCROLLING)
 
 RenderObject* EventHandler::autoscrollRenderer() const
 {
@@ -737,7 +916,7 @@ void EventHandler::updateAutoscrollRenderer()
     if (Node* nodeAtPoint = hitTest.innerNode())
         m_autoscrollRenderer = nodeAtPoint->renderer();
 
-    while (m_autoscrollRenderer && (!m_autoscrollRenderer->isBox() || !toRenderBox(m_autoscrollRenderer)->canBeScrolledAndHasScrollableArea()))
+    while (m_autoscrollRenderer && !canAutoscroll(m_autoscrollRenderer))
         m_autoscrollRenderer = m_autoscrollRenderer->parent();
 }
 
@@ -747,37 +926,33 @@ void EventHandler::setAutoscrollRenderer(RenderObject* renderer)
 }
 
 #if ENABLE(DRAG_SUPPORT)
-void EventHandler::allowDHTMLDrag(bool& flagDHTML, bool& flagUA) const
+DragSourceAction EventHandler::updateDragSourceActionsAllowed() const
 {
-    flagDHTML = false;
-    flagUA = false;
-
     if (!m_frame)
-        return;
+        return DragSourceActionNone;
 
     Page* page = m_frame->page();
     if (!page)
-        return;
+        return DragSourceActionNone;
 
     FrameView* view = m_frame->view();
     if (!view)
-        return;
+        return DragSourceActionNone;
 
-    unsigned mask = page->dragController()->delegateDragSourceAction(view->contentsToWindow(m_mouseDownPos));
-    flagDHTML = (mask & DragSourceActionDHTML) != DragSourceActionNone;
-    flagUA = ((mask & DragSourceActionImage) || (mask & DragSourceActionLink) || (mask & DragSourceActionSelection));
+    return page->dragController()->delegateDragSourceAction(view->contentsToRootView(m_mouseDownPos));
 }
 #endif // ENABLE(DRAG_SUPPORT)
     
-HitTestResult EventHandler::hitTestResultAtPoint(const IntPoint& point, bool allowShadowContent, bool ignoreClipping, HitTestScrollbars testScrollbars)
+HitTestResult EventHandler::hitTestResultAtPoint(const LayoutPoint& point, bool allowShadowContent, bool ignoreClipping, HitTestScrollbars testScrollbars, HitTestRequest::HitTestRequestType hitType, const LayoutSize& padding)
 {
-    HitTestResult result(point);
+    enum ShadowContentFilterPolicy shadowContentFilterPolicy = allowShadowContent ? AllowShadowContent : DoNotAllowShadowContent;
+    HitTestResult result(point, padding.height(), padding.width(), padding.height(), padding.width(), shadowContentFilterPolicy);
+
     if (!m_frame->contentRenderer())
         return result;
-    int hitType = HitTestRequest::ReadOnly | HitTestRequest::Active;
     if (ignoreClipping)
         hitType |= HitTestRequest::IgnoreClipping;
-    m_frame->contentRenderer()->layer()->hitTest(HitTestRequest(hitType), result);
+    m_frame->contentRenderer()->hitTest(HitTestRequest(hitType), result);
 
     while (true) {
         Node* n = result.innerNode();
@@ -791,14 +966,14 @@ HitTestResult EventHandler::hitTestResultAtPoint(const IntPoint& point, bool all
         if (!frame || !frame->contentRenderer())
             break;
         FrameView* view = static_cast<FrameView*>(widget);
-        IntPoint widgetPoint(result.localPoint().x() + view->scrollX() - renderWidget->borderLeft() - renderWidget->paddingLeft(), 
+        LayoutPoint widgetPoint(result.localPoint().x() + view->scrollX() - renderWidget->borderLeft() - renderWidget->paddingLeft(), 
             result.localPoint().y() + view->scrollY() - renderWidget->borderTop() - renderWidget->paddingTop());
-        HitTestResult widgetHitTestResult(widgetPoint);
-        frame->contentRenderer()->layer()->hitTest(HitTestRequest(hitType), widgetHitTestResult);
+        HitTestResult widgetHitTestResult(widgetPoint, padding.height(), padding.width(), padding.height(), padding.width(), shadowContentFilterPolicy);
+        frame->contentRenderer()->hitTest(HitTestRequest(hitType), widgetHitTestResult);
         result = widgetHitTestResult;
 
         if (testScrollbars == ShouldHitTestScrollbars) {
-            Scrollbar* eventScrollbar = view->scrollbarAtPoint(point);
+            Scrollbar* eventScrollbar = view->scrollbarAtPoint(roundedIntPoint(point));
             if (eventScrollbar)
                 result.setScrollbar(eventScrollbar);
         }
@@ -813,9 +988,8 @@ HitTestResult EventHandler::hitTestResultAtPoint(const IntPoint& point, bool all
             FrameView* resultView = resultFrame->view();
             FrameView* mainView = mainFrame->view();
             if (resultView && mainView) {
-                IntPoint windowPoint = resultView->contentsToWindow(result.point());
-                IntPoint mainFramePoint = mainView->windowToContents(windowPoint);
-                result = mainFrame->eventHandler()->hitTestResultAtPoint(mainFramePoint, allowShadowContent, ignoreClipping);
+                IntPoint mainFramePoint = mainView->rootViewToContents(resultView->contentsToRootView(roundedIntPoint(result.point())));
+                result = mainFrame->eventHandler()->hitTestResultAtPoint(mainFramePoint, allowShadowContent, ignoreClipping, testScrollbars, hitType, padding);
             }
         }
     }
@@ -866,7 +1040,7 @@ void EventHandler::stopAutoscrollTimer(bool rendererIsBeingDestroyed)
     if (Page* page = m_frame->page()) {
         Frame* mainFrame = page->mainFrame();
         if (m_frame != mainFrame)
-            mainFrame->eventHandler()->setPanScrollInProgress(false);
+            mainFrame->eventHandler()->m_panScrollInProgress = false;
     }
 
     m_autoscrollInProgress = false;
@@ -882,9 +1056,13 @@ void EventHandler::setMousePressNode(PassRefPtr<Node> node)
     m_mousePressNode = node;
 }
 
-bool EventHandler::scrollOverflow(ScrollDirection direction, ScrollGranularity granularity)
+bool EventHandler::scrollOverflow(ScrollDirection direction, ScrollGranularity granularity, Node* startingNode)
 {
-    Node* node = m_frame->document()->focusedNode();
+    Node* node = startingNode;
+
+    if (!node)
+        node = m_frame->document()->focusedNode();
+
     if (!node)
         node = m_mousePressNode.get();
     
@@ -899,19 +1077,71 @@ bool EventHandler::scrollOverflow(ScrollDirection direction, ScrollGranularity g
     return false;
 }
 
-bool EventHandler::scrollRecursively(ScrollDirection direction, ScrollGranularity granularity)
+bool EventHandler::logicalScrollOverflow(ScrollLogicalDirection direction, ScrollGranularity granularity, Node* startingNode)
 {
-    bool handled = scrollOverflow(direction, granularity);
-    if (!handled) {
-        Frame* frame = m_frame;
-        do {
-            FrameView* view = frame->view();
-            handled = view ? view->scroll(direction, granularity) : false;
-            frame = frame->tree()->parent();
-        } while (!handled && frame);
-     }
+    Node* node = startingNode;
 
-    return handled;
+    if (!node)
+        node = m_frame->document()->focusedNode();
+
+    if (!node)
+        node = m_mousePressNode.get();
+    
+    if (node) {
+        RenderObject* r = node->renderer();
+        if (r && !r->isListBox() && r->enclosingBox()->logicalScroll(direction, granularity)) {
+            setFrameWasScrolledByUser();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool EventHandler::scrollRecursively(ScrollDirection direction, ScrollGranularity granularity, Node* startingNode)
+{
+    // The layout needs to be up to date to determine if we can scroll. We may be
+    // here because of an onLoad event, in which case the final layout hasn't been performed yet.
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
+    if (scrollOverflow(direction, granularity, startingNode))
+        return true;    
+    Frame* frame = m_frame;
+    FrameView* view = frame->view();
+    if (view && view->scroll(direction, granularity))
+        return true;
+    frame = frame->tree()->parent();
+    if (!frame)
+        return false;
+    return frame->eventHandler()->scrollRecursively(direction, granularity, m_frame->ownerElement());
+}
+
+bool EventHandler::logicalScrollRecursively(ScrollLogicalDirection direction, ScrollGranularity granularity, Node* startingNode)
+{
+    // The layout needs to be up to date to determine if we can scroll. We may be
+    // here because of an onLoad event, in which case the final layout hasn't been performed yet.
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
+    if (logicalScrollOverflow(direction, granularity, startingNode))
+        return true;    
+    Frame* frame = m_frame;
+    FrameView* view = frame->view();
+    
+    bool scrolled = false;
+#if PLATFORM(MAC)
+    // Mac also resets the scroll position in the inline direction.
+    if (granularity == ScrollByDocument && view && view->logicalScroll(ScrollInlineDirectionBackward, ScrollByDocument))
+        scrolled = true;
+#endif
+    if (view && view->logicalScroll(direction, granularity))
+        scrolled = true;
+    
+    if (scrolled)
+        return true;
+    
+    frame = frame->tree()->parent();
+    if (!frame)
+        return false;
+
+    return frame->eventHandler()->logicalScrollRecursively(direction, granularity, m_frame->ownerElement());
 }
 
 IntPoint EventHandler::currentMousePosition() const
@@ -919,11 +1149,11 @@ IntPoint EventHandler::currentMousePosition() const
     return m_currentMousePosition;
 }
 
-Frame* subframeForHitTestResult(const MouseEventWithHitTestResults& hitTestResult)
+Frame* EventHandler::subframeForHitTestResult(const MouseEventWithHitTestResults& hitTestResult)
 {
     if (!hitTestResult.isOverWidget())
         return 0;
-    return EventHandler::subframeForTargetNode(hitTestResult.targetNode());
+    return subframeForTargetNode(targetNode(hitTestResult));
 }
 
 Frame* EventHandler::subframeForTargetNode(Node* node)
@@ -943,7 +1173,7 @@ Frame* EventHandler::subframeForTargetNode(Node* node)
 }
 
     
-static IntPoint documentPointForWindowPoint(Frame* frame, const IntPoint& windowPoint)
+static LayoutPoint documentPointForWindowPoint(Frame* frame, const IntPoint& windowPoint)
 {
     FrameView* view = frame->view();
     // FIXME: Is it really OK to use the wrong coordinates here when view is 0?
@@ -951,15 +1181,44 @@ static IntPoint documentPointForWindowPoint(Frame* frame, const IntPoint& window
     return view ? view->windowToContents(windowPoint) : windowPoint;
 }
 
+Node* EventHandler::targetNode(const MouseEventWithHitTestResults& event)
+{
+    return targetNode(event.hitTestResult());
+}
+
+Node* EventHandler::targetNode(const HitTestResult& hitTestResult)
+{
+    Node* node = hitTestResult.innerNode();
+    if (!node)
+        return 0;
+    if (node->inDocument())
+        return node;
+
+    Element* element = node->parentElement();
+    if (element && element->inDocument())
+        return element;
+
+    return node;
+
+}
+
 bool EventHandler::handleMousePressEvent(const PlatformMouseEvent& mouseEvent)
 {
     RefPtr<FrameView> protector(m_frame->view());
+
+    bool defaultPrevented = dispatchSyntheticTouchEventIfEnabled(mouseEvent);
+    if (defaultPrevented)
+        return true;
+
+    UserGestureIndicator gestureIndicator(DefinitelyProcessingUserGesture);
+
+    // FIXME (bug 68185): this call should be made at another abstraction layer
+    m_frame->loader()->resetMultipleFormSubmissionProtection();
     
-    UserGestureIndicator gestureIndicator;
-    
+    cancelFakeMouseMoveEvent();
     m_mousePressed = true;
     m_capturesDragging = true;
-    m_currentMousePosition = mouseEvent.pos();
+    m_currentMousePosition = mouseEvent.position();
     m_mouseDownTimestamp = mouseEvent.timestamp();
 #if ENABLE(DRAG_SUPPORT)
     m_mouseDownMayStartDrag = false;
@@ -967,7 +1226,7 @@ bool EventHandler::handleMousePressEvent(const PlatformMouseEvent& mouseEvent)
     m_mouseDownMayStartSelect = false;
     m_mouseDownMayStartAutoscroll = false;
     if (FrameView* view = m_frame->view())
-        m_mouseDownPos = view->windowToContents(mouseEvent.pos());
+        m_mouseDownPos = view->windowToContents(mouseEvent.position());
     else {
         invalidateClick();
         return false;
@@ -977,49 +1236,50 @@ bool EventHandler::handleMousePressEvent(const PlatformMouseEvent& mouseEvent)
     HitTestRequest request(HitTestRequest::Active);
     // Save the document point we generate in case the window coordinate is invalidated by what happens 
     // when we dispatch the event.
-    IntPoint documentPoint = documentPointForWindowPoint(m_frame, mouseEvent.pos());
+    LayoutPoint documentPoint = documentPointForWindowPoint(m_frame, mouseEvent.position());
     MouseEventWithHitTestResults mev = m_frame->document()->prepareMouseEvent(request, documentPoint, mouseEvent);
 
-    if (!mev.targetNode()) {
+    if (!targetNode(mev)) {
         invalidateClick();
         return false;
     }
 
-    m_mousePressNode = mev.targetNode();
+    m_mousePressNode = targetNode(mev);
 
-#if ENABLE(INSPECTOR)
-    if (Page* page = m_frame->page()) {
-        InspectorController* inspector = page->inspectorController();
-        if (inspector && inspector->enabled() && inspector->searchingForNodeInPage()) {
-            inspector->handleMousePressOnNode(m_mousePressNode.get());
-            invalidateClick();
-            return true;
-        }
+    if (InspectorInstrumentation::handleMousePress(m_frame->page())) {
+        invalidateClick();
+        return true;
     }
-#endif
-
+        
     Frame* subframe = subframeForHitTestResult(mev);
     if (subframe && passMousePressEventToSubframe(mev, subframe)) {
         // Start capturing future events for this frame.  We only do this if we didn't clear
         // the m_mousePressed flag, which may happen if an AppKit widget entered a modal event loop.
         m_capturesDragging = subframe->eventHandler()->capturesDragging();
-        if (m_mousePressed && m_capturesDragging)
-            m_capturingMouseEventsNode = mev.targetNode();
+        if (m_mousePressed && m_capturesDragging) {
+            m_capturingMouseEventsNode = targetNode(mev);
+            m_eventHandlerWillResetCapturingMouseEventsNode = true;
+        }
         invalidateClick();
         return true;
     }
 
 #if ENABLE(PAN_SCROLLING)
-    Page* page = m_frame->page();
-    if (page && page->mainFrame()->eventHandler()->panScrollInProgress() || m_autoscrollInProgress) {
+    // We store whether pan scrolling is in progress before calling stopAutoscrollTimer()
+    // because it will set m_panScrollInProgress to false on return.
+    bool isPanScrollInProgress = m_frame->page() && m_frame->page()->mainFrame()->eventHandler()->m_panScrollInProgress;
+    if (isPanScrollInProgress || m_autoscrollInProgress)
         stopAutoscrollTimer();
+    if (isPanScrollInProgress) {
+        // We invalidate the click when exiting pan scrolling so that we don't inadvertently navigate
+        // away from the current page (e.g. the click was on a hyperlink). See <rdar://problem/6095023>.
         invalidateClick();
         return true;
     }
 #endif
 
     m_clickCount = mouseEvent.clickCount();
-    m_clickNode = mev.targetNode();
+    m_clickNode = targetNode(mev);
 
     if (!m_clickNode) {
         invalidateClick();
@@ -1028,7 +1288,7 @@ bool EventHandler::handleMousePressEvent(const PlatformMouseEvent& mouseEvent)
     
     if (FrameView* view = m_frame->view()) {
         RenderLayer* layer = m_clickNode->renderer() ? m_clickNode->renderer()->enclosingLayer() : 0;
-        IntPoint p = view->windowToContents(mouseEvent.pos());
+        IntPoint p = view->windowToContents(mouseEvent.position());
         if (layer && layer->isPointInResizeControl(p)) {
             layer->setInResizeMode(true);
             m_resizeLayer = layer;
@@ -1038,8 +1298,10 @@ bool EventHandler::handleMousePressEvent(const PlatformMouseEvent& mouseEvent)
         }
     }
 
-    bool swallowEvent = dispatchMouseEvent(eventNames().mousedownEvent, mev.targetNode(), true, m_clickCount, mouseEvent, true);
-    m_capturesDragging = !swallowEvent;
+    m_frame->selection()->setCaretBlinkingSuspended(true);
+
+    bool swallowEvent = dispatchMouseEvent(eventNames().mousedownEvent, targetNode(mev), true, m_clickCount, mouseEvent, true);
+    m_capturesDragging = !swallowEvent || mev.scrollbar();
 
     // If the hit testing originally determined the event was in a scrollbar, refetch the MouseEventWithHitTestResults
     // in case the scrollbar widget was destroyed when the mouse event was handled.
@@ -1064,13 +1326,13 @@ bool EventHandler::handleMousePressEvent(const PlatformMouseEvent& mouseEvent)
         // If a mouse event handler changes the input element type to one that has a widget associated,
         // we'd like to EventHandler::handleMousePressEvent to pass the event to the widget and thus the
         // event target node can't still be the shadow node.
-        if (mev.targetNode()->isShadowNode() && mev.targetNode()->shadowParentNode()->hasTagName(inputTag)) {
+        if (targetNode(mev)->isShadowRoot() && targetNode(mev)->shadowHost()->hasTagName(inputTag)) {
             HitTestRequest request(HitTestRequest::ReadOnly | HitTestRequest::Active);
             mev = m_frame->document()->prepareMouseEvent(request, documentPoint, mouseEvent);
         }
 
         FrameView* view = m_frame->view();
-        Scrollbar* scrollbar = view ? view->scrollbarAtPoint(mouseEvent.pos()) : 0;
+        Scrollbar* scrollbar = view ? view->scrollbarAtPoint(mouseEvent.position()) : 0;
         if (!scrollbar)
             scrollbar = mev.scrollbar();
 
@@ -1089,49 +1351,79 @@ bool EventHandler::handleMousePressEvent(const PlatformMouseEvent& mouseEvent)
 bool EventHandler::handleMouseDoubleClickEvent(const PlatformMouseEvent& mouseEvent)
 {
     RefPtr<FrameView> protector(m_frame->view());
-    
-    UserGestureIndicator gestureIndicator;
+
+    UserGestureIndicator gestureIndicator(DefinitelyProcessingUserGesture);
 
     // We get this instead of a second mouse-up 
     m_mousePressed = false;
-    m_currentMousePosition = mouseEvent.pos();
+    m_currentMousePosition = mouseEvent.position();
 
     HitTestRequest request(HitTestRequest::Active);
     MouseEventWithHitTestResults mev = prepareMouseEvent(request, mouseEvent);
     Frame* subframe = subframeForHitTestResult(mev);
-    if (subframe && passMousePressEventToSubframe(mev, subframe)) {
+    if (m_eventHandlerWillResetCapturingMouseEventsNode)
         m_capturingMouseEventsNode = 0;
+    if (subframe && passMousePressEventToSubframe(mev, subframe))
         return true;
-    }
 
     m_clickCount = mouseEvent.clickCount();
-    bool swallowMouseUpEvent = dispatchMouseEvent(eventNames().mouseupEvent, mev.targetNode(), true, m_clickCount, mouseEvent, false);
+    bool swallowMouseUpEvent = dispatchMouseEvent(eventNames().mouseupEvent, targetNode(mev), true, m_clickCount, mouseEvent, false);
 
-    bool swallowClickEvent = false;
-    // Don't ever dispatch click events for right clicks
-    if (mouseEvent.button() != RightButton && mev.targetNode() == m_clickNode)
-        swallowClickEvent = dispatchMouseEvent(eventNames().clickEvent, mev.targetNode(), true, m_clickCount, mouseEvent, true);
+    bool swallowClickEvent = mouseEvent.button() != RightButton && targetNode(mev) == m_clickNode && dispatchMouseEvent(eventNames().clickEvent, targetNode(mev), true, m_clickCount, mouseEvent, true);
 
     if (m_lastScrollbarUnderMouse)
-        swallowMouseUpEvent = m_lastScrollbarUnderMouse->mouseUp();
-            
-    bool swallowMouseReleaseEvent = false;
-    if (!swallowMouseUpEvent)
-        swallowMouseReleaseEvent = handleMouseReleaseEvent(mev);
+        swallowMouseUpEvent = m_lastScrollbarUnderMouse->mouseUp(mouseEvent);
+
+    bool swallowMouseReleaseEvent = !swallowMouseUpEvent && handleMouseReleaseEvent(mev);
 
     invalidateClick();
 
     return swallowMouseUpEvent || swallowClickEvent || swallowMouseReleaseEvent;
 }
 
+static RenderLayer* layerForNode(Node* node)
+{
+    if (!node)
+        return 0;
+
+    RenderObject* renderer = node->renderer();
+    if (!renderer)
+        return 0;
+
+    RenderLayer* layer = renderer->enclosingLayer();
+    if (!layer)
+        return 0;
+
+    return layer;
+}
+
 bool EventHandler::mouseMoved(const PlatformMouseEvent& event)
 {
-    HitTestResult hoveredNode = HitTestResult(IntPoint());
+    MaximumDurationTracker maxDurationTracker(&m_maxMouseMovedDuration);
+    RefPtr<FrameView> protector(m_frame->view());
+
+
+    // FIXME: this should be moved elsewhere to also be able to dispatch touchcancel events.
+    bool defaultPrevented = dispatchSyntheticTouchEventIfEnabled(event);
+    if (defaultPrevented)
+        return true;
+
+    HitTestResult hoveredNode = HitTestResult(LayoutPoint());
     bool result = handleMouseMoveEvent(event, &hoveredNode);
 
     Page* page = m_frame->page();
     if (!page)
         return result;
+
+    if (RenderLayer* layer = layerForNode(hoveredNode.innerNode())) {
+        if (FrameView* frameView = m_frame->view()) {
+            if (frameView->containsScrollableArea(layer))
+                layer->mouseMovedInContentArea();
+        }
+    }
+
+    if (FrameView* frameView = m_frame->view())
+        frameView->mouseMovedInContentArea();  
 
     hoveredNode.setToNonShadowAncestor();
     page->chrome()->mouseDidMoveOverElement(hoveredNode, event.modifierFlags());
@@ -1139,7 +1431,13 @@ bool EventHandler::mouseMoved(const PlatformMouseEvent& event)
     return result;
 }
 
-bool EventHandler::handleMouseMoveEvent(const PlatformMouseEvent& mouseEvent, HitTestResult* hoveredNode)
+bool EventHandler::passMouseMovedEventToScrollbars(const PlatformMouseEvent& event)
+{
+    HitTestResult hoveredNode;
+    return handleMouseMoveEvent(event, &hoveredNode, true);
+}
+
+bool EventHandler::handleMouseMoveEvent(const PlatformMouseEvent& mouseEvent, HitTestResult* hoveredNode, bool onlyUpdateScrollbars)
 {
     // in Radar 3703768 we saw frequent crashes apparently due to the
     // part being null here, which seems impossible, so check for nil
@@ -1150,14 +1448,16 @@ bool EventHandler::handleMouseMoveEvent(const PlatformMouseEvent& mouseEvent, Hi
         return false;
 
     RefPtr<FrameView> protector(m_frame->view());
-    m_currentMousePosition = mouseEvent.pos();
+    m_currentMousePosition = mouseEvent.position();
 
     if (m_hoverTimer.isActive())
         m_hoverTimer.stop();
 
+    cancelFakeMouseMoveEvent();
+
 #if ENABLE(SVG)
     if (m_svgPan) {
-        static_cast<SVGDocument*>(m_frame->document())->updatePan(m_currentMousePosition);
+        static_cast<SVGDocument*>(m_frame->document())->updatePan(m_frame->view()->windowToContents(m_currentMousePosition));
         return true;
     }
 #endif
@@ -1167,15 +1467,17 @@ bool EventHandler::handleMouseMoveEvent(const PlatformMouseEvent& mouseEvent, Hi
 
     // No scrollbars on iPhone
 
-    // Treat mouse move events while the mouse is pressed as "read-only" in prepareMouseEvent
-    // if we are allowed to select.
-    // This means that :hover and :active freeze in the state they were in when the mouse
-    // was pressed, rather than updating for nodes the mouse moves over as you hold the mouse down.
-    int hitType = HitTestRequest::MouseMove;
-    if (m_mousePressed && m_mouseDownMayStartSelect)
-        hitType |= HitTestRequest::ReadOnly;
+    HitTestRequest::HitTestRequestType hitType = HitTestRequest::Move;
     if (m_mousePressed)
         hitType |= HitTestRequest::Active;
+    else if (onlyUpdateScrollbars) {
+        // Mouse events should be treated as "read-only" if we're updating only scrollbars. This  
+        // means that :hover and :active freeze in the state they were in, rather than updating  
+        // for nodes the mouse moves while the window is not key (which will be the case if 
+        // onlyUpdateScrollbars is true). 
+        hitType |= HitTestRequest::ReadOnly;
+    }
+
     HitTestRequest request(hitType);
     MouseEventWithHitTestResults mev = prepareMouseEvent(request, mouseEvent);
     if (hoveredNode)
@@ -1187,12 +1489,14 @@ bool EventHandler::handleMouseMoveEvent(const PlatformMouseEvent& mouseEvent, Hi
         m_resizeLayer->resize(mouseEvent, m_offsetFromResizeCorner);
     else {
         if (FrameView* view = m_frame->view())
-            scrollbar = view->scrollbarAtPoint(mouseEvent.pos());
+            scrollbar = view->scrollbarAtPoint(mouseEvent.position());
 
         if (!scrollbar)
             scrollbar = mev.scrollbar();
 
         updateLastScrollbarUnderMouse(scrollbar, !m_mousePressed);
+        if (onlyUpdateScrollbars)
+            return true;
     }
 
     bool swallowEvent = false;
@@ -1204,7 +1508,7 @@ bool EventHandler::handleMouseMoveEvent(const PlatformMouseEvent& mouseEvent, Hi
 
     if (newSubframe) {
         // Update over/out state before passing the event to the subframe.
-        updateMouseEventTargetNode(mev.targetNode(), mouseEvent, true);
+        updateMouseEventTargetNode(targetNode(mev), mouseEvent, true);
         
         // Event dispatch in updateMouseEventTargetNode may have caused the subframe of the target
         // node to be detached from its FrameView, in which case the event should not be passed.
@@ -1217,7 +1521,7 @@ bool EventHandler::handleMouseMoveEvent(const PlatformMouseEvent& mouseEvent, Hi
     if (swallowEvent)
         return true;
     
-    swallowEvent = dispatchMouseEvent(eventNames().mousemoveEvent, mev.targetNode(), false, 0, mouseEvent, true);
+    swallowEvent = dispatchMouseEvent(eventNames().mousemoveEvent, targetNode(mev), false, 0, mouseEvent, true);
 #if ENABLE(DRAG_SUPPORT)
     if (!swallowEvent)
         swallowEvent = handleMouseDraggedEvent(mev);
@@ -1235,23 +1539,27 @@ void EventHandler::invalidateClick()
 bool EventHandler::handleMouseReleaseEvent(const PlatformMouseEvent& mouseEvent)
 {
     RefPtr<FrameView> protector(m_frame->view());
-    
-    UserGestureIndicator gestureIndicator;
+
+    bool defaultPrevented = dispatchSyntheticTouchEventIfEnabled(mouseEvent);
+    if (defaultPrevented)
+        return true;
+
+    UserGestureIndicator gestureIndicator(DefinitelyProcessingUserGesture);
 
 #if ENABLE(PAN_SCROLLING)
     if (mouseEvent.button() == MiddleButton)
         m_panScrollButtonPressed = false;
     if (m_springLoadedPanScrollInProgress)
-       stopAutoscrollTimer();
+        stopAutoscrollTimer();
 #endif
 
     m_mousePressed = false;
-    m_currentMousePosition = mouseEvent.pos();
+    m_currentMousePosition = mouseEvent.position();
 
 #if ENABLE(SVG)
     if (m_svgPan) {
         m_svgPan = false;
-        static_cast<SVGDocument*>(m_frame->document())->updatePan(m_currentMousePosition);
+        static_cast<SVGDocument*>(m_frame->document())->updatePan(m_frame->view()->windowToContents(m_currentMousePosition));
         return true;
     }
 #endif
@@ -1261,24 +1569,21 @@ bool EventHandler::handleMouseReleaseEvent(const PlatformMouseEvent& mouseEvent)
 
     if (m_lastScrollbarUnderMouse) {
         invalidateClick();
-        return m_lastScrollbarUnderMouse->mouseUp();
+        return m_lastScrollbarUnderMouse->mouseUp(mouseEvent);
     }
 
-    HitTestRequest request(HitTestRequest::MouseUp);
+    HitTestRequest request(HitTestRequest::Release);
     MouseEventWithHitTestResults mev = prepareMouseEvent(request, mouseEvent);
     Frame* subframe = m_capturingMouseEventsNode.get() ? subframeForTargetNode(m_capturingMouseEventsNode.get()) : subframeForHitTestResult(mev);
-    if (subframe && passMouseReleaseEventToSubframe(mev, subframe)) {
+    if (m_eventHandlerWillResetCapturingMouseEventsNode)
         m_capturingMouseEventsNode = 0;
+    if (subframe && passMouseReleaseEventToSubframe(mev, subframe))
         return true;
-    }
     m_capturingMouseEventsNode = 0;
 
-    bool swallowMouseUpEvent = dispatchMouseEvent(eventNames().mouseupEvent, mev.targetNode(), true, m_clickCount, mouseEvent, false);
+    bool swallowMouseUpEvent = dispatchMouseEvent(eventNames().mouseupEvent, targetNode(mev), true, m_clickCount, mouseEvent, false);
 
-    // Don't ever dispatch click events for right clicks
-    bool swallowClickEvent = false;
-    if (m_clickCount > 0 && mouseEvent.button() != RightButton && mev.targetNode() == m_clickNode)
-        swallowClickEvent = dispatchMouseEvent(eventNames().clickEvent, mev.targetNode(), true, m_clickCount, mouseEvent, true);
+    bool swallowClickEvent = m_clickCount > 0 && mouseEvent.button() != RightButton && targetNode(mev) == m_clickNode && dispatchMouseEvent(eventNames().clickEvent, targetNode(mev), true, m_clickCount, mouseEvent, true);
 
     if (m_resizeLayer) {
         m_resizeLayer->setInResizeMode(false);
@@ -1304,11 +1609,12 @@ bool EventHandler::dispatchDragEvent(const AtomicString& eventType, Node* dragTa
         return false;
 
     view->resetDeferredRepaintDelay();
-    IntPoint contentsPos = view->windowToContents(event.pos());
-
     RefPtr<MouseEvent> me = MouseEvent::create(eventType,
         true, true, m_frame->document()->defaultView(),
-        0, event.globalX(), event.globalY(), contentsPos.x(), contentsPos.y(),
+        0, event.globalPosition().x(), event.globalPosition().y(), event.position().x(), event.position().y(),
+#if ENABLE(POINTER_LOCK)
+        event.movementDelta().x(), event.movementDelta().y(),
+#endif
         event.ctrlKey(), event.altKey(), event.shiftKey(), event.metaKey(),
         0, 0, clipboard);
 
@@ -1317,35 +1623,55 @@ bool EventHandler::dispatchDragEvent(const AtomicString& eventType, Node* dragTa
     return me->defaultPrevented();
 }
 
-bool EventHandler::canHandleDragAndDropForTarget(DragAndDropHandleType type, Node* target, const PlatformMouseEvent& event, Clipboard* clipboard, bool* accepted)
+static bool targetIsFrame(Node* target, Frame*& frame)
 {
-    bool canHandle = false;
-    bool wasAccepted = false;
+    if (!target)
+        return false;
 
-    if (target->hasTagName(frameTag) || target->hasTagName(iframeTag)) {
-        Frame* frame = static_cast<HTMLFrameElementBase*>(target)->contentFrame();
-        if (frame) {
-            switch (type) {
-                case UpdateDragAndDrop:
-                    wasAccepted = frame->eventHandler()->updateDragAndDrop(event, clipboard);
-                    break;
-                case CancelDragAndDrop:
-                    frame->eventHandler()->cancelDragAndDrop(event, clipboard);
-                    break;
-                case PerformDragAndDrop:
-                    wasAccepted = frame->eventHandler()->performDragAndDrop(event, clipboard);
-                    break;
-            }
-        }
-    } else
-        canHandle = true;
+    if (!target->hasTagName(frameTag) && !target->hasTagName(iframeTag))
+        return false;
 
-    if (accepted)
-        *accepted = wasAccepted;
+    frame = static_cast<HTMLFrameElementBase*>(target)->contentFrame();
 
-    return canHandle;
+    return true;
 }
 
+static bool findDropZone(Node* target, Clipboard* clipboard)
+{
+    Element* element = target->isElementNode() ? toElement(target) : target->parentElement();
+    for (; element; element = element->parentElement()) {
+        bool matched = false;
+        String dropZoneStr = element->fastGetAttribute(webkitdropzoneAttr);
+
+        if (dropZoneStr.isEmpty())
+            continue;
+        
+        dropZoneStr.makeLower();
+        
+        SpaceSplitString keywords(dropZoneStr, false);
+        if (keywords.isNull())
+            continue;
+        
+        DragOperation dragOperation = DragOperationNone;
+        for (unsigned int i = 0; i < keywords.size(); i++) {
+            DragOperation op = convertDropZoneOperationToDragOperation(keywords[i]);
+            if (op != DragOperationNone) {
+                if (dragOperation == DragOperationNone)
+                    dragOperation = op;
+            } else
+                matched = matched || clipboard->hasDropZoneType(keywords[i].string());
+
+            if (matched && dragOperation != DragOperationNone)
+                break;
+        }
+        if (matched) {
+            clipboard->setDropEffect(convertDragOperationToDropZoneOperation(dragOperation));
+            return true;
+        }
+    }
+    return false;
+}
+    
 bool EventHandler::updateDragAndDrop(const PlatformMouseEvent& event, Clipboard* clipboard)
 {
     bool accept = false;
@@ -1357,7 +1683,7 @@ bool EventHandler::updateDragAndDrop(const PlatformMouseEvent& event, Clipboard*
     MouseEventWithHitTestResults mev = prepareMouseEvent(request, event);
 
     // Drag events should never go to text nodes (following IE, and proper mouseover/out dispatch)
-    Node* newTarget = mev.targetNode();
+    RefPtr<Node> newTarget = targetNode(mev);
     if (newTarget && newTarget->isTextNode())
         newTarget = newTarget->parentNode();
     if (newTarget)
@@ -1369,31 +1695,46 @@ bool EventHandler::updateDragAndDrop(const PlatformMouseEvent& event, Clipboard*
         // LayoutTests/fast/events/drag-in-frames.html.
         //
         // Moreover, this ordering conforms to section 7.9.4 of the HTML 5 spec. <http://dev.w3.org/html5/spec/Overview.html#drag-and-drop-processing-model>.
-        if (newTarget && canHandleDragAndDropForTarget(UpdateDragAndDrop, newTarget, event, clipboard, &accept)) {
+        Frame* targetFrame;
+        if (targetIsFrame(newTarget.get(), targetFrame)) {
+            if (targetFrame)
+                accept = targetFrame->eventHandler()->updateDragAndDrop(event, clipboard);
+        } else if (newTarget) {
             // As per section 7.9.4 of the HTML 5 spec., we must always fire a drag event before firing a dragenter, dragleave, or dragover event.
-            if (dragState().m_dragSrc && dragState().m_dragSrcMayBeDHTML) {
+            if (dragState().m_dragSrc && dragState().shouldDispatchEvents()) {
                 // for now we don't care if event handler cancels default behavior, since there is none
                 dispatchDragSrcEvent(eventNames().dragEvent, event);
             }
-            accept = dispatchDragEvent(eventNames().dragenterEvent, newTarget, event, clipboard);
+            accept = dispatchDragEvent(eventNames().dragenterEvent, newTarget.get(), event, clipboard);
+            if (!accept)
+                accept = findDropZone(newTarget.get(), clipboard);
         }
 
-        if (m_dragTarget && canHandleDragAndDropForTarget(UpdateDragAndDrop, m_dragTarget.get(), event, clipboard, &accept))
+        if (targetIsFrame(m_dragTarget.get(), targetFrame)) {
+            if (targetFrame)
+                accept = targetFrame->eventHandler()->updateDragAndDrop(event, clipboard);
+        } else if (m_dragTarget)
             dispatchDragEvent(eventNames().dragleaveEvent, m_dragTarget.get(), event, clipboard);
-        
+
         if (newTarget) {
             // We do not explicitly call dispatchDragEvent here because it could ultimately result in the appearance that
             // two dragover events fired. So, we mark that we should only fire a dragover event on the next call to this function.
             m_shouldOnlyFireDragOverEvent = true;
         }
     } else {
-        if (newTarget && canHandleDragAndDropForTarget(UpdateDragAndDrop, newTarget, event, clipboard, &accept)) {
+        Frame* targetFrame;
+        if (targetIsFrame(newTarget.get(), targetFrame)) {
+            if (targetFrame)
+                accept = targetFrame->eventHandler()->updateDragAndDrop(event, clipboard);
+        } else if (newTarget) {
             // Note, when dealing with sub-frames, we may need to fire only a dragover event as a drag event may have been fired earlier.
-            if (!m_shouldOnlyFireDragOverEvent && dragState().m_dragSrc && dragState().m_dragSrcMayBeDHTML) {
+            if (!m_shouldOnlyFireDragOverEvent && dragState().m_dragSrc && dragState().shouldDispatchEvents()) {
                 // for now we don't care if event handler cancels default behavior, since there is none
                 dispatchDragSrcEvent(eventNames().dragEvent, event);
             }
-            accept = dispatchDragEvent(eventNames().dragoverEvent, newTarget, event, clipboard);
+            accept = dispatchDragEvent(eventNames().dragoverEvent, newTarget.get(), event, clipboard);
+            if (!accept)
+                accept = findDropZone(newTarget.get(), clipboard);
             m_shouldOnlyFireDragOverEvent = false;
         }
     }
@@ -1404,8 +1745,12 @@ bool EventHandler::updateDragAndDrop(const PlatformMouseEvent& event, Clipboard*
 
 void EventHandler::cancelDragAndDrop(const PlatformMouseEvent& event, Clipboard* clipboard)
 {
-    if (m_dragTarget && canHandleDragAndDropForTarget(CancelDragAndDrop, m_dragTarget.get(), event, clipboard)) {
-        if (dragState().m_dragSrc && dragState().m_dragSrcMayBeDHTML)
+    Frame* targetFrame;
+    if (targetIsFrame(m_dragTarget.get(), targetFrame)) {
+        if (targetFrame)
+            targetFrame->eventHandler()->cancelDragAndDrop(event, clipboard);
+    } else if (m_dragTarget.get()) {
+        if (dragState().m_dragSrc && dragState().shouldDispatchEvents())
             dispatchDragSrcEvent(eventNames().dragEvent, event);
         dispatchDragEvent(eventNames().dragleaveEvent, m_dragTarget.get(), event, clipboard);
     }
@@ -1414,11 +1759,15 @@ void EventHandler::cancelDragAndDrop(const PlatformMouseEvent& event, Clipboard*
 
 bool EventHandler::performDragAndDrop(const PlatformMouseEvent& event, Clipboard* clipboard)
 {
-    bool accept = false;
-    if (m_dragTarget && canHandleDragAndDropForTarget(PerformDragAndDrop, m_dragTarget.get(), event, clipboard, &accept))
-        dispatchDragEvent(eventNames().dropEvent, m_dragTarget.get(), event, clipboard);
+    Frame* targetFrame;
+    bool preventedDefault = false;
+    if (targetIsFrame(m_dragTarget.get(), targetFrame)) {
+        if (targetFrame)
+            preventedDefault = targetFrame->eventHandler()->performDragAndDrop(event, clipboard);
+    } else if (m_dragTarget.get())
+        preventedDefault = dispatchDragEvent(eventNames().dropEvent, m_dragTarget.get(), event, clipboard);
     clearDragState();
-    return accept;
+    return preventedDefault;
 }
 
 void EventHandler::clearDragState()
@@ -1426,7 +1775,7 @@ void EventHandler::clearDragState()
     m_dragTarget = 0;
     m_capturingMouseEventsNode = 0;
     m_shouldOnlyFireDragOverEvent = false;
-#if PLATFORM(MAC) && !ENABLE(EXPERIMENTAL_SINGLE_VIEW_MODE)
+#if PLATFORM(MAC)
     m_sendingEventToSubview = false;
 #endif
 }
@@ -1435,6 +1784,7 @@ void EventHandler::clearDragState()
 void EventHandler::setCapturingMouseEventsNode(PassRefPtr<Node> n)
 {
     m_capturingMouseEventsNode = n;
+    m_eventHandlerWillResetCapturingMouseEventsNode = false;
 }
 
 MouseEventWithHitTestResults EventHandler::prepareMouseEvent(const HitTestRequest& request, const PlatformMouseEvent& mev)
@@ -1442,7 +1792,7 @@ MouseEventWithHitTestResults EventHandler::prepareMouseEvent(const HitTestReques
     ASSERT(m_frame);
     ASSERT(m_frame->document());
     
-    return m_frame->document()->prepareMouseEvent(request, documentPointForWindowPoint(m_frame, mev.pos()), mev);
+    return m_frame->document()->prepareMouseEvent(request, documentPointForWindowPoint(m_frame, mev.position()), mev);
 }
 
 #if ENABLE(SVG)
@@ -1455,7 +1805,7 @@ static inline SVGElementInstance* instanceAssociatedWithShadowTreeElement(Node* 
     if (!shadowTreeElement)
         return 0;
 
-    Node* shadowTreeParentElement = shadowTreeElement->shadowParentNode();
+    Element* shadowTreeParentElement = shadowTreeElement->shadowHost();
     if (!shadowTreeParentElement)
         return 0;
 
@@ -1475,8 +1825,6 @@ void EventHandler::updateMouseEventTargetNode(Node* targetNode, const PlatformMo
         // If the target node is a text node, dispatch on the parent node - rdar://4196646
         if (result && result->isTextNode())
             result = result->parentNode();
-        if (result)
-            result = result->shadowAncestorNode();
     }
     m_nodeUnderMouse = result;
 #if ENABLE(SVG)
@@ -1516,6 +1864,42 @@ void EventHandler::updateMouseEventTargetNode(Node* targetNode, const PlatformMo
 
     // Fire mouseout/mouseover if the mouse has shifted to a different node.
     if (fireMouseOverOut) {
+        RenderLayer* layerForLastNode = layerForNode(m_lastNodeUnderMouse.get());
+        RenderLayer* layerForNodeUnderMouse = layerForNode(m_nodeUnderMouse.get());
+        Page* page = m_frame->page();
+
+        if (m_lastNodeUnderMouse && (!m_nodeUnderMouse || m_nodeUnderMouse->document() != m_frame->document())) {
+            // The mouse has moved between frames.
+            if (Frame* frame = m_lastNodeUnderMouse->document()->frame()) {
+                if (FrameView* frameView = frame->view())
+                    frameView->mouseExitedContentArea();
+            }
+        } else if (page && (layerForLastNode && (!layerForNodeUnderMouse || layerForNodeUnderMouse != layerForLastNode))) {
+            // The mouse has moved between layers.
+            if (Frame* frame = m_lastNodeUnderMouse->document()->frame()) {
+                if (FrameView* frameView = frame->view()) {
+                    if (frameView->containsScrollableArea(layerForLastNode))
+                        layerForLastNode->mouseExitedContentArea();
+                }
+            }
+        }
+
+        if (m_nodeUnderMouse && (!m_lastNodeUnderMouse || m_lastNodeUnderMouse->document() != m_frame->document())) {
+            // The mouse has moved between frames.
+            if (Frame* frame = m_nodeUnderMouse->document()->frame()) {
+                if (FrameView* frameView = frame->view())
+                    frameView->mouseEnteredContentArea();
+            }
+        } else if (page && (layerForNodeUnderMouse && (!layerForLastNode || layerForNodeUnderMouse != layerForLastNode))) {
+            // The mouse has moved between layers.
+            if (Frame* frame = m_nodeUnderMouse->document()->frame()) {
+                if (FrameView* frameView = frame->view()) {
+                    if (frameView->containsScrollableArea(layerForNodeUnderMouse))
+                        layerForNodeUnderMouse->mouseEnteredContentArea();
+                }
+            }
+        }
+
         if (m_lastNodeUnderMouse && m_lastNodeUnderMouse->document() != m_frame->document()) {
             m_lastNodeUnderMouse = 0;
             m_lastScrollbarUnderMouse = 0;
@@ -1550,8 +1934,15 @@ bool EventHandler::dispatchMouseEvent(const AtomicString& eventType, Node* targe
 
     if (m_nodeUnderMouse)
         swallowEvent = m_nodeUnderMouse->dispatchMouseEvent(mouseEvent, eventType, clickCount);
-    
+
     if (!swallowEvent && eventType == eventNames().mousedownEvent) {
+
+        // If clicking on a frame scrollbar, do not mess up with content focus.
+        if (FrameView* view = m_frame->view()) {
+            if (view->scrollbarAtPoint(mouseEvent.position()))
+                return false;
+        }
+
         // The layout needs to be up to date to determine if an element is focusable.
         m_frame->document()->updateLayoutIgnorePendingStylesheets();
 
@@ -1559,28 +1950,24 @@ bool EventHandler::dispatchMouseEvent(const AtomicString& eventType, Node* targe
         // is expected by some sites that rely on onChange handlers running
         // from form fields before the button click is processed.
         Node* node = m_nodeUnderMouse.get();
-        RenderObject* renderer = node ? node->renderer() : 0;
 
-        // Walk up the render tree to search for a node to focus.
-        // Walking up the DOM tree wouldn't work for shadow trees, like those behind the engine-based text fields.
-        while (renderer) {
-            node = renderer->node();
-            if (node && node->isFocusable()) {
-                // To fix <rdar://problem/4895428> Can't drag selected ToDo, we don't focus a 
-                // node on mouse down if it's selected and inside a focused node. It will be 
+        // Walk up the DOM tree to search for a node to focus.
+        while (node) {
+            if (node->isMouseFocusable()) {
+                // To fix <rdar://problem/4895428> Can't drag selected ToDo, we don't focus a
+                // node on mouse down if it's selected and inside a focused node. It will be
                 // focused if the user does a mouseup over it, however, because the mouseup
                 // will set a selection inside it, which will call setFocuseNodeIfNeeded.
                 ExceptionCode ec = 0;
-                Node* n = node->isShadowNode() ? node->shadowParentNode() : node;
-                if (m_frame->selection()->isRange() && 
-                    m_frame->selection()->toNormalizedRange()->compareNode(n, ec) == Range::NODE_INSIDE &&
-                    n->isDescendantOf(m_frame->document()->focusedNode()))
+                Node* n = node->isShadowRoot() ? node->shadowHost() : node;
+                if (m_frame->selection()->isRange()
+                    && m_frame->selection()->toNormalizedRange()->compareNode(n, ec) == Range::NODE_INSIDE
+                    && n->isDescendantOf(m_frame->document()->focusedNode()))
                     return false;
                     
                 break;
             }
-            
-            renderer = renderer->parent();
+            node = node->parentOrHostNode();
         }
 
         // If focus shift is blocked, we eat the event.  Note we should never clear swallowEvent
@@ -1599,14 +1986,14 @@ bool EventHandler::dispatchMouseEvent(const AtomicString& eventType, Node* targe
     return swallowEvent;
 }
 
-#if !PLATFORM(GTK) && !(PLATFORM(CHROMIUM) && OS(LINUX))
+#if !PLATFORM(GTK) && !(PLATFORM(CHROMIUM) && (OS(UNIX) && !OS(DARWIN)))
 bool EventHandler::shouldTurnVerticalTicksIntoHorizontal(const HitTestResult&) const
 {
     return false;
 }
 #endif
 
-bool EventHandler::handleWheelEvent(PlatformWheelEvent& e)
+bool EventHandler::handleWheelEvent(const PlatformWheelEvent& e)
 {
     Document* doc = m_frame->document();
 
@@ -1620,21 +2007,23 @@ bool EventHandler::handleWheelEvent(PlatformWheelEvent& e)
     if (!view)
         return false;
     setFrameWasScrolledByUser();
-    IntPoint vPoint = view->windowToContents(e.pos());
+    LayoutPoint vPoint = view->windowToContents(e.position());
 
     Node* node;
     bool isOverWidget;
-    bool didSetLatchedNode = false;
 
     HitTestRequest request(HitTestRequest::ReadOnly);
     HitTestResult result(vPoint);
-    doc->renderView()->layer()->hitTest(request, result);
+    doc->renderView()->hitTest(request, result);
+
+#if PLATFORM(MAC)
+    m_useLatchedWheelEventNode = e.momentumPhase() == PlatformWheelEventPhaseBegan || e.momentumPhase() == PlatformWheelEventPhaseChanged;
+#endif
 
     if (m_useLatchedWheelEventNode) {
         if (!m_latchedWheelEventNode) {
             m_latchedWheelEventNode = result.innerNode();
             m_widgetIsLatched = result.isOverWidget();
-            didSetLatchedNode = true;
         }
 
         node = m_latchedWheelEventNode.get();
@@ -1649,8 +2038,12 @@ bool EventHandler::handleWheelEvent(PlatformWheelEvent& e)
         isOverWidget = result.isOverWidget();
     }
 
-    if (shouldTurnVerticalTicksIntoHorizontal(result))
-        e.turnVerticalTicksIntoHorizontal();
+    // FIXME: It should not be necessary to do this mutation here.
+    // Instead, the handlers should know convert vertical scrolls
+    // appropriately.
+    PlatformWheelEvent event = e;
+    if (m_baseEventType == PlatformEvent::NoType && shouldTurnVerticalTicksIntoHorizontal(result))
+        event = event.copyTurningVerticalTicksIntoHorizontalTicks();
 
     if (node) {
         // Figure out which view to send the event to.
@@ -1658,43 +2051,160 @@ bool EventHandler::handleWheelEvent(PlatformWheelEvent& e)
         
         if (isOverWidget && target && target->isWidget()) {
             Widget* widget = toRenderWidget(target)->widget();
-            if (widget && passWheelEventToWidget(e, widget)) {
-                e.accept();
+            if (widget && passWheelEventToWidget(e, widget))
                 return true;
-            }
         }
 
         node = node->shadowAncestorNode();
-        node->dispatchWheelEvent(e);
-        if (e.isAccepted())
+        if (node && !node->dispatchWheelEvent(event))
             return true;
-
-        // If we don't have a renderer, send the wheel event to the first node we find with a renderer.
-        // This is needed for <option> and <optgroup> elements so that <select>s get a wheel scroll.
-        while (node && !node->renderer())
-            node = node->parent();
-
-        if (node && node->renderer()) {
-            // Just break up into two scrolls if we need to.  Diagonal movement on 
-            // a MacBook pro is an example of a 2-dimensional mouse wheel event (where both deltaX and deltaY can be set).
-            Node* stopNode = m_previousWheelScrolledNode.get();
-            scrollAndAcceptEvent(e.deltaX(), ScrollLeft, ScrollRight, e, node, &stopNode);
-            scrollAndAcceptEvent(e.deltaY(), ScrollUp, ScrollDown, e, node, &stopNode);
-            if (!m_useLatchedWheelEventNode)
-                m_previousWheelScrolledNode = stopNode;
-        }
     }
 
-    if (e.isAccepted())
-        return true;
 
+    // We do another check on the frame view because the event handler can run JS which results in the frame getting destroyed.
     view = m_frame->view();
     if (!view)
         return false;
-
-    view->wheelEvent(e);
-    return e.isAccepted();
+    
+    return view->wheelEvent(event);
 }
+
+void EventHandler::defaultWheelEventHandler(Node* startNode, WheelEvent* wheelEvent)
+{
+    if (!startNode || !wheelEvent)
+        return;
+    
+    Node* stopNode = m_previousWheelScrolledNode.get();
+    ScrollGranularity granularity = m_baseEventType == PlatformEvent::GestureScrollEnd ? ScrollByPixelVelocity : wheelGranularityToScrollGranularity(wheelEvent->granularity());
+    
+    // Break up into two scrolls if we need to.  Diagonal movement on 
+    // a MacBook pro is an example of a 2-dimensional mouse wheel event (where both deltaX and deltaY can be set).
+    if (scrollNode(wheelEvent->rawDeltaX(), granularity, ScrollLeft, ScrollRight, startNode, &stopNode))
+        wheelEvent->setDefaultHandled();
+    
+    if (scrollNode(wheelEvent->rawDeltaY(), granularity, ScrollUp, ScrollDown, startNode, &stopNode))
+        wheelEvent->setDefaultHandled();
+    
+    if (!m_useLatchedWheelEventNode)
+        m_previousWheelScrolledNode = stopNode;
+}
+
+#if ENABLE(GESTURE_EVENTS)
+bool EventHandler::handleGestureTapDown()
+{
+    FrameView* view = m_frame->view();
+    if (!view)
+        return false;
+    if (ScrollAnimator* scrollAnimator = view->existingScrollAnimator())
+        scrollAnimator->cancelAnimations();
+    const FrameView::ScrollableAreaSet* areas = view->scrollableAreas();
+    if (!areas)
+        return false;
+    for (FrameView::ScrollableAreaSet::const_iterator it = areas->begin(); it != areas->end(); ++it) {
+        ScrollableArea* sa = *it;
+        ScrollAnimator* animator = sa->scrollAnimator();
+        if (animator)
+            animator->cancelAnimations();
+    }
+    return false;
+}
+
+bool EventHandler::handleGestureEvent(const PlatformGestureEvent& gestureEvent)
+{
+    // FIXME: A more general scroll system (https://bugs.webkit.org/show_bug.cgi?id=80596) will
+    // eliminate the need for this.
+    TemporaryChange<PlatformEvent::Type> baseEventType(m_baseEventType, gestureEvent.type());
+
+    switch (gestureEvent.type()) {
+    case PlatformEvent::GestureScrollBegin:
+        return handleGestureScrollCore(gestureEvent, ScrollByPixelWheelEvent, false);
+    case PlatformEvent::GestureScrollEnd:
+        return handleGestureScrollCore(gestureEvent, ScrollByPixelVelocityWheelEvent, true);
+    case PlatformEvent::GestureScrollUpdate:
+        return handleGestureScrollUpdate(gestureEvent);
+    case PlatformEvent::GestureTap:
+        return handleGestureTap(gestureEvent);
+    case PlatformEvent::GestureTapDown:
+        return handleGestureTapDown();
+    case PlatformEvent::GestureDoubleTap:
+    case PlatformEvent::GestureLongPress:
+    case PlatformEvent::GesturePinchBegin:
+    case PlatformEvent::GesturePinchEnd:
+    case PlatformEvent::GesturePinchUpdate:
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
+
+    return false;
+}
+
+bool EventHandler::handleGestureTap(const PlatformGestureEvent& gestureEvent, Node* preTargetedNode)
+{
+    IntPoint adjustedPoint = gestureEvent.position();
+#if ENABLE(TOUCH_ADJUSTMENT)
+    if (!gestureEvent.area().isEmpty() && !preTargetedNode) {
+        Node* targetNode = 0;
+        // For now we use the adjusted position to ensure the later redundant hit-tests hits the right node.
+        bestClickableNodeForTouchPoint(gestureEvent.position(), IntSize(gestureEvent.area().width() / 2, gestureEvent.area().height() / 2), adjustedPoint, targetNode);
+        if (!targetNode)
+            return false;
+    }
+#endif
+    // FIXME: Refactor to avoid hit testing multiple times (this is only an interim step).
+    if (preTargetedNode)
+        adjustedPoint = preTargetedNode->getPixelSnappedRect().center();
+
+    bool defaultPrevented = false;
+    PlatformMouseEvent fakeMouseMove(adjustedPoint, gestureEvent.globalPosition(), NoButton, PlatformEvent::MouseMoved, /* clickCount */ 1, gestureEvent.shiftKey(), gestureEvent.ctrlKey(), gestureEvent.altKey(), gestureEvent.metaKey(), gestureEvent.timestamp());
+    PlatformMouseEvent fakeMouseDown(adjustedPoint, gestureEvent.globalPosition(), LeftButton, PlatformEvent::MousePressed, /* clickCount */ 1, gestureEvent.shiftKey(), gestureEvent.ctrlKey(), gestureEvent.altKey(), gestureEvent.metaKey(), gestureEvent.timestamp());
+    PlatformMouseEvent fakeMouseUp(adjustedPoint, gestureEvent.globalPosition(), LeftButton, PlatformEvent::MouseReleased, /* clickCount */ 1, gestureEvent.shiftKey(), gestureEvent.ctrlKey(), gestureEvent.altKey(), gestureEvent.metaKey(), gestureEvent.timestamp());
+    mouseMoved(fakeMouseMove);
+    defaultPrevented |= handleMousePressEvent(fakeMouseDown);
+    defaultPrevented |= handleMouseReleaseEvent(fakeMouseUp);
+    return defaultPrevented;
+}
+
+bool EventHandler::handleGestureScrollUpdate(const PlatformGestureEvent& gestureEvent)
+{
+    return handleGestureScrollCore(gestureEvent, ScrollByPixelWheelEvent, true);
+}
+
+bool EventHandler::handleGestureScrollCore(const PlatformGestureEvent& gestureEvent, PlatformWheelEventGranularity granularity, bool latchedWheel)
+{
+    TemporaryChange<bool> latched(m_useLatchedWheelEventNode, latchedWheel);
+    const float tickDivisor = (float)WheelEvent::tickMultiplier;
+    IntPoint point(gestureEvent.position().x(), gestureEvent.position().y());
+    IntPoint globalPoint(gestureEvent.globalPosition().x(), gestureEvent.globalPosition().y());
+    PlatformWheelEvent syntheticWheelEvent(point, globalPoint,
+        gestureEvent.deltaX(), gestureEvent.deltaY(), gestureEvent.deltaX() / tickDivisor, gestureEvent.deltaY() / tickDivisor,
+        granularity,
+        gestureEvent.shiftKey(), gestureEvent.ctrlKey(), gestureEvent.altKey(), gestureEvent.metaKey());
+    return handleWheelEvent(syntheticWheelEvent);
+}
+#endif
+
+#if ENABLE(TOUCH_ADJUSTMENT)
+bool EventHandler::bestClickableNodeForTouchPoint(const IntPoint& touchCenter, const IntSize& touchRadius, IntPoint& targetPoint, Node*& targetNode)
+{
+    HitTestRequest::HitTestRequestType hitType = HitTestRequest::ReadOnly | HitTestRequest::Active;
+    HitTestResult result = hitTestResultAtPoint(touchCenter, /*allowShadowContent*/ false, /*ignoreClipping*/ false, DontHitTestScrollbars, hitType, touchRadius);
+
+    IntRect touchRect = result.rectForPoint(touchCenter);
+    RefPtr<StaticHashSetNodeList> nodeList = StaticHashSetNodeList::adopt(result.rectBasedTestResult());
+    return findBestClickableCandidate(targetNode, targetPoint, touchCenter, touchRect, *nodeList.get());
+}
+
+bool EventHandler::bestZoomableAreaForTouchPoint(const IntPoint& touchCenter, const IntSize& touchRadius, IntRect& targetArea, Node*& targetNode)
+{
+    HitTestRequest::HitTestRequestType hitType = HitTestRequest::ReadOnly | HitTestRequest::Active;
+    HitTestResult result = hitTestResultAtPoint(touchCenter, /*allowShadowContent*/ false, /*ignoreClipping*/ false, DontHitTestScrollbars, hitType, touchRadius);
+
+    IntRect touchRect = result.rectForPoint(touchCenter);
+    RefPtr<StaticHashSetNodeList> nodeList = StaticHashSetNodeList::adopt(result.rectBasedTestResult());
+    return findBestZoomableArea(targetNode, targetArea, touchCenter, touchRect, *nodeList.get());
+}
+#endif
 
 #if ENABLE(CONTEXT_MENUS)
 bool EventHandler::sendContextMenuEvent(const PlatformMouseEvent& event)
@@ -1705,28 +2215,98 @@ bool EventHandler::sendContextMenuEvent(const PlatformMouseEvent& event)
         return false;
     
     bool swallowEvent;
-    IntPoint viewportPos = v->windowToContents(event.pos());
+    LayoutPoint viewportPos = v->windowToContents(event.position());
     HitTestRequest request(HitTestRequest::Active);
     MouseEventWithHitTestResults mev = doc->prepareMouseEvent(request, viewportPos, event);
 
-    // Context menu events shouldn't select text in GTK+ applications or in Chromium.
-    // FIXME: This should probably be configurable by embedders. Consider making it a WebPreferences setting.
-    // See: https://bugs.webkit.org/show_bug.cgi?id=15279
-#if !PLATFORM(GTK) && !PLATFORM(CHROMIUM)
-    if (!m_frame->selection()->contains(viewportPos) && 
+    if (m_frame->editor()->behavior().shouldSelectOnContextualMenuClick()
+        && !m_frame->selection()->contains(viewportPos)
         // FIXME: In the editable case, word selection sometimes selects content that isn't underneath the mouse.
         // If the selection is non-editable, we do word selection to make it easier to use the contextual menu items
         // available for text selections.  But only if we're above text.
-        (m_frame->selection()->isContentEditable() || (mev.targetNode() && mev.targetNode()->isTextNode()))) {
+        && (m_frame->selection()->isContentEditable() || (targetNode(mev) && targetNode(mev)->isTextNode()))) {
         m_mouseDownMayStartSelect = true; // context menu events are always allowed to perform a selection
         selectClosestWordOrLinkFromMouseEvent(mev);
     }
-#endif
 
-    swallowEvent = dispatchMouseEvent(eventNames().contextmenuEvent, mev.targetNode(), true, 0, event, true);
+    swallowEvent = dispatchMouseEvent(eventNames().contextmenuEvent, targetNode(mev), true, 0, event, false);
     
     return swallowEvent;
 }
+
+bool EventHandler::sendContextMenuEventForKey()
+{
+    FrameView* view = m_frame->view();
+    if (!view)
+        return false;
+
+    Document* doc = m_frame->document();
+    if (!doc)
+        return false;
+
+    static const int kContextMenuMargin = 1;
+
+#if OS(WINDOWS) && !OS(WINCE)
+    int rightAligned = ::GetSystemMetrics(SM_MENUDROPALIGNMENT);
+#else
+    int rightAligned = 0;
+#endif
+    IntPoint location;
+
+    Node* focusedNode = doc->focusedNode();
+    FrameSelection* selection = m_frame->selection();
+    Position start = selection->selection().start();
+
+    if (start.deprecatedNode() && (selection->rootEditableElement() || selection->isRange())) {
+        RefPtr<Range> selectionRange = selection->toNormalizedRange();
+        IntRect firstRect = m_frame->editor()->firstRectForRange(selectionRange.get());
+
+        int x = rightAligned ? firstRect.maxX() : firstRect.x();
+        // In a multiline edit, firstRect.maxY() would endup on the next line, so -1.
+        int y = firstRect.maxY() ? firstRect.maxY() - 1 : 0;
+        location = IntPoint(x, y);
+    } else if (focusedNode) {
+        RenderBoxModelObject* box = focusedNode->renderBoxModelObject();
+        if (!box)
+            return false;
+        IntRect clippedRect = box->pixelSnappedAbsoluteClippedOverflowRect();
+        location = IntPoint(clippedRect.x(), clippedRect.maxY() - 1);
+    } else {
+        location = IntPoint(
+            rightAligned ? view->contentsWidth() - kContextMenuMargin : kContextMenuMargin,
+            kContextMenuMargin);
+    }
+
+    m_frame->view()->setCursor(pointerCursor());
+
+    IntPoint position = view->contentsToRootView(location);
+    IntPoint globalPosition = view->hostWindow()->rootViewToScreen(IntRect(position, IntSize())).location();
+
+    Node* targetNode = doc->focusedNode();
+    if (!targetNode)
+        targetNode = doc;
+
+    // Use the focused node as the target for hover and active.
+    HitTestResult result(position);
+    result.setInnerNode(targetNode);
+    HitTestRequest request(HitTestRequest::Active);
+    doc->renderView()->layer()->updateHoverActiveState(request, result);
+    doc->updateStyleIfNeeded();
+   
+    // The contextmenu event is a mouse event even when invoked using the keyboard.
+    // This is required for web compatibility.
+
+#if OS(WINDOWS)
+    PlatformEvent::Type eventType = PlatformEvent::MouseReleased;
+#else
+    PlatformEvent::Type eventType = PlatformEvent::MousePressed;
+#endif
+
+    PlatformMouseEvent mouseEvent(position, globalPosition, RightButton, eventType, 1, false, false, false, false, WTF::currentTime());
+
+    return dispatchMouseEvent(eventNames().contextmenuEvent, targetNode, true, 0, mouseEvent, false);
+}
+
 #endif // ENABLE(CONTEXT_MENUS)
 
 void EventHandler::scheduleHoverStateUpdate()
@@ -1735,38 +2315,60 @@ void EventHandler::scheduleHoverStateUpdate()
         m_hoverTimer.startOneShot(0);
 }
 
-// Whether or not a mouse down can begin the creation of a selection.  Fires the selectStart event.
-bool EventHandler::canMouseDownStartSelect(Node* node)
+void EventHandler::dispatchFakeMouseMoveEventSoon()
 {
-    if (!node || !node->renderer())
-        return true;
-    
-    // Some controls and images can't start a select on a mouse down.
-    if (!node->canStartSelection())
-        return false;
-            
-    for (RenderObject* curr = node->renderer(); curr; curr = curr->parent()) {
-        if (Node* node = curr->node())
-            return node->dispatchEvent(Event::create(eventNames().selectstartEvent, true, true));
-    }
+    if (m_mousePressed)
+        return;
 
-    return true;
+    // If the content has ever taken longer than fakeMouseMoveShortInterval we
+    // reschedule the timer and use a longer time. This will cause the content
+    // to receive these moves only after the user is done scrolling, reducing
+    // pauses during the scroll.
+    if (m_maxMouseMovedDuration > fakeMouseMoveShortInterval) {
+        if (m_fakeMouseMoveEventTimer.isActive())
+            m_fakeMouseMoveEventTimer.stop();
+        m_fakeMouseMoveEventTimer.startOneShot(fakeMouseMoveLongInterval);
+    } else {
+        if (!m_fakeMouseMoveEventTimer.isActive())
+            m_fakeMouseMoveEventTimer.startOneShot(fakeMouseMoveShortInterval);
+    }
 }
 
-#if ENABLE(DRAG_SUPPORT)
-bool EventHandler::canMouseDragExtendSelect(Node* node)
+void EventHandler::dispatchFakeMouseMoveEventSoonInQuad(const FloatQuad& quad)
 {
-    if (!node || !node->renderer())
-        return true;
-            
-    for (RenderObject* curr = node->renderer(); curr; curr = curr->parent()) {
-        if (Node* node = curr->node())
-            return node->dispatchEvent(Event::create(eventNames().selectstartEvent, true, true));
-    }
+    FrameView* view = m_frame->view();
+    if (!view)
+        return;
 
-    return true;
+    if (!quad.containsPoint(view->windowToContents(m_currentMousePosition)))
+        return;
+
+    dispatchFakeMouseMoveEventSoon();
 }
-#endif // ENABLE(DRAG_SUPPORT)
+
+void EventHandler::cancelFakeMouseMoveEvent()
+{
+    m_fakeMouseMoveEventTimer.stop();
+}
+
+void EventHandler::fakeMouseMoveEventTimerFired(Timer<EventHandler>* timer)
+{
+    ASSERT_UNUSED(timer, timer == &m_fakeMouseMoveEventTimer);
+    ASSERT(!m_mousePressed);
+
+    FrameView* view = m_frame->view();
+    if (!view)
+        return;
+
+    bool shiftKey;
+    bool ctrlKey;
+    bool altKey;
+    bool metaKey;
+    PlatformKeyboardEvent::getCurrentModifierState(shiftKey, ctrlKey, altKey, metaKey);
+    IntPoint globalPoint = view->contentsToScreen(IntRect(view->windowToContents(m_currentMousePosition), IntSize())).location();
+    PlatformMouseEvent fakeMouseMoveEvent(m_currentMousePosition, globalPoint, NoButton, PlatformEvent::MouseMoved, 0, shiftKey, ctrlKey, altKey, metaKey, currentTime());
+    mouseMoved(fakeMouseMoveEvent);
+}
 
 void EventHandler::setResizingFrameSet(HTMLFrameSetElement* frameSet)
 {
@@ -1788,24 +2390,12 @@ void EventHandler::hoverTimerFired(Timer<EventHandler>*)
 
     if (RenderView* renderer = m_frame->contentRenderer()) {
         if (FrameView* view = m_frame->view()) {
-            HitTestRequest request(HitTestRequest::MouseMove);
+            HitTestRequest request(HitTestRequest::Move);
             HitTestResult result(view->windowToContents(m_currentMousePosition));
-            renderer->layer()->hitTest(request, result);
+            renderer->hitTest(request, result);
             m_frame->document()->updateStyleIfNeeded();
         }
     }
-}
-
-static Node* eventTargetNodeForDocument(Document* doc)
-{
-    if (!doc)
-        return 0;
-    Node* node = doc->focusedNode();
-    if (!node && doc->isHTMLDocument())
-        node = doc->body();
-    if (!node)
-        node = doc->documentElement();
-    return node;
 }
 
 bool EventHandler::handleAccessKey(const PlatformKeyboardEvent& evt)
@@ -1814,8 +2404,8 @@ bool EventHandler::handleAccessKey(const PlatformKeyboardEvent& evt)
     // IE matches lower and upper case access keys regardless of Shift key state - but if both upper and
     // lower case variants are present in a document, the correct element is matched based on Shift key state.
     // Firefox only matches an access key if Shift is not pressed, and does that case-insensitively.
-    ASSERT(!(accessKeyModifiers() & PlatformKeyboardEvent::ShiftKey));
-    if ((evt.modifiers() & ~PlatformKeyboardEvent::ShiftKey) != accessKeyModifiers())
+    ASSERT(!(accessKeyModifiers() & PlatformEvent::ShiftKey));
+    if ((evt.modifiers() & ~PlatformEvent::ShiftKey) != accessKeyModifiers())
         return false;
     String key = evt.unmodifiedText();
     Element* elem = m_frame->document()->getElementByAccessKey(key.lower());
@@ -1830,16 +2420,48 @@ bool EventHandler::needsKeyboardEventDisambiguationQuirks() const
     return false;
 }
 
+#if ENABLE(FULLSCREEN_API)
+bool EventHandler::isKeyEventAllowedInFullScreen(const PlatformKeyboardEvent& keyEvent) const
+{
+    Document* document = m_frame->document();
+    if (document->webkitFullScreenKeyboardInputAllowed())
+        return true;
+
+    if (keyEvent.type() == PlatformKeyboardEvent::Char) {
+        if (keyEvent.text().length() != 1)
+            return false;
+        UChar character = keyEvent.text()[0];
+        return character == ' ';
+    }
+
+    int keyCode = keyEvent.windowsVirtualKeyCode();
+    return (keyCode >= VK_BACK && keyCode <= VK_CAPITAL)
+        || (keyCode >= VK_SPACE && keyCode <= VK_DELETE)
+        || (keyCode >= VK_OEM_1 && keyCode <= VK_OEM_PLUS)
+        || (keyCode >= VK_MULTIPLY && keyCode <= VK_OEM_8);
+}
+#endif
+
 bool EventHandler::keyEvent(const PlatformKeyboardEvent& initialKeyEvent)
 {
+    RefPtr<FrameView> protector(m_frame->view()); 
+
+#if ENABLE(FULLSCREEN_API)
+    if (m_frame->document()->webkitIsFullScreen() && !isKeyEventAllowedInFullScreen(initialKeyEvent))
+        return false;
+#endif
+
+    if (initialKeyEvent.windowsVirtualKeyCode() == VK_CAPITAL)
+        capsLockStateMayHaveChanged();
+
 #if ENABLE(PAN_SCROLLING)
     if (Page* page = m_frame->page()) {
-        if (page->mainFrame()->eventHandler()->panScrollInProgress() || m_autoscrollInProgress) {
-            // If a key is pressed while the autoscroll/panScroll is in progress then we want to stop
-            if (initialKeyEvent.type() == PlatformKeyboardEvent::KeyDown || initialKeyEvent.type() == PlatformKeyboardEvent::RawKeyDown) 
+        if (page->mainFrame()->eventHandler()->m_panScrollInProgress) {
+            // If a key is pressed while the panScroll is in progress then we want to stop
+            if (initialKeyEvent.type() == PlatformEvent::KeyDown || initialKeyEvent.type() == PlatformEvent::RawKeyDown) 
                 stopAutoscrollTimer();
 
-            // If we were in autoscroll/panscroll mode, we swallow the key event
+            // If we were in panscroll mode, we swallow the key event
             return true;
         }
     }
@@ -1850,13 +2472,14 @@ bool EventHandler::keyEvent(const PlatformKeyboardEvent& initialKeyEvent)
     RefPtr<Node> node = eventTargetNodeForDocument(m_frame->document());
     if (!node)
         return false;
-    
-    UserGestureIndicator gestureIndicator;
+
+    UserGestureIndicator gestureIndicator(DefinitelyProcessingUserGesture);
+    UserTypingGestureIndicator typingGestureIndicator(m_frame);
 
     if (FrameView* view = m_frame->view())
         view->resetDeferredRepaintDelay();
 
-    // FIXME: what is this doing here, in keyboard event handler?
+    // FIXME (bug 68185): this call should be made at another abstraction layer
     m_frame->loader()->resetMultipleFormSubmissionProtection();
 
     // In IE, access keys are special, they are handled after default keydown processing, but cannot be canceled - this is hard to match.
@@ -1865,27 +2488,29 @@ bool EventHandler::keyEvent(const PlatformKeyboardEvent& initialKeyEvent)
     // On Windows, WebKit explicitly calls handleAccessKey() instead of dispatching a keypress event for WM_SYSCHAR messages.
     // Other platforms currently match either Mac or Windows behavior, depending on whether they send combined KeyDown events.
     bool matchedAnAccessKey = false;
-    if (initialKeyEvent.type() == PlatformKeyboardEvent::KeyDown)
+    if (initialKeyEvent.type() == PlatformEvent::KeyDown)
         matchedAnAccessKey = handleAccessKey(initialKeyEvent);
 
     // FIXME: it would be fair to let an input method handle KeyUp events before DOM dispatch.
-    if (initialKeyEvent.type() == PlatformKeyboardEvent::KeyUp || initialKeyEvent.type() == PlatformKeyboardEvent::Char)
+    if (initialKeyEvent.type() == PlatformEvent::KeyUp || initialKeyEvent.type() == PlatformEvent::Char)
         return !node->dispatchKeyEvent(initialKeyEvent);
 
     bool backwardCompatibilityMode = needsKeyboardEventDisambiguationQuirks();
 
     ExceptionCode ec;
     PlatformKeyboardEvent keyDownEvent = initialKeyEvent;    
-    if (keyDownEvent.type() != PlatformKeyboardEvent::RawKeyDown)
-        keyDownEvent.disambiguateKeyDownEvent(PlatformKeyboardEvent::RawKeyDown, backwardCompatibilityMode);
+    if (keyDownEvent.type() != PlatformEvent::RawKeyDown)
+        keyDownEvent.disambiguateKeyDownEvent(PlatformEvent::RawKeyDown, backwardCompatibilityMode);
     RefPtr<KeyboardEvent> keydown = KeyboardEvent::create(keyDownEvent, m_frame->document()->defaultView());
     if (matchedAnAccessKey)
         keydown->setDefaultPrevented(true);
     keydown->setTarget(node);
 
-    if (initialKeyEvent.type() == PlatformKeyboardEvent::RawKeyDown) {
+    if (initialKeyEvent.type() == PlatformEvent::RawKeyDown) {
         node->dispatchEvent(keydown, ec);
-        return keydown->defaultHandled() || keydown->defaultPrevented();
+        // If frame changed as a result of keydown dispatch, then return true to avoid sending a subsequent keypress message to the new frame.
+        bool changedFocusedFrame = m_frame->page() && m_frame != m_frame->page()->focusController()->focusedOrMainFrame();
+        return keydown->defaultHandled() || keydown->defaultPrevented() || changedFocusedFrame;
     }
 
     // Run input method in advance of DOM event handling.  This may result in the IM
@@ -1905,7 +2530,9 @@ bool EventHandler::keyEvent(const PlatformKeyboardEvent& initialKeyEvent)
     }
 
     node->dispatchEvent(keydown, ec);
-    bool keydownResult = keydown->defaultHandled() || keydown->defaultPrevented();
+    // If frame changed as a result of keydown dispatch, then return early to avoid sending a subsequent keypress message to the new frame.
+    bool changedFocusedFrame = m_frame->page() && m_frame != m_frame->page()->focusController()->focusedOrMainFrame();
+    bool keydownResult = keydown->defaultHandled() || keydown->defaultPrevented() || changedFocusedFrame;
     if (handledByInputMethod || (keydownResult && !backwardCompatibilityMode))
         return keydownResult;
     
@@ -1918,7 +2545,7 @@ bool EventHandler::keyEvent(const PlatformKeyboardEvent& initialKeyEvent)
     }
 
     PlatformKeyboardEvent keyPressEvent = initialKeyEvent;
-    keyPressEvent.disambiguateKeyDownEvent(PlatformKeyboardEvent::Char, backwardCompatibilityMode);
+    keyPressEvent.disambiguateKeyDownEvent(PlatformEvent::Char, backwardCompatibilityMode);
     if (keyPressEvent.text().isEmpty())
         return keydownResult;
     RefPtr<KeyboardEvent> keypress = KeyboardEvent::create(keyPressEvent, m_frame->document()->defaultView());
@@ -1933,32 +2560,66 @@ bool EventHandler::keyEvent(const PlatformKeyboardEvent& initialKeyEvent)
     return keydownResult || keypress->defaultPrevented() || keypress->defaultHandled();
 }
 
-void EventHandler::handleKeyboardSelectionMovement(KeyboardEvent* event)
+static FocusDirection focusDirectionForKey(const AtomicString& keyIdentifier)
+{
+    DEFINE_STATIC_LOCAL(AtomicString, Down, ("Down"));
+    DEFINE_STATIC_LOCAL(AtomicString, Up, ("Up"));
+    DEFINE_STATIC_LOCAL(AtomicString, Left, ("Left"));
+    DEFINE_STATIC_LOCAL(AtomicString, Right, ("Right"));
+
+    FocusDirection retVal = FocusDirectionNone;
+
+    if (keyIdentifier == Down)
+        retVal = FocusDirectionDown;
+    else if (keyIdentifier == Up)
+        retVal = FocusDirectionUp;
+    else if (keyIdentifier == Left)
+        retVal = FocusDirectionLeft;
+    else if (keyIdentifier == Right)
+        retVal = FocusDirectionRight;
+
+    return retVal;
+}
+
+static void handleKeyboardSelectionMovement(FrameSelection* selection, KeyboardEvent* event)
 {
     if (!event)
         return;
-    
-    String key = event->keyIdentifier();           
-    bool isShifted = event->getModifierState("Shift");
+
     bool isOptioned = event->getModifierState("Alt");
     bool isCommanded = event->getModifierState("Meta");
-    
-    if (key == "Up") {
-        m_frame->selection()->modify((isShifted) ? SelectionController::EXTEND : SelectionController::MOVE, SelectionController::BACKWARD, (isCommanded) ? DocumentBoundary : LineGranularity, true);
-        event->setDefaultHandled();
+
+    SelectionDirection direction = DirectionForward;
+    TextGranularity granularity = CharacterGranularity;
+
+    switch (focusDirectionForKey(event->keyIdentifier())) {
+    case FocusDirectionNone:
+        return;
+    case FocusDirectionForward:
+    case FocusDirectionBackward:
+        ASSERT_NOT_REACHED();
+        return;
+    case FocusDirectionUp:
+        direction = DirectionBackward;
+        granularity = isCommanded ? DocumentBoundary : LineGranularity;
+        break;
+    case FocusDirectionDown:
+        direction = DirectionForward;
+        granularity = isCommanded ? DocumentBoundary : LineGranularity;
+        break;
+    case FocusDirectionLeft:
+        direction = DirectionLeft;
+        granularity = (isCommanded) ? LineBoundary : (isOptioned) ? WordGranularity : CharacterGranularity;
+        break;
+    case FocusDirectionRight:
+        direction = DirectionRight;
+        granularity = (isCommanded) ? LineBoundary : (isOptioned) ? WordGranularity : CharacterGranularity;
+        break;
     }
-    else if (key == "Down") { 
-        m_frame->selection()->modify((isShifted) ? SelectionController::EXTEND : SelectionController::MOVE, SelectionController::FORWARD, (isCommanded) ? DocumentBoundary : LineGranularity, true);
-        event->setDefaultHandled();
-    }
-    else if (key == "Left") {
-        m_frame->selection()->modify((isShifted) ? SelectionController::EXTEND : SelectionController::MOVE, SelectionController::LEFT, (isCommanded) ? LineBoundary : (isOptioned) ? WordGranularity : CharacterGranularity, true);
-        event->setDefaultHandled();
-    }
-    else if (key == "Right") {
-        m_frame->selection()->modify((isShifted) ? SelectionController::EXTEND : SelectionController::MOVE, SelectionController::RIGHT, (isCommanded) ? LineBoundary : (isOptioned) ? WordGranularity : CharacterGranularity, true);
-        event->setDefaultHandled();
-    }    
+
+    FrameSelection::EAlteration alternation = event->getModifierState("Shift") ? FrameSelection::AlterationExtend : FrameSelection::AlterationMove;
+    selection->modify(alternation, direction, granularity, UserTriggered);
+    event->setDefaultHandled();
 }
     
 void EventHandler::defaultKeyboardEventHandler(KeyboardEvent* event)
@@ -1969,10 +2630,17 @@ void EventHandler::defaultKeyboardEventHandler(KeyboardEvent* event)
             return;
         if (event->keyIdentifier() == "U+0009")
             defaultTabEventHandler(event);
+        else if (event->keyIdentifier() == "U+0008")
+            defaultBackspaceEventHandler(event);
+        else {
+            FocusDirection direction = focusDirectionForKey(event->keyIdentifier());
+            if (direction != FocusDirectionNone)
+                defaultArrowEventHandler(direction, event);
+        }
 
-       // provides KB navigation and selection for enhanced accessibility users
-       if (AXObjectCache::accessibilityEnhancedUserInterfaceEnabled())
-           handleKeyboardSelectionMovement(event);       
+        // provides KB navigation and selection for enhanced accessibility users
+        if (AXObjectCache::accessibilityEnhancedUserInterfaceEnabled())
+            handleKeyboardSelectionMovement(m_frame->selection(), event);
     }
     if (event->type() == eventNames().keypressEvent) {
         m_frame->editor()->handleKeyboardEvent(event);
@@ -1984,27 +2652,37 @@ void EventHandler::defaultKeyboardEventHandler(KeyboardEvent* event)
 }
 
 #if ENABLE(DRAG_SUPPORT)
-bool EventHandler::dragHysteresisExceeded(const FloatPoint& floatDragViewportLocation) const
+bool EventHandler::dragHysteresisExceeded(const IntPoint& floatDragViewportLocation) const
 {
-    IntPoint dragViewportLocation((int)floatDragViewportLocation.x(), (int)floatDragViewportLocation.y());
+    FloatPoint dragViewportLocation(floatDragViewportLocation.x(), floatDragViewportLocation.y());
     return dragHysteresisExceeded(dragViewportLocation);
 }
-    
-bool EventHandler::dragHysteresisExceeded(const IntPoint& dragViewportLocation) const
+
+bool EventHandler::dragHysteresisExceeded(const FloatPoint& dragViewportLocation) const
 {
     FrameView* view = m_frame->view();
     if (!view)
         return false;
-    IntPoint dragLocation = view->windowToContents(dragViewportLocation);
+    IntPoint dragLocation = view->windowToContents(flooredIntPoint(dragViewportLocation));
     IntSize delta = dragLocation - m_mouseDownPos;
     
     int threshold = GeneralDragHysteresis;
-    if (dragState().m_dragSrcIsImage)
-        threshold = ImageDragHysteresis;
-    else if (dragState().m_dragSrcIsLink)
-        threshold = LinkDragHysteresis;
-    else if (dragState().m_dragSrcInSelection)
+    switch (dragState().m_dragType) {
+    case DragSourceActionSelection:
         threshold = TextDragHysteresis;
+        break;
+    case DragSourceActionImage:
+        threshold = ImageDragHysteresis;
+        break;
+    case DragSourceActionLink:
+        threshold = LinkDragHysteresis;
+        break;
+    case DragSourceActionDHTML:
+        break;
+    case DragSourceActionNone:
+    case DragSourceActionAny:
+        ASSERT_NOT_REACHED();
+    }
     
     return abs(delta.width()) >= threshold || abs(delta.height()) >= threshold;
 }
@@ -2015,17 +2693,13 @@ void EventHandler::freeClipboard()
         dragState().m_dragClipboard->setAccessPolicy(ClipboardNumb);
 }
 
-bool EventHandler::shouldDragAutoNode(Node* node, const IntPoint& point) const
-{
-    if (!node || !m_frame->view())
-        return false;
-    Page* page = m_frame->page();
-    return page && page->dragController()->mayStartDragAtEventLocation(m_frame, point);
-}
-
 void EventHandler::dragSourceEndedAt(const PlatformMouseEvent& event, DragOperation operation)
 {
-    if (dragState().m_dragSrc && dragState().m_dragSrcMayBeDHTML) {
+    // Send a hit test request so that RenderLayer gets a chance to update the :hover and :active pseudoclasses.
+    HitTestRequest request(HitTestRequest::Release);
+    prepareMouseEvent(request, event);
+
+    if (dragState().m_dragSrc && dragState().shouldDispatchEvents()) {
         dragState().m_dragClipboard->setDestinationOperation(operation);
         // for now we don't care if event handler cancels default behavior, since there is none
         dispatchDragSrcEvent(eventNames().dragendEvent, event);
@@ -2036,16 +2710,28 @@ void EventHandler::dragSourceEndedAt(const PlatformMouseEvent& event, DragOperat
     // that consecutive mousemove events don't reinitiate the drag and drop.
     m_mouseDownMayStartDrag = false;
 }
-    
+
+void EventHandler::updateDragStateAfterEditDragIfNeeded(Element* rootEditableElement)
+{
+    // If inserting the dragged contents removed the drag source, we still want to fire dragend at the root editble element.
+    if (dragState().m_dragSrc && !dragState().m_dragSrc->inDocument())
+        dragState().m_dragSrc = rootEditableElement;
+}
+
 // returns if we should continue "default processing", i.e., whether eventhandler canceled
 bool EventHandler::dispatchDragSrcEvent(const AtomicString& eventType, const PlatformMouseEvent& event)
 {
     return !dispatchDragEvent(eventType, dragState().m_dragSrc.get(), event, dragState().m_dragClipboard.get());
 }
     
+static bool ExactlyOneBitSet(DragSourceAction n)
+{
+    return n && !(n & (n - 1));
+}
+
 bool EventHandler::handleDrag(const MouseEventWithHitTestResults& event)
 {
-    if (event.event().button() != LeftButton || event.event().eventType() != MouseEventMoved) {
+    if (event.event().button() != LeftButton || event.event().type() != PlatformEvent::MouseMoved) {
         // If we allowed the other side of the bridge to handle a drag
         // last time, then m_mousePressed might still be set. So we
         // clear it now to make sure the next move after a drag
@@ -2060,57 +2746,69 @@ bool EventHandler::handleDrag(const MouseEventWithHitTestResults& event)
     // Careful that the drag starting logic stays in sync with eventMayStartDrag()
     
     if (m_mouseDownMayStartDrag && !dragState().m_dragSrc) {
-        allowDHTMLDrag(dragState().m_dragSrcMayBeDHTML, dragState().m_dragSrcMayBeUA);
-        if (!dragState().m_dragSrcMayBeDHTML && !dragState().m_dragSrcMayBeUA)
-            m_mouseDownMayStartDrag = false;     // no element is draggable
-    }
+        dragState().m_eventDispatchPolicy = (updateDragSourceActionsAllowed() & DragSourceActionDHTML) ? DragState::DispatchEvents: DragState::DoNotDispatchEvents;
 
-    if (m_mouseDownMayStartDrag && !dragState().m_dragSrc) {
         // try to find an element that wants to be dragged
         HitTestRequest request(HitTestRequest::ReadOnly);
         HitTestResult result(m_mouseDownPos);
-        m_frame->contentRenderer()->layer()->hitTest(request, result);
+        m_frame->contentRenderer()->hitTest(request, result);
         Node* node = result.innerNode();
-        if (node && node->renderer())
-            dragState().m_dragSrc = node->renderer()->draggableNode(dragState().m_dragSrcMayBeDHTML, dragState().m_dragSrcMayBeUA,
-                                                                    m_mouseDownPos.x(), m_mouseDownPos.y(), dragState().m_dragSrcIsDHTML);
+        if (node && m_frame->page())
+            dragState().m_dragSrc = m_frame->page()->dragController()->draggableNode(m_frame, node, m_mouseDownPos, dragState());
         else
             dragState().m_dragSrc = 0;
         
         if (!dragState().m_dragSrc)
-            m_mouseDownMayStartDrag = false;     // no element is draggable
-        else {
-            // remember some facts about this source, while we have a HitTestResult handy
-            node = result.URLElement();
-            dragState().m_dragSrcIsLink = node && node->isLink();
-            
-            node = result.innerNonSharedNode();
-            dragState().m_dragSrcIsImage = node && node->renderer() && node->renderer()->isImage();
-            
-            dragState().m_dragSrcInSelection = m_frame->selection()->contains(m_mouseDownPos);
-        }                
+            m_mouseDownMayStartDrag = false; // no element is draggable
+        else
+            m_dragMayStartSelectionInstead = (dragState().m_dragType & DragSourceActionSelection);
     }
     
     // For drags starting in the selection, the user must wait between the mousedown and mousedrag,
     // or else we bail on the dragging stuff and allow selection to occur
-    if (m_mouseDownMayStartDrag && !dragState().m_dragSrcIsImage && dragState().m_dragSrcInSelection && event.event().timestamp() - m_mouseDownTimestamp < TextDragDelay) {
-        m_mouseDownMayStartDrag = false;
-        dragState().m_dragSrc = 0;
-        // ...but if this was the first click in the window, we don't even want to start selection
-        if (eventActivatedView(event.event()))
-            m_mouseDownMayStartSelect = false;
+    if (m_mouseDownMayStartDrag && m_dragMayStartSelectionInstead && (dragState().m_dragType & DragSourceActionSelection) && event.event().timestamp() - m_mouseDownTimestamp < TextDragDelay) {
+        ASSERT(event.event().type() == PlatformEvent::MouseMoved);
+        if ((dragState().m_dragType & DragSourceActionImage)) {
+            // ... unless the mouse is over an image, then we start dragging just the image
+            dragState().m_dragType = DragSourceActionImage;
+        } else if (!(dragState().m_dragType & (DragSourceActionDHTML | DragSourceActionLink))) {
+            // ... but only bail if we're not over an unselectable element.
+            m_mouseDownMayStartDrag = false;
+            dragState().m_dragSrc = 0;
+            // ... but if this was the first click in the window, we don't even want to start selection
+            if (eventActivatedView(event.event()))
+                m_mouseDownMayStartSelect = false;
+        } else {
+            // Prevent the following case from occuring:
+            // 1. User starts a drag immediately after mouse down over an unselectable element.
+            // 2. We enter this block and decided that since we're over an unselectable element,
+            //    don't cancel the drag.
+            // 3. The drag gets resolved as a potential selection drag below /but/ we haven't
+            //    exceeded the drag hysteresis yet.
+            // 4. We enter this block again, and since it's now marked as a selection drag, we
+            //    cancel the drag.
+            m_dragMayStartSelectionInstead = false;
+        }
     }
     
     if (!m_mouseDownMayStartDrag)
         return !mouseDownMayStartSelect() && !m_mouseDownMayStartAutoscroll;
     
+    if (!ExactlyOneBitSet(dragState().m_dragType)) {
+        ASSERT((dragState().m_dragType & DragSourceActionSelection));
+        ASSERT((dragState().m_dragType & ~DragSourceActionSelection) == DragSourceActionDHTML
+                || (dragState().m_dragType & ~DragSourceActionSelection) == DragSourceActionImage
+                || (dragState().m_dragType & ~DragSourceActionSelection) == DragSourceActionLink);
+        dragState().m_dragType = DragSourceActionSelection;
+    }
+
     // We are starting a text/image/url drag, so the cursor should be an arrow
     if (FrameView* view = m_frame->view()) {
         // FIXME <rdar://7577595>: Custom cursors aren't supported during drag and drop (default to pointer).
         view->setCursor(pointerCursor());
     }
 
-    if (!dragHysteresisExceeded(event.event().pos())) 
+    if (!dragHysteresisExceeded(event.event().position())) 
         return true;
     
     // Once we're past the hysteresis point, we don't want to treat this gesture as a click
@@ -2118,19 +2816,19 @@ bool EventHandler::handleDrag(const MouseEventWithHitTestResults& event)
     
     DragOperation srcOp = DragOperationNone;      
     
-    freeClipboard();    // would only happen if we missed a dragEnd.  Do it anyway, just
-                        // to make sure it gets numbified
+    freeClipboard(); // would only happen if we missed a dragEnd.  Do it anyway, just
+                     // to make sure it gets numbified
     dragState().m_dragClipboard = createDraggingClipboard();  
     
-    if (dragState().m_dragSrcMayBeDHTML) {
+    if (dragState().shouldDispatchEvents()) {
         // Check to see if the is a DOM based drag, if it is get the DOM specified drag 
         // image and offset
-        if (dragState().m_dragSrcIsDHTML) {
+        if (dragState().m_dragType == DragSourceActionDHTML) {
             if (RenderObject* renderer = dragState().m_dragSrc->renderer()) {
                 // FIXME: This doesn't work correctly with transforms.
                 FloatPoint absPos = renderer->localToAbsolute();
                 IntSize delta = m_mouseDownPos - roundedIntPoint(absPos);
-                dragState().m_dragClipboard->setDragImageElement(dragState().m_dragSrc.get(), IntPoint() + delta);
+                dragState().m_dragClipboard->setDragImageElement(dragState().m_dragSrc.get(), toPoint(delta));
             } else {
                 // The renderer has disappeared, this can happen if the onStartDrag handler has hidden
                 // the element in some way.  In this case we just kill the drag.
@@ -2161,8 +2859,15 @@ bool EventHandler::handleDrag(const MouseEventWithHitTestResults& event)
     if (m_mouseDownMayStartDrag) {
         Page* page = m_frame->page();
         DragController* dragController = page ? page->dragController() : 0;
-        bool startedDrag = dragController && dragController->startDrag(m_frame, dragState().m_dragClipboard.get(), srcOp, event.event(), m_mouseDownPos, dragState().m_dragSrcIsDHTML);
-        if (!startedDrag && dragState().m_dragSrcMayBeDHTML) {
+        bool startedDrag = dragController && dragController->startDrag(m_frame, dragState(), srcOp, event.event(), m_mouseDownPos);
+        // In WebKit2 we could reenter this code and start another drag.
+        // On OS X this causes problems with the ownership of the pasteboard
+        // and the promised types.
+        if (startedDrag) {
+            m_mouseDownMayStartDrag = false;
+            return true;
+        }
+        if (dragState().shouldDispatchEvents()) {
             // Drag was canned at the last minute - we owe m_dragSrc a DRAGEND event
             dispatchDragSrcEvent(eventNames().dragendEvent, event.event());
             m_mouseDownMayStartDrag = false;
@@ -2181,7 +2886,7 @@ cleanupDrag:
 }
 #endif // ENABLE(DRAG_SUPPORT)
   
-bool EventHandler::handleTextInputEvent(const String& text, Event* underlyingEvent, bool isLineBreak, bool isBackTab)
+bool EventHandler::handleTextInputEvent(const String& text, Event* underlyingEvent, TextEventInputType inputType)
 {
     // Platforms should differentiate real commands like selectAll from text input in disguise (like insertNewline),
     // and avoid dispatching text input events from keydown default handlers.
@@ -2201,68 +2906,62 @@ bool EventHandler::handleTextInputEvent(const String& text, Event* underlyingEve
     if (FrameView* view = m_frame->view())
         view->resetDeferredRepaintDelay();
 
-    RefPtr<TextEvent> event = TextEvent::create(m_frame->domWindow(), text);
+    RefPtr<TextEvent> event = TextEvent::create(m_frame->domWindow(), text, inputType);
     event->setUnderlyingEvent(underlyingEvent);
-    event->setIsLineBreak(isLineBreak);
-    event->setIsBackTab(isBackTab);
+
     ExceptionCode ec;
     target->dispatchEvent(event, ec);
     return event->defaultHandled();
 }
     
-    
-#if !PLATFORM(MAC) && !PLATFORM(QT) && !PLATFORM(HAIKU)
-bool EventHandler::invertSenseOfTabsToLinks(KeyboardEvent*) const
+bool EventHandler::isKeyboardOptionTab(KeyboardEvent* event)
 {
-    return false;
+    return event
+        && (event->type() == eventNames().keydownEvent || event->type() == eventNames().keypressEvent)
+        && event->altKey()
+        && event->keyIdentifier() == "U+0009";    
 }
-#endif
+
+bool EventHandler::eventInvertsTabsToLinksClientCallResult(KeyboardEvent* event)
+{
+    return EventHandler::isKeyboardOptionTab(event);
+}
 
 bool EventHandler::tabsToLinks(KeyboardEvent* event) const
 {
+    // FIXME: This function needs a better name. It can be called for keypresses other than Tab when spatial navigation is enabled.
+
     Page* page = m_frame->page();
     if (!page)
         return false;
 
-    if (page->chrome()->client()->tabsToLinks())
-        return !invertSenseOfTabsToLinks(event);
-
-    return invertSenseOfTabsToLinks(event);
+    bool tabsToLinksClientCallResult = page->chrome()->client()->keyboardUIMode() & KeyboardAccessTabsToLinks;
+    return eventInvertsTabsToLinksClientCallResult(event) ? !tabsToLinksClientCallResult : tabsToLinksClientCallResult;
 }
 
 void EventHandler::defaultTextInputEventHandler(TextEvent* event)
 {
-    String data = event->data();
-    if (data == "\n") {
-        if (event->isLineBreak()) {
-            if (m_frame->editor()->insertLineBreak())
-                event->setDefaultHandled();
-        } else {
-            if (m_frame->editor()->insertParagraphSeparator())
-                event->setDefaultHandled();
-        }
-    } else {
-        if (m_frame->editor()->insertTextWithoutSendingTextEvent(data, false, event))
-            event->setDefaultHandled();
-    }
+    if (m_frame->editor()->handleTextEvent(event))
+        event->setDefaultHandled();
 }
 
-#if PLATFORM(QT) || PLATFORM(MAC)
-
-// These two platforms handle the space event in the platform-specific WebKit code.
-// Eventually it would be good to eliminate that and use the code here instead, but
-// the Qt version is inside an ifdef and the Mac version has some extra behavior
-// so we can't unify everything yet.
+#if PLATFORM(QT)
+// Qt handles the space event in platform-specific WebKit code.
+// Eventually it would be good to eliminate that and use the code here instead.
 void EventHandler::defaultSpaceEventHandler(KeyboardEvent*)
 {
 }
-
 #else
 
 void EventHandler::defaultSpaceEventHandler(KeyboardEvent* event)
 {
-    ScrollDirection direction = event->shiftKey() ? ScrollUp : ScrollDown;
-    if (scrollOverflow(direction, ScrollByPage)) {
+    ASSERT(event->type() == eventNames().keypressEvent);
+
+    if (event->ctrlKey() || event->metaKey() || event->altKey() || event->altGraphKey())
+        return;
+
+    ScrollLogicalDirection direction = event->shiftKey() ? ScrollBlockDirectionBackward : ScrollBlockDirectionForward;
+    if (logicalScrollOverflow(direction, ScrollByPage)) {
         event->setDefaultHandled();
         return;
     }
@@ -2271,14 +2970,68 @@ void EventHandler::defaultSpaceEventHandler(KeyboardEvent* event)
     if (!view)
         return;
 
-    if (view->scroll(direction, ScrollByPage))
+    if (view->logicalScroll(direction, ScrollByPage))
         event->setDefaultHandled();
 }
 
 #endif
 
+void EventHandler::defaultBackspaceEventHandler(KeyboardEvent* event)
+{
+    ASSERT(event->type() == eventNames().keydownEvent);
+
+    if (event->ctrlKey() || event->metaKey() || event->altKey() || event->altGraphKey())
+        return;
+
+    if (!m_frame->editor()->behavior().shouldNavigateBackOnBackspace())
+        return;
+    
+    Page* page = m_frame->page();
+    if (!page)
+        return;
+
+    if (!m_frame->settings()->backspaceKeyNavigationEnabled())
+        return;
+    
+    bool handledEvent = false;
+
+    if (event->shiftKey())
+        handledEvent = page->goForward();
+    else
+        handledEvent = page->goBack();
+
+    if (handledEvent)
+        event->setDefaultHandled();
+}
+
+
+void EventHandler::defaultArrowEventHandler(FocusDirection focusDirection, KeyboardEvent* event)
+{
+    ASSERT(event->type() == eventNames().keydownEvent);
+
+    if (event->ctrlKey() || event->metaKey() || event->altGraphKey() || event->shiftKey())
+        return;
+
+    Page* page = m_frame->page();
+    if (!page)
+        return;
+
+    if (!isSpatialNavigationEnabled(m_frame))
+        return;
+
+    // Arrows and other possible directional navigation keys can be used in design
+    // mode editing.
+    if (m_frame->document()->inDesignMode())
+        return;
+
+    if (page->focusController()->advanceFocus(focusDirection, event))
+        event->setDefaultHandled();
+}
+
 void EventHandler::defaultTabEventHandler(KeyboardEvent* event)
 {
+    ASSERT(event->type() == eventNames().keydownEvent);
+
     // We should only advance focus on tabs if no special modifier keys are held down.
     if (event->ctrlKey() || event->metaKey() || event->altGraphKey())
         return;
@@ -2312,14 +3065,14 @@ void EventHandler::capsLockStateMayHaveChanged()
 
 void EventHandler::sendResizeEvent()
 {
-    m_frame->document()->dispatchWindowEvent(Event::create(eventNames().resizeEvent, false, false));
+    m_frame->document()->enqueueWindowEvent(Event::create(eventNames().resizeEvent, false, false));
 }
 
 void EventHandler::sendScrollEvent()
 {
     setFrameWasScrolledByUser();
-    if (m_frame->view())
-        m_frame->document()->dispatchEvent(Event::create(eventNames().scrollEvent, true, false));
+    if (m_frame->view() && m_frame->document())
+        m_frame->document()->eventQueue()->enqueueOrDispatchScrollEvent(m_frame->document(), DocumentEventQueue::ScrollEventDocumentTarget);
 }
 
 void EventHandler::setFrameWasScrolledByUser()
@@ -2345,9 +3098,18 @@ void EventHandler::updateLastScrollbarUnderMouse(Scrollbar* scrollbar, bool setL
         // Send mouse exited to the old scrollbar.
         if (m_lastScrollbarUnderMouse)
             m_lastScrollbarUnderMouse->mouseExited();
+
+        // Send mouse entered if we're setting a new scrollbar.
+        if (scrollbar && setLast)
+            scrollbar->mouseEntered();
+
         m_lastScrollbarUnderMouse = setLast ? scrollbar : 0;
     }
 }
 
+bool EventHandler::dispatchSyntheticTouchEventIfEnabled(const PlatformMouseEvent&)
+{
+    return false;
+}
 
 }

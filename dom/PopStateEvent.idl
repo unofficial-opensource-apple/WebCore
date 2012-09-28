@@ -26,13 +26,12 @@
 
 module events {
 
-    interface PopStateEvent : Event {
-        [Custom] void initPopStateEvent(in DOMString typeArg, 
-                               in boolean canBubbleArg, 
-                               in boolean cancelableArg, 
-                               in any stateArg);
-                               
-        readonly attribute [V8CustomGetter] any state;
+#if !defined(LANGUAGE_CPP) || !LANGUAGE_CPP
+    interface [
+        ConstructorTemplate=Event
+    ] PopStateEvent : Event {
+        readonly attribute [InitializedByEventConstructor, CachedAttribute, CustomGetter] DOMObject state;
     };
+#endif
 
 }

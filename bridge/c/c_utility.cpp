@@ -30,6 +30,8 @@
 
 #include "c_utility.h"
 
+#include "CRuntimeObject.h"
+#include "JSDOMBinding.h"
 #include "JSDOMWindow.h"
 #include "NP_jsobject.h"
 #include "c_instance.h"
@@ -41,8 +43,6 @@
 #include "runtime_object.h"
 #include "runtime_root.h"
 #include <wtf/Assertions.h>
-
-using WebCore::String;
 
 namespace JSC { namespace Bindings {
 
@@ -68,14 +68,14 @@ static String convertUTF8ToUTF16WithLatin1Fallback(const NPUTF8* UTF8Chars, int 
 // Variant value must be released with NPReleaseVariantValue()
 void convertValueToNPVariant(ExecState* exec, JSValue value, NPVariant* result)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
 
     VOID_TO_NPVARIANT(*result);
 
     if (value.isString()) {
-        UString ustring = value.toString(exec);
-        CString cstring = ustring.UTF8String();
-        NPString string = { (const NPUTF8*)cstring.c_str(), static_cast<uint32_t>(cstring.size()) };
+        UString ustring = value.toString(exec)->value(exec);
+        CString cstring = ustring.utf8();
+        NPString string = { (const NPUTF8*)cstring.data(), static_cast<uint32_t>(cstring.length()) };
         NPN_InitializeVariantWithStringCopy(result, &string);
     } else if (value.isNumber()) {
         DOUBLE_TO_NPVARIANT(value.toNumber(exec), *result);
@@ -85,9 +85,9 @@ void convertValueToNPVariant(ExecState* exec, JSValue value, NPVariant* result)
         NULL_TO_NPVARIANT(*result);
     } else if (value.isObject()) {
         JSObject* object = asObject(value);
-        if (object->classInfo() == &RuntimeObjectImp::s_info) {
-            RuntimeObjectImp* imp = static_cast<RuntimeObjectImp*>(object);
-            CInstance* instance = static_cast<CInstance*>(imp->getInternalInstance());
+        if (object->classInfo() == &CRuntimeObject::s_info) {
+            CRuntimeObject* runtimeObject = static_cast<CRuntimeObject*>(object);
+            CInstance* instance = runtimeObject->getInternalCInstance();
             if (instance) {
                 NPObject* obj = instance->getObject();
                 _NPN_RetainObject(obj);
@@ -107,7 +107,7 @@ void convertValueToNPVariant(ExecState* exec, JSValue value, NPVariant* result)
 
 JSValue convertNPVariantToValue(ExecState* exec, const NPVariant* variant, RootObject* rootObject)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     
     NPVariantType type = variant->type;
 
@@ -118,11 +118,11 @@ JSValue convertNPVariantToValue(ExecState* exec, const NPVariant* variant, RootO
     if (type == NPVariantType_Void)
         return jsUndefined();
     if (type == NPVariantType_Int32)
-        return jsNumber(exec, NPVARIANT_TO_INT32(*variant));
+        return jsNumber(NPVARIANT_TO_INT32(*variant));
     if (type == NPVariantType_Double)
-        return jsNumber(exec, NPVARIANT_TO_DOUBLE(*variant));
+        return jsNumber(NPVARIANT_TO_DOUBLE(*variant));
     if (type == NPVariantType_String)
-        return jsString(exec, convertNPStringToUTF16(&variant->value.stringValue));
+        return WebCore::jsString(exec, convertNPStringToUTF16(&variant->value.stringValue));
     if (type == NPVariantType_Object) {
         NPObject* obj = variant->value.objectValue;
         
@@ -142,9 +142,9 @@ String convertNPStringToUTF16(const NPString* string)
     return String::fromUTF8WithLatin1Fallback(string->UTF8Characters, string->UTF8Length);
 }
 
-Identifier identifierFromNPIdentifier(const NPUTF8* name)
+Identifier identifierFromNPIdentifier(ExecState* exec, const NPUTF8* name)
 {
-    return Identifier(WebCore::JSDOMWindow::commonJSGlobalData(), convertUTF8ToUTF16WithLatin1Fallback(name, -1));
+    return Identifier(exec, WebCore::stringToUString(convertUTF8ToUTF16WithLatin1Fallback(name, -1)));
 }
 
 } }

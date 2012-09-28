@@ -21,12 +21,19 @@
 #define PlatformTouchPoint_h
 
 #include "IntPoint.h"
-#include <wtf/Platform.h>
 #include <wtf/Vector.h>
 
 
 #if PLATFORM(QT)
 #include <QTouchEvent>
+#endif
+
+#if PLATFORM(BLACKBERRY)
+namespace BlackBerry {
+namespace Platform {
+class TouchPoint;
+};
+};
 #endif
 
 namespace WebCore {
@@ -40,25 +47,44 @@ public:
         TouchPressed,
         TouchMoved,
         TouchStationary,
-        TouchCancelled
+        TouchCancelled,
+        TouchStateEnd // Placeholder: must remain the last item.
     };
 
-#if PLATFORM(QT)
-    PlatformTouchPoint(const QTouchEvent::TouchPoint&);
-#elif PLATFORM(ANDROID)
-    PlatformTouchPoint(const IntPoint& windowPos, State);
+    // This is necessary for us to be able to build synthetic events.
+    PlatformTouchPoint()
+        : m_id(0)
+        , m_radiusY(0)
+        , m_radiusX(0)
+        , m_rotationAngle(0)
+        , m_force(0)
+    {
+    }
+
+#if PLATFORM(EFL)
+    PlatformTouchPoint(unsigned id, const IntPoint& windowPos, State);
+#elif PLATFORM(BLACKBERRY)
+    PlatformTouchPoint(const BlackBerry::Platform::TouchPoint&);
 #endif
 
-    int id() const { return m_id; }
+    unsigned id() const { return m_id; }
     State state() const { return m_state; }
     IntPoint screenPos() const { return m_screenPos; }
     IntPoint pos() const { return m_pos; }
-    
-private:
-    int m_id;
+    int radiusX() const { return m_radiusX; }
+    int radiusY() const { return m_radiusY; }
+    float rotationAngle() const { return m_rotationAngle; }
+    float force() const { return m_force; }
+
+protected:
+    unsigned m_id;
     State m_state;
     IntPoint m_screenPos;
     IntPoint m_pos;
+    int m_radiusY;
+    int m_radiusX;
+    float m_rotationAngle;
+    float m_force;
 };
 
 }

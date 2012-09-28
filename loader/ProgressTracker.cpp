@@ -29,8 +29,11 @@
 #include "DocumentLoader.h"
 #include "Frame.h"
 #include "FrameLoader.h"
+#include "FrameLoaderStateMachine.h"
 #include "FrameLoaderClient.h"
+#include "Logging.h"
 #include "ResourceResponse.h"
+#include <wtf/text/CString.h>
 #include <wtf/CurrentTime.h>
 
 using std::min;
@@ -47,7 +50,9 @@ static const double finalProgressValue = 0.9; // 1.0 - initialProgressValue
 
 static const int progressItemDefaultEstimatedLength = 1024 * 16;
 
-struct ProgressItem : Noncopyable {
+struct ProgressItem {
+    WTF_MAKE_NONCOPYABLE(ProgressItem); WTF_MAKE_FAST_ALLOCATED;
+public:
     ProgressItem(long long length) 
         : bytesReceived(0)
         , estimatedLength(length) { }
@@ -56,9 +61,10 @@ struct ProgressItem : Noncopyable {
     long long estimatedLength;
 };
 
+unsigned long ProgressTracker::s_uniqueIdentifier = 0;
+
 ProgressTracker::ProgressTracker()
-    : m_uniqueIdentifier(0)
-    , m_totalPageAndResourceBytesToLoad(0)
+    : m_totalPageAndResourceBytesToLoad(0)
     , m_totalBytesReceived(0)
     , m_lastNotifiedProgressValue(0)
     , m_lastNotifiedProgressTime(0)
@@ -72,7 +78,11 @@ ProgressTracker::ProgressTracker()
 
 ProgressTracker::~ProgressTracker()
 {
-    deleteAllValues(m_progressItems);
+}
+
+PassOwnPtr<ProgressTracker> ProgressTracker::create()
+{
+    return adoptPtr(new ProgressTracker);
 }
 
 double ProgressTracker::estimatedProgress() const
@@ -82,7 +92,6 @@ double ProgressTracker::estimatedProgress() const
 
 void ProgressTracker::reset()
 {
-    deleteAllValues(m_progressItems);
     m_progressItems.clear();    
 
     m_totalPageAndResourceBytesToLoad = 0;
@@ -97,7 +106,7 @@ void ProgressTracker::reset()
 
 void ProgressTracker::progressStarted(Frame* frame)
 {
-    // LOG (Progress, "frame %p(%@), _private->numProgressTrackedFrames %d, _private->originatingProgressFrame %p", frame, [frame name], _private->numProgressTrackedFrames, _private->originatingProgressFrame);
+    LOG(Progress, "Progress started (%p) - frame %p(\"%s\"), value %f, tracked frames %d, originating frame %p", this, frame, frame->tree()->uniqueName().string().utf8().data(), m_progressValue, m_numProgressTrackedFrames, m_originatingProgressFrame.get());
 
     frame->loader()->client()->willChangeEstimatedProgress();
     
@@ -115,7 +124,7 @@ void ProgressTracker::progressStarted(Frame* frame)
 
 void ProgressTracker::progressCompleted(Frame* frame)
 {
-    // LOG (Progress, "frame %p(%@), _private->numProgressTrackedFrames %d, _private->originatingProgressFrame %p", frame, [frame name], _private->numProgressTrackedFrames, _private->originatingProgressFrame);
+    LOG(Progress, "Progress completed (%p) - frame %p(\"%s\"), value %f, tracked frames %d, originating frame %p", this, frame, frame->tree()->uniqueName().string().utf8().data(), m_progressValue, m_numProgressTrackedFrames, m_originatingProgressFrame.get());
     
     if (m_numProgressTrackedFrames <= 0)
         return;
@@ -123,8 +132,7 @@ void ProgressTracker::progressCompleted(Frame* frame)
     frame->loader()->client()->willChangeEstimatedProgress();
         
     m_numProgressTrackedFrames--;
-    if (m_numProgressTrackedFrames == 0 ||
-        (frame == m_originatingProgressFrame && m_numProgressTrackedFrames != 0))
+    if (!m_numProgressTrackedFrames || m_originatingProgressFrame == frame)
         finalProgressComplete();
     
     frame->loader()->client()->didChangeEstimatedProgress();
@@ -132,7 +140,7 @@ void ProgressTracker::progressCompleted(Frame* frame)
 
 void ProgressTracker::finalProgressComplete()
 {
-    // LOG (Progress, "");
+    LOG(Progress, "Final progress complete (%p)", this);
     
     RefPtr<Frame> frame = m_originatingProgressFrame.release();
     
@@ -151,7 +159,7 @@ void ProgressTracker::finalProgressComplete()
 
 void ProgressTracker::incrementProgress(unsigned long identifier, const ResourceResponse& response)
 {
-    // LOG (Progress, "_private->numProgressTrackedFrames %d, _private->originatingProgressFrame %p", _private->numProgressTrackedFrames, _private->originatingProgressFrame);
+    LOG(Progress, "Progress incremented (%p) - value %f, tracked frames %d, originating frame %p", this, m_progressValue, m_numProgressTrackedFrames, m_originatingProgressFrame.get());
 
     if (m_numProgressTrackedFrames <= 0)
         return;
@@ -166,7 +174,7 @@ void ProgressTracker::incrementProgress(unsigned long identifier, const Resource
         item->bytesReceived = 0;
         item->estimatedLength = estimatedLength;
     } else
-        m_progressItems.set(identifier, new ProgressItem(estimatedLength));
+        m_progressItems.set(identifier, adoptPtr(new ProgressItem(estimatedLength)));
 }
 
 void ProgressTracker::incrementProgress(unsigned long identifier, const char*, int length)
@@ -202,7 +210,7 @@ void ProgressTracker::incrementProgress(unsigned long identifier, const char*, i
     // For documents that use WebCore's layout system, treat first layout as the half-way point.
     // FIXME: The hasHTMLView function is a sort of roundabout way of asking "do you use WebCore's layout system".
     bool useClampedMaxProgress = frame->loader()->client()->hasHTMLView()
-        && !frame->loader()->firstLayoutDone();
+        && !frame->loader()->stateMachine()->firstLayoutDone();
     double maxProgressValue = useClampedMaxProgress ? 0.5 : finalProgressValue;
     increment = (maxProgressValue - m_progressValue) * percentOfRemainingBytes;
     m_progressValue += increment;
@@ -214,7 +222,7 @@ void ProgressTracker::incrementProgress(unsigned long identifier, const char*, i
     double now = currentTime();
     double notifiedProgressTimeDelta = now - m_lastNotifiedProgressTime;
     
-    // LOG (Progress, "_private->progressValue %g, _private->numProgressTrackedFrames %d", _private->progressValue, _private->numProgressTrackedFrames);
+    LOG(Progress, "Progress incremented (%p) - value %f, tracked frames %d", this, m_progressValue, m_numProgressTrackedFrames);
     double notificationProgressDelta = m_progressValue - m_lastNotifiedProgressValue;
     if ((notificationProgressDelta >= m_progressNotificationInterval ||
          notifiedProgressTimeDelta >= m_progressNotificationTimeInterval) &&
@@ -241,22 +249,20 @@ void ProgressTracker::completeProgress(unsigned long identifier)
 {
     ProgressItem* item = m_progressItems.get(identifier);
     
-    // FIXME: Can this happen?
+    // This can happen if a load fails without receiving any response data.
     if (!item)
         return;
     
     // Adjust the total expected bytes to account for any overage/underage.
     long long delta = item->bytesReceived - item->estimatedLength;
     m_totalPageAndResourceBytesToLoad += delta;
-    item->estimatedLength = item->bytesReceived;
-    
+
     m_progressItems.remove(identifier);
-    delete item;
 }
 
 unsigned long ProgressTracker::createUniqueIdentifier()
 {
-    return ++m_uniqueIdentifier;
+    return ++s_uniqueIdentifier;
 }
 
 

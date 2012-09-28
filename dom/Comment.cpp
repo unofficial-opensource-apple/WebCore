@@ -22,6 +22,8 @@
 #include "config.h"
 #include "Comment.h"
 
+#include "Document.h"
+
 namespace WebCore {
 
 inline Comment::Comment(Document* document, const String& text)
@@ -49,7 +51,7 @@ PassRefPtr<Node> Comment::cloneNode(bool /*deep*/)
     return create(document(), data());
 }
 
-bool Comment::childTypeAllowed(NodeType)
+bool Comment::childTypeAllowed(NodeType) const
 {
     return false;
 }

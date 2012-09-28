@@ -36,16 +36,19 @@ class ResourceResponse : public ResourceResponseBase {
 public:
     ResourceResponse()
         : ResourceResponseBase()
+        , m_soupFlags(static_cast<SoupMessageFlags>(0))
     {
     }
 
     ResourceResponse(const KURL& url, const String& mimeType, long long expectedLength, const String& textEncodingName, const String& filename)
         : ResourceResponseBase(url, mimeType, expectedLength, textEncodingName, filename)
+        , m_soupFlags(static_cast<SoupMessageFlags>(0))
     {
     }
 
     ResourceResponse(SoupMessage* soupMessage)
         : ResourceResponseBase()
+        , m_soupFlags(static_cast<SoupMessageFlags>(0))
     {
         updateFromSoupMessage(soupMessage);
     }
@@ -53,12 +56,25 @@ public:
     SoupMessage* toSoupMessage() const;
     void updateFromSoupMessage(SoupMessage* soupMessage);
 
+    SoupMessageFlags soupMessageFlags() const { return m_soupFlags; }
+    void setSoupMessageFlags(SoupMessageFlags soupFlags) { m_soupFlags = soupFlags; }
+
+    const String& sniffedContentType() const { return m_sniffedContentType; }
+    void setSniffedContentType(const String& value) { m_sniffedContentType = value; }
+
 private:
     friend class ResourceResponseBase;
 
-    void doUpdateResourceResponse()
-    {
-    }
+    SoupMessageFlags m_soupFlags;
+    String m_sniffedContentType;
+
+    void doUpdateResourceResponse() { }
+
+    PassOwnPtr<CrossThreadResourceResponseData> doPlatformCopyData(PassOwnPtr<CrossThreadResourceResponseData> data) const { return data; }
+    void doPlatformAdopt(PassOwnPtr<CrossThreadResourceResponseData>) { }
+};
+
+struct CrossThreadResourceResponseData : public CrossThreadResourceResponseDataBase {
 };
 
 } // namespace WebCore

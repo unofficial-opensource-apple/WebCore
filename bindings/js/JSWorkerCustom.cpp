@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2008, 2009 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2011 Google Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,14 +33,45 @@
 #include "JSDOMGlobalObject.h"
 #include "JSMessagePortCustom.h"
 #include "Worker.h"
+#include "JSDOMWindowCustom.h"
+#include <runtime/Error.h>
 
 using namespace JSC;
 
 namespace WebCore {
 
-JSC::JSValue JSWorker::postMessage(JSC::ExecState* exec, const JSC::ArgList& args)
+JSC::JSValue JSWorker::postMessage(JSC::ExecState* exec)
 {
-    return handlePostMessage(exec, args, impl());
+    return handlePostMessage(exec, impl());
+}
+
+JSC::JSValue JSWorker::webkitPostMessage(JSC::ExecState* exec)
+{
+    return handlePostMessage(exec, impl());
+}
+
+EncodedJSValue JSC_HOST_CALL JSWorkerConstructor::constructJSWorker(ExecState* exec)
+{
+    JSWorkerConstructor* jsConstructor = jsCast<JSWorkerConstructor*>(exec->callee());
+
+    if (!exec->argumentCount())
+        return throwVMError(exec, createNotEnoughArgumentsError(exec));
+
+    UString scriptURL = exec->argument(0).toString(exec)->value(exec);
+    if (exec->hadException())
+        return JSValue::encode(JSValue());
+
+    // See section 4.8.2 step 14 of WebWorkers for why this is the lexicalGlobalObject. 
+    DOMWindow* window = asJSDOMWindow(exec->lexicalGlobalObject())->impl();
+
+    ExceptionCode ec = 0;
+    RefPtr<Worker> worker = Worker::create(window->document(), ustringToString(scriptURL), ec);
+    if (ec) {
+        setDOMException(exec, ec);
+        return JSValue::encode(JSValue());
+    }
+
+    return JSValue::encode(asObject(toJS(exec, jsConstructor->globalObject(), worker.release())));
 }
 
 } // namespace WebCore

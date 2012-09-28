@@ -1,6 +1,7 @@
 /*
- * Copyright (C) 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Collabora Ltd. All rights reserved.
+ * Copyright (C) 2010 Girish Ramakrishnan <girish@forwardbias.in>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,54 +28,63 @@
 #include "config.h"
 #include "PluginView.h"
 
-#include "Bridge.h"
+#if USE(JSC)
+#include "BridgeJSC.h"
+#endif
 #include "Chrome.h"
+#include "CookieJar.h"
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "Element.h"
-#include "FrameLoader.h"
-#include "FrameTree.h"
+#include "FocusController.h"
 #include "Frame.h"
+#include "FrameLoader.h"
+#include "FrameLoaderClient.h"
+#include "FrameTree.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
-#include "Image.h"
 #include "HTMLNames.h"
 #include "HTMLPlugInElement.h"
-#include "JSDOMWindow.h"
+#include "Image.h"
 #include "KeyboardEvent.h"
 #include "MIMETypeRegistry.h"
 #include "MouseEvent.h"
 #include "NotImplemented.h"
 #include "Page.h"
-#include "FocusController.h"
 #include "PlatformMouseEvent.h"
-#if OS(WINDOWS) && ENABLE(NETSCAPE_PLUGIN_API)
-#include "PluginMessageThrottlerWin.h"
-#endif
-#include "PluginPackage.h"
-#include "JSDOMBinding.h"
-#include "ScriptController.h"
-#include "ScriptValue.h"
-#include "SecurityOrigin.h"
 #include "PluginDatabase.h"
 #include "PluginDebug.h"
 #include "PluginMainThreadScheduler.h"
 #include "PluginPackage.h"
+#include "ProxyServer.h"
 #include "RenderBox.h"
 #include "RenderObject.h"
-#include "c_instance.h"
-#include "npruntime_impl.h"
-#include "runtime_root.h"
+#include "ScriptValue.h"
+#include "SecurityOrigin.h"
 #include "Settings.h"
+#include "npruntime_impl.h"
+#include <wtf/ASCIICType.h>
+
+#if OS(WINDOWS) && ENABLE(NETSCAPE_PLUGIN_API)
+#include "PluginMessageThrottlerWin.h"
+#endif
+
+#if USE(JSC)
+#include "JSDOMBinding.h"
+#include "JSDOMWindow.h"
+#include "c_instance.h"
+#include "runtime_root.h"
 #include <runtime/JSLock.h>
 #include <runtime/JSValue.h>
-#include <wtf/ASCIICType.h>
 
 using JSC::ExecState;
 using JSC::JSLock;
 using JSC::JSObject;
 using JSC::JSValue;
 using JSC::UString;
+#endif
+
+#if ENABLE(NETSCAPE_PLUGIN_API)
 
 using std::min;
 
@@ -85,6 +95,14 @@ namespace WebCore {
 using namespace HTMLNames;
 
 static int s_callingPlugin;
+
+typedef HashMap<NPP, PluginView*> InstanceMap;
+
+static InstanceMap& instanceMap()
+{
+    static InstanceMap& map = *new InstanceMap;
+    return map;
+}
 
 static String scriptStringIfJavaScriptURL(const KURL& url)
 {
@@ -125,8 +143,8 @@ void PluginView::setFrameRect(const IntRect& rect)
 
     updatePluginWidget();
 
-#if OS(WINDOWS) || OS(SYMBIAN)
-    // On Windows and Symbian, always call plugin to change geometry.
+#if OS(WINDOWS)
+    // On Windows always call plugin to change geometry.
     setNPWindowRect(rect);
 #elif defined(XP_UNIX)
     // On Unix, multiple calls to setNPWindow() in windowed mode causes Flash to crash
@@ -152,10 +170,12 @@ void PluginView::handleEvent(Event* event)
         handleMouseEvent(static_cast<MouseEvent*>(event));
     else if (event->isKeyboardEvent())
         handleKeyboardEvent(static_cast<KeyboardEvent*>(event));
+    else if (event->type() == eventNames().contextmenuEvent)
+        event->setDefaultHandled(); // We don't know if the plug-in has handled mousedown event by displaying a context menu, so we never want WebKit to show a default one.
 #if defined(XP_UNIX) && ENABLE(NETSCAPE_PLUGIN_API)
-    else if (event->type() == eventNames().DOMFocusOutEvent)
+    else if (event->type() == eventNames().focusoutEvent)
         handleFocusOutEvent();
-    else if (event->type() == eventNames().DOMFocusInEvent)
+    else if (event->type() == eventNames().focusinEvent)
         handleFocusInEvent();
 #endif
 }
@@ -193,8 +213,11 @@ bool PluginView::startOrAddToUnstartedList()
     if (!m_parentFrame->page())
         return false;
 
-    if (!m_parentFrame->page()->canStartPlugins()) {
-        m_parentFrame->page()->addUnstartedPlugin(this);
+    // We only delay starting the plug-in if we're going to kick off the load
+    // ourselves. Otherwise, the loader will try to deliver data before we've
+    // started the plug-in.
+    if (!m_loadManually && !m_parentFrame->page()->canStartMedia()) {
+        m_parentFrame->document()->addMediaCanStartListener(this);
         m_isWaitingToStart = true;
         return true;
     }
@@ -217,7 +240,9 @@ bool PluginView::start()
     NPError npErr;
     {
         PluginView::setCurrentPluginView(this);
-        JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+#if USE(JSC)
+        JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
+#endif
         setCallingPlugin(true);
         npErr = m_plugin->pluginFuncs()->newp((NPMIMEType)m_mimeType.utf8().data(), m_instance, m_mode, m_paramCount, m_paramNames, m_paramValues, NULL);
         setCallingPlugin(false);
@@ -234,7 +259,7 @@ bool PluginView::start()
     m_isStarted = true;
 
     if (!m_url.isEmpty() && !m_loadManually) {
-        FrameLoadRequest frameLoadRequest;
+        FrameLoadRequest frameLoadRequest(m_parentFrame->document()->securityOrigin());
         frameLoadRequest.resourceRequest().setHTTPMethod("GET");
         frameLoadRequest.resourceRequest().setURL(m_url);
         load(frameLoadRequest, false, 0);
@@ -248,17 +273,29 @@ bool PluginView::start()
     if (m_status != PluginStatusLoadedSuccessfully)
         return false;
 
-    if (parentFrame()->page())
-        parentFrame()->page()->didStartPlugin(this);
-
     return true;
+}
+
+void PluginView::mediaCanStart()
+{
+    ASSERT(!m_isStarted);
+    if (!start())
+        parentFrame()->loader()->client()->dispatchDidFailToStartPlugin(this);
 }
 
 PluginView::~PluginView()
 {
     LOG(Plugins, "PluginView::~PluginView()");
 
-    removeFromUnstartedListIfNecessary();
+    ASSERT(!m_lifeSupportTimer.isActive());
+
+    // If we failed to find the plug-in, we'll return early in our constructor, and
+    // m_instance will be 0.
+    if (m_instance)
+        instanceMap().remove(m_instance);
+
+    if (m_isWaitingToStart)
+        m_parentFrame->document()->removeMediaCanStartListener(this);
 
     stop();
 
@@ -275,24 +312,10 @@ PluginView::~PluginView()
         m_plugin->unload();
 }
 
-void PluginView::removeFromUnstartedListIfNecessary()
-{
-    if (!m_isWaitingToStart)
-        return;
-
-    if (!m_parentFrame->page())
-        return;
-
-    m_parentFrame->page()->removeUnstartedPlugin(this);
-}
-
 void PluginView::stop()
 {
     if (!m_isStarted)
         return;
-
-    if (parentFrame()->page())
-        parentFrame()->page()->didStopPlugin(this);
 
     LOG(Plugins, "PluginView::stop(): Stopping plug-in '%s'", m_plugin->name().utf8().data());
 
@@ -307,10 +330,12 @@ void PluginView::stop()
 
     m_isStarted = false;
 
-    JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+#if USE(JSC)
+    JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
+#endif
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
-#ifdef XP_WIN
+#if defined(XP_WIN) && !PLATFORM(GTK)
     // Unsubclass the window
     if (m_isWindowed) {
 #if OS(WINCE)
@@ -322,10 +347,10 @@ void PluginView::stop()
         WNDPROC currentWndProc = (WNDPROC)GetWindowLongPtr(platformPluginWidget(), GWLP_WNDPROC);
 
         if (currentWndProc == PluginViewWndProc)
-            SetWindowLongPtr(platformPluginWidget(), GWLP_WNDPROC, (LONG)m_pluginWndProc);
+            SetWindowLongPtr(platformPluginWidget(), GWLP_WNDPROC, (LONG_PTR)m_pluginWndProc);
 #endif
     }
-#endif // XP_WIN
+#endif // !defined(XP_WIN) || PLATFORM(GTK)
 #endif // ENABLE(NETSCAPE_PLUGIN_API)
 
 #if !defined(XP_MACOSX)
@@ -341,8 +366,7 @@ void PluginView::stop()
     }
 
 #ifdef XP_UNIX
-    if (m_isWindowed && m_npWindow.ws_info)
-           delete (NPSetWindowCallbackStruct *)m_npWindow.ws_info;
+    delete static_cast<NPSetWindowCallbackStruct*>(m_npWindow.ws_info);
     m_npWindow.ws_info = 0;
 #endif
 
@@ -390,20 +414,6 @@ static char* createUTF8String(const String& str)
     return result;
 }
 
-static bool getString(ScriptController* proxy, JSValue result, String& string)
-{
-    if (!proxy || !result || result.isUndefined())
-        return false;
-    JSLock lock(JSC::SilenceAssertionsOnly);
-
-    ExecState* exec = proxy->globalObject(pluginWorld())->globalExec();
-    UString ustring = result.toString(exec);
-    exec->clearException();
-
-    string = ustring;
-    return true;
-}
-
 void PluginView::performRequest(PluginRequest* request)
 {
     if (!m_isStarted)
@@ -423,7 +433,7 @@ void PluginView::performRequest(PluginRequest* request)
         // if this is not a targeted request, create a stream for it. otherwise,
         // just pass it off to the loader
         if (targetFrameName.isEmpty()) {
-            RefPtr<PluginStream> stream = PluginStream::create(this, m_parentFrame, request->frameLoadRequest().resourceRequest(), request->sendNotification(), request->notifyData(), plugin()->pluginFuncs(), instance(), m_plugin->quirks());
+            RefPtr<PluginStream> stream = PluginStream::create(this, m_parentFrame.get(), request->frameLoadRequest().resourceRequest(), request->sendNotification(), request->notifyData(), plugin()->pluginFuncs(), instance(), m_plugin->quirks());
             m_streams.add(stream);
             stream->start();
         } else {
@@ -436,7 +446,9 @@ void PluginView::performRequest(PluginRequest* request)
             // FIXME: <rdar://problem/4807469> This should be sent when the document has finished loading
             if (request->sendNotification()) {
                 PluginView::setCurrentPluginView(this);
-                JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+#if USE(JSC)
+                JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
+#endif
                 setCallingPlugin(true);
                 m_plugin->pluginFuncs()->urlnotify(m_instance, requestURL.string().utf8().data(), NPRES_DONE, request->notifyData());
                 setCallingPlugin(false);
@@ -450,18 +462,23 @@ void PluginView::performRequest(PluginRequest* request)
     // and this has been made sure in ::load.
     ASSERT(targetFrameName.isEmpty() || m_parentFrame->tree()->find(targetFrameName) == m_parentFrame);
     
-    // Executing a script can cause the plugin view to be destroyed, so we keep a reference to the parent frame.
-    RefPtr<Frame> parentFrame = m_parentFrame;
-    JSValue result = m_parentFrame->script()->executeScript(jsString, request->shouldAllowPopups()).jsValue();
+    // Executing a script can cause the plugin view to be destroyed, so we keep a reference to it.
+    RefPtr<PluginView> protector(this);
+    ScriptValue result = m_parentFrame->script()->executeScript(jsString, request->shouldAllowPopups());
 
     if (targetFrameName.isNull()) {
         String resultString;
 
+#if USE(JSC)
+        ScriptState* scriptState = m_parentFrame->script()->globalObject(pluginWorld())->globalExec();
+#elif USE(V8)
+        ScriptState* scriptState = 0; // Not used with V8
+#endif
         CString cstr;
-        if (getString(parentFrame->script(), result, resultString))
+        if (result.getString(scriptState, resultString))
             cstr = resultString.utf8();
 
-        RefPtr<PluginStream> stream = PluginStream::create(this, m_parentFrame, request->frameLoadRequest().resourceRequest(), request->sendNotification(), request->notifyData(), plugin()->pluginFuncs(), instance(), m_plugin->quirks());
+        RefPtr<PluginStream> stream = PluginStream::create(this, m_parentFrame.get(), request->frameLoadRequest().resourceRequest(), request->sendNotification(), request->notifyData(), plugin()->pluginFuncs(), instance(), m_plugin->quirks());
         m_streams.add(stream);
         stream->sendJavaScriptStream(requestURL, cstr);
     }
@@ -503,24 +520,23 @@ NPError PluginView::load(const FrameLoadRequest& frameLoadRequest, bool sendNoti
         return NPERR_INVALID_URL;
 
     // Don't allow requests to be made when the document loader is stopping all loaders.
-    if (m_parentFrame->loader()->documentLoader()->isStopping())
+    DocumentLoader* loader = m_parentFrame->loader()->documentLoader();
+    if (!loader || loader->isStopping())
         return NPERR_GENERIC_ERROR;
 
     const String& targetFrameName = frameLoadRequest.frameName();
     String jsString = scriptStringIfJavaScriptURL(url);
 
     if (!jsString.isNull()) {
-        Settings* settings = m_parentFrame->settings();
-
         // Return NPERR_GENERIC_ERROR if JS is disabled. This is what Mozilla does.
-        if (!settings || !settings->isJavaScriptEnabled())
+        if (!m_parentFrame->script()->canExecuteScripts(NotAboutToExecuteScript))
             return NPERR_GENERIC_ERROR;
-        
+
         // For security reasons, only allow JS requests to be made on the frame that contains the plug-in.
         if (!targetFrameName.isNull() && m_parentFrame->tree()->find(targetFrameName) != m_parentFrame)
             return NPERR_INVALID_PARAM;
-    } else if (!SecurityOrigin::canLoad(url, String(), m_parentFrame->document()))
-            return NPERR_GENERIC_ERROR;
+    } else if (!m_parentFrame->document()->securityOrigin()->canDisplay(url))
+        return NPERR_GENERIC_ERROR;
 
     PluginRequest* request = new PluginRequest(frameLoadRequest, sendNotification, notifyData, arePopupsAllowed());
     scheduleRequest(request);
@@ -541,32 +557,32 @@ static KURL makeURL(const KURL& baseURL, const char* relativeURLString)
 
 NPError PluginView::getURLNotify(const char* url, const char* target, void* notifyData)
 {
-    FrameLoadRequest frameLoadRequest;
+    FrameLoadRequest frameLoadRequest(m_parentFrame->document()->securityOrigin());
 
     frameLoadRequest.setFrameName(target);
     frameLoadRequest.resourceRequest().setHTTPMethod("GET");
-    frameLoadRequest.resourceRequest().setURL(makeURL(m_baseURL, url));
+    frameLoadRequest.resourceRequest().setURL(makeURL(m_parentFrame->document()->baseURL(), url));
 
     return load(frameLoadRequest, true, notifyData);
 }
 
 NPError PluginView::getURL(const char* url, const char* target)
 {
-    FrameLoadRequest frameLoadRequest;
+    FrameLoadRequest frameLoadRequest(m_parentFrame->document()->securityOrigin());
 
     frameLoadRequest.setFrameName(target);
     frameLoadRequest.resourceRequest().setHTTPMethod("GET");
-    frameLoadRequest.resourceRequest().setURL(makeURL(m_baseURL, url));
+    frameLoadRequest.resourceRequest().setURL(makeURL(m_parentFrame->document()->baseURL(), url));
 
     return load(frameLoadRequest, false, 0);
 }
 
-NPError PluginView::postURLNotify(const char* url, const char* target, uint32 len, const char* buf, NPBool file, void* notifyData)
+NPError PluginView::postURLNotify(const char* url, const char* target, uint32_t len, const char* buf, NPBool file, void* notifyData)
 {
     return handlePost(url, target, len, buf, file, notifyData, true, true);
 }
 
-NPError PluginView::postURL(const char* url, const char* target, uint32 len, const char* buf, NPBool file)
+NPError PluginView::postURL(const char* url, const char* target, uint32_t len, const char* buf, NPBool file)
 {
     // As documented, only allow headers to be specified via NPP_PostURL when using a file.
     return handlePost(url, target, len, buf, file, 0, false, file);
@@ -579,7 +595,7 @@ NPError PluginView::newStream(NPMIMEType type, const char* target, NPStream** st
     return NPERR_GENERIC_ERROR;
 }
 
-int32 PluginView::write(NPStream* stream, int32 len, void* buffer)
+int32_t PluginView::write(NPStream* stream, int32_t len, void* buffer)
 {
     notImplemented();
     // Unsupported
@@ -600,7 +616,7 @@ NPError PluginView::destroyStream(NPStream* stream, NPReason reason)
 void PluginView::status(const char* message)
 {
     if (Page* page = m_parentFrame->page())
-        page->chrome()->setStatusbarText(m_parentFrame, String(message));
+        page->chrome()->setStatusbarText(m_parentFrame.get(), String::fromUTF8(message));
 }
 
 NPError PluginView::setValue(NPPVariable variable, void* value)
@@ -704,9 +720,9 @@ void PluginView::setJavaScriptPaused(bool paused)
         m_requestTimer.startOneShot(0);
 }
 
-PassRefPtr<JSC::Bindings::Instance> PluginView::bindingInstance()
-{
 #if ENABLE(NETSCAPE_PLUGIN_API)
+NPObject* PluginView::npObject()
+{
     NPObject* object = 0;
 
     if (!m_isStarted || !m_plugin || !m_plugin->pluginFuncs()->getvalue)
@@ -720,12 +736,29 @@ PassRefPtr<JSC::Bindings::Instance> PluginView::bindingInstance()
     NPError npErr;
     {
         PluginView::setCurrentPluginView(this);
-        JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+#if USE(JSC)
+        JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
+#endif
         setCallingPlugin(true);
         npErr = m_plugin->pluginFuncs()->getvalue(m_instance, NPPVpluginScriptableNPObject, &object);
         setCallingPlugin(false);
         PluginView::setCurrentPluginView(0);
     }
+
+    if (npErr != NPERR_NO_ERROR)
+        return 0;
+
+    return object;
+}
+#endif
+
+#if USE(JSC)
+PassRefPtr<JSC::Bindings::Instance> PluginView::bindingInstance()
+{
+#if ENABLE(NETSCAPE_PLUGIN_API)
+    NPObject* object = npObject();
+    if (!object)
+        return 0;
 
     if (hasOneRef()) {
         // The renderer for the PluginView was destroyed during the above call, and
@@ -733,9 +766,6 @@ PassRefPtr<JSC::Bindings::Instance> PluginView::bindingInstance()
         // return null.
         return 0;
     }
-
-    if (npErr != NPERR_NO_ERROR || !object)
-        return 0;
 
     RefPtr<JSC::Bindings::RootObject> root = m_parentFrame->script()->createRootObject(this);
     RefPtr<JSC::Bindings::Instance> instance = JSC::Bindings::CInstance::create(object, root.release());
@@ -747,6 +777,7 @@ PassRefPtr<JSC::Bindings::Instance> PluginView::bindingInstance()
     return 0;
 #endif
 }
+#endif
 
 void PluginView::disconnectStream(PluginStream* stream)
 {
@@ -787,15 +818,16 @@ PluginView::PluginView(Frame* parentFrame, const IntSize& size, PluginPackage* p
     , m_element(element)
     , m_isStarted(false)
     , m_url(url)
-    , m_baseURL(m_parentFrame->loader()->completeURL(m_parentFrame->document()->baseURL().string()))
     , m_status(PluginStatusLoadedSuccessfully)
     , m_requestTimer(this, &PluginView::requestTimerFired)
     , m_invalidateTimer(this, &PluginView::invalidateTimerFired)
     , m_popPopupsStateTimer(this, &PluginView::popPopupsStateTimerFired)
+    , m_lifeSupportTimer(this, &PluginView::lifeSupportTimerFired)
     , m_mode(loadManually ? NP_FULL : NP_EMBED)
     , m_paramNames(0)
     , m_paramValues(0)
     , m_mimeType(mimeType)
+    , m_instance(0)
 #if defined(XP_MACOSX)
     , m_isWindowed(false)
 #else
@@ -814,7 +846,7 @@ PluginView::PluginView(Frame* parentFrame, const IntSize& size, PluginPackage* p
     , m_wmPrintHDC(0)
     , m_haveUpdatedPluginWidget(false)
 #endif
-#if (PLATFORM(QT) && OS(WINDOWS)) || defined(XP_MACOSX)
+#if (PLATFORM(QT) && OS(WINDOWS)) || defined(XP_MACOSX) || PLATFORM(EFL)
     , m_window(0)
 #endif
 #if defined(XP_MACOSX)
@@ -830,11 +862,13 @@ PluginView::PluginView(Frame* parentFrame, const IntSize& size, PluginPackage* p
     , m_colormap(0)
     , m_pluginDisplay(0)
 #endif
+#if PLATFORM(QT) && defined(MOZ_PLATFORM_MAEMO) && (MOZ_PLATFORM_MAEMO >= 5)
+    , m_renderToImage(false)
+#endif
     , m_loadManually(loadManually)
     , m_manualStream(0)
     , m_isJavaScriptPaused(false)
-    , m_isHalted(false)
-    , m_hasBeenHalted(false)
+    , m_haveCalledSetWindow(false)
 {
     if (!m_plugin) {
         m_status = PluginStatusCanNotFindPlugin;
@@ -844,6 +878,8 @@ PluginView::PluginView(Frame* parentFrame, const IntSize& size, PluginPackage* p
     m_instance = &m_instanceStruct;
     m_instance->ndata = this;
     m_instance->pdata = 0;
+
+    instanceMap().add(m_instance, this);
 
     setParameters(paramNames, paramValues);
 
@@ -859,8 +895,9 @@ void PluginView::focusPluginElement()
 {
     // Focus the plugin
     if (Page* page = m_parentFrame->page())
-        page->focusController()->setFocusedFrame(m_parentFrame);
-    m_parentFrame->document()->setFocusedNode(m_element);
+        page->focusController()->setFocusedNode(m_element, m_parentFrame);
+    else
+        m_parentFrame->document()->setFocusedNode(m_element);
 }
 
 void PluginView::didReceiveResponse(const ResourceResponse& response)
@@ -871,7 +908,7 @@ void PluginView::didReceiveResponse(const ResourceResponse& response)
     ASSERT(m_loadManually);
     ASSERT(!m_manualStream);
 
-    m_manualStream = PluginStream::create(this, m_parentFrame, m_parentFrame->loader()->activeDocumentLoader()->request(), false, 0, plugin()->pluginFuncs(), instance(), m_plugin->quirks());
+    m_manualStream = PluginStream::create(this, m_parentFrame.get(), m_parentFrame->loader()->activeDocumentLoader()->request(), false, 0, plugin()->pluginFuncs(), instance(), m_plugin->quirks());
     m_manualStream->setLoadManually(true);
 
     m_manualStream->didReceiveResponse(0, response);
@@ -905,9 +942,9 @@ void PluginView::didFail(const ResourceError& error)
         return;
 
     ASSERT(m_loadManually);
-    ASSERT(m_manualStream);
-
-    m_manualStream->didFail(0, error);
+    
+    if (m_manualStream)
+        m_manualStream->didFail(0, error);
 }
 
 void PluginView::setCallingPlugin(bool b) const
@@ -1112,12 +1149,12 @@ static inline HTTPHeaderMap parseRFC822HeaderFields(const Vector<char>& buffer, 
     return headerFields;
 }
 
-NPError PluginView::handlePost(const char* url, const char* target, uint32 len, const char* buf, bool file, void* notifyData, bool sendNotification, bool allowHeaders)
+NPError PluginView::handlePost(const char* url, const char* target, uint32_t len, const char* buf, bool file, void* notifyData, bool sendNotification, bool allowHeaders)
 {
     if (!url || !len || !buf)
         return NPERR_INVALID_PARAM;
 
-    FrameLoadRequest frameLoadRequest;
+    FrameLoadRequest frameLoadRequest(m_parentFrame->document()->securityOrigin());
 
     HTTPHeaderMap headerFields;
     Vector<char> buffer;
@@ -1161,7 +1198,7 @@ NPError PluginView::handlePost(const char* url, const char* target, uint32 len, 
     }
 
     frameLoadRequest.resourceRequest().setHTTPMethod("POST");
-    frameLoadRequest.resourceRequest().setURL(makeURL(m_baseURL, url));
+    frameLoadRequest.resourceRequest().setURL(makeURL(m_parentFrame->document()->baseURL(), url));
     frameLoadRequest.resourceRequest().addHTTPHeaderFields(headerFields);
     frameLoadRequest.resourceRequest().setHTTPBody(FormData::create(postData, postDataLength));
     frameLoadRequest.setFrameName(target);
@@ -1201,7 +1238,7 @@ void PluginView::paintMissingPluginIcon(GraphicsContext* context, const IntRect&
 
     context->save();
     context->clip(windowClipRect());
-    context->drawImage(nullPluginImage.get(), DeviceColorSpace, imageRect.location());
+    context->drawImage(nullPluginImage.get(), ColorSpaceDeviceRGB, imageRect.location());
     context->restore();
 }
 
@@ -1239,14 +1276,232 @@ const char* PluginView::userAgentStatic()
 #endif
 
 
-Node* PluginView::node() const
+void PluginView::lifeSupportTimerFired(Timer<PluginView>*)
 {
-    return m_element;
+    deref();
 }
 
-String PluginView::pluginName() const
+void PluginView::keepAlive()
 {
-    return m_plugin->name();
+    if (m_lifeSupportTimer.isActive())
+        return;
+
+    ref();
+    m_lifeSupportTimer.startOneShot(0);
+}
+
+#if ENABLE(NETSCAPE_PLUGIN_API)
+void PluginView::keepAlive(NPP instance)
+{
+    PluginView* view = instanceMap().get(instance);
+    if (!view)
+        return;
+
+    view->keepAlive();
+}
+
+NPError PluginView::getValueStatic(NPNVariable variable, void* value)
+{
+    LOG(Plugins, "PluginView::getValueStatic(%s)", prettyNameForNPNVariable(variable).data());
+
+    NPError result;
+    if (platformGetValueStatic(variable, value, &result))
+        return result;
+
+    return NPERR_GENERIC_ERROR;
+}
+
+NPError PluginView::getValue(NPNVariable variable, void* value)
+{
+    LOG(Plugins, "PluginView::getValue(%s)", prettyNameForNPNVariable(variable).data());
+
+    NPError result;
+    if (platformGetValue(variable, value, &result))
+        return result;
+
+    if (platformGetValueStatic(variable, value, &result))
+        return result;
+
+    switch (variable) {
+    case NPNVWindowNPObject: {
+        if (m_isJavaScriptPaused)
+            return NPERR_GENERIC_ERROR;
+
+        NPObject* windowScriptObject = m_parentFrame->script()->windowScriptNPObject();
+
+        // Return value is expected to be retained, as described here: <http://www.mozilla.org/projects/plugin/npruntime.html>
+        if (windowScriptObject)
+            _NPN_RetainObject(windowScriptObject);
+
+        void** v = (void**)value;
+        *v = windowScriptObject;
+
+        return NPERR_NO_ERROR;
+    }
+
+    case NPNVPluginElementNPObject: {
+        if (m_isJavaScriptPaused)
+            return NPERR_GENERIC_ERROR;
+
+        NPObject* pluginScriptObject = 0;
+
+        if (m_element->hasTagName(appletTag) || m_element->hasTagName(embedTag) || m_element->hasTagName(objectTag))
+            pluginScriptObject = static_cast<HTMLPlugInElement*>(m_element)->getNPObject();
+
+        // Return value is expected to be retained, as described here: <http://www.mozilla.org/projects/plugin/npruntime.html>
+        if (pluginScriptObject)
+            _NPN_RetainObject(pluginScriptObject);
+
+        void** v = (void**)value;
+        *v = pluginScriptObject;
+
+        return NPERR_NO_ERROR;
+    }
+
+    case NPNVprivateModeBool: {
+        Page* page = m_parentFrame->page();
+        if (!page)
+            return NPERR_GENERIC_ERROR;
+        *((NPBool*)value) = !page->settings() || page->settings()->privateBrowsingEnabled();
+        return NPERR_NO_ERROR;
+    }
+
+    default:
+        return NPERR_GENERIC_ERROR;
+    }
+}
+
+static Frame* getFrame(Frame* parentFrame, Element* element)
+{
+    if (parentFrame)
+        return parentFrame;
+    
+    Document* document = element->document();
+    if (!document)
+        document = element->ownerDocument();
+    if (document)
+        return document->frame();
+    
+    return 0;
+}
+
+NPError PluginView::getValueForURL(NPNURLVariable variable, const char* url, char** value, uint32_t* len)
+{
+    LOG(Plugins, "PluginView::getValueForURL(%s)", prettyNameForNPNURLVariable(variable).data());
+
+    NPError result = NPERR_NO_ERROR;
+
+    switch (variable) {
+    case NPNURLVCookie: {
+        KURL u(m_parentFrame->document()->baseURL(), url);
+        if (u.isValid()) {
+            Frame* frame = getFrame(parentFrame(), m_element);
+            if (frame) {
+                const CString cookieStr = cookies(frame->document(), u).utf8();
+                if (!cookieStr.isNull()) {
+                    const int size = cookieStr.length();
+                    *value = static_cast<char*>(NPN_MemAlloc(size+1));
+                    if (*value) {
+                        memset(*value, 0, size+1);
+                        memcpy(*value, cookieStr.data(), size+1);
+                        if (len)
+                            *len = size;
+                    } else
+                        result = NPERR_OUT_OF_MEMORY_ERROR;
+                }
+            }
+        } else
+            result = NPERR_INVALID_URL;
+        break;
+    }
+    case NPNURLVProxy: {
+        KURL u(m_parentFrame->document()->baseURL(), url);
+        if (u.isValid()) {
+            Frame* frame = getFrame(parentFrame(), m_element);
+            const FrameLoader* frameLoader = frame ? frame->loader() : 0;
+            const NetworkingContext* context = frameLoader ? frameLoader->networkingContext() : 0;
+            const CString proxyStr = toString(proxyServersForURL(u, context)).utf8();
+            if (!proxyStr.isNull()) {
+                const int size = proxyStr.length();
+                *value = static_cast<char*>(NPN_MemAlloc(size+1));
+                if (*value) {
+                    memset(*value, 0, size+1);
+                    memcpy(*value, proxyStr.data(), size+1);
+                    if (len)
+                        *len = size;
+                } else
+                    result = NPERR_OUT_OF_MEMORY_ERROR;
+            }
+        } else
+            result = NPERR_INVALID_URL;
+        break;
+    }
+    default:
+        result = NPERR_GENERIC_ERROR;
+        LOG(Plugins, "PluginView::getValueForURL: %s", prettyNameForNPNURLVariable(variable).data());
+        break;
+    }
+
+    return result;
+}
+
+
+NPError PluginView::setValueForURL(NPNURLVariable variable, const char* url, const char* value, uint32_t len)
+{
+    LOG(Plugins, "PluginView::setValueForURL(%s)", prettyNameForNPNURLVariable(variable).data());
+
+    NPError result = NPERR_NO_ERROR;
+
+    switch (variable) {
+    case NPNURLVCookie: {
+        KURL u(m_parentFrame->document()->baseURL(), url);
+        if (u.isValid()) {
+            const String cookieStr = String::fromUTF8(value, len);
+            Frame* frame = getFrame(parentFrame(), m_element);
+            if (frame && !cookieStr.isEmpty())
+                setCookies(frame->document(), u, cookieStr);
+        } else
+            result = NPERR_INVALID_URL;
+        break;
+    }
+    case NPNURLVProxy:
+        LOG(Plugins, "PluginView::setValueForURL(%s): Plugins are NOT allowed to set proxy information.", prettyNameForNPNURLVariable(variable).data());
+        result = NPERR_GENERIC_ERROR;
+        break;
+    default:
+        LOG(Plugins, "PluginView::setValueForURL: %s", prettyNameForNPNURLVariable(variable).data());
+        result = NPERR_GENERIC_ERROR;
+        break;
+    }
+
+    return result;
+}
+
+NPError PluginView::getAuthenticationInfo(const char* protocol, const char* host, int32_t port, const char* scheme, const char* realm, char** username, uint32_t* ulen, char** password, uint32_t* plen)
+{
+    LOG(Plugins, "PluginView::getAuthenticationInfo: protocol=%s, host=%s, port=%d", protocol, host, port);
+    notImplemented();
+    return NPERR_GENERIC_ERROR;
+}
+#endif
+
+void PluginView::privateBrowsingStateChanged(bool privateBrowsingEnabled)
+{
+    NPP_SetValueProcPtr setValue = m_plugin->pluginFuncs()->setvalue;
+    if (!setValue)
+        return;
+
+    PluginView::setCurrentPluginView(this);
+#if USE(JSC)
+    JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
+#endif
+    setCallingPlugin(true);
+    NPBool value = privateBrowsingEnabled;
+    setValue(m_instance, NPNVprivateModeBool, &value);
+    setCallingPlugin(false);
+    PluginView::setCurrentPluginView(0);
 }
 
 } // namespace WebCore
+
+#endif // ENABLE(NETSCAPE_PLUGIN_API)

@@ -21,6 +21,7 @@
 
 #include "config.h"
 #include "TranslateTransformOperation.h"
+#include "FloatConversion.h"
 
 namespace WebCore {
 

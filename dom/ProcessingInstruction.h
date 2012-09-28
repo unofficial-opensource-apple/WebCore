@@ -22,16 +22,16 @@
 #ifndef ProcessingInstruction_h
 #define ProcessingInstruction_h
 
-#include "CachedResourceClient.h"
 #include "CachedResourceHandle.h"
-#include "ContainerNode.h"
+#include "CachedStyleSheetClient.h"
+#include "Node.h"
 
 namespace WebCore {
 
 class StyleSheet;
 class CSSStyleSheet;
 
-class ProcessingInstruction : public ContainerNode, private CachedResourceClient {
+class ProcessingInstruction : public Node, private CachedStyleSheetClient {
 public:
     static PassRefPtr<ProcessingInstruction> create(Document*, const String& target, const String& data);
     virtual ~ProcessingInstruction();
@@ -48,6 +48,7 @@ public:
     StyleSheet* sheet() const { return m_sheet.get(); }
     void setCSSStyleSheet(PassRefPtr<CSSStyleSheet>);
 
+    bool isCSS() const { return m_isCSS; }
 #if ENABLE(XSLT)
     bool isXSL() const { return m_isXSL; }
 #endif
@@ -60,12 +61,11 @@ private:
     virtual String nodeValue() const;
     virtual void setNodeValue(const String&, ExceptionCode&);
     virtual PassRefPtr<Node> cloneNode(bool deep);
-    virtual bool childTypeAllowed(NodeType);
     virtual bool offsetInCharacters() const;
     virtual int maxCharacterOffset() const;
 
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void removedFrom(Node*) OVERRIDE;
 
     void checkStyleSheet();
     virtual void setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet*);
@@ -90,6 +90,7 @@ private:
     bool m_loading;
     bool m_alternate;
     bool m_createdByParser;
+    bool m_isCSS;
 #if ENABLE(XSLT)
     bool m_isXSL;
 #endif

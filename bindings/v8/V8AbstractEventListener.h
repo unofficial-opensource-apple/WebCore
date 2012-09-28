@@ -88,6 +88,13 @@ namespace WebCore {
             return v8::Local<v8::Object>::New(m_listener);
         }
 
+        // Provides access to the underlying handle for GC. Returned
+        // value is a weak handle and so not guaranteed to stay alive.
+        v8::Persistent<v8::Object> existingListenerObjectPersistentHandle()
+        {
+            return m_listener;
+        }
+
         bool hasExistingListenerObject()
         {
             return !m_listener.IsEmpty();
@@ -95,6 +102,8 @@ namespace WebCore {
 
         // Dispose listener object and clear the handle.
         void disposeListenerObject();
+
+        const WorldContextHandle& worldContext() const { return m_worldContext; }
 
     protected:
         V8AbstractEventListener(bool isAttribute, const WorldContextHandle& worldContext);
@@ -108,18 +117,15 @@ namespace WebCore {
         // Get the receiver object to use for event listener call.
         v8::Local<v8::Object> getReceiverObject(Event*);
 
-        const WorldContextHandle& worldContext() const { return m_worldContext; }
-
     private:
         // Implementation of EventListener function.
         virtual bool virtualisAttribute() const { return m_isAttribute; }
 
         virtual v8::Local<v8::Value> callListenerFunction(ScriptExecutionContext*, v8::Handle<v8::Value> jsevent, Event*) = 0;
 
-        v8::Persistent<v8::Object> m_listener;
+        virtual bool shouldPreventDefault(v8::Local<v8::Value> returnValue);
 
-        // Indicates if the above handle is weak.
-        bool m_isWeak;
+        v8::Persistent<v8::Object> m_listener;
 
         // Indicates if this is an HTML type listener.
         bool m_isAttribute;

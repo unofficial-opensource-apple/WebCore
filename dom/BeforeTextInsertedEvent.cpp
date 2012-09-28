@@ -35,4 +35,14 @@ BeforeTextInsertedEvent::BeforeTextInsertedEvent(const String& text)
 {
 }
 
+BeforeTextInsertedEvent::~BeforeTextInsertedEvent()
+{
+}
+
+const AtomicString& BeforeTextInsertedEvent::interfaceName() const
+{
+    // Notice that there is no BeforeTextInsertedEvent.idl.
+    return eventNames().interfaceForEvent;
+}
+
 }

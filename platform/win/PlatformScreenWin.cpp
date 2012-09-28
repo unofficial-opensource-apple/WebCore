@@ -27,11 +27,12 @@
 #include "config.h"
 #include "PlatformScreen.h"
 
-#include "HostWindow.h"
-#include "IntRect.h"
 #include "FloatRect.h"
 #include "Frame.h"
 #include "FrameView.h"
+#include "HostWindow.h"
+#include "IntRect.h"
+#include "NotImplemented.h"
 #include "Page.h"
 #include <windows.h>
 
@@ -65,17 +66,33 @@ static DEVMODE deviceInfoForWidget(Widget* widget)
     return deviceInfo;
 }
 
+int screenHorizontalDPI(Widget* widget)
+{
+    notImplemented();
+    return 0;
+}
+
+int screenVerticalDPI(Widget* widget)
+{
+    notImplemented();
+    return 0;
+}
+
 int screenDepth(Widget* widget)
 {
     DEVMODE deviceInfo = deviceInfoForWidget(widget);
+    if (deviceInfo.dmBitsPerPel == 32) {
+        // Some video drivers return 32, but this function is supposed to ignore the alpha
+        // component. See <http://webkit.org/b/42972>.
+        return 24;
+    }
     return deviceInfo.dmBitsPerPel;
 }
 
 int screenDepthPerComponent(Widget* widget)
 {
     // FIXME: Assumes RGB -- not sure if this is right.
-    DEVMODE deviceInfo = deviceInfoForWidget(widget);
-    return deviceInfo.dmBitsPerPel / 3;
+    return screenDepth(widget) / 3;
 }
 
 bool screenIsMonochrome(Widget* widget)

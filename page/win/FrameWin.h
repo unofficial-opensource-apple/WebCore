@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef FrameWin_H
-#define FrameWin_H
+#ifndef FrameWin_h
+#define FrameWin_h
 
 #include <wtf/Vector.h>
 
@@ -37,7 +37,7 @@ namespace WebCore {
     class IntRect;
 
     HBITMAP imageFromSelection(Frame* frame, bool forceWhiteText);
-    void computePageRectsForFrame(Frame*, const IntRect& printRect, float headerHeight, float footerHeight, float userScaleFactor, Vector<IntRect>& pages, int& pageHeight);
+    void computePageRectsForFrame(Frame*, const IntRect& printRect, float headerHeight, float footerHeight, float userScaleFactor, Vector<IntRect>& outPages, int& outPageHeight);
 
 }
 

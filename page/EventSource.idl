@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2009 Ericsson AB
- * All rights reserved.
+ * Copyright (C) 2009 Ericsson AB. All rights reserved.
+ * Copyright (C) 2010, 2011 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,13 +32,16 @@
 module window {
 
     interface [
-        Conditional=EVENTSOURCE,
-        CustomConstructor,
+        ActiveDOMObject,
+        Constructor(in DOMString scriptUrl),
+        CallWith=ScriptExecutionContext,
+        ConstructorRaisesException,
         EventTarget,
-        NoStaticTables
+        JSNoStaticTables
     ] EventSource {
 
-        readonly attribute DOMString URL;
+        readonly attribute DOMString URL; // Lowercased .url is the one in the spec, but leaving .URL for compatibility reasons.
+        readonly attribute DOMString url;
 
         // ready state
         const unsigned short CONNECTING = 0;
@@ -53,12 +56,12 @@ module window {
         void close();
 
         // EventTarget interface
-        [Custom] void addEventListener(in DOMString type,
-                                      in EventListener listener,
-                                      in boolean useCapture);
-        [Custom] void removeEventListener(in DOMString type,
-                                          in EventListener listener,
-                                          in boolean useCapture);
+        void addEventListener(in DOMString type,
+                              in EventListener listener,
+                              in [Optional] boolean useCapture);
+        void removeEventListener(in DOMString type,
+                                 in EventListener listener,
+                                 in [Optional] boolean useCapture);
         boolean dispatchEvent(in Event evt)
             raises(EventException);
 

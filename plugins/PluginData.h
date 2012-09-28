@@ -22,52 +22,74 @@
 
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
-#include "PlatformString.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-    class Page;
-    struct PluginInfo;
+class Page;
+struct PluginInfo;
 
-    struct MimeClassInfo : Noncopyable {
-        String type;
-        String desc;
-        String suffixes;
-        PluginInfo* plugin;
-    };
+struct MimeClassInfo {
+    String type;
+    String desc;
+    Vector<String> extensions;
 
-    struct PluginInfo : Noncopyable {
-        String name;
-        String file;
-        String desc;
-        Vector<MimeClassInfo*> mimes;
-    };
+    MimeClassInfo isolatedCopy() const
+    {
+        MimeClassInfo clone;
+        clone.type = type.isolatedCopy();
+        clone.desc = desc.isolatedCopy();
+        for (unsigned i = 0; i < extensions.size(); ++i)
+            clone.extensions.append(extensions[i].isolatedCopy());
+        return clone;
+    }
+};
 
-    // FIXME: merge with PluginDatabase in the future
-    class PluginData : public RefCounted<PluginData> {
-    public:
-        static PassRefPtr<PluginData> create(const Page* page) { return adoptRef(new PluginData(page)); }
-        ~PluginData();
+inline bool operator==(const MimeClassInfo& a, const MimeClassInfo& b)
+{
+    return a.type == b.type && a.desc == b.desc && a.extensions == b.extensions;
+}
 
-        void disconnectPage() { m_page = 0; }
-        const Page* page() const { return m_page; }
+struct PluginInfo {
+    String name;
+    String file;
+    String desc;
+    Vector<MimeClassInfo> mimes;
 
-        const Vector<PluginInfo*>& plugins() const { return m_plugins; }
-        const Vector<MimeClassInfo*>& mimes() const { return m_mimes; }
+    PluginInfo isolatedCopy() const
+    {
+        PluginInfo clone;
+        clone.name = name.isolatedCopy();
+        clone.file = file.isolatedCopy();
+        clone.desc = desc.isolatedCopy();
+        for (unsigned i = 0; i < mimes.size(); ++i)
+            clone.mimes.append(mimes[i].isolatedCopy());
+        return clone;
+    }
+};
 
-        bool supportsMimeType(const String& mimeType) const;
-        String pluginNameForMimeType(const String& mimeType) const;
+// FIXME: merge with PluginDatabase in the future
+class PluginData : public RefCounted<PluginData> {
+public:
+    static PassRefPtr<PluginData> create(const Page* page) { return adoptRef(new PluginData(page)); }
 
-        static void refresh();
+    const Vector<PluginInfo>& plugins() const { return m_plugins; }
+    const Vector<MimeClassInfo>& mimes() const { return m_mimes; }
+    const Vector<size_t>& mimePluginIndices() const { return m_mimePluginIndices; }
+    
+    bool supportsMimeType(const String& mimeType) const;
+    String pluginNameForMimeType(const String& mimeType) const;
 
-    private:
-        PluginData(const Page*);
-        void initPlugins();
+    static void refresh();
 
-        Vector<PluginInfo*> m_plugins;
-        Vector<MimeClassInfo*> m_mimes;
-        const Page* m_page;
-    };
+private:
+    PluginData(const Page*);
+    void initPlugins(const Page*);
+
+    Vector<PluginInfo> m_plugins;
+    Vector<MimeClassInfo> m_mimes;
+    Vector<size_t> m_mimePluginIndices;
+};
 
 }
 

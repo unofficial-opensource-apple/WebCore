@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,6 +33,7 @@
 #include "HTMLDocument.h"
 #include "HTMLMediaElement.h"
 #include "HTMLNames.h"
+#include "Logging.h"
 
 using namespace std;
 
@@ -40,32 +41,36 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLSourceElement::HTMLSourceElement(const QualifiedName& tagName, Document* doc)
-    : HTMLElement(tagName, doc)
+inline HTMLSourceElement::HTMLSourceElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
     , m_errorEventTimer(this, &HTMLSourceElement::errorEventTimerFired)
 {
+    LOG(Media, "HTMLSourceElement::HTMLSourceElement - %p", this);
     ASSERT(hasTagName(sourceTag));
 }
 
-HTMLSourceElement::~HTMLSourceElement()
+PassRefPtr<HTMLSourceElement> HTMLSourceElement::create(const QualifiedName& tagName, Document* document)
 {
+    return adoptRef(new HTMLSourceElement(tagName, document));
 }
 
-void HTMLSourceElement::insertedIntoDocument()
+Node::InsertionNotificationRequest HTMLSourceElement::insertedInto(Node* insertionPoint)
 {
-    HTMLElement::insertedIntoDocument();
-    if (parentNode() && (parentNode()->hasTagName(audioTag) ||  parentNode()->hasTagName(videoTag))) {
-        HTMLMediaElement* media = static_cast<HTMLMediaElement*>(parentNode());
-        if (media->networkState() == HTMLMediaElement::NETWORK_EMPTY)
-            media->scheduleLoad();
-    }
+    HTMLElement::insertedInto(insertionPoint);
+    Element* parent = parentElement();
+    if (parent && parent->isMediaElement())
+        static_cast<HTMLMediaElement*>(parentNode())->sourceWasAdded(this);
+    return InsertionDone;
 }
 
-KURL HTMLSourceElement::src() const
+void HTMLSourceElement::willRemove()
 {
-    return document()->completeURL(getAttribute(srcAttr));
+    Element* parent = parentElement();
+    if (parent && parent->isMediaElement())
+        static_cast<HTMLMediaElement*>(parentNode())->sourceWillBeRemoved(this);
+    HTMLElement::willRemove();
 }
-
+    
 void HTMLSourceElement::setSrc(const String& url)
 {
     setAttribute(srcAttr, url);
@@ -93,6 +98,7 @@ void HTMLSourceElement::setType(const String& type)
 
 void HTMLSourceElement::scheduleErrorEvent()
 {
+    LOG(Media, "HTMLSourceElement::scheduleErrorEvent - %p", this);
     if (m_errorEventTimer.isActive())
         return;
 
@@ -101,13 +107,33 @@ void HTMLSourceElement::scheduleErrorEvent()
 
 void HTMLSourceElement::cancelPendingErrorEvent()
 {
+    LOG(Media, "HTMLSourceElement::cancelPendingErrorEvent - %p", this);
     m_errorEventTimer.stop();
 }
 
 void HTMLSourceElement::errorEventTimerFired(Timer<HTMLSourceElement>*)
 {
+    LOG(Media, "HTMLSourceElement::errorEventTimerFired - %p", this);
     dispatchEvent(Event::create(eventNames().errorEvent, false, true));
 }
 
+bool HTMLSourceElement::isURLAttribute(Attribute* attribute) const
+{
+    return attribute->name() == srcAttr || HTMLElement::isURLAttribute(attribute);
 }
+
+#if ENABLE(MICRODATA)
+String HTMLSourceElement::itemValueText() const
+{
+    return getURLAttribute(srcAttr);
+}
+
+void HTMLSourceElement::setItemValueText(const String& value, ExceptionCode&)
+{
+    setAttribute(srcAttr, value);
+}
+#endif
+
+}
+
 #endif

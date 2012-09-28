@@ -30,6 +30,8 @@
 #define AccessibilityRenderObject_h
 
 #include "AccessibilityObject.h"
+#include "LayoutTypes.h"
+#include <wtf/Forward.h>
 
 namespace WebCore {
     
@@ -47,12 +49,10 @@ class HTMLSelectElement;
 class IntPoint;
 class IntSize;
 class Node;
-class RenderObject;
 class RenderListBox;
 class RenderTextControl;
 class RenderView;
 class VisibleSelection;
-class String;
 class Widget;
     
 class AccessibilityRenderObject : public AccessibilityObject {
@@ -62,7 +62,7 @@ public:
     static PassRefPtr<AccessibilityRenderObject> create(RenderObject*);
     virtual ~AccessibilityRenderObject();
     
-    bool isAccessibilityRenderObject() const { return true; }
+    virtual bool isAccessibilityRenderObject() const { return true; }
     
     virtual bool isAnchor() const;
     virtual bool isAttachment() const;
@@ -72,10 +72,9 @@ public:
     virtual bool isImage() const;
     virtual bool isNativeImage() const;
     virtual bool isPasswordField() const;
-    virtual bool isTextControl() const;
     virtual bool isNativeTextControl() const;
+    virtual bool isSearchField() const;
     virtual bool isWebArea() const;
-    virtual bool isCheckboxOrRadio() const;
     virtual bool isFileUploadButton() const;
     virtual bool isInputImage() const;
     virtual bool isProgressIndicator() const;
@@ -100,35 +99,41 @@ public:
     virtual bool isOffScreen() const;
     virtual bool isPressed() const;
     virtual bool isReadOnly() const;
+    virtual bool isUnvisited() const;
     virtual bool isVisited() const;        
     virtual bool isRequired() const;
     virtual bool isLinked() const;
-    virtual bool isExpanded() const;
-    virtual void setIsExpanded(bool);
+    virtual bool hasBoldFont() const;
+    virtual bool hasItalicFont() const;
+    virtual bool hasPlainText() const;
+    virtual bool hasSameFont(RenderObject*) const;
+    virtual bool hasSameFontColor(RenderObject*) const;
+    virtual bool hasSameStyle(RenderObject*) const;
+    virtual bool hasUnderline() const;
 
-    const AtomicString& getAttribute(const QualifiedName&) const;
     virtual bool canSetFocusAttribute() const;
     virtual bool canSetTextRangeAttributes() const;
     virtual bool canSetValueAttribute() const;
     virtual bool canSetExpandedAttribute() const;
 
-    virtual bool hasIntValue() const;
+    virtual void setAccessibleName(const AtomicString&);
     
+    // Provides common logic used by all elements when determining isIgnored.
+    AccessibilityObjectInclusion accessibilityIsIgnoredBase() const;
     virtual bool accessibilityIsIgnored() const;
     
     virtual int headingLevel() const;
-    virtual int intValue() const;
+    virtual AccessibilityButtonState checkboxOrRadioValue() const;
     virtual String valueDescription() const;
     virtual float valueForRange() const;
     virtual float maxValueForRange() const;
     virtual float minValueForRange() const;
+    virtual float stepValueForRange() const;
     virtual AccessibilityObject* selectedRadioButton();
     virtual AccessibilityObject* selectedTabItem();
     virtual int layoutCount() const;
     virtual double estimatedLoadingProgress() const;
     
-    virtual AccessibilityObject* doAccessibilityHitTest(const IntPoint&) const;
-    virtual AccessibilityObject* focusedUIElement() const;
     virtual AccessibilityObject* firstChild() const;
     virtual AccessibilityObject* lastChild() const;
     virtual AccessibilityObject* previousSibling() const;
@@ -149,8 +154,9 @@ public:
     virtual bool ariaRoleHasPresentationalChildren() const;
     void updateAccessibilityRole();
     
-    virtual AXObjectCache* axObjectCache() const;
-    
+    // Should be called on the root accessibility object to kick off a hit test.
+    virtual AccessibilityObject* accessibilityHitTest(const IntPoint&) const;
+
     virtual Element* actionElement() const;
     Element* mouseButtonListener() const;
     FrameView* frameViewIfRenderView() const;
@@ -158,17 +164,20 @@ public:
     AccessibilityObject* menuForMenuButton() const;
     AccessibilityObject* menuButtonForMenu() const;
     
-    virtual IntRect boundingBoxRect() const;
-    virtual IntRect elementRect() const;
-    virtual IntSize size() const;
-    virtual IntPoint clickPoint() const;
+    virtual LayoutRect boundingBoxRect() const;
+    virtual LayoutRect elementRect() const;
+    virtual IntPoint clickPoint();
     
     void setRenderer(RenderObject* renderer) { m_renderer = renderer; }
-    RenderObject* renderer() const { return m_renderer; }
+    virtual RenderObject* renderer() const { return m_renderer; }
+    RenderBoxModelObject* renderBoxModelObject() const;
+    virtual Node* node() const;
+
     RenderView* topRenderer() const;
     RenderTextControl* textControl() const;
     Document* document() const;
     FrameView* topDocumentFrameView() const;  
+    Document* topDocument() const;
     HTMLLabelElement* labelElementContainer() const;
     
     virtual KURL url() const;
@@ -183,7 +192,6 @@ public:
     virtual String textUnderElement() const;
     virtual String text() const;
     virtual int textLength() const;
-    virtual PassRefPtr<Range> ariaSelectedTextDOMRange() const;
     virtual String selectedText() const;
     virtual const AtomicString& accessKey() const;
     virtual const String& actionVerb() const;
@@ -191,15 +199,14 @@ public:
     virtual Widget* widgetForAttachmentView() const;
     virtual void getDocumentLinks(AccessibilityChildrenVector&);
     virtual FrameView* documentFrameView() const;
-    virtual String language() const;
     virtual unsigned hierarchicalLevel() const;
 
-    virtual const AccessibilityChildrenVector& children();
+    virtual void clearChildren();
+    virtual void updateChildrenIfNecessary();
     
     virtual void setFocused(bool);
     virtual void setSelectedTextRange(const PlainTextRange&);
     virtual void setValue(const String&);
-    virtual void setSelected(bool);
     virtual void setSelectedRows(AccessibilityChildrenVector&);
     virtual void changeValueByPercent(float percentChange);
     virtual AccessibilityOrientation orientation() const;
@@ -217,18 +224,19 @@ public:
     virtual bool shouldFocusActiveDescendant() const;
     virtual AccessibilityObject* activeDescendant() const;
     virtual void handleActiveDescendantChanged();
-
+    virtual void handleAriaExpandedChanged();
+    
     virtual VisiblePositionRange visiblePositionRange() const;
     virtual VisiblePositionRange visiblePositionRangeForLine(unsigned) const;
     virtual IntRect boundsForVisiblePositionRange(const VisiblePositionRange&) const;
     virtual void setSelectedVisiblePositionRange(const VisiblePositionRange&) const;
     virtual bool supportsARIAFlowTo() const;
     virtual void ariaFlowToElements(AccessibilityChildrenVector&) const;
+    virtual bool ariaHasPopup() const;
 
-    virtual bool supportsARIADropping();
-    virtual bool supportsARIADragging();
+    virtual bool supportsARIADropping() const;
+    virtual bool supportsARIADragging() const;
     virtual bool isARIAGrabbed();
-    virtual void setARIAGrabbed(bool);
     virtual void determineARIADropEffects(Vector<String>&);
     
     virtual VisiblePosition visiblePositionForPoint(const IntPoint&) const;
@@ -237,15 +245,13 @@ public:
 
     virtual VisiblePosition visiblePositionForIndex(int) const;
     virtual int indexForVisiblePosition(const VisiblePosition&) const;
-    
+
     virtual PlainTextRange doAXRangeForLine(unsigned) const;
     virtual PlainTextRange doAXRangeForIndex(unsigned) const;
     
     virtual String doAXStringForRange(const PlainTextRange&) const;
     virtual IntRect doAXBoundsForRange(const PlainTextRange&) const;
     
-    virtual void updateBackingStore();
-
     virtual String stringValueForMSAA() const;
     virtual String stringRoleForMSAA() const;
     virtual String nameForMSAA() const;
@@ -255,10 +261,13 @@ public:
 protected:
     RenderObject* m_renderer;
     AccessibilityRole m_ariaRole;
-    mutable bool m_childrenDirty;
+    bool m_childrenDirty;
     
     void setRenderObject(RenderObject* renderer) { m_renderer = renderer; }
     void ariaLabeledByElements(Vector<Element*>& elements) const;
+    bool needsToUpdateChildren() const { return m_childrenDirty; }
+    ScrollableArea* getScrollableAreaIfScrollable() const;
+    void scrollTo(const IntPoint&) const;
     
     virtual bool isDetached() const { return !m_renderer; }
 
@@ -270,18 +279,36 @@ private:
     bool isAllowedChildOfTree() const;
     bool hasTextAlternative() const;
     String positionalDescriptionForMSAA() const;
+    PlainTextRange ariaSelectedTextRange() const;
+    Element* rootEditableElementForPosition(const Position&) const;
+    bool nodeIsTextControl(const Node*) const;
+    virtual void setNeedsToUpdateChildren() { m_childrenDirty = true; }
 
     Element* menuElementForMenuButton() const;
     Element* menuItemElementForMenu() const;
     AccessibilityRole determineAccessibilityRole();
     AccessibilityRole determineAriaRoleAttribute() const;
+    AccessibilityRole remapAriaRoleDueToParent(AccessibilityRole) const;
 
     bool isTabItemSelected() const;
-    IntRect checkboxOrRadioRect() const;
+    void alterSliderValue(bool increase);
+    void changeValueByStep(bool increase);
+    bool isNativeCheckboxOrRadio() const;
+    LayoutRect checkboxOrRadioRect() const;
     void addRadioButtonGroupMembers(AccessibilityChildrenVector& linkedUIElements) const;
     AccessibilityObject* internalLinkElement() const;
     AccessibilityObject* accessibilityImageMapHitTest(HTMLAreaElement*, const IntPoint&) const;
-    AccessibilityObject* accessibilityParentForImageMap(HTMLMapElement* map) const;
+    AccessibilityObject* accessibilityParentForImageMap(HTMLMapElement*) const;
+    bool renderObjectIsObservable(RenderObject*) const;
+    RenderObject* renderParentObject() const;
+    bool isDescendantOfElementType(const QualifiedName& tagName) const;
+
+    void addTextFieldChildren();
+    void addImageMapChildren();
+    void addAttachmentChildren();
+#if PLATFORM(MAC)
+    void updateAttachmentViewParents();
+#endif
 
     void ariaSelectedRows(AccessibilityChildrenVector&);
     
@@ -289,19 +316,36 @@ private:
     void setElementAttributeValue(const QualifiedName&, bool);
     
     String accessibilityDescriptionForElements(Vector<Element*> &elements) const;
-    void elementsFromAttribute(Vector<Element*>& elements, const QualifiedName& name) const;
+    void elementsFromAttribute(Vector<Element*>& elements, const QualifiedName&) const;
+    String ariaAccessibilityDescription() const;
+    
+    virtual ESpeak speakProperty() const;
     
     virtual const AtomicString& ariaLiveRegionStatus() const;
     virtual const AtomicString& ariaLiveRegionRelevant() const;
     virtual bool ariaLiveRegionAtomic() const;
     virtual bool ariaLiveRegionBusy() const;    
     
-    void setNeedsToUpdateChildren() const { m_childrenDirty = true; }
-    bool needsToUpdateChildren() const { return m_childrenDirty; }
+    bool inheritsPresentationalRole() const;
     
     mutable AccessibilityRole m_roleForMSAA;
 };
-    
+
+inline AccessibilityRenderObject* toAccessibilityRenderObject(AccessibilityObject* object)
+{
+    ASSERT(!object || object->isAccessibilityRenderObject());
+    return static_cast<AccessibilityRenderObject*>(object);
+}
+
+inline const AccessibilityRenderObject* toAccessibilityRenderObject(const AccessibilityObject* object)
+{
+    ASSERT(!object || object->isAccessibilityRenderObject());
+    return static_cast<const AccessibilityRenderObject*>(object);
+}
+
+// This will catch anyone doing an unnecessary cast.
+void toAccessibilityRenderObject(const AccessibilityRenderObject*);
+
 } // namespace WebCore
 
 #endif // AccessibilityRenderObject_h

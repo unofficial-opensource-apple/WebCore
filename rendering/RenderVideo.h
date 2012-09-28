@@ -34,31 +34,31 @@ namespace WebCore {
     
 class HTMLMediaElement;
 class HTMLVideoElement;
-#if USE(ACCELERATED_COMPOSITING)
-class GraphicsLayer;
-#endif
 
 class RenderVideo : public RenderMedia {
 public:
     RenderVideo(HTMLVideoElement*);
     virtual ~RenderVideo();
 
+    IntRect videoBox() const;
+
     static IntSize defaultSize();
 
-    void videoSizeChanged();
-    IntRect videoBox() const;
-    
 #if USE(ACCELERATED_COMPOSITING)
     bool supportsAcceleratedRendering() const;
     void acceleratedRenderingStateChanged();
-    GraphicsLayer* videoGraphicsLayer() const;
 #endif
+
+    virtual bool shouldDisplayVideo() const;
 
 private:
     virtual void updateFromElement();
     inline HTMLVideoElement* videoElement() const;
 
     virtual void intrinsicSizeChanged();
+    IntSize calculateIntrinsicSize();
+    void updateIntrinsicSize();
+
     virtual void imageChanged(WrappedImagePtr, const IntRect*);
 
     virtual const char* renderName() const { return "RenderVideo"; }
@@ -66,16 +66,20 @@ private:
     virtual bool requiresLayer() const { return true; }
     virtual bool isVideo() const { return true; }
 
-    virtual void paintReplaced(PaintInfo&, int tx, int ty);
+    virtual void paintReplaced(PaintInfo&, const LayoutPoint&);
 
     virtual void layout();
 
-    virtual int calcReplacedWidth(bool includeMaxWidth = true) const;
-    virtual int calcReplacedHeight() const;
+    virtual LayoutUnit computeReplacedLogicalWidth(bool includeMaxWidth = true) const;
+    virtual LayoutUnit computeReplacedLogicalHeight() const;
     virtual int minimumReplacedHeight() const;
-    
-    int calcAspectRatioWidth() const;
-    int calcAspectRatioHeight() const;
+
+#if ENABLE(FULLSCREEN_API)
+    virtual LayoutUnit offsetLeft() const;
+    virtual LayoutUnit offsetTop() const;
+    virtual LayoutUnit offsetWidth() const;
+    virtual LayoutUnit offsetHeight() const;
+#endif
 
     void updatePlayer();
 

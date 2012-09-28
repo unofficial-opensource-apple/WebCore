@@ -25,9 +25,11 @@
 
 #if USE(ATSUI)
 
-#include "CharacterNames.h"
 #include "Font.h"
 #include "ShapeArabic.h"
+#include "TextRun.h"
+#include <ApplicationServices/ApplicationServices.h>
+#include <wtf/unicode/CharacterNames.h>
 
 #ifdef __LP64__
 // ATSUTextInserted() is SPI in 64-bit.
@@ -145,6 +147,7 @@ ComplexTextController::ComplexTextRun::ComplexTextRun(ATSUTextLayout atsuTextLay
     , m_characters(characters)
     , m_stringLocation(stringLocation)
     , m_stringLength(stringLength)
+    , m_indexEnd(stringLength)
     , m_directionalOverride(directionalOverride)
     , m_isMonotonic(true)
 {
@@ -262,7 +265,7 @@ static void disableLigatures(const SimpleFontData* fontData, ATSUStyle atsuStyle
     // Don't be too aggressive: if the font doesn't contain 'a', then assume that any ligatures it contains are
     // in characters that always go through ATSUI, and therefore allow them. Geeza Pro is an example.
     // See bugzilla 5166.
-    if ((typesettingFeatures & Ligatures) || fontData->platformData().allowsLigatures())
+    if ((typesettingFeatures & Ligatures) || (fontData->platformData().orientation() == Horizontal && fontData->platformData().allowsLigatures()))
         return;
 
     ATSUFontFeatureType featureTypes[] = { kLigaturesType };
@@ -275,15 +278,15 @@ static void disableLigatures(const SimpleFontData* fontData, ATSUStyle atsuStyle
 static ATSUStyle initializeATSUStyle(const SimpleFontData* fontData, TypesettingFeatures typesettingFeatures)
 {
     unsigned key = typesettingFeatures + 1;
-    pair<HashMap<unsigned, ATSUStyle>::iterator, bool> addResult = fontData->m_ATSUStyleMap.add(key, 0);
-    ATSUStyle& atsuStyle = addResult.first->second;
-    if (!addResult.second)
+    HashMap<unsigned, ATSUStyle>::AddResult addResult = fontData->m_ATSUStyleMap.add(key, 0);
+    ATSUStyle& atsuStyle = addResult.iterator->second;
+    if (!addResult.isNewEntry)
         return atsuStyle;
 
-    ATSUFontID fontID = fontData->platformData().m_atsuFontID;
+    ATSUFontID fontID = fontData->platformData().ctFont() ? CTFontGetPlatformFont(fontData->platformData().ctFont(), 0) : 0;
     if (!fontID) {
         LOG_ERROR("unable to get ATSUFontID for %p", fontData->platformData().font());
-        fontData->m_ATSUStyleMap.remove(addResult.first);
+        fontData->m_ATSUStyleMap.remove(addResult.isNewEntry);
         return 0;
     }
 
@@ -312,11 +315,10 @@ static ATSUStyle initializeATSUStyle(const SimpleFontData* fontData, Typesetting
 
 void ComplexTextController::collectComplexTextRunsForCharactersATSUI(const UChar* cp, unsigned length, unsigned stringLocation, const SimpleFontData* fontData)
 {
-    if (!fontData) {
-        // Create a run of missing glyphs from the primary font.
-        m_complexTextRuns.append(ComplexTextRun::create(m_font.primaryFont(), cp, stringLocation, length, m_run.ltr()));
-        return;
-    }
+    ASSERT_ARG(fontData, fontData);
+
+    if (fontData == systemFallbackFontData())
+        fontData = m_font.primaryFont();
 
     if (m_fallbackFonts && fontData != m_font.primaryFont())
         m_fallbackFonts->add(fontData);

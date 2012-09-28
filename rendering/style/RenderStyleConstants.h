@@ -2,7 +2,7 @@
  * Copyright (C) 2000 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Antti Koivisto (koivisto@kde.org)
  *           (C) 2000 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Graham Dennis (graham.dennis@gmail.com)
  * Copyright (C) 2009 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
  *
@@ -28,21 +28,21 @@
 
 namespace WebCore {
 
-/*
- * WARNING:
- * --------
- *
- * The order of the values in the enums have to agree with the order specified
- * in CSSValueKeywords.in, otherwise some optimizations in the parser will fail,
- * and produce invalid results.
- */
+static const size_t PrintColorAdjustBits = 1;
+enum PrintColorAdjust {
+    PrintColorAdjustEconomy,
+    PrintColorAdjustExact
+};
 
 // The difference between two styles.  The following values are used:
 // (1) StyleDifferenceEqual - The two styles are identical
 // (2) StyleDifferenceRecompositeLayer - The layer needs its position and transform updated, but no repaint
 // (3) StyleDifferenceRepaint - The object just needs to be repainted.
 // (4) StyleDifferenceRepaintLayer - The layer and its descendant layers needs to be repainted.
-// (5) StyleDifferenceLayout - A layout is required.
+// (5) StyleDifferenceLayoutPositionedMovementOnly - Only the position of this positioned object has been updated
+// (6) StyleDifferenceSimplifiedLayout - Only overflow needs to be recomputed
+// (7) StyleDifferenceSimplifiedLayoutAndPositionedMovement - Both positioned movement and simplified layout updates are required.
+// (8) StyleDifferenceLayout - A full layout is required.
 enum StyleDifference {
     StyleDifferenceEqual,
 #if USE(ACCELERATED_COMPOSITING)
@@ -51,6 +51,8 @@ enum StyleDifference {
     StyleDifferenceRepaint,
     StyleDifferenceRepaintLayer,
     StyleDifferenceLayoutPositionedMovementOnly,
+    StyleDifferenceSimplifiedLayout,
+    StyleDifferenceSimplifiedLayoutAndPositionedMovement,
     StyleDifferenceLayout
 };
 
@@ -61,39 +63,43 @@ enum StyleDifference {
 enum StyleDifferenceContextSensitiveProperty {
     ContextSensitivePropertyNone = 0,
     ContextSensitivePropertyTransform = (1 << 0),
-    ContextSensitivePropertyOpacity = (1 << 1)
+    ContextSensitivePropertyOpacity = (1 << 1),
+    ContextSensitivePropertyFilter = (1 << 2)
 };
 
 // Static pseudo styles. Dynamic ones are produced on the fly.
 enum PseudoId {
-    NOPSEUDO, FIRST_LINE, FIRST_LETTER, BEFORE, AFTER, SELECTION, FIRST_LINE_INHERITED, SCROLLBAR, FILE_UPLOAD_BUTTON, INPUT_PLACEHOLDER,
-    SLIDER_THUMB, SEARCH_CANCEL_BUTTON, SEARCH_DECORATION, SEARCH_RESULTS_DECORATION, SEARCH_RESULTS_BUTTON, MEDIA_CONTROLS_PANEL,
-    MEDIA_CONTROLS_PLAY_BUTTON, MEDIA_CONTROLS_MUTE_BUTTON, MEDIA_CONTROLS_TIMELINE, MEDIA_CONTROLS_TIMELINE_CONTAINER,
-    MEDIA_CONTROLS_VOLUME_SLIDER, MEDIA_CONTROLS_VOLUME_SLIDER_CONTAINER, MEDIA_CONTROLS_CURRENT_TIME_DISPLAY, MEDIA_CONTROLS_TIME_REMAINING_DISPLAY, 
-    MEDIA_CONTROLS_SEEK_BACK_BUTTON, MEDIA_CONTROLS_SEEK_FORWARD_BUTTON, MEDIA_CONTROLS_FULLSCREEN_BUTTON, MEDIA_CONTROLS_REWIND_BUTTON, 
-    MEDIA_CONTROLS_RETURN_TO_REALTIME_BUTTON, MEDIA_CONTROLS_TOGGLE_CLOSED_CAPTIONS_BUTTON,
-    MEDIA_CONTROLS_STATUS_DISPLAY, SCROLLBAR_THUMB, SCROLLBAR_BUTTON, SCROLLBAR_TRACK, SCROLLBAR_TRACK_PIECE, SCROLLBAR_CORNER, RESIZER,
-    INPUT_LIST_BUTTON, INNER_SPIN_BUTTON, OUTER_SPIN_BUTTON,
-
-    FIRST_INTERNAL_PSEUDOID = FILE_UPLOAD_BUTTON
+    // The order must be NOP ID, public IDs, and then internal IDs.
+    NOPSEUDO, FIRST_LINE, FIRST_LETTER, BEFORE, AFTER, SELECTION, FIRST_LINE_INHERITED, SCROLLBAR,
+    // Internal IDs follow:
+    SCROLLBAR_THUMB, SCROLLBAR_BUTTON, SCROLLBAR_TRACK, SCROLLBAR_TRACK_PIECE, SCROLLBAR_CORNER, RESIZER,
+    INPUT_LIST_BUTTON,
+    AFTER_LAST_INTERNAL_PSEUDOID,
+    FULL_SCREEN, FULL_SCREEN_DOCUMENT, FULL_SCREEN_ANCESTOR, ANIMATING_FULL_SCREEN_TRANSITION,
+    FIRST_PUBLIC_PSEUDOID = FIRST_LINE,
+    FIRST_INTERNAL_PSEUDOID = SCROLLBAR_THUMB,
+    PUBLIC_PSEUDOID_MASK = ((1 << FIRST_INTERNAL_PSEUDOID) - 1) & ~((1 << FIRST_PUBLIC_PSEUDOID) - 1)
 };
 
+enum ColumnSpan { ColumnSpanOne = 0, ColumnSpanAll};
+
+enum EBorderCollapse { BSEPARATE = 0, BCOLLAPSE = 1 };
+
 // These have been defined in the order of their precedence for border-collapsing. Do
-// not change this order!
-enum EBorderStyle { BNONE, BHIDDEN, INSET, GROOVE, RIDGE, OUTSET, DOTTED, DASHED, SOLID, DOUBLE };
+// not change this order! This order also must match the order in CSSValueKeywords.in.
+enum EBorderStyle { BNONE, BHIDDEN, INSET, GROOVE, OUTSET, RIDGE, DOTTED, DASHED, SOLID, DOUBLE };
 
 enum EBorderPrecedence { BOFF, BTABLE, BCOLGROUP, BCOL, BROWGROUP, BROW, BCELL };
 
-enum PseudoState { PseudoUnknown, PseudoNone, PseudoAnyLink, PseudoLink, PseudoVisited};
+enum OutlineIsAuto { AUTO_OFF = 0, AUTO_ON };
 
 enum EPosition {
     StaticPosition, RelativePosition, AbsolutePosition, FixedPosition
 };
 
 enum EFloat {
-    FNONE = 0, FLEFT, FRIGHT
+    NoFloat, LeftFloat, RightFloat
 };
-
 
 enum EMarginCollapse { MCOLLAPSE, MSEPARATE, MDISCARD };
 
@@ -120,8 +126,13 @@ enum ETableLayout {
     TAUTO, TFIXED
 };
 
-enum EUnicodeBidi {
-    UBNormal, Embed, Override
+// CSS Text Layout Module Level 3: Vertical writing support
+enum WritingMode {
+    TopToBottomWritingMode, RightToLeftWritingMode, LeftToRightWritingMode, BottomToTopWritingMode
+};
+
+enum TextCombine {
+    TextCombineNone, TextCombineHorizontal
 };
 
 enum EFillAttachment {
@@ -148,12 +159,21 @@ enum EFillSizeType { Contain, Cover, SizeLength, SizeNone };
 enum EMarqueeBehavior { MNONE, MSCROLL, MSLIDE, MALTERNATE };
 enum EMarqueeDirection { MAUTO = 0, MLEFT = 1, MRIGHT = -1, MUP = 2, MDOWN = -2, MFORWARD = 3, MBACKWARD = -3 };
 
-// CSS3 Flexible Box Properties
+// Deprecated Flexible Box Properties
 
-enum EBoxAlignment { BSTRETCH, BSTART, BCENTER, BEND, BJUSTIFY, BBASELINE };
+enum EBoxPack { Start, Center, End, Justify };
+enum EBoxAlignment { BSTRETCH, BSTART, BCENTER, BEND, BBASELINE };
 enum EBoxOrient { HORIZONTAL, VERTICAL };
 enum EBoxLines { SINGLE, MULTIPLE };
 enum EBoxDirection { BNORMAL, BREVERSE };
+
+// CSS3 Flexbox Properties
+
+enum EFlexPack { PackStart, PackEnd, PackCenter, PackJustify, PackDistribute };
+enum EFlexAlign { AlignAuto, AlignStart, AlignEnd, AlignCenter, AlignStretch, AlignBaseline };
+enum EFlexDirection { FlowRow, FlowRowReverse, FlowColumn, FlowColumnReverse };
+enum EFlexLinePack { LinePackStart, LinePackEnd, LinePackCenter, LinePackJustify, LinePackDistribute, LinePackStretch };
+enum EFlexWrap { FlexWrapNone, FlexWrap, FlexWrapReverse };
 
 enum ETextSecurity {
     TSNONE, TSDISC, TSCIRCLE, TSSQUARE
@@ -203,67 +223,97 @@ enum EResize {
     RESIZE_NONE, RESIZE_BOTH, RESIZE_HORIZONTAL, RESIZE_VERTICAL
 };
 
-// The order of this enum must match the order of the list style types in CSSValueKeywords.in. 
+// The order of this enum must match the order of the list style types in CSSValueKeywords.in.
 enum EListStyleType {
-     Disc,
-     Circle,
-     Square,
-     DecimalListStyle,
-     DecimalLeadingZero,
-     LowerRoman,
-     UpperRoman,
-     LowerGreek,
-     LowerAlpha,
-     LowerLatin,
-     UpperAlpha,
-     UpperLatin,
-     Afar,
-     EthiopicHalehameAaEt,
-     EthiopicHalehameAaEr,
-     Amharic,
-     EthiopicHalehameAmEt,
-     AmharicAbegede,
-     EthiopicAbegedeAmEt,
-     CjkEarthlyBranch,
-     CjkHeavenlyStem,
-     Ethiopic,
-     EthiopicHalehameGez,
-     EthiopicAbegede,
-     EthiopicAbegedeGez,
-     HangulConsonant,
-     Hangul,
-     LowerNorwegian,
-     Oromo,
-     EthiopicHalehameOmEt,
-     Sidama,
-     EthiopicHalehameSidEt,
-     Somali,
-     EthiopicHalehameSoEt,
-     Tigre,
-     EthiopicHalehameTig,
-     TigrinyaEr,
-     EthiopicHalehameTiEr,
-     TigrinyaErAbegede,
-     EthiopicAbegedeTiEr,
-     TigrinyaEt,
-     EthiopicHalehameTiEt,
-     TigrinyaEtAbegede,
-     EthiopicAbegedeTiEt,
-     UpperGreek,
-     UpperNorwegian,
-     Hebrew,
-     Armenian,
-     Georgian,
-     CJKIdeographic,
-     Hiragana,
-     Katakana,
-     HiraganaIroha,
-     KatakanaIroha,
-     NoneListStyle
+    Disc,
+    Circle,
+    Square,
+    DecimalListStyle,
+    DecimalLeadingZero,
+    ArabicIndic,
+    BinaryListStyle,
+    Bengali,
+    Cambodian,
+    Khmer,
+    Devanagari,
+    Gujarati,
+    Gurmukhi,
+    Kannada,
+    LowerHexadecimal,
+    Lao,
+    Malayalam,
+    Mongolian,
+    Myanmar,
+    Octal,
+    Oriya,
+    Persian,
+    Urdu,
+    Telugu,
+    Tibetan,
+    Thai,
+    UpperHexadecimal,
+    LowerRoman,
+    UpperRoman,
+    LowerGreek,
+    LowerAlpha,
+    LowerLatin,
+    UpperAlpha,
+    UpperLatin,
+    Afar,
+    EthiopicHalehameAaEt,
+    EthiopicHalehameAaEr,
+    Amharic,
+    EthiopicHalehameAmEt,
+    AmharicAbegede,
+    EthiopicAbegedeAmEt,
+    CjkEarthlyBranch,
+    CjkHeavenlyStem,
+    Ethiopic,
+    EthiopicHalehameGez,
+    EthiopicAbegede,
+    EthiopicAbegedeGez,
+    HangulConsonant,
+    Hangul,
+    LowerNorwegian,
+    Oromo,
+    EthiopicHalehameOmEt,
+    Sidama,
+    EthiopicHalehameSidEt,
+    Somali,
+    EthiopicHalehameSoEt,
+    Tigre,
+    EthiopicHalehameTig,
+    TigrinyaEr,
+    EthiopicHalehameTiEr,
+    TigrinyaErAbegede,
+    EthiopicAbegedeTiEr,
+    TigrinyaEt,
+    EthiopicHalehameTiEt,
+    TigrinyaEtAbegede,
+    EthiopicAbegedeTiEt,
+    UpperGreek,
+    UpperNorwegian,
+    Asterisks,
+    Footnotes,
+    Hebrew,
+    Armenian,
+    LowerArmenian,
+    UpperArmenian,
+    Georgian,
+    CJKIdeographic,
+    Hiragana,
+    Katakana,
+    HiraganaIroha,
+    KatakanaIroha,
+    NoneListStyle
 };
 
 enum StyleContentType {
-    CONTENT_NONE, CONTENT_OBJECT, CONTENT_TEXT, CONTENT_COUNTER
+    CONTENT_NONE, CONTENT_OBJECT, CONTENT_TEXT, CONTENT_COUNTER, CONTENT_QUOTE
+};
+
+enum QuoteType {
+    OPEN_QUOTE, CLOSE_QUOTE, NO_OPEN_QUOTE, NO_CLOSE_QUOTE
 };
 
 enum EBorderFit { BorderFitBorder, BorderFitLines };
@@ -275,23 +325,25 @@ enum EAnimPlayState {
     AnimPlayStatePaused = 0x1
 };
 
-enum ETimingFunctionType { LinearTimingFunction, CubicBezierTimingFunction };
-
 enum EWhiteSpace {
     NORMAL, PRE, PRE_WRAP, PRE_LINE, NOWRAP, KHTML_NOWRAP
 };
 
+// The order of this enum must match the order of the text align values in CSSValueKeywords.in.
 enum ETextAlign {
-    TAAUTO, LEFT, RIGHT, CENTER, JUSTIFY, WEBKIT_LEFT, WEBKIT_RIGHT, WEBKIT_CENTER
+    TAAUTO, LEFT, RIGHT, CENTER, JUSTIFY, WEBKIT_LEFT, WEBKIT_RIGHT, WEBKIT_CENTER, TASTART, TAEND,
 };
 
 enum ETextTransform {
     CAPITALIZE, UPPERCASE, LOWERCASE, TTNONE
 };
 
+static const size_t ETextDecorationBits = 4;
 enum ETextDecoration {
     TDNONE = 0x0 , UNDERLINE = 0x1, OVERLINE = 0x2, LINE_THROUGH= 0x4, BLINK = 0x8
 };
+inline ETextDecoration operator|(ETextDecoration a, ETextDecoration b) { return ETextDecoration(int(a) | int(b)); }
+inline ETextDecoration& operator|=(ETextDecoration& a, ETextDecoration b) { return a = a | b; }
 
 enum EPageBreak {
     PBAUTO, PBALWAYS, PBAVOID
@@ -351,18 +403,26 @@ enum ECursor {
     CURSOR_NONE
 };
 
+// The order of this enum must match the order of the display values in CSSValueKeywords.in.
 enum EDisplay {
     INLINE, BLOCK, LIST_ITEM, RUN_IN, COMPACT, INLINE_BLOCK,
     TABLE, INLINE_TABLE, TABLE_ROW_GROUP,
     TABLE_HEADER_GROUP, TABLE_FOOTER_GROUP, TABLE_ROW,
     TABLE_COLUMN_GROUP, TABLE_COLUMN, TABLE_CELL,
     TABLE_CAPTION, BOX, INLINE_BOX, 
-#if ENABLE(WCSS)
-    WAP_MARQUEE,
+#if ENABLE(CSS3_FLEXBOX)
+    FLEXBOX, INLINE_FLEXBOX,
+#endif
+#if ENABLE(CSS_GRID_LAYOUT)
+    GRID, INLINE_GRID,
 #endif
     NONE
 };
 
+enum EInsideLink {
+    NotInsideLink, InsideUnvisitedLink, InsideVisitedLink
+};
+    
 enum EPointerEvents {
     PE_NONE, PE_AUTO, PE_STROKE, PE_FILL, PE_PAINTED, PE_VISIBLE,
     PE_VISIBLE_STROKE, PE_VISIBLE_FILL, PE_VISIBLE_PAINTED, PE_ALL
@@ -378,9 +438,35 @@ enum EBackfaceVisibility {
     
 enum ELineClampType { LineClampLineCount, LineClampPercentage };
 
-enum EImageLoadingBorder {
-    IMAGE_LOADING_BORDER_OUTLINE, IMAGE_LOADING_BORDER_NONE
-};
+enum Hyphens { HyphensNone, HyphensManual, HyphensAuto };
+
+enum ESpeak { SpeakNone, SpeakNormal, SpeakSpellOut, SpeakDigits, SpeakLiteralPunctuation, SpeakNoPunctuation };
+
+enum TextEmphasisFill { TextEmphasisFillFilled, TextEmphasisFillOpen };
+
+enum TextEmphasisMark { TextEmphasisMarkNone, TextEmphasisMarkAuto, TextEmphasisMarkDot, TextEmphasisMarkCircle, TextEmphasisMarkDoubleCircle, TextEmphasisMarkTriangle, TextEmphasisMarkSesame, TextEmphasisMarkCustom };
+
+enum TextEmphasisPosition { TextEmphasisPositionOver, TextEmphasisPositionUnder };
+
+enum TextOverflow { TextOverflowClip = 0, TextOverflowEllipsis };
+
+enum EImageRendering { ImageRenderingAuto, ImageRenderingOptimizeSpeed, ImageRenderingOptimizeQuality, ImageRenderingOptimizeContrast };
+
+enum Order { LogicalOrder = 0, VisualOrder };
+
+enum RegionOverflow { AutoRegionOverflow, BreakRegionOverflow };
+
+enum ColumnAxis { HorizontalColumnAxis, VerticalColumnAxis, AutoColumnAxis };
+
+enum ColumnProgression { NormalColumnProgression, ReverseColumnProgression };
+
+enum LineSnap { LineSnapNone, LineSnapBaseline, LineSnapContain };
+
+enum LineAlign { LineAlignNone, LineAlignEdges };
+
+enum WrapFlow { WrapFlowAuto, WrapFlowBoth, WrapFlowStart, WrapFlowEnd, WrapFlowMaximum, WrapFlowClear };
+
+enum WrapThrough { WrapThroughWrap, WrapThroughNone };
 
 } // namespace WebCore
 

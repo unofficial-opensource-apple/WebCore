@@ -26,68 +26,38 @@
 #import "config.h"
 #import "Editor.h"
 
+#import "ColorMac.h"
 #import "ClipboardMac.h"
-#import "DocLoader.h"
+#import "CachedResourceLoader.h"
+#import "DocumentFragment.h"
+#import "DOMRangeInternal.h"
+#import "EditingText.h"
+#import "Editor.h"
+#import "EditorClient.h"
 #import "Frame.h"
 #import "FrameView.h"
+#import "HTMLConverter.h"
+#import "HTMLNames.h"
+#import "LegacyWebArchive.h"
+#import "Pasteboard.h"
+#import "PasteboardStrategy.h"
+#import "PlatformStrategies.h"
+#import "Range.h"
+#import "RenderBlock.h"
+#import "RuntimeApplicationChecks.h"
+#import "Sound.h"
+#import "TypingCommand.h"
+#import "htmlediting.h"
+#import "WebNSAttributedStringExtras.h"
 
 namespace WebCore {
 
-extern "C" {
+using namespace HTMLNames;
 
-// Kill ring calls. Would be better to use NSKillRing.h, but that's not available as API or SPI.
-
-void _NSInitializeKillRing();
-void _NSAppendToKillRing(NSString *);
-void _NSPrependToKillRing(NSString *);
-NSString *_NSYankFromKillRing();
-void _NSNewKillRingSequence();
-void _NSSetKillRingToYankedState();
-
-}
-
-PassRefPtr<Clipboard> Editor::newGeneralClipboard(ClipboardAccessPolicy policy)
+PassRefPtr<Clipboard> Editor::newGeneralClipboard(ClipboardAccessPolicy policy, Frame* frame)
 {
-    return ClipboardMac::create(false, [NSPasteboard generalPasteboard], policy, 0);
-}
-
-static void initializeKillRingIfNeeded()
-{
-    static bool initializedKillRing = false;
-    if (!initializedKillRing) {
-        initializedKillRing = true;
-        _NSInitializeKillRing();
-    }
-}
-
-void Editor::appendToKillRing(const String& string)
-{
-    initializeKillRingIfNeeded();
-    _NSAppendToKillRing(string);
-}
-
-void Editor::prependToKillRing(const String& string)
-{
-    initializeKillRingIfNeeded();
-    _NSPrependToKillRing(string);
-}
-
-String Editor::yankFromKillRing()
-{
-    initializeKillRingIfNeeded();
-    return _NSYankFromKillRing();
-}
-
-void Editor::startNewKillRingSequence()
-{
-    initializeKillRingIfNeeded();
-    _NSNewKillRingSequence();
-}
-
-void Editor::setKillRingToYankedState()
-{
-    initializeKillRingIfNeeded();
-    _NSSetKillRingToYankedState();
+    return ClipboardMac::create(Clipboard::CopyAndPaste,
+        policy == ClipboardWritable ? platformStrategies()->pasteboardStrategy()->uniqueName() : String(NSGeneralPboard), policy, ClipboardMac::CopyAndPasteGeneric, frame);
 }
 
 void Editor::showFontPanel()
@@ -105,20 +75,256 @@ void Editor::showColorPanel()
     [[NSApplication sharedApplication] orderFrontColorPanel:nil];
 }
 
-// FIXME: We want to use the platform-independent code instead. But when we last
-// tried to do so it seemed that we first need to move more of the logic from
-// -[WebHTMLView.cpp _documentFragmentFromPasteboard] into PasteboardMac.
-
-void Editor::paste()
+void Editor::pasteWithPasteboard(Pasteboard* pasteboard, bool allowPlainText)
 {
-    ASSERT(m_frame->document());
-    FrameView* view = m_frame->view();
-    if (!view)
+    RefPtr<Range> range = selectedRange();
+    bool choosePlainText;
+    
+    m_frame->editor()->client()->setInsertionPasteboard(NSGeneralPboard);
+#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+    RefPtr<DocumentFragment> fragment = pasteboard->documentFragment(m_frame, range, allowPlainText, choosePlainText);
+    if (fragment && shouldInsertFragment(fragment, range, EditorInsertActionPasted))
+        pasteAsFragment(fragment, canSmartReplaceWithPasteboard(pasteboard), false);
+#else
+    // Mail is ignoring the frament passed to the delegate and creates a new one.
+    // We want to avoid creating the fragment twice.
+    if (applicationIsAppleMail()) {
+        if (shouldInsertFragment(NULL, range, EditorInsertActionPasted)) {
+            RefPtr<DocumentFragment> fragment = pasteboard->documentFragment(m_frame, range, allowPlainText, choosePlainText);
+            if (fragment)
+                pasteAsFragment(fragment, canSmartReplaceWithPasteboard(pasteboard), false);
+        }        
+    } else {
+        RefPtr<DocumentFragment>fragment = pasteboard->documentFragment(m_frame, range, allowPlainText, choosePlainText);
+        if (fragment && shouldInsertFragment(fragment, range, EditorInsertActionPasted))
+            pasteAsFragment(fragment, canSmartReplaceWithPasteboard(pasteboard), false);
+    }
+#endif
+    m_frame->editor()->client()->setInsertionPasteboard(String());
+}
+
+bool Editor::insertParagraphSeparatorInQuotedContent()
+{
+    // FIXME: Why is this missing calls to canEdit, canEditRichly, etc...
+    TypingCommand::insertParagraphSeparatorInQuotedContent(m_frame->document());
+    revealSelectionAfterEditingOperation();
+    return true;
+}
+
+static RenderStyle* styleForSelectionStart(Frame* frame, Node *&nodeToRemove)
+{
+    nodeToRemove = 0;
+
+    if (frame->selection()->isNone())
+        return 0;
+
+    Position position = frame->selection()->selection().visibleStart().deepEquivalent();
+    if (!position.isCandidate() || position.isNull())
+        return 0;
+
+    RefPtr<EditingStyle> typingStyle = frame->selection()->typingStyle();
+    if (!typingStyle || !typingStyle->style())
+        return position.deprecatedNode()->renderer()->style();
+
+    RefPtr<Element> styleElement = frame->document()->createElement(spanTag, false);
+
+    String styleText = typingStyle->style()->asText() + " display: inline";
+    styleElement->setAttribute(styleAttr, styleText.impl());
+
+    styleElement->appendChild(frame->document()->createEditingTextNode(""), ASSERT_NO_EXCEPTION);
+
+    position.deprecatedNode()->parentNode()->appendChild(styleElement, ASSERT_NO_EXCEPTION);
+
+    nodeToRemove = styleElement.get();
+    return styleElement->renderer() ? styleElement->renderer()->style() : 0;
+}
+
+const SimpleFontData* Editor::fontForSelection(bool& hasMultipleFonts) const
+{
+    hasMultipleFonts = false;
+
+    if (!m_frame->selection()->isRange()) {
+        Node* nodeToRemove;
+        RenderStyle* style = styleForSelectionStart(m_frame, nodeToRemove); // sets nodeToRemove
+
+        const SimpleFontData* result = 0;
+        if (style)
+            result = style->font().primaryFont();
+
+        if (nodeToRemove) {
+            ExceptionCode ec;
+            nodeToRemove->remove(ec);
+            ASSERT(!ec);
+        }
+
+        return result;
+    }
+
+    const SimpleFontData* font = 0;
+    RefPtr<Range> range = m_frame->selection()->toNormalizedRange();
+    if (Node* startNode = adjustedSelectionStartForStyleComputation(m_frame->selection()->selection()).deprecatedNode()) {
+        Node* pastEnd = range->pastLastNode();
+        // In the loop below, n should eventually match pastEnd and not become nil, but we've seen at least one
+        // unreproducible case where this didn't happen, so check for null also.
+        for (Node* node = startNode; node && node != pastEnd; node = node->traverseNextNode()) {
+            RenderObject* renderer = node->renderer();
+            if (!renderer)
+                continue;
+            // FIXME: Are there any node types that have renderers, but that we should be skipping?
+            const SimpleFontData* primaryFont = renderer->style()->font().primaryFont();
+            if (!font)
+                font = primaryFont;
+            else if (font != primaryFont) {
+                hasMultipleFonts = true;
+                break;
+            }
+        }
+    }
+
+    return font;
+}
+
+NSDictionary* Editor::fontAttributesForSelectionStart() const
+{
+    Node* nodeToRemove;
+    RenderStyle* style = styleForSelectionStart(m_frame, nodeToRemove);
+    if (!style)
+        return nil;
+
+    NSMutableDictionary* result = [NSMutableDictionary dictionary];
+
+    if (style->visitedDependentColor(CSSPropertyBackgroundColor).isValid() && style->visitedDependentColor(CSSPropertyBackgroundColor).alpha() != 0)
+        [result setObject:nsColor(style->visitedDependentColor(CSSPropertyBackgroundColor)) forKey:NSBackgroundColorAttributeName];
+
+    if (style->font().primaryFont()->getNSFont())
+        [result setObject:style->font().primaryFont()->getNSFont() forKey:NSFontAttributeName];
+
+    if (style->visitedDependentColor(CSSPropertyColor).isValid() && style->visitedDependentColor(CSSPropertyColor) != Color::black)
+        [result setObject:nsColor(style->visitedDependentColor(CSSPropertyColor)) forKey:NSForegroundColorAttributeName];
+
+    const ShadowData* shadow = style->textShadow();
+    if (shadow) {
+        NSShadow* s = [[NSShadow alloc] init];
+        [s setShadowOffset:NSMakeSize(shadow->x(), shadow->y())];
+        [s setShadowBlurRadius:shadow->blur()];
+        [s setShadowColor:nsColor(shadow->color())];
+        [result setObject:s forKey:NSShadowAttributeName];
+    }
+
+    int decoration = style->textDecorationsInEffect();
+    if (decoration & LINE_THROUGH)
+        [result setObject:[NSNumber numberWithInt:NSUnderlineStyleSingle] forKey:NSStrikethroughStyleAttributeName];
+
+    int superscriptInt = 0;
+    switch (style->verticalAlign()) {
+        case BASELINE:
+        case BOTTOM:
+        case BASELINE_MIDDLE:
+        case LENGTH:
+        case MIDDLE:
+        case TEXT_BOTTOM:
+        case TEXT_TOP:
+        case TOP:
+            break;
+        case SUB:
+            superscriptInt = -1;
+            break;
+        case SUPER:
+            superscriptInt = 1;
+            break;
+    }
+    if (superscriptInt)
+        [result setObject:[NSNumber numberWithInt:superscriptInt] forKey:NSSuperscriptAttributeName];
+
+    if (decoration & UNDERLINE)
+        [result setObject:[NSNumber numberWithInt:NSUnderlineStyleSingle] forKey:NSUnderlineStyleAttributeName];
+
+    if (nodeToRemove) {
+        ExceptionCode ec = 0;
+        nodeToRemove->remove(ec);
+        ASSERT(ec == 0);
+    }
+
+    return result;
+}
+
+NSWritingDirection Editor::baseWritingDirectionForSelectionStart() const
+{
+    NSWritingDirection result = NSWritingDirectionLeftToRight;
+
+    Position pos = m_frame->selection()->selection().visibleStart().deepEquivalent();
+    Node* node = pos.deprecatedNode();
+    if (!node)
+        return result;
+
+    RenderObject* renderer = node->renderer();
+    if (!renderer)
+        return result;
+
+    if (!renderer->isBlockFlow()) {
+        renderer = renderer->containingBlock();
+        if (!renderer)
+            return result;
+    }
+
+    RenderStyle* style = renderer->style();
+    if (!style)
+        return result;
+        
+    switch (style->direction()) {
+        case LTR:
+            result = NSWritingDirectionLeftToRight;
+            break;
+        case RTL:
+            result = NSWritingDirectionRightToLeft;
+            break;
+    }
+
+    return result;
+}
+
+bool Editor::canCopyExcludingStandaloneImages()
+{
+    FrameSelection* selection = m_frame->selection();
+    return selection->isRange() && !selection->isInPasswordField();
+}
+
+void Editor::takeFindStringFromSelection()
+{
+    if (!canCopyExcludingStandaloneImages()) {
+        systemBeep();
         return;
-    DocLoader* loader = m_frame->document()->docLoader();
-    loader->setAllowStaleResources(true);
-    [view->documentView() tryToPerform:@selector(paste:) with:nil];
-    loader->setAllowStaleResources(false);
+    }
+
+    Vector<String> types;
+    types.append(String(NSStringPboardType));
+    platformStrategies()->pasteboardStrategy()->setTypes(types, NSFindPboard);
+    platformStrategies()->pasteboardStrategy()->setStringForType(m_frame->displayStringModifiedByEncoding(selectedText()), NSStringPboardType, NSFindPboard);
+}
+
+void Editor::writeSelectionToPasteboard(const String& pasteboardName, const Vector<String>& pasteboardTypes)
+{
+    Pasteboard pasteboard(pasteboardName);
+    pasteboard.writeSelectionForTypes(pasteboardTypes, true, m_frame);
+}
+    
+void Editor::readSelectionFromPasteboard(const String& pasteboardName)
+{
+    Pasteboard pasteboard(pasteboardName);
+    if (m_frame->selection()->isContentRichlyEditable())
+        pasteWithPasteboard(&pasteboard, true);
+    else
+        pasteAsPlainTextWithPasteboard(&pasteboard);   
+}
+
+String Editor::stringSelectionForPasteboard()
+{
+    return Pasteboard::getStringSelection(m_frame);
+}
+
+PassRefPtr<SharedBuffer> Editor::dataSelectionForPasteboard(const String& pasteboardType)
+{
+    return Pasteboard::getDataSelection(m_frame, pasteboardType);
 }
 
 } // namespace WebCore

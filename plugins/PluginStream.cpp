@@ -27,14 +27,17 @@
 #include "config.h"
 #include "PluginStream.h"
 
-#include "CString.h"
 #include "DocumentLoader.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "PluginDebug.h"
+#include "ResourceLoadScheduler.h"
 #include "SharedBuffer.h"
 #include "SubresourceLoader.h"
-#include <StringExtras.h>
+#include <wtf/StringExtras.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/StringBuilder.h>
+#include <wtf/text/WTFString.h>
 
 // We use -2 here because some plugins like to return -1 to indicate error
 // and this way we won't clash with them.
@@ -61,7 +64,6 @@ PluginStream::PluginStream(PluginStreamClient* client, Frame* frame, const Resou
     , m_streamState(StreamBeforeStarted)
     , m_loadManually(false)
     , m_delayDeliveryTimer(this, &PluginStream::delayDeliveryTimerFired)
-    , m_deliveryData(0)
     , m_tempFileHandle(invalidPlatformFileHandle)
     , m_pluginFuncs(pluginFuncs)
     , m_instance(instance)
@@ -84,7 +86,7 @@ PluginStream::~PluginStream()
     ASSERT(m_streamState != StreamStarted);
     ASSERT(!m_loader);
 
-    free((char*)m_stream.url);
+    fastFree((char*)m_stream.url);
 
     streams().remove(&m_stream);
 }
@@ -92,12 +94,7 @@ PluginStream::~PluginStream()
 void PluginStream::start()
 {
     ASSERT(!m_loadManually);
-
-    m_loader = NetscapePlugInStreamLoader::create(m_frame, this);
-
-    m_loader->setShouldBufferData(false);
-    m_loader->documentLoader()->addPlugInStreamLoader(m_loader.get());
-    m_loader->load(m_resourceRequest);
+    m_loader = resourceLoadScheduler()->schedulePluginStreamLoad(m_frame, this, m_resourceRequest);
 }
 
 void PluginStream::stop()
@@ -133,31 +130,30 @@ void PluginStream::startStream()
     // Some plugins (Flash) expect that javascript URLs are passed back decoded as this is the
     // format used when requesting the URL.
     if (protocolIsJavaScript(responseURL))
-        m_stream.url = strdup(decodeURLEscapeSequences(responseURL.string()).utf8().data());
+        m_stream.url = fastStrDup(decodeURLEscapeSequences(responseURL.string()).utf8().data());
     else
-        m_stream.url = strdup(responseURL.string().utf8().data());
+        m_stream.url = fastStrDup(responseURL.string().utf8().data());
 
     CString mimeTypeStr = m_resourceResponse.mimeType().utf8();
 
     long long expectedContentLength = m_resourceResponse.expectedContentLength();
 
     if (m_resourceResponse.isHTTP()) {
-        Vector<UChar> stringBuilder;
+        StringBuilder stringBuilder;
         String separator(": ");
 
-        String statusLine = String::format("HTTP %d OK\n", m_resourceResponse.httpStatusCode());
-
-        stringBuilder.append(statusLine.characters(), statusLine.length());
+        String statusLine = "HTTP " + String::number(m_resourceResponse.httpStatusCode()) + " OK\n";
+        stringBuilder.append(statusLine);
 
         HTTPHeaderMap::const_iterator end = m_resourceResponse.httpHeaderFields().end();
         for (HTTPHeaderMap::const_iterator it = m_resourceResponse.httpHeaderFields().begin(); it != end; ++it) {
-            stringBuilder.append(it->first.characters(), it->first.length());
-            stringBuilder.append(separator.characters(), separator.length());
-            stringBuilder.append(it->second.characters(), it->second.length());
+            stringBuilder.append(it->first);
+            stringBuilder.append(separator);
+            stringBuilder.append(it->second);
             stringBuilder.append('\n');
         }
 
-        m_headers = String::adopt(stringBuilder).utf8();
+        m_headers = stringBuilder.toString().utf8();
 
         // If the content is encoded (most likely compressed), then don't send its length to the plugin,
         // which is only interested in the decoded length, not yet known at the moment.
@@ -261,7 +257,7 @@ void PluginStream::destroyStream()
 
             if (m_loader)
                 m_loader->setDefersLoading(true);
-            m_pluginFuncs->asfile(m_instance, &m_stream, m_path.data());
+            m_pluginFuncs->asfile(m_instance, &m_stream, m_path.utf8().data());
             if (m_loader)
                 m_loader->setDefersLoading(false);
         }
@@ -310,10 +306,8 @@ void PluginStream::destroyStream()
     if (!m_loadManually && m_client)
         m_client->streamDidFinishLoading(this);
 
-    if (!m_path.isNull()) {
-        String tempFilePath = String::fromUTF8(m_path.data());
-        deleteFile(tempFilePath);
-    }
+    if (!m_path.isNull())
+        deleteFile(m_path);
 }
 
 void PluginStream::delayDeliveryTimerFired(Timer<PluginStream>* timer)
@@ -336,26 +330,28 @@ void PluginStream::deliverData()
     if (!m_stream.ndata || m_deliveryData->size() == 0)
         return;
 
-    int32 totalBytes = m_deliveryData->size();
-    int32 totalBytesDelivered = 0;
+    int32_t totalBytes = m_deliveryData->size();
+    int32_t totalBytesDelivered = 0;
 
     if (m_loader)
         m_loader->setDefersLoading(true);
     while (totalBytesDelivered < totalBytes) {
-        int32 deliveryBytes = m_pluginFuncs->writeready(m_instance, &m_stream);
+        int32_t deliveryBytes = m_pluginFuncs->writeready(m_instance, &m_stream);
 
         if (deliveryBytes <= 0) {
             m_delayDeliveryTimer.startOneShot(0);
             break;
         } else {
             deliveryBytes = min(deliveryBytes, totalBytes - totalBytesDelivered);
-            int32 dataLength = deliveryBytes;
+            int32_t dataLength = deliveryBytes;
             char* data = m_deliveryData->data() + totalBytesDelivered;
 
             // Write the data
             deliveryBytes = m_pluginFuncs->write(m_instance, &m_stream, m_offset, dataLength, (void*)data);
             if (deliveryBytes < 0) {
                 LOG_PLUGIN_NET_ERROR();
+                if (m_loader)
+                    m_loader->setDefersLoading(false);
                 cancelAndDestroyStream(NPRES_NETWORK_ERR);
                 return;
             }
@@ -411,7 +407,6 @@ void PluginStream::didReceiveResponse(NetscapePlugInStreamLoader* loader, const 
 void PluginStream::didReceiveData(NetscapePlugInStreamLoader* loader, const char* data, int length)
 {
     ASSERT(loader == m_loader);
-    ASSERT(length > 0);
     ASSERT(m_streamState == StreamStarted);
 
     // If the plug-in cancels the stream in deliverData it could be deleted, 
@@ -420,7 +415,7 @@ void PluginStream::didReceiveData(NetscapePlugInStreamLoader* loader, const char
 
     if (m_transferMode != NP_ASFILEONLY) {
         if (!m_deliveryData)
-            m_deliveryData.set(new Vector<char>);
+            m_deliveryData = adoptPtr(new Vector<char>);
 
         int oldSize = m_deliveryData->size();
         m_deliveryData->resize(oldSize + length);

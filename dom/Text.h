@@ -32,7 +32,7 @@ public:
     static const unsigned defaultLengthLimit = 1 << 16;
 
     static PassRefPtr<Text> create(Document*, const String&);
-    static PassRefPtr<Text> createWithLengthLimit(Document*, const String&, unsigned& charsLeft, unsigned lengthLimit = defaultLengthLimit);
+    static PassRefPtr<Text> createWithLengthLimit(Document*, const String&, unsigned positionInString, unsigned lengthLimit = defaultLengthLimit);
 
     PassRefPtr<Text> splitText(unsigned offset, ExceptionCode&);
 
@@ -40,20 +40,28 @@ public:
 
     String wholeText() const;
     PassRefPtr<Text> replaceWholeText(const String&, ExceptionCode&);
+    
+    void recalcTextStyle(StyleChange);
 
     virtual void attach();
+    
+    virtual bool canContainRangeEndPoint() const { return true; }
 
 protected:
-    Text(Document*, const String&);
+    Text(Document* document, const String& data)
+        : CharacterData(document, data, CreateText)
+    {
+    }
+
+    virtual void willRecalcTextStyle(StyleChange) { ASSERT_NOT_REACHED(); }
 
 private:
     virtual String nodeName() const;
     virtual NodeType nodeType() const;
     virtual PassRefPtr<Node> cloneNode(bool deep);
-    virtual bool rendererIsNeeded(RenderStyle*);
+    virtual bool rendererIsNeeded(const NodeRenderingContext&);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual void recalcStyle(StyleChange = NoChange);
-    virtual bool childTypeAllowed(NodeType);
+    virtual bool childTypeAllowed(NodeType) const;
 
     virtual PassRefPtr<Text> virtualCreate(const String&);
 
@@ -61,6 +69,12 @@ private:
     virtual void formatForDebugger(char* buffer, unsigned length) const;
 #endif
 };
+
+inline Text* toText(Node* node)
+{
+    ASSERT(!node || node->isTextNode());
+    return static_cast<Text*>(node);
+}
 
 } // namespace WebCore
 

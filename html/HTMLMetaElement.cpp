@@ -1,8 +1,8 @@
-/**
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003 Apple Computer, Inc.
+ * Copyright (C) 2003, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,54 +23,69 @@
 #include "config.h"
 #include "HTMLMetaElement.h"
 
+#include "Attribute.h"
 #include "Document.h"
 #include "HTMLNames.h"
-#include "MappedAttribute.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLMetaElement::HTMLMetaElement(const QualifiedName& tagName, Document* doc)
-    : HTMLElement(tagName, doc)
+inline HTMLMetaElement::HTMLMetaElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(metaTag));
 }
 
-HTMLMetaElement::~HTMLMetaElement()
+PassRefPtr<HTMLMetaElement> HTMLMetaElement::create(const QualifiedName& tagName, Document* document)
 {
+    return adoptRef(new HTMLMetaElement(tagName, document));
 }
 
-void HTMLMetaElement::parseMappedAttribute(MappedAttribute* attr)
+void HTMLMetaElement::parseAttribute(Attribute* attr)
 {
-    if (attr->name() == http_equivAttr) {
-        m_equiv = attr->value();
+    if (attr->name() == http_equivAttr)
         process();
-    } else if (attr->name() == contentAttr) {
-        m_content = attr->value();
+    else if (attr->name() == contentAttr)
         process();
-    } else if (attr->name() == nameAttr) {
-        // Do nothing.
+    else if (attr->name() == nameAttr) {
+        // Do nothing
     } else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::parseAttribute(attr);
 }
 
-void HTMLMetaElement::insertedIntoDocument()
+Node::InsertionNotificationRequest HTMLMetaElement::insertedInto(Node* insertionPoint)
 {
-    HTMLElement::insertedIntoDocument();
-    process();
+    HTMLElement::insertedInto(insertionPoint);
+    if (insertionPoint->inDocument())
+        process();
+    return InsertionDone;
 }
 
 void HTMLMetaElement::process()
 {
-    if (inDocument() && equalIgnoringCase(name(), "viewport") && !m_content.isNull())
-        document()->processViewport(m_content);
-    if (inDocument() && equalIgnoringCase(name(), "format-detection") && !m_content.isNull())
-        document()->processFormatDetection(m_content);
+    if (!inDocument())
+        return;
+
+    const AtomicString& contentValue = fastGetAttribute(contentAttr);
+    if (contentValue.isNull())
+        return;
+
+    if (equalIgnoringCase(name(), "viewport"))
+        document()->processViewport(contentValue);
+    else if (equalIgnoringCase(name(), "format-detection"))
+        document()->processFormatDetection(contentValue);
+    else if (equalIgnoringCase(name(), "apple-mobile-web-app-orientations"))
+        document()->processWebAppOrientations();
+
+    if (equalIgnoringCase(name(), "referrer"))
+        document()->processReferrerPolicy(contentValue);
+
     // Get the document to process the tag, but only if we're actually part of DOM tree (changing a meta tag while
     // it's not in the tree shouldn't have any effect on the document)
-    if (inDocument() && !m_equiv.isNull() && !m_content.isNull())
-        document()->processHttpEquiv(m_equiv, m_content);
+    const AtomicString& httpEquivValue = fastGetAttribute(http_equivAttr);
+    if (!httpEquivValue.isNull())
+        document()->processHttpEquiv(httpEquivValue, contentValue);
 }
 
 String HTMLMetaElement::content() const
@@ -78,39 +93,26 @@ String HTMLMetaElement::content() const
     return getAttribute(contentAttr);
 }
 
-void HTMLMetaElement::setContent(const String& value)
-{
-    setAttribute(contentAttr, value);
-}
-
 String HTMLMetaElement::httpEquiv() const
 {
     return getAttribute(http_equivAttr);
 }
 
-void HTMLMetaElement::setHttpEquiv(const String& value)
-{
-    setAttribute(http_equivAttr, value);
-}
-
 String HTMLMetaElement::name() const
 {
-    return getAttribute(nameAttr);
+    return getNameAttribute();
 }
 
-void HTMLMetaElement::setName(const String& value)
+#if ENABLE(MICRODATA)
+String HTMLMetaElement::itemValueText() const
 {
-    setAttribute(nameAttr, value);
+    return getAttribute(contentAttr);
 }
 
-String HTMLMetaElement::scheme() const
+void HTMLMetaElement::setItemValueText(const String& value, ExceptionCode&)
 {
-    return getAttribute(schemeAttr);
+    setAttribute(contentAttr, value);
 }
-
-void HTMLMetaElement::setScheme(const String &value)
-{
-    setAttribute(schemeAttr, value);
-}
+#endif
 
 }

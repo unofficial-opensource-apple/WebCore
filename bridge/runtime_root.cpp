@@ -26,8 +26,10 @@
 #include "config.h"
 #include "runtime_root.h"
 
-#include "Bridge.h"
+#include "BridgeJSC.h"
 #include "runtime_object.h"
+#include <heap/StrongInlines.h>
+#include <heap/Weak.h>
 #include <runtime/JSGlobalObject.h>
 #include <wtf/HashCountedSet.h>
 #include <wtf/HashSet.h>
@@ -71,6 +73,10 @@ RootObject* findRootObject(JSGlobalObject* globalObject)
     return 0;
 }
 
+RootObject::InvalidationCallback::~InvalidationCallback()
+{
+}
+
 PassRefPtr<RootObject> RootObject::create(const void* nativeHandle, JSGlobalObject* globalObject)
 {
     return adoptRef(new RootObject(nativeHandle, globalObject));
@@ -79,7 +85,7 @@ PassRefPtr<RootObject> RootObject::create(const void* nativeHandle, JSGlobalObje
 RootObject::RootObject(const void* nativeHandle, JSGlobalObject* globalObject)
     : m_isValid(true)
     , m_nativeHandle(nativeHandle)
-    , m_globalObject(globalObject)
+    , m_globalObject(globalObject->globalData(), globalObject)
 {
     ASSERT(globalObject);
     rootObjectSet()->add(this);
@@ -97,17 +103,26 @@ void RootObject::invalidate()
         return;
 
     {
-        HashSet<RuntimeObjectImp*>::iterator end = m_runtimeObjects.end();
-        for (HashSet<RuntimeObjectImp*>::iterator it = m_runtimeObjects.begin(); it != end; ++it)
-            (*it)->invalidate();
-        
+        HashMap<RuntimeObject*, JSC::Weak<RuntimeObject> >::iterator end = m_runtimeObjects.end();
+        for (HashMap<RuntimeObject*, JSC::Weak<RuntimeObject> >::iterator it = m_runtimeObjects.begin(); it != end; ++it) {
+            it->second.get()->invalidate();
+        }
+
         m_runtimeObjects.clear();
     }
-    
+
     m_isValid = false;
 
     m_nativeHandle = 0;
-    m_globalObject = 0;
+    m_globalObject.clear();
+
+    {
+        HashSet<InvalidationCallback*>::iterator end = m_invalidationCallbacks.end();
+        for (HashSet<InvalidationCallback*>::iterator iter = m_invalidationCallbacks.begin(); iter != end; ++iter)
+            (**iter)(this);
+
+        m_invalidationCallbacks.clear();
+    }
 
     ProtectCountSet::iterator end = m_protectCountSet.end();
     for (ProtectCountSet::iterator it = m_protectCountSet.begin(); it != end; ++it)
@@ -121,8 +136,10 @@ void RootObject::gcProtect(JSObject* jsObject)
 {
     ASSERT(m_isValid);
     
-    if (!m_protectCountSet.contains(jsObject))
+    if (!m_protectCountSet.contains(jsObject)) {
+        JSC::JSLockHolder holder(&globalObject()->globalData());
         JSC::gcProtect(jsObject);
+    }
     m_protectCountSet.add(jsObject);
 }
 
@@ -133,8 +150,10 @@ void RootObject::gcUnprotect(JSObject* jsObject)
     if (!jsObject)
         return;
 
-    if (m_protectCountSet.count(jsObject) == 1)
+    if (m_protectCountSet.count(jsObject) == 1) {
+        JSC::JSLockHolder holder(&globalObject()->globalData());
         JSC::gcUnprotect(jsObject);
+    }
     m_protectCountSet.remove(jsObject);
 }
 
@@ -153,22 +172,39 @@ const void* RootObject::nativeHandle() const
 JSGlobalObject* RootObject::globalObject() const
 {
     ASSERT(m_isValid);
-    return m_globalObject;
+    return m_globalObject.get();
 }
 
-void RootObject::addRuntimeObject(RuntimeObjectImp* object)
+void RootObject::updateGlobalObject(JSGlobalObject* globalObject)
+{
+    m_globalObject.set(globalObject->globalData(), globalObject);
+}
+
+void RootObject::addRuntimeObject(JSGlobalData&, RuntimeObject* object)
 {
     ASSERT(m_isValid);
-    ASSERT(!m_runtimeObjects.contains(object));
-    
-    m_runtimeObjects.add(object);
-}        
-    
-void RootObject::removeRuntimeObject(RuntimeObjectImp* object)
+    ASSERT(!m_runtimeObjects.get(object));
+
+    m_runtimeObjects.set(object, JSC::PassWeak<RuntimeObject>(object, this));
+}
+
+void RootObject::removeRuntimeObject(RuntimeObject* object)
 {
-    ASSERT(m_isValid);
+    if (!m_isValid)
+        return;
+
+    ASSERT(m_runtimeObjects.get(object));
+
+    m_runtimeObjects.take(object);
+}
+
+void RootObject::finalize(JSC::Handle<JSC::Unknown> handle, void*)
+{
+    RuntimeObject* object = static_cast<RuntimeObject*>(asObject(handle.get()));
     ASSERT(m_runtimeObjects.contains(object));
-    
+
+    RefPtr<RootObject> protect(this);
+    object->invalidate();
     m_runtimeObjects.remove(object);
 }
 

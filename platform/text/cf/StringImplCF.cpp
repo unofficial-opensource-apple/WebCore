@@ -19,20 +19,20 @@
  */
 
 #include "config.h"
-#include "StringImpl.h"
+#include <wtf/text/StringImpl.h>
 
-#if PLATFORM(CF)
+#if USE(CF)
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <wtf/MainThread.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/Threading.h>
 
-#if PLATFORM(MAC) && !defined(BUILDING_ON_TIGER)
+#if PLATFORM(MAC)
 #include <objc/objc-auto.h>
 #endif
 
-namespace WebCore {
+namespace WTF {
 
 namespace StringWrapperCFAllocator {
 
@@ -43,6 +43,7 @@ namespace StringWrapperCFAllocator {
         return info;
     }
 
+    NO_RETURN_DUE_TO_ASSERT
     static void release(const void*)
     {
         ASSERT_NOT_REACHED();
@@ -50,7 +51,7 @@ namespace StringWrapperCFAllocator {
 
     static CFStringRef copyDescription(const void*)
     {
-        return CFSTR("WebCore::String-based allocator");
+        return CFSTR("WTF::String-based allocator");
     }
 
     static void* allocate(CFIndex size, CFOptionFlags, void*)
@@ -114,7 +115,7 @@ namespace StringWrapperCFAllocator {
 
     static CFAllocatorRef create()
     {
-#if PLATFORM(MAC) && !defined(BUILDING_ON_TIGER)
+#if PLATFORM(MAC)
         // Since garbage collection isn't compatible with custom allocators, don't use this at all when garbage collection is active.
         if (objc_collectingEnabled())
             return 0;
@@ -135,13 +136,13 @@ CFStringRef StringImpl::createCFString()
 {
     CFAllocatorRef allocator = (m_length && isMainThread()) ? StringWrapperCFAllocator::allocator() : 0;
     if (!allocator)
-        return CFStringCreateWithCharacters(0, reinterpret_cast<const UniChar*>(m_data), m_length);
+        return CFStringCreateWithCharacters(0, reinterpret_cast<const UniChar*>(characters()), m_length);
 
     // Put pointer to the StringImpl in a global so the allocator can store it with the CFString.
     ASSERT(!StringWrapperCFAllocator::currentString);
     StringWrapperCFAllocator::currentString = this;
 
-    CFStringRef string = CFStringCreateWithCharactersNoCopy(allocator, reinterpret_cast<const UniChar*>(m_data), m_length, kCFAllocatorNull);
+    CFStringRef string = CFStringCreateWithCharactersNoCopy(allocator, reinterpret_cast<const UniChar*>(characters()), m_length, kCFAllocatorNull);
 
     // The allocator cleared the global when it read it, but also clear it here just in case.
     ASSERT(!StringWrapperCFAllocator::currentString);
@@ -159,4 +160,4 @@ CFStringRef StringImpl::createCFString()
 
 }
 
-#endif // PLATFORM(CF)
+#endif // USE(CF)

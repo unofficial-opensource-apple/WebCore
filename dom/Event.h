@@ -24,20 +24,27 @@
 #ifndef Event_h
 #define Event_h
 
-#include "AtomicString.h"
-#include "EventTarget.h"
+#include "Clipboard.h"
+#include "DOMTimeStamp.h"
 #include <wtf/RefCounted.h>
+#include <wtf/text/AtomicString.h>
 
 namespace WebCore {
 
-    class Clipboard;
+    class EventTarget;
+    class EventDispatcher;
 
-    // FIXME: this should probably defined elsewhere.
-    typedef unsigned long long DOMTimeStamp;
+    struct EventInit {
+        EventInit();
+        
+        bool bubbles;
+        bool cancelable;
+    };
 
     class Event : public RefCounted<Event> {
     public:
         enum PhaseType { 
+            NONE                = 0,
             CAPTURING_PHASE     = 1, 
             AT_TARGET           = 2,
             BUBBLING_PHASE      = 3 
@@ -70,12 +77,18 @@ namespace WebCore {
         {
             return adoptRef(new Event(type, canBubble, cancelable));
         }
+
+        static PassRefPtr<Event> create(const AtomicString& type, const EventInit& initializer)
+        {
+            return adoptRef(new Event(type, initializer));
+        }
+
         virtual ~Event();
 
         void initEvent(const AtomicString& type, bool canBubble, bool cancelable);
 
         const AtomicString& type() const { return m_type; }
-
+        
         EventTarget* target() const { return m_target.get(); }
         void setTarget(PassRefPtr<EventTarget>);
 
@@ -88,8 +101,10 @@ namespace WebCore {
         bool bubbles() const { return m_canBubble; }
         bool cancelable() const { return m_cancelable; }
         DOMTimeStamp timeStamp() const { return m_createTime; }
-        void stopPropagation() { m_propagationStopped = true; }
 
+        void stopPropagation() { m_propagationStopped = true; }
+        void stopImmediatePropagation() { m_immediatePropagationStopped = true; }
+        
         // IE Extensions
         EventTarget* srcElement() const { return target(); } // MSIE extension - "the object that fired the event"
 
@@ -98,39 +113,23 @@ namespace WebCore {
 
         Clipboard* clipboardData() const { return isClipboardEvent() ? clipboard() : 0; }
 
+        virtual const AtomicString& interfaceName() const;
+        bool hasInterface(const AtomicString&) const;
+
+        // These events are general classes of events.
         virtual bool isUIEvent() const;
         virtual bool isMouseEvent() const;
-        virtual bool isMutationEvent() const;
         virtual bool isKeyboardEvent() const;
-        virtual bool isTextEvent() const;
-        virtual bool isCompositionEvent() const;
-        virtual bool isDragEvent() const; // a subset of mouse events
+
+        // Drag events are a subset of mouse events.
+        virtual bool isDragEvent() const;
+
+        // These events lack a DOM interface.
         virtual bool isClipboardEvent() const;
-        virtual bool isMessageEvent() const;
-        virtual bool isWheelEvent() const;
         virtual bool isBeforeTextInsertedEvent() const;
-        virtual bool isOverflowEvent() const;
-        virtual bool isPageTransitionEvent() const;
-        virtual bool isPopStateEvent() const;
-        virtual bool isProgressEvent() const;
-        virtual bool isXMLHttpRequestProgressEvent() const;
-        virtual bool isWebKitAnimationEvent() const;
-        virtual bool isWebKitTransitionEvent() const;
-        virtual bool isBeforeLoadEvent() const;
-#if ENABLE(SVG)
-        virtual bool isSVGZoomEvent() const;
-#endif
-#if ENABLE(DOM_STORAGE)
-        virtual bool isStorageEvent() const;
-#endif
-#if ENABLE(WORKERS)
-        virtual bool isErrorEvent() const;
-#endif
-        virtual bool isTouchEvent() const;
-        virtual bool isGestureEvent() const;
-        bool fromUserGesture();
-        
-        bool propagationStopped() const { return m_propagationStopped; }
+
+        bool propagationStopped() const { return m_propagationStopped || m_immediatePropagationStopped; }
+        bool immediatePropagationStopped() const { return m_immediatePropagationStopped; }
 
         bool defaultPrevented() const { return m_defaultPrevented; }
         void preventDefault() { if (m_cancelable) m_defaultPrevented = true; }
@@ -150,9 +149,12 @@ namespace WebCore {
 
         virtual Clipboard* clipboard() const { return 0; }
 
+        bool isBeingDispatched() const { return eventPhase(); }
+
     protected:
         Event();
         Event(const AtomicString& type, bool canBubble, bool cancelable);
+        Event(const AtomicString& type, const EventInit&);
 
         virtual void receivedTarget();
         bool dispatched() const { return m_target; }
@@ -163,6 +165,7 @@ namespace WebCore {
         bool m_cancelable;
 
         bool m_propagationStopped;
+        bool m_immediatePropagationStopped;
         bool m_defaultPrevented;
         bool m_defaultHandled;
         bool m_cancelBubble;

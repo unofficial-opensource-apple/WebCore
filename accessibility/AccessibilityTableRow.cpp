@@ -68,14 +68,26 @@ AccessibilityRole AccessibilityTableRow::roleValue() const
 bool AccessibilityTableRow::isTableRow() const
 {
     AccessibilityObject* table = parentTable();
-    if (!table || !table->isDataTable())
+    if (!table || !table->isAccessibilityTable())
         return false;
     
     return true;
 }
     
+AccessibilityObject* AccessibilityTableRow::observableObject() const
+{
+    // This allows the table to be the one who sends notifications about tables.
+    return parentTable();
+}
+    
 bool AccessibilityTableRow::accessibilityIsIgnored() const
 {    
+    AccessibilityObjectInclusion decision = accessibilityIsIgnoredBase();
+    if (decision == IncludeObject)
+        return false;
+    if (decision == IgnoreObject)
+        return true;
+    
     if (!isTableRow())
         return AccessibilityRenderObject::accessibilityIsIgnored();
 
@@ -87,7 +99,8 @@ AccessibilityObject* AccessibilityTableRow::parentTable() const
     if (!m_renderer || !m_renderer->isTableRow())
         return 0;
     
-    return axObjectCache()->getOrCreate(toRenderTableRow(m_renderer)->table());
+    // Do not use getOrCreate. parentTable() can be called while the render tree is being modified.
+    return axObjectCache()->get(toRenderTableRow(m_renderer)->table());
 }
     
 AccessibilityObject* AccessibilityTableRow::headerObject()

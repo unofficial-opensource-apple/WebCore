@@ -28,12 +28,11 @@
 #define CanvasGradient_h
 
 #include "Gradient.h"
+#include <wtf/Forward.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 
 namespace WebCore {
-
-    class String;
 
     typedef int ExceptionCode;
 
@@ -63,7 +62,9 @@ namespace WebCore {
         CanvasGradient(const FloatPoint& p0, float r0, const FloatPoint& p1, float r1);
         
         RefPtr<Gradient> m_gradient;
+#if ENABLE(DASHBOARD_SUPPORT)
         bool m_dashbardCompatibilityMode;
+#endif
     };
 
 } //namespace

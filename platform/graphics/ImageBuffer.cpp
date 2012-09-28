@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
+ * Copyright (C) Research In Motion Limited 2011. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,24 +27,23 @@
 #include "config.h"
 #include "ImageBuffer.h"
 
-#if !PLATFORM(CG)
-
-#include <math.h>
+#include "IntRect.h"
+#include <wtf/MathExtras.h>
 
 namespace WebCore {
 
-void ImageBuffer::transformColorSpace(ImageColorSpace srcColorSpace, ImageColorSpace dstColorSpace)
+#if !USE(CG)
+void ImageBuffer::transformColorSpace(ColorSpace srcColorSpace, ColorSpace dstColorSpace)
 {
     if (srcColorSpace == dstColorSpace)
         return;
 
     // only sRGB <-> linearRGB are supported at the moment
-    if ((srcColorSpace != LinearRGB && srcColorSpace != DeviceRGB) || 
-        (dstColorSpace != LinearRGB && dstColorSpace != DeviceRGB))
+    if ((srcColorSpace != ColorSpaceLinearRGB && srcColorSpace != ColorSpaceDeviceRGB)
+        || (dstColorSpace != ColorSpaceLinearRGB && dstColorSpace != ColorSpaceDeviceRGB))
         return;
 
-    Vector<int> lookUpTable;
-    if (dstColorSpace == LinearRGB) {
+    if (dstColorSpace == ColorSpaceLinearRGB) {
         if (m_linearRgbLUT.isEmpty()) {
             for (unsigned i = 0; i < 256; i++) {
                 float color = i  / 255.0f;
@@ -54,11 +54,11 @@ void ImageBuffer::transformColorSpace(ImageColorSpace srcColorSpace, ImageColorS
             }
         }
         platformTransformColorSpace(m_linearRgbLUT);
-    } else if (dstColorSpace == DeviceRGB) {
+    } else if (dstColorSpace == ColorSpaceDeviceRGB) {
         if (m_deviceRgbLUT.isEmpty()) {
             for (unsigned i = 0; i < 256; i++) {
-                float color = i  / 255.0f;
-                color = pow(1.055f * color, 1.0f / 2.4f) - 0.055f;
+                float color = i / 255.0f;
+                color = (powf(color, 1.0f / 2.4f) * 1.055f) - 0.055f;
                 color = std::max(0.0f, color);
                 color = std::min(1.0f, color);
                 m_deviceRgbLUT.append(static_cast<int>(color * 255));
@@ -67,7 +67,39 @@ void ImageBuffer::transformColorSpace(ImageColorSpace srcColorSpace, ImageColorS
         platformTransformColorSpace(m_deviceRgbLUT);
     }
 }
+#endif // USE(CG)
 
+inline void ImageBuffer::genericConvertToLuminanceMask()
+{
+    IntRect luminanceRect(IntPoint(), internalSize());
+    RefPtr<Uint8ClampedArray> srcPixelArray = getUnmultipliedImageData(luminanceRect);
+    
+    unsigned pixelArrayLength = srcPixelArray->length();
+    for (unsigned pixelOffset = 0; pixelOffset < pixelArrayLength; pixelOffset += 4) {
+        unsigned char a = srcPixelArray->item(pixelOffset + 3);
+        if (!a)
+            continue;
+        unsigned char r = srcPixelArray->item(pixelOffset);
+        unsigned char g = srcPixelArray->item(pixelOffset + 1);
+        unsigned char b = srcPixelArray->item(pixelOffset + 2);
+        
+        double luma = (r * 0.2125 + g * 0.7154 + b * 0.0721) * ((double)a / 255.0);
+        srcPixelArray->set(pixelOffset + 3, luma);
+    }
+    putByteArray(Unmultiplied, srcPixelArray.get(), luminanceRect.size(), luminanceRect, IntPoint());
 }
 
-#endif // PLATFORM(CG)
+void ImageBuffer::convertToLuminanceMask()
+{
+    // Add platform specific functions with platformConvertToLuminanceMask here later.
+    genericConvertToLuminanceMask();
+}
+
+#if USE(ACCELERATED_COMPOSITING) && !USE(SKIA)
+PlatformLayer* ImageBuffer::platformLayer() const
+{
+    return 0;
+}
+#endif
+
+}

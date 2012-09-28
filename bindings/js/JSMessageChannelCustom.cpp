@@ -27,20 +27,25 @@
 #include "JSMessageChannel.h"
 
 #include "MessageChannel.h"
+#include <runtime/Error.h>
 
 using namespace JSC;
 
 namespace WebCore {
-    
-void JSMessageChannel::markChildren(MarkStack& markStack)
+
+void JSMessageChannel::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
-    Base::markChildren(markStack);
+    JSMessageChannel* thisObject = jsCast<JSMessageChannel*>(cell);
+    ASSERT_GC_OBJECT_INHERITS(thisObject, &s_info);
+    COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
+    ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
+    Base::visitChildren(thisObject, visitor);
 
-    if (MessagePort* port = m_impl->port1())
-        markDOMObjectWrapper(markStack, *Heap::heap(this)->globalData(), port);
+    if (MessagePort* port = thisObject->m_impl->port1())
+        visitor.addOpaqueRoot(port);
 
-    if (MessagePort* port = m_impl->port2())
-        markDOMObjectWrapper(markStack, *Heap::heap(this)->globalData(), port);
+    if (MessagePort* port = thisObject->m_impl->port2())
+        visitor.addOpaqueRoot(port);
 }
 
 } // namespace WebCore

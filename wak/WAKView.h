@@ -30,6 +30,9 @@ extern NSString *WAKViewDidScrollNotification;
     
     NSMutableSet *subviewReferences;    // This array is only used to keep WAKViews alive.
                                         // The actual subviews are maintained by the WKView.
+
+    BOOL _isHidden;
+    BOOL _drawsOwnDescendants;
 }
 
 + (WAKView *)focusView;
@@ -42,7 +45,9 @@ extern NSString *WAKViewDidScrollNotification;
 - (NSRect)frame;
 
 - (void)setFrame:(NSRect)frameRect;
+- (void)setFrameOrigin:(NSPoint)newOrigin;
 - (void)setFrameSize:(NSSize)newSize;
+- (void)setBoundsOrigin:(NSPoint)newOrigin;
 - (void)setBoundsSize:(NSSize)size;
 - (void)frameSizeChanged;
 
@@ -108,6 +113,10 @@ extern NSString *WAKViewDidScrollNotification;
 - (float)scale;
 
 - (void)_setDrawsOwnDescendants:(BOOL)draw;
+
+- (void)_appendDescriptionToString:(NSMutableString *)info atLevel:(int)level;
+
++ (void)_setInterpolationQuality:(int)quality;
 
 @end
 

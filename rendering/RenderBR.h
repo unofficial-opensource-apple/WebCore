@@ -38,22 +38,20 @@ public:
 
     virtual const char* renderName() const { return "RenderBR"; }
  
-    virtual IntRect selectionRectForRepaint(RenderBoxModelObject* /*repaintContainer*/, bool /*clipToVisibleContent*/) { return IntRect(); }
+    virtual LayoutRect selectionRectForRepaint(RenderBoxModelObject* /*repaintContainer*/, bool /*clipToVisibleContent*/) { return LayoutRect(); }
 
-    virtual unsigned width(unsigned /*from*/, unsigned /*len*/, const Font&, int /*xpos*/) const { return 0; }
-    virtual unsigned width(unsigned /*from*/, unsigned /*len*/, int /*xpos*/, bool /*firstLine = false*/) const { return 0; }
+    virtual float width(unsigned /*from*/, unsigned /*len*/, const Font&, float /*xPos*/, HashSet<const SimpleFontData*>* = 0 /*fallbackFonts*/ , GlyphOverflow* = 0) const { return 0; }
+    virtual float width(unsigned /*from*/, unsigned /*len*/, float /*xpos*/, bool = false /*firstLine*/, HashSet<const SimpleFontData*>* = 0 /*fallbackFonts*/, GlyphOverflow* = 0) const { return 0; }
 
-    virtual int lineHeight(bool firstLine, bool isRootLineBox = false) const;
-    virtual int baselinePosition(bool firstLine, bool isRootLineBox = false) const;
+    int lineHeight(bool firstLine) const;
 
     // overrides
     virtual bool isBR() const { return true; }
 
     virtual int caretMinOffset() const;
     virtual int caretMaxOffset() const;
-    virtual unsigned caretMaxRenderedOffset() const;
 
-    virtual VisiblePosition positionForPoint(const IntPoint&);
+    virtual VisiblePosition positionForPoint(const LayoutPoint&);
 
 protected:
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
@@ -61,6 +59,22 @@ protected:
 private:
     mutable int m_lineHeight;
 };
+
+
+inline RenderBR* toRenderBR(RenderObject* object)
+{ 
+    ASSERT(!object || object->isBR());
+    return static_cast<RenderBR*>(object);
+}
+
+inline const RenderBR* toRenderBR(const RenderObject* object)
+{ 
+    ASSERT(!object || object->isBR());
+    return static_cast<const RenderBR*>(object);
+}
+
+// This will catch anyone doing an unnecessary cast.
+void toRenderBR(const RenderBR*);
 
 } // namespace WebCore
 

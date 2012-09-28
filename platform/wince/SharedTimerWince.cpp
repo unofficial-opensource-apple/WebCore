@@ -29,14 +29,11 @@
 
 #include "Page.h"
 #include "SystemTime.h"
+#include "WebCoreInstanceHandle.h"
 #include "Widget.h"
 #include <wtf/Assertions.h>
 #include <wtf/CurrentTime.h>
 #include <windows.h>
-
-namespace JSC {
-extern void* g_stackBase;
-}
 
 namespace WebCore {
 
@@ -54,22 +51,17 @@ const LPCWSTR kTimerWindowClassName = L"TimerWindowClass";
 
 LRESULT CALLBACK TimerWindowWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    int dummy;
-    JSC::g_stackBase = &dummy;
-
     if (message == WM_TIMER) {
         if (timerID != TimerIdNone)
             sharedTimerFiredFunction();
-    } else if (message == WM_USER)    {
+    } else if (message == WM_USER) {
         if (timerID = TimerIdManual) {
             sharedTimerFiredFunction();
             PostMessage(hWnd, WM_USER, 0, 0);
         }
-    } else {
-        JSC::g_stackBase = 0;
+    } else
         return DefWindowProc(hWnd, message, wParam, lParam);
-    }
-    JSC::g_stackBase = 0;
+
     return 0;
 }
 
@@ -80,12 +72,12 @@ static void initializeOffScreenTimerWindow()
 
     WNDCLASS wcex = {0};
     wcex.lpfnWndProc    = TimerWindowWndProc;
-    wcex.hInstance      = Page::instanceHandle();
+    wcex.hInstance      = WebCore::instanceHandle();
     wcex.lpszClassName  = kTimerWindowClassName;
     RegisterClass(&wcex);
 
     timerWindowHandle = CreateWindow(kTimerWindowClassName, 0, 0,
-       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, 0, 0, Page::instanceHandle(), 0);
+       CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, 0, 0, WebCore::instanceHandle(), 0);
 }
 
 void setSharedTimerFiredFunction(void (*f)())
@@ -96,16 +88,16 @@ void setSharedTimerFiredFunction(void (*f)())
 #define USER_TIMER_MAXIMUM  0x7FFFFFFF
 #define USER_TIMER_MINIMUM  0x0000000A
 
-void setSharedTimerFireTime(double fireTime)
+void setSharedTimerFireInterval(double intervalSeconds)
 {
     ASSERT(sharedTimerFiredFunction);
 
-    double interval = (fireTime - currentTime()) * 1000.;
-    unsigned intervalInMS = interval < USER_TIMER_MINIMUM
+    double intervalMS = intervalSeconds * 1000.;
+    unsigned clampedIntervalMS = intervalMS < USER_TIMER_MINIMUM
         ? USER_TIMER_MINIMUM
-        : interval > USER_TIMER_MAXIMUM
+        : intervalMS > USER_TIMER_MAXIMUM
         ? USER_TIMER_MAXIMUM
-        : static_cast<unsigned>(interval);
+        : static_cast<unsigned>(intervalMS);
 
     if (timerID == TimerIdAuto) {
         KillTimer(timerWindowHandle, TimerIdAuto);
@@ -113,7 +105,7 @@ void setSharedTimerFireTime(double fireTime)
     }
 
     initializeOffScreenTimerWindow();
-    if (SetTimer(timerWindowHandle, TimerIdAuto, intervalInMS, 0))
+    if (SetTimer(timerWindowHandle, TimerIdAuto, clampedIntervalMS, 0))
         timerID = TimerIdAuto;
     else if (timerID != TimerIdManual)
         PostMessage(timerWindowHandle, WM_USER, 0, 0);
@@ -127,4 +119,4 @@ void stopSharedTimer()
     timerID = TimerIdNone;
 }
 
-}
+} // namespace WebCore

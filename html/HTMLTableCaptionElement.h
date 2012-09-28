@@ -4,7 +4,7 @@
  *           (C) 1998 Waldo Bastian (bastian@kde.org)
  *           (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -26,24 +26,21 @@
 #ifndef HTMLTableCaptionElement_h
 #define HTMLTableCaptionElement_h
 
-#include "HTMLTablePartElement.h"
+#include "HTMLElement.h"
 
 namespace WebCore {
 
-class HTMLTableCaptionElement : public HTMLTablePartElement {
+class HTMLTableCaptionElement : public HTMLElement {
 public:
-    HTMLTableCaptionElement(const QualifiedName&, Document*);
-    
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
-    virtual int tagPriority() const { return 5; }
-    
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(MappedAttribute*);
+    static PassRefPtr<HTMLTableCaptionElement> create(const QualifiedName&, Document*);
 
-    String align() const;
-    void setAlign(const String&);
+private:
+    HTMLTableCaptionElement(const QualifiedName&, Document*);
+
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
 };
 
-} //namespace
+} // namespace
 
 #endif

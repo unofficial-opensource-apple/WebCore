@@ -34,7 +34,7 @@ class HTMLCanvasElement;
 
 class RenderHTMLCanvas : public RenderReplaced {
 public:
-    RenderHTMLCanvas(HTMLCanvasElement*);
+    explicit RenderHTMLCanvas(HTMLCanvasElement*);
 
     virtual bool isCanvas() const { return true; }
     virtual bool requiresLayer() const;
@@ -43,7 +43,7 @@ public:
     
 private:
     virtual const char* renderName() const { return "RenderHTMLCanvas"; }
-    virtual void paintReplaced(PaintInfo&, int tx, int ty);
+    virtual void paintReplaced(PaintInfo&, const LayoutPoint&);
     virtual void intrinsicSizeChanged() { canvasSizeChanged(); }
 };
 

@@ -43,7 +43,6 @@ namespace WebCore {
 using namespace HTMLNames;
 
 AccessibilityTableColumn::AccessibilityTableColumn()
-    : m_parentTable(0)
 {
 }
 
@@ -56,41 +55,33 @@ PassRefPtr<AccessibilityTableColumn> AccessibilityTableColumn::create()
     return adoptRef(new AccessibilityTableColumn());
 }
 
-void AccessibilityTableColumn::setParentTable(AccessibilityTable* table)
+void AccessibilityTableColumn::setParent(AccessibilityObject* parent)
 {
-    m_parentTable = table;
+    AccessibilityMockObject::setParent(parent);
     
     clearChildren();
 }
     
-IntRect AccessibilityTableColumn::elementRect() const
+LayoutRect AccessibilityTableColumn::elementRect() const
 {
     // this will be filled in when addChildren is called
     return m_columnRect;
 }
 
-IntSize AccessibilityTableColumn::size() const
-{
-    return elementRect().size();
-}
-  
-const AccessibilityObject::AccessibilityChildrenVector& AccessibilityTableColumn::children()
-{
-    if (!m_haveChildren)
-        addChildren();
-    return m_children;
-}
-    
 AccessibilityObject* AccessibilityTableColumn::headerObject()
 {
-    if (!m_parentTable)
+    if (!m_parent)
         return 0;
     
-    RenderObject* renderer = m_parentTable->renderer();
+    RenderObject* renderer = m_parent->renderer();
     if (!renderer)
         return 0;
     
-    if (m_parentTable->isAriaTable()) {
+    if (!m_parent->isAccessibilityTable())
+        return 0;
+    
+    AccessibilityTable* parentTable = toAccessibilityTable(m_parent);
+    if (parentTable->isAriaTable()) {
         AccessibilityChildrenVector rowChildren = children();
         unsigned childrenCount = rowChildren.size();
         for (unsigned i = 0; i < childrenCount; ++i) {
@@ -126,14 +117,17 @@ AccessibilityObject* AccessibilityTableColumn::headerObjectForSection(RenderTabl
     if (!section)
         return 0;
     
-    int numCols = section->numColumns();
+    unsigned numCols = section->numColumns();
     if (m_columnIndex >= numCols)
+        return 0;
+    
+    if (!section->numRows())
         return 0;
     
     RenderTableCell* cell = 0;
     // also account for cells that have a span
     for (int testCol = m_columnIndex; testCol >= 0; --testCol) {
-        RenderTableCell* testCell = section->cellAt(0, testCol).cell;
+        RenderTableCell* testCell = section->primaryCellAt(0, testCol);
         if (!testCell)
             continue;
         
@@ -155,7 +149,17 @@ AccessibilityObject* AccessibilityTableColumn::headerObjectForSection(RenderTabl
     if (!cell)
         return 0;
 
-    return m_parentTable->axObjectCache()->getOrCreate(cell);
+    return axObjectCache()->getOrCreate(cell);
+}
+    
+bool AccessibilityTableColumn::accessibilityIsIgnored() const
+{
+    if (!m_parent)
+        return true;
+    
+    return true;
+    
+    return m_parent->accessibilityIsIgnored();
 }
     
 void AccessibilityTableColumn::addChildren()
@@ -163,13 +167,14 @@ void AccessibilityTableColumn::addChildren()
     ASSERT(!m_haveChildren); 
     
     m_haveChildren = true;
-    if (!m_parentTable)
+    if (!m_parent || !m_parent->isAccessibilityTable())
         return;
     
-    int numRows = m_parentTable->rowCount();
+    AccessibilityTable* parentTable = toAccessibilityTable(m_parent);
+    int numRows = parentTable->rowCount();
     
     for (int i = 0; i < numRows; i++) {
-        AccessibilityTableCell* cell = m_parentTable->cellForColumnAndRow(m_columnIndex, i);
+        AccessibilityTableCell* cell = parentTable->cellForColumnAndRow(m_columnIndex, i);
         if (!cell)
             continue;
         

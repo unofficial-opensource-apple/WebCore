@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ *  Copyright (C) 2004, 2005, 2006, 2007, 2008, 2010 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -24,7 +24,6 @@
 #include "HTMLNames.h"
 #include "JSHTMLImageElement.h"
 #include "JSNode.h"
-#include "ScriptExecutionContext.h"
 #include <runtime/Error.h>
 
 using namespace JSC;
@@ -32,49 +31,51 @@ using namespace JSC;
 namespace WebCore {
 
 ASSERT_CLASS_FITS_IN_CELL(JSImageConstructor);
+ASSERT_HAS_TRIVIAL_DESTRUCTOR(JSImageConstructor);
 
-const ClassInfo JSImageConstructor::s_info = { "ImageConstructor", 0, 0, 0 };
+const ClassInfo JSImageConstructor::s_info = { "ImageConstructor", &Base::s_info, 0, 0, CREATE_METHOD_TABLE(JSImageConstructor) };
 
-JSImageConstructor::JSImageConstructor(ExecState* exec, JSDOMGlobalObject* globalObject)
-    : DOMConstructorWithDocument(JSImageConstructor::createStructure(globalObject->objectPrototype()), globalObject)
+JSImageConstructor::JSImageConstructor(Structure* structure, JSDOMGlobalObject* globalObject)
+    : DOMConstructorWithDocument(structure, globalObject)
 {
-    putDirect(exec->propertyNames().prototype, JSHTMLImageElementPrototype::self(exec, globalObject), None);
 }
 
-static JSObject* constructImage(ExecState* exec, JSObject* constructor, const ArgList& args)
+void JSImageConstructor::finishCreation(ExecState* exec, JSDOMGlobalObject* globalObject)
 {
-    bool widthSet = false;
-    bool heightSet = false;
-    int width = 0;
-    int height = 0;
-    if (args.size() > 0) {
-        widthSet = true;
-        width = args.at(0).toInt32(exec);
-    }
-    if (args.size() > 1) {
-        heightSet = true;
-        height = args.at(1).toInt32(exec);
-    }
+    Base::finishCreation(globalObject);
+    ASSERT(inherits(&s_info));
+    putDirect(exec->globalData(), exec->propertyNames().prototype, JSHTMLImageElementPrototype::self(exec, globalObject), None);
+}
 
-    JSImageConstructor* jsConstructor = static_cast<JSImageConstructor*>(constructor);
+static EncodedJSValue JSC_HOST_CALL constructImage(ExecState* exec)
+{
+    JSImageConstructor* jsConstructor = jsCast<JSImageConstructor*>(exec->callee());
     Document* document = jsConstructor->document();
     if (!document)
-        return throwError(exec, ReferenceError, "Image constructor associated document is unavailable");
+        return throwVMError(exec, createReferenceError(exec, "Image constructor associated document is unavailable"));
 
     // Calling toJS on the document causes the JS document wrapper to be
-    // added to the window object. This is done to ensure that JSDocument::mark
-    // will be called (which will cause the image element to be marked if necessary).
+    // added to the window object. This is done to ensure that JSDocument::visit
+    // will be called, which will cause the image element to be marked if necessary.
     toJS(exec, jsConstructor->globalObject(), document);
+    int width;
+    int height;
+    int* optionalWidth = 0;
+    int* optionalHeight = 0;
+    if (exec->argumentCount() > 0) {
+        width = exec->argument(0).toInt32(exec);
+        optionalWidth = &width;
+    }
+    if (exec->argumentCount() > 1) {
+        height = exec->argument(1).toInt32(exec);
+        optionalHeight = &height;
+    }
 
-    RefPtr<HTMLImageElement> image = new HTMLImageElement(HTMLNames::imgTag, document);
-    if (widthSet)
-        image->setWidth(width);
-    if (heightSet)
-        image->setHeight(height);
-    return asObject(toJS(exec, jsConstructor->globalObject(), image.release()));
+    return JSValue::encode(asObject(toJS(exec, jsConstructor->globalObject(),
+        HTMLImageElement::createForJSConstructor(document, optionalWidth, optionalHeight))));
 }
 
-ConstructType JSImageConstructor::getConstructData(ConstructData& constructData)
+ConstructType JSImageConstructor::getConstructData(JSCell*, ConstructData& constructData)
 {
     constructData.native.function = constructImage;
     return ConstructTypeHost;

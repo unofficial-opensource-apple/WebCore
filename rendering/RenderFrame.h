@@ -23,22 +23,24 @@
 #ifndef RenderFrame_h
 #define RenderFrame_h
 
-#include "RenderPart.h"
+#include "RenderFrameBase.h"
 #include "RenderFrameSet.h"
 
 namespace WebCore {
 
 class HTMLFrameElement;
 
-class RenderFrame : public RenderPart {
+class RenderFrame : public RenderFrameBase {
 public:
-    RenderFrame(HTMLFrameElement*);
+    explicit RenderFrame(HTMLFrameElement*);
 
     FrameEdgeInfo edgeInfo() const;
 
 private:
     virtual const char* renderName() const { return "RenderFrame"; }
     virtual bool isFrame() const { return true; }
+
+    virtual void updateFromElement();
 
     virtual void viewCleared();
 };

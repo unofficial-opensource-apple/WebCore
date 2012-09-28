@@ -1,8 +1,5 @@
 /*
- * This file is part of the internal font implementation.  It should not be included by anyone other than
- * FontMac.cpp, FontWin.cpp and Font.cpp.
- *
- * Copyright (C) 2006 Apple Computer, Inc.
+ * Copyright (C) 2006, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,12 +18,13 @@
  *
  */
 
-// This file has no guards on purpose in order to detect redundant includes. This is a private header
-// and so this may catch someone trying to include this file in public cpp files.
+#ifndef FontFallbackList_h
+#define FontFallbackList_h
 
 #include "FontSelector.h"
 #include "SimpleFontData.h"
 #include <wtf/Forward.h>
+#include <wtf/MainThread.h>
 
 namespace WebCore {
 
@@ -53,9 +51,22 @@ public:
     bool loadingCustomFonts() const { return m_loadingCustomFonts; }
 
     FontSelector* fontSelector() const { return m_fontSelector.get(); }
+    // FIXME: It should be possible to combine fontSelectorVersion and generation.
+    unsigned fontSelectorVersion() const { return m_fontSelectorVersion; }
     unsigned generation() const { return m_generation; }
 
+    struct GlyphPagesHashTraits : HashTraits<int> {
+        static const int minimumTableSize = 16;
+    };
+    typedef HashMap<int, GlyphPageTreeNode*, DefaultHash<int>::Hash, GlyphPagesHashTraits> GlyphPages;
+    GlyphPageTreeNode* glyphPageZero() const { return m_pageZero; }
+    const GlyphPages& glyphPages() const { return m_pages; }
+
 private:
+    friend class SVGTextRunRenderingContext;
+    void setGlyphPageZero(GlyphPageTreeNode* pageZero) { m_pageZero = pageZero; }
+    void setGlyphPages(const GlyphPages& pages) { m_pages = pages; }
+
     FontFallbackList();
 
     const SimpleFontData* primarySimpleFontData(const Font* f)
@@ -68,24 +79,25 @@ private:
 
     const FontData* primaryFontData(const Font* f) const { return fontDataAt(f, 0); }
     const FontData* fontDataAt(const Font*, unsigned index) const;
-    const FontData* fontDataForCharacters(const Font*, const UChar*, int length) const;
-    
+
     void setPlatformFont(const FontPlatformData&);
 
     void releaseFontData();
 
     mutable Vector<pair<const FontData*, bool>, 1> m_fontList;
-    mutable HashMap<int, GlyphPageTreeNode*> m_pages;
+    mutable GlyphPages m_pages;
     mutable GlyphPageTreeNode* m_pageZero;
     mutable const SimpleFontData* m_cachedPrimarySimpleFontData;
     RefPtr<FontSelector> m_fontSelector;
+    unsigned m_fontSelectorVersion;
     mutable int m_familyIndex;
-    mutable Pitch m_pitch;
-    mutable bool m_loadingCustomFonts;
-    unsigned m_generation;
+    unsigned short m_generation;
+    mutable unsigned m_pitch : 3; // Pitch
+    mutable bool m_loadingCustomFonts : 1;
 
     friend class Font;
 };
 
 }
 
+#endif

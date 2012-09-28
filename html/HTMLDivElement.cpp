@@ -1,7 +1,7 @@
-/**
+/*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003 Apple Computer, Inc.
+ * Copyright (C) 2003, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,58 +23,51 @@
 #include "config.h"
 #include "HTMLDivElement.h"
 
+#include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
 #include "HTMLNames.h"
-#include "MappedAttribute.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLDivElement::HTMLDivElement(const QualifiedName& tagName, Document *doc)
-    : HTMLElement(tagName, doc)
+HTMLDivElement::HTMLDivElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(divTag));
 }
 
-HTMLDivElement::~HTMLDivElement()
+PassRefPtr<HTMLDivElement> HTMLDivElement::create(Document* document)
 {
+    return adoptRef(new HTMLDivElement(divTag, document));
 }
 
-bool HTMLDivElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+PassRefPtr<HTMLDivElement> HTMLDivElement::create(const QualifiedName& tagName, Document* document)
 {
-    if (attrName == alignAttr) {
-        result = eBlock;
-        return false;
-    }
-    return HTMLElement::mapToEntry(attrName, result);
+    return adoptRef(new HTMLDivElement(tagName, document));
 }
 
-void HTMLDivElement::parseMappedAttribute(MappedAttribute *attr)
+bool HTMLDivElement::isPresentationAttribute(const QualifiedName& name) const
+{
+    if (name == alignAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
+}
+
+void HTMLDivElement::collectStyleForAttribute(Attribute* attr, StylePropertySet* style)
 {
     if (attr->name() == alignAttr) {
-        String v = attr->value();
         if (equalIgnoringCase(attr->value(), "middle") || equalIgnoringCase(attr->value(), "center"))
-           addCSSProperty(attr, CSSPropertyTextAlign, CSSValueWebkitCenter);
+            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitCenter);
         else if (equalIgnoringCase(attr->value(), "left"))
-            addCSSProperty(attr, CSSPropertyTextAlign, CSSValueWebkitLeft);
+            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitLeft);
         else if (equalIgnoringCase(attr->value(), "right"))
-            addCSSProperty(attr, CSSPropertyTextAlign, CSSValueWebkitRight);
+            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, CSSValueWebkitRight);
         else
-            addCSSProperty(attr, CSSPropertyTextAlign, v);
+            addPropertyToAttributeStyle(style, CSSPropertyTextAlign, attr->value());
     } else
-        HTMLElement::parseMappedAttribute(attr);
-}
-
-String HTMLDivElement::align() const
-{
-    return getAttribute(alignAttr);
-}
-
-void HTMLDivElement::setAlign(const String &value)
-{
-    setAttribute(alignAttr, value);
+        HTMLElement::collectStyleForAttribute(attr, style);
 }
 
 }

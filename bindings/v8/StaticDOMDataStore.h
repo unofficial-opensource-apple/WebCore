@@ -32,6 +32,7 @@
 #define StaticDOMDataStore_h
 
 #include "DOMDataStore.h"
+#include "IntrusiveDOMWrapperMap.h"
 
 namespace WebCore {
 
@@ -45,19 +46,16 @@ namespace WebCore {
 //
 class StaticDOMDataStore : public DOMDataStore {
 public:
-    StaticDOMDataStore(DOMData*);
+    StaticDOMDataStore();
+    virtual ~StaticDOMDataStore();
 
 private:
     IntrusiveDOMWrapperMap m_staticDomNodeMap;
-    InternalDOMWrapperMap<void> m_staticDomObjectMap;
-    InternalDOMWrapperMap<void> m_staticActiveDomObjectMap;
-#if ENABLE(SVG)
-    InternalDOMWrapperMap<SVGElementInstance> m_staticDomSvgElementInstanceMap;
-    InternalDOMWrapperMap<void> m_staticDomSvgObjectWithContextMap;
-#endif
+    IntrusiveDOMWrapperMap m_staticActiveDomNodeMap;
+    DOMWrapperMap<void> m_staticDomObjectMap;
+    DOMWrapperMap<void> m_staticActiveDomObjectMap;
 };
 
 } // namespace WebCore
 
 #endif // StaticDOMDataStore_h
-

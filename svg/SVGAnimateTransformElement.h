@@ -1,67 +1,54 @@
 /*
-    Copyright (C) 2004, 2005 Nikolas Zimmermann <wildfox@kde.org>
-                  2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
-    Copyright (C) 2007 Eric Seidel <eric@webkit.org>
-    Copyright (C) 2008 Apple Inc. All Rights Reserved.
-    
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006, 2007 Rob Buis <buis@kde.org>
+ * Copyright (C) 2007 Eric Seidel <eric@webkit.org>
+ * Copyright (C) 2008 Apple Inc. All rights reserved.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #ifndef SVGAnimateTransformElement_h
 #define SVGAnimateTransformElement_h
-#if ENABLE(SVG) && ENABLE(SVG_ANIMATION)
 
-#include "SVGAnimationElement.h"
+#if ENABLE(SVG)
+#include "SVGAnimateElement.h"
 #include "SVGTransform.h"
-#include "SVGTransformDistance.h"
 
 namespace WebCore {
 
-    class TransformationMatrix;
+class AffineTransform;
 
-    class SVGAnimateTransformElement : public SVGAnimationElement {
-    public:
-        SVGAnimateTransformElement(const QualifiedName&, Document*);
-        virtual ~SVGAnimateTransformElement();
-        
-        virtual bool hasValidTarget() const;
+class SVGAnimateTransformElement : public SVGAnimateElement {
+public:
+    static PassRefPtr<SVGAnimateTransformElement> create(const QualifiedName&, Document*);
 
-        virtual void parseMappedAttribute(MappedAttribute*);
+    SVGTransform::SVGTransformType transformType() const { return m_type; }
 
-    private:
-        virtual void resetToBaseValue(const String&);
-        virtual bool calculateFromAndToValues(const String& fromString, const String& toString);
-        virtual bool calculateFromAndByValues(const String& fromString, const String& byString);
-        virtual void calculateAnimatedValue(float percentage, unsigned repeat, SVGSMILElement* resultElement);
-        virtual void applyResultsToTarget();
-        virtual float calculateDistance(const String& fromString, const String& toString);
+private:
+    SVGAnimateTransformElement(const QualifiedName&, Document*);
+    
+    virtual bool hasValidAttributeType();
 
-        SVGTransform parseTransformValue(const String&) const;
-        
-        SVGTransform::SVGTransformType m_type;
-        
-        unsigned m_baseIndexInTransformList;
+    bool isSupportedAttribute(const QualifiedName&);
+    virtual void parseAttribute(Attribute*) OVERRIDE;
 
-        SVGTransform m_toTransform;
-        SVGTransform m_fromTransform;
-    };
+    SVGTransform::SVGTransformType m_type;
+};
 
 } // namespace WebCore
 
 #endif // ENABLE(SVG)
 #endif // SVGAnimateTransformElement_h
-
-// vim:ts=4:noet

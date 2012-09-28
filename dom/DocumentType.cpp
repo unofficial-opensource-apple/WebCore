@@ -23,7 +23,6 @@
 #include "config.h"
 #include "DocumentType.h"
 
-#include "DOMImplementation.h"
 #include "Document.h"
 #include "NamedNodeMap.h"
 
@@ -57,23 +56,28 @@ PassRefPtr<Node> DocumentType::cloneNode(bool /*deep*/)
     return create(document(), m_name, m_publicId, m_systemId);
 }
 
-void DocumentType::insertedIntoDocument()
+Node::InsertionNotificationRequest DocumentType::insertedInto(Node* insertionPoint)
 {
+    Node::insertedInto(insertionPoint);
+    if (!insertionPoint->inDocument())
+        return InsertionDone;
+
     // Our document node can be null if we were created by a DOMImplementation.  We use the parent() instead.
-    ASSERT(parent() && parent()->isDocumentNode());
-    if (parent() && parent()->isDocumentNode()) {
-        Document* doc = static_cast<Document*>(parent());
+    ASSERT(parentNode() && parentNode()->isDocumentNode());
+    if (parentNode() && parentNode()->isDocumentNode()) {
+        Document* doc = static_cast<Document*>(parentNode());
         if (!doc->doctype())
             doc->setDocType(this);
     }
-    Node::insertedIntoDocument();
+
+    return InsertionDone;
 }
 
-void DocumentType::removedFromDocument()
+void DocumentType::removedFrom(Node* insertionPoint)
 {
-    if (document() && document()->doctype() == this)
+    if (insertionPoint->inDocument() && document() && document()->doctype() == this)
         document()->setDocType(0);
-    Node::removedFromDocument();
+    Node::removedFrom(insertionPoint);
 }
 
 }

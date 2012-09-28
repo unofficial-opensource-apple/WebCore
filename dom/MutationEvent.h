@@ -31,6 +31,8 @@ namespace WebCore {
 
     class MutationEvent : public Event {
     public:
+        virtual ~MutationEvent();
+
         enum attrChangeType {
             MODIFICATION    = 1,
             ADDITION        = 2,
@@ -58,7 +60,7 @@ namespace WebCore {
         String attrName() const { return m_attrName; }
         unsigned short attrChange() const { return m_attrChange; }
 
-        virtual bool isMutationEvent() const;
+        virtual const AtomicString& interfaceName() const;
 
     private:
         MutationEvent();

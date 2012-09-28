@@ -32,13 +32,18 @@
 #include "NotImplemented.h"
 #include "Pasteboard.h"
 #include "PlatformString.h"
-#include "StringHash.h"
+#include <wtf/text/StringHash.h>
 
 
 namespace WebCore {
     
-ClipboardWx::ClipboardWx(ClipboardAccessPolicy policy, bool forDragging) 
-    : Clipboard(policy, forDragging)
+PassRefPtr<Clipboard> Clipboard::create(ClipboardAccessPolicy, DragData*, Frame*)
+{
+    return 0;
+}
+
+ClipboardWx::ClipboardWx(ClipboardAccessPolicy policy, ClipboardType clipboardType) 
+    : Clipboard(policy, clipboardType)
 {
 }
 
@@ -52,7 +57,7 @@ void ClipboardWx::clearAllData()
     Pasteboard::generalPasteboard()->clear();
 }
 
-String ClipboardWx::getData(const String& type, bool& success) const 
+String ClipboardWx::getData(const String& type) const 
 {
     notImplemented();
     return ""; 
@@ -131,6 +136,11 @@ bool ClipboardWx::hasData()
 {
     notImplemented();
     return false;
+}
+
+void ClipboardWx::writePlainText(const WTF::String& text)
+{
+    Pasteboard::generalPasteboard()->writePlainText(text);
 }
 
 }

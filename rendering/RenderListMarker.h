@@ -38,9 +38,10 @@ public:
     RenderListMarker(RenderListItem*);
     virtual ~RenderListMarker();
 
-    virtual void calcPrefWidths();
+    virtual void computePreferredLogicalWidths();
 
     const String& text() const { return m_text; }
+    String suffix() const;
 
     bool isInside() const;
 
@@ -49,7 +50,7 @@ private:
 
     virtual bool isListMarker() const { return true; }
 
-    virtual void paint(PaintInfo&, int tx, int ty);
+    virtual void paint(PaintInfo&, const LayoutPoint&);
 
     virtual void layout();
 
@@ -57,14 +58,14 @@ private:
 
     virtual InlineBox* createInlineBox();
 
-    virtual int lineHeight(bool firstLine, bool isRootLineBox = false) const;
-    virtual int baselinePosition(bool firstLine, bool isRootLineBox = false) const;
+    virtual LayoutUnit lineHeight(bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
+    virtual LayoutUnit baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
 
     bool isImage() const;
     bool isText() const { return !isImage(); }
 
     virtual void setSelectionState(SelectionState);
-    virtual IntRect selectionRectForRepaint(RenderBoxModelObject* repaintContainer, bool clipToVisibleContent = true);
+    virtual LayoutRect selectionRectForRepaint(RenderBoxModelObject* repaintContainer, bool clipToVisibleContent = true);
     virtual bool canBeSelectionLeaf() const { return true; }
 
     void updateMargins();
@@ -73,7 +74,7 @@ private:
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
     IntRect getRelativeMarkerRect();
-    IntRect localSelectionRect();
+    LayoutRect localSelectionRect();
 
     String m_text;
     RefPtr<StyleImage> m_image;

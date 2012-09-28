@@ -28,11 +28,12 @@
 
 #include "BitmapInfo.h"
 #include "CachedImage.h"
-#include "GraphicsContext.h"
+#include "GraphicsContextCG.h"
+#include "HWndDC.h"
 #include "Image.h"
-#include "RetainPtr.h"
 
 #include <CoreGraphics/CoreGraphics.h>
+#include <wtf/RetainPtr.h>
 
 #include <windows.h>
 
@@ -53,11 +54,9 @@ HBITMAP allocImage(HDC dc, IntSize size, CGContextRef *targetRef)
     if (!targetRef)
         return hbmp;
 
-    CGColorSpaceRef deviceRGB = CGColorSpaceCreateDeviceRGB();
     CGContextRef bitmapContext = CGBitmapContextCreate(bits, bmpInfo.bmiHeader.biWidth, bmpInfo.bmiHeader.biHeight, 8,
-                                                       bmpInfo.bmiHeader.biWidth * 4, deviceRGB, 
+                                                       bmpInfo.bmiHeader.biWidth * 4, deviceRGBColorSpaceRef(),
                                                        kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst);
-    CGColorSpaceRelease(deviceRGB);
     if (!bitmapContext) {
         DeleteObject(hbmp);
         return 0;
@@ -73,10 +72,8 @@ static CGContextRef createCgContextFromBitmap(HBITMAP bitmap)
     GetObject(bitmap, sizeof(info), &info);
     ASSERT(info.bmBitsPixel == 32);
 
-    CGColorSpaceRef deviceRGB = CGColorSpaceCreateDeviceRGB();
     CGContextRef bitmapContext = CGBitmapContextCreate(info.bmBits, info.bmWidth, info.bmHeight, 8,
-                                                       info.bmWidthBytes, deviceRGB, kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst);
-    CGColorSpaceRelease(deviceRGB);
+                                                       info.bmWidthBytes, deviceRGBColorSpaceRef(), kCGBitmapByteOrder32Little | kCGImageAlphaNoneSkipFirst);
     return bitmapContext;
 }
 
@@ -93,7 +90,7 @@ DragImageRef scaleDragImage(DragImageRef image, FloatSize scale)
     IntSize srcSize = dragImageSize(image);
     IntSize dstSize(static_cast<int>(srcSize.width() * scale.width()), static_cast<int>(srcSize.height() * scale.height()));
     HBITMAP hbmp = 0;
-    HDC dc = GetDC(0);
+    HWndDC dc(0);
     HDC dstDC = CreateCompatibleDC(dc);
     if (!dstDC)
         goto exit;
@@ -120,14 +117,13 @@ exit:
         hbmp = image;
     if (dstDC)
         DeleteDC(dstDC);
-    ReleaseDC(0, dc);
     return hbmp;
 }
     
-DragImageRef createDragImageFromImage(Image* img)
+DragImageRef createDragImageFromImage(Image* img, RespectImageOrientationEnum)
 {
     HBITMAP hbmp = 0;
-    HDC dc = GetDC(0);
+    HWndDC dc(0);
     HDC workingDC = CreateCompatibleDC(dc);
     CGContextRef drawContext = 0;
     if (!workingDC)
@@ -159,7 +155,6 @@ DragImageRef createDragImageFromImage(Image* img)
 exit:
     if (workingDC)
         DeleteDC(workingDC);
-    ReleaseDC(0, dc);
     return hbmp;
 }
     

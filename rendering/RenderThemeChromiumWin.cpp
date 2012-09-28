@@ -29,19 +29,24 @@
 #include <uxtheme.h>
 #include <vssym32.h>
 
-#include "ChromiumBridge.h"
 #include "CSSValueKeywords.h"
 #include "FontSelector.h"
 #include "FontUtilsChromiumWin.h"
 #include "GraphicsContext.h"
 #include "HTMLMediaElement.h"
 #include "HTMLNames.h"
+#include "HWndDC.h"
 #include "MediaControlElements.h"
+#include "PaintInfo.h"
+#include "PlatformSupport.h"
 #include "RenderBox.h"
+#include "RenderProgress.h"
 #include "RenderSlider.h"
 #include "ScrollbarTheme.h"
+#include "SystemInfo.h"
 #include "TransparencyWin.h"
-#include "WindowsVersion.h"
+#include <wtf/CurrentTime.h>
+
 
 // FIXME: This dependency should eventually be removed.
 #include <skia/ext/skia_utils_win.h>
@@ -54,54 +59,84 @@
 
 namespace WebCore {
 
+// The standard width for the menu list drop-down button when run under
+// layout test mode. Use the value that's currently captured in most baselines.
+static const int kStandardMenuListButtonWidth = 17;
+
 namespace {
-class ThemePainter : public TransparencyWin {
+// We must not create multiple ThemePainter instances.
+class ThemePainter {
 public:
     ThemePainter(GraphicsContext* context, const IntRect& r)
     {
-        TransformMode transformMode = getTransformMode(context->getCTM());
-        init(context, getLayerMode(context, transformMode), transformMode, r);
+#ifndef NDEBUG
+        ASSERT(!s_hasInstance);
+        s_hasInstance = true;
+#endif
+        TransparencyWin::TransformMode transformMode = getTransformMode(context->getCTM());
+        m_helper.init(context, getLayerMode(context, transformMode), transformMode, r);
+
+        if (!m_helper.context()) {
+            // TransparencyWin doesn't have well-defined copy-ctor nor op=()
+            // so we re-initialize it instead of assigning a fresh istance.
+            // On the reinitialization, we fallback to use NoLayer mode.
+            // Note that the original initialization failure can be caused by
+            // a failure of an internal buffer allocation and NoLayer mode
+            // does not have such buffer allocations.
+            m_helper.~TransparencyWin();
+            new (&m_helper) TransparencyWin();
+            m_helper.init(context, TransparencyWin::NoLayer, transformMode, r);
+        }
     }
 
     ~ThemePainter()
     {
-        composite();
+        m_helper.composite();
+#ifndef NDEBUG
+        s_hasInstance = false;
+#endif
     }
+
+    GraphicsContext* context() { return m_helper.context(); }
+    const IntRect& drawRect() { return m_helper.drawRect(); }
 
 private:
-    static bool canvasHasMultipleLayers(const SkCanvas* canvas)
+
+    static TransparencyWin::LayerMode getLayerMode(GraphicsContext* context, TransparencyWin::TransformMode transformMode)
     {
-        SkCanvas::LayerIter iter(const_cast<SkCanvas*>(canvas), false);
-        iter.next();  // There is always at least one layer.
-        return !iter.done();  // There is > 1 layer if the the iterator can stil advance.
+        if (context->platformContext()->isDrawingToImageBuffer()) // Might have transparent background.
+            return TransparencyWin::WhiteLayer;
+        if (context->platformContext()->canvas()->isDrawingToLayer()) // Needs antialiasing help.
+            return TransparencyWin::OpaqueCompositeLayer;
+        // Nothing interesting.
+        return transformMode == TransparencyWin::KeepTransform ? TransparencyWin::NoLayer : TransparencyWin::OpaqueCompositeLayer;
     }
 
-    static LayerMode getLayerMode(GraphicsContext* context, TransformMode transformMode)
+    static TransparencyWin::TransformMode getTransformMode(const AffineTransform& matrix)
     {
-        if (context->platformContext()->isDrawingToImageBuffer())  // Might have transparent background.
-            return WhiteLayer;
-        else if (canvasHasMultipleLayers(context->platformContext()->canvas()))  // Needs antialiasing help.
-            return OpaqueCompositeLayer;
-        else  // Nothing interesting.
-            return transformMode == KeepTransform ? NoLayer : OpaqueCompositeLayer;
+        if (matrix.b() || matrix.c()) // Skew.
+            return TransparencyWin::Untransform;
+        if (matrix.a() != 1.0 || matrix.d() != 1.0) // Scale.
+            return TransparencyWin::ScaleTransform;
+        // Nothing interesting.
+        return TransparencyWin::KeepTransform;
     }
 
-    static TransformMode getTransformMode(const TransformationMatrix& matrix)
-    {
-        if (matrix.b() != 0 || matrix.c() != 0)  // Skew.
-            return Untransform;
-        else if (matrix.a() != 1.0 || matrix.d() != 1.0)  // Scale.
-            return ScaleTransform;
-        else  // Nothing interesting.
-            return KeepTransform;
-    }
+    TransparencyWin m_helper;
+#ifndef NDEBUG
+    static bool s_hasInstance;
+#endif
 };
 
-}  // namespace
+#ifndef NDEBUG
+bool ThemePainter::s_hasInstance = false;
+#endif
+
+} // namespace
 
 static void getNonClientMetrics(NONCLIENTMETRICS* metrics)
 {
-    static UINT size = WebCore::isVistaOrNewer() ?
+    static UINT size = (windowsVersion() >= WindowsVista) ?
         sizeof(NONCLIENTMETRICS) : NONCLIENTMETRICS_SIZE_PRE_VISTA;
     metrics->cbSize = size;
     bool success = !!SystemParametersInfo(SPI_GETNONCLIENTMETRICS, size, metrics, 0);
@@ -118,6 +153,7 @@ static FontDescription labelFont;
 static bool supportsFocus(ControlPart appearance)
 {
     switch (appearance) {
+    case SquareButtonPart:
     case PushButtonPart:
     case ButtonPart:
     case DefaultButtonPart:
@@ -137,13 +173,12 @@ static float systemFontSize(const LOGFONT& font)
     if (size < 0) {
         HFONT hFont = CreateFontIndirect(&font);
         if (hFont) {
-            HDC hdc = GetDC(0);  // What about printing?  Is this the right DC?
+            HWndDC hdc(0); // What about printing? Is this the right DC?
             if (hdc) {
                 HGDIOBJ hObject = SelectObject(hdc, hFont);
                 TEXTMETRIC tm;
                 GetTextMetrics(hdc, &tm);
                 SelectObject(hdc, hObject);
-                ReleaseDC(0, hdc);
                 size = tm.tmAscent;
             }
             DeleteObject(hFont);
@@ -168,13 +203,11 @@ static float pointsToPixels(float points)
 {
     static float pixelsPerInch = 0.0f;
     if (!pixelsPerInch) {
-        HDC hdc = GetDC(0);  // What about printing?  Is this the right DC?
-        if (hdc) {  // Can this ever actually be NULL?
+        HWndDC hdc(0); // What about printing? Is this the right DC?
+        if (hdc) // Can this ever actually be NULL?
             pixelsPerInch = GetDeviceCaps(hdc, LOGPIXELSY);
-            ReleaseDC(0, hdc);
-        } else {
+        else
             pixelsPerInch = 96.0f;
-        }
     }
 
     static const float pointsPerInch = 72.0f;
@@ -184,7 +217,7 @@ static float pointsToPixels(float points)
 static double querySystemBlinkInterval(double defaultInterval)
 {
     UINT blinkTime = GetCaretBlinkTime();
-    if (blinkTime == 0)
+    if (!blinkTime)
         return defaultInterval;
     if (blinkTime == INFINITE)
         return 0;
@@ -198,7 +231,7 @@ PassRefPtr<RenderTheme> RenderThemeChromiumWin::create()
 
 PassRefPtr<RenderTheme> RenderTheme::themeForPage(Page* page)
 {
-    static RenderTheme* rt = RenderThemeChromiumWin::create().releaseRef();
+    static RenderTheme* rt = RenderThemeChromiumWin::create().leakRef();
     return rt;
 }
 
@@ -208,29 +241,30 @@ bool RenderThemeChromiumWin::supportsFocusRing(const RenderStyle* style) const
     // except push buttons. For buttons we use the windows PBS_DEFAULTED
     // styling to give it a blue border.
     return style->appearance() == ButtonPart
-            || style->appearance() == PushButtonPart;
+            || style->appearance() == PushButtonPart
+            || style->appearance() == SquareButtonPart;
 }
 
 Color RenderThemeChromiumWin::platformActiveSelectionBackgroundColor() const
 {
-    if (ChromiumBridge::layoutTestMode())
-        return Color(0x00, 0x00, 0xff);  // Royal blue.
+    if (PlatformSupport::layoutTestMode())
+        return Color(0x00, 0x00, 0xff); // Royal blue.
     COLORREF color = GetSysColor(COLOR_HIGHLIGHT);
     return Color(GetRValue(color), GetGValue(color), GetBValue(color), 0xff);
 }
 
 Color RenderThemeChromiumWin::platformInactiveSelectionBackgroundColor() const
 {
-    if (ChromiumBridge::layoutTestMode())
-        return Color(0x99, 0x99, 0x99);  // Medium gray.
+    if (PlatformSupport::layoutTestMode())
+        return Color(0x99, 0x99, 0x99); // Medium gray.
     COLORREF color = GetSysColor(COLOR_GRAYTEXT);
     return Color(GetRValue(color), GetGValue(color), GetBValue(color), 0xff);
 }
 
 Color RenderThemeChromiumWin::platformActiveSelectionForegroundColor() const
 {
-    if (ChromiumBridge::layoutTestMode())
-        return Color(0xff, 0xff, 0xcc);  // Pale yellow.
+    if (PlatformSupport::layoutTestMode())
+        return Color(0xff, 0xff, 0xcc); // Pale yellow.
     COLORREF color = GetSysColor(COLOR_HIGHLIGHTTEXT);
     return Color(GetRValue(color), GetGValue(color), GetBValue(color), 0xff);
 }
@@ -242,7 +276,7 @@ Color RenderThemeChromiumWin::platformInactiveSelectionForegroundColor() const
 
 Color RenderThemeChromiumWin::platformActiveTextSearchHighlightColor() const
 {
-    return Color(0xff, 0x96, 0x32);  // Orange.
+    return Color(0xff, 0x96, 0x32); // Orange.
 }
 
 Color RenderThemeChromiumWin::platformInactiveTextSearchHighlightColor() const
@@ -350,43 +384,43 @@ static int cssValueIdToSysColorIndex(int cssValueId)
 Color RenderThemeChromiumWin::systemColor(int cssValueId) const
 {
     int sysColorIndex = cssValueIdToSysColorIndex(cssValueId);
-    if (ChromiumBridge::layoutTestMode() || (sysColorIndex == -1))
+    if (PlatformSupport::layoutTestMode() || (sysColorIndex == -1))
         return RenderTheme::systemColor(cssValueId);
 
     COLORREF color = GetSysColor(sysColorIndex);
     return Color(GetRValue(color), GetGValue(color), GetBValue(color));
 }
 
-void RenderThemeChromiumWin::adjustSliderThumbSize(RenderObject* o) const
+void RenderThemeChromiumWin::adjustSliderThumbSize(RenderStyle* style) const
 {
     // These sizes match what WinXP draws for various menus.
     const int sliderThumbAlongAxis = 11;
     const int sliderThumbAcrossAxis = 21;
-    if (o->style()->appearance() == SliderThumbHorizontalPart) {
-        o->style()->setWidth(Length(sliderThumbAlongAxis, Fixed));
-        o->style()->setHeight(Length(sliderThumbAcrossAxis, Fixed));
-    } else if (o->style()->appearance() == SliderThumbVerticalPart) {
-        o->style()->setWidth(Length(sliderThumbAcrossAxis, Fixed));
-        o->style()->setHeight(Length(sliderThumbAlongAxis, Fixed));
+    if (style->appearance() == SliderThumbHorizontalPart) {
+        style->setWidth(Length(sliderThumbAlongAxis, Fixed));
+        style->setHeight(Length(sliderThumbAcrossAxis, Fixed));
+    } else if (style->appearance() == SliderThumbVerticalPart) {
+        style->setWidth(Length(sliderThumbAcrossAxis, Fixed));
+        style->setHeight(Length(sliderThumbAlongAxis, Fixed));
     } else
-        RenderThemeChromiumSkia::adjustSliderThumbSize(o);
+        RenderThemeChromiumSkia::adjustSliderThumbSize(style);
 }
 
-bool RenderThemeChromiumWin::paintCheckbox(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeChromiumWin::paintCheckbox(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     return paintButton(o, i, r);
 }
-bool RenderThemeChromiumWin::paintRadio(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeChromiumWin::paintRadio(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     return paintButton(o, i, r);
 }
 
-bool RenderThemeChromiumWin::paintButton(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeChromiumWin::paintButton(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     const ThemeData& themeData = getThemeData(o);
 
-    WebCore::ThemePainter painter(i.context, r);
-    ChromiumBridge::paintButton(painter.context(),
+    ThemePainter painter(i.context, r);
+    PlatformSupport::paintButton(painter.context(),
                                 themeData.m_part,
                                 themeData.m_state,
                                 themeData.m_classicState,
@@ -394,17 +428,17 @@ bool RenderThemeChromiumWin::paintButton(RenderObject* o, const RenderObject::Pa
     return false;
 }
 
-bool RenderThemeChromiumWin::paintTextField(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeChromiumWin::paintTextField(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     return paintTextFieldInternal(o, i, r, true);
 }
 
-bool RenderThemeChromiumWin::paintSliderTrack(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeChromiumWin::paintSliderTrack(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     const ThemeData& themeData = getThemeData(o);
 
-    WebCore::ThemePainter painter(i.context, r);
-    ChromiumBridge::paintTrackbar(painter.context(),
+    ThemePainter painter(i.context, r);
+    PlatformSupport::paintTrackbar(painter.context(),
                                   themeData.m_part,
                                   themeData.m_state,
                                   themeData.m_classicState,
@@ -412,13 +446,19 @@ bool RenderThemeChromiumWin::paintSliderTrack(RenderObject* o, const RenderObjec
     return false;
 }
 
-bool RenderThemeChromiumWin::paintSliderThumb(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeChromiumWin::paintSliderThumb(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     return paintSliderTrack(o, i, r);
 }
 
+static int menuListButtonWidth()
+{
+    static int width = PlatformSupport::layoutTestMode() ? kStandardMenuListButtonWidth : GetSystemMetrics(SM_CXVSCROLL);
+    return width;
+}
+
 // Used to paint unstyled menulists (i.e. with the default border)
-bool RenderThemeChromiumWin::paintMenuList(RenderObject* o, const RenderObject::PaintInfo& i, const IntRect& r)
+bool RenderThemeChromiumWin::paintMenuList(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
     if (!o->isBox())
         return false;
@@ -434,38 +474,38 @@ bool RenderThemeChromiumWin::paintMenuList(RenderObject* o, const RenderObject::
     // draw individual borders and then pass that to skia so we can avoid
     // drawing any borders that are set to 0. For non-zero borders, we draw the
     // border, but webkit just draws over it.
-    bool drawEdges = !(borderRight == 0 && borderLeft == 0 && borderTop == 0 && borderBottom == 0);
+    bool drawEdges = !(!borderRight && !borderLeft && !borderTop && !borderBottom);
 
     paintTextFieldInternal(o, i, r, drawEdges);
 
     // Take padding and border into account.  If the MenuList is smaller than
     // the size of a button, make sure to shrink it appropriately and not put
     // its x position to the left of the menulist.
-    const int buttonWidth = GetSystemMetrics(SM_CXVSCROLL);
+    const int buttonWidth = menuListButtonWidth();
     int spacingLeft = borderLeft + box->paddingLeft();
     int spacingRight = borderRight + box->paddingRight();
     int spacingTop = borderTop + box->paddingTop();
     int spacingBottom = borderBottom + box->paddingBottom();
 
     int buttonX;
-    if (r.right() - r.x() < buttonWidth)
+    if (r.maxX() - r.x() < buttonWidth)
         buttonX = r.x();
     else
-        buttonX = o->style()->direction() == LTR ? r.right() - spacingRight - buttonWidth : r.x() + spacingLeft;
+        buttonX = o->style()->direction() == LTR ? r.maxX() - spacingRight - buttonWidth : r.x() + spacingLeft;
 
     // Compute the rectangle of the button in the destination image.
     IntRect rect(buttonX,
                  r.y() + spacingTop,
-                 std::min(buttonWidth, r.right() - r.x()),
+                 std::min(buttonWidth, r.maxX() - r.x()),
                  r.height() - (spacingTop + spacingBottom));
 
     // Get the correct theme data for a textfield and paint the menu.
-    WebCore::ThemePainter painter(i.context, rect);
-    ChromiumBridge::paintMenuList(painter.context(),
-                                  CP_DROPDOWNBUTTON,
-                                  determineState(o),
-                                  determineClassicState(o),
-                                  painter.drawRect());
+    ThemePainter painter(i.context, rect);
+    PlatformSupport::paintMenuList(painter.context(),
+                                   CP_DROPDOWNBUTTON,
+                                   determineState(o),
+                                   determineClassicState(o),
+                                   painter.drawRect());
     return false;
 }
 
@@ -485,40 +525,47 @@ double RenderThemeChromiumWin::caretBlinkIntervalInternal() const
     return blinkInterval;
 }
 
-unsigned RenderThemeChromiumWin::determineState(RenderObject* o)
+unsigned RenderThemeChromiumWin::determineState(RenderObject* o, ControlSubPart subPart)
 {
     unsigned result = TS_NORMAL;
     ControlPart appearance = o->style()->appearance();
     if (!isEnabled(o))
         result = TS_DISABLED;
-    else if (isReadOnlyControl(o) && (TextFieldPart == appearance || TextAreaPart == appearance || SearchFieldPart == appearance))
-        result = ETS_READONLY; // Readonly is supported on textfields.
-    else if (isPressed(o)) // Active overrides hover and focused.
+    else if (isReadOnlyControl(o))
+        result = (appearance == TextFieldPart || appearance == TextAreaPart || appearance == SearchFieldPart) ? ETS_READONLY : TS_DISABLED;
+    // Active overrides hover and focused.
+    else if (isPressed(o) && (subPart == SpinButtonUp) == isSpinUpButtonPartPressed(o))
         result = TS_PRESSED;
     else if (supportsFocus(appearance) && isFocused(o))
         result = ETS_FOCUSED;
-    else if (isHovered(o))
+    else if (isHovered(o) && (subPart == SpinButtonUp) == isSpinUpButtonPartHovered(o))
         result = TS_HOT;
-    if (isChecked(o))
-        result += 4; // 4 unchecked states, 4 checked states.
+
+    // CBS_UNCHECKED*: 1-4
+    // CBS_CHECKED*: 5-8
+    // CBS_MIXED*: 9-12
+    if (isIndeterminate(o))
+        result += 8;
+    else if (isChecked(o))
+        result += 4;
     return result;
 }
 
 unsigned RenderThemeChromiumWin::determineSliderThumbState(RenderObject* o)
 {
     unsigned result = TUS_NORMAL;
-    if (!isEnabled(o->parent()))
+    if (!isEnabled(o))
         result = TUS_DISABLED;
-    else if (supportsFocus(o->style()->appearance()) && isFocused(o->parent()))
+    else if (supportsFocus(o->style()->appearance()) && isFocused(o))
         result = TUS_FOCUSED;
-    else if (toRenderSlider(o->parent())->inDragMode())
+    else if (isPressed(o))
         result = TUS_PRESSED;
     else if (isHovered(o))
         result = TUS_HOT;
     return result;
 }
 
-unsigned RenderThemeChromiumWin::determineClassicState(RenderObject* o)
+unsigned RenderThemeChromiumWin::determineClassicState(RenderObject* o, ControlSubPart subPart)
 {
     unsigned result = 0;
 
@@ -533,28 +580,30 @@ unsigned RenderThemeChromiumWin::determineClassicState(RenderObject* o)
         return result;   
 
     if (part == SliderThumbHorizontalPart || part == SliderThumbVerticalPart) {
-        if (!isEnabled(o->parent()))
-            result = DFCS_INACTIVE;
-        else if (toRenderSlider(o->parent())->inDragMode()) // Active supersedes hover
-            result = DFCS_PUSHED;
-        else if (isHovered(o))
-            result = DFCS_HOT;
-    } else {
         if (!isEnabled(o))
             result = DFCS_INACTIVE;
         else if (isPressed(o)) // Active supersedes hover
             result = DFCS_PUSHED;
-        else if (supportsFocus(part) && isFocused(o)) // So does focused
-            result = 0;
         else if (isHovered(o))
             result = DFCS_HOT;
-        if (isChecked(o))
+    } else {
+        if (!isEnabled(o) || isReadOnlyControl(o))
+            result = DFCS_INACTIVE;
+        // Active supersedes hover
+        else if (isPressed(o) && (subPart == SpinButtonUp) == isSpinUpButtonPartPressed(o))
+            result = DFCS_PUSHED;
+        else if (supportsFocus(part) && isFocused(o)) // So does focused
+            result = 0;
+        else if (isHovered(o) && (subPart == SpinButtonUp) == isSpinUpButtonPartHovered(o))
+            result = DFCS_HOT;
+        // Classic theme can't represent indeterminate states. Use unchecked appearance.
+        if (isChecked(o) && !isIndeterminate(o))
             result |= DFCS_CHECKED;
     }
     return result;
 }
 
-ThemeData RenderThemeChromiumWin::getThemeData(RenderObject* o)
+ThemeData RenderThemeChromiumWin::getThemeData(RenderObject* o, ControlSubPart subPart)
 {
     ThemeData result;
     switch (o->style()->appearance()) {
@@ -568,6 +617,7 @@ ThemeData RenderThemeChromiumWin::getThemeData(RenderObject* o)
         result.m_state = determineState(o);
         result.m_classicState = DFCS_BUTTONRADIO;
         break;
+    case SquareButtonPart:
     case PushButtonPart:
     case ButtonPart:
         result.m_part = BP_PUSHBUTTON;
@@ -599,23 +649,28 @@ ThemeData RenderThemeChromiumWin::getThemeData(RenderObject* o)
         result.m_part = EP_EDITTEXT;
         result.m_state = determineState(o);
         break;
+    case InnerSpinButtonPart:
+        result.m_part = subPart == SpinButtonUp ? SPNP_UP : SPNP_DOWN;
+        result.m_state = determineState(o, subPart);
+        result.m_classicState = subPart == SpinButtonUp ? DFCS_SCROLLUP : DFCS_SCROLLDOWN;
+        break;
     }
 
-    result.m_classicState |= determineClassicState(o);
+    result.m_classicState |= determineClassicState(o, subPart);
 
     return result;
 }
 
 bool RenderThemeChromiumWin::paintTextFieldInternal(RenderObject* o,
-                                                    const RenderObject::PaintInfo& i,
+                                                    const PaintInfo& i,
                                                     const IntRect& r,
                                                     bool drawEdges)
 {
     // Fallback to white if the specified color object is invalid.
-    // (Note ChromiumBridge::paintTextField duplicates this check).
+    // (Note PlatformSupport::paintTextField duplicates this check).
     Color backgroundColor(Color::white);
-    if (o->style()->backgroundColor().isValid())
-        backgroundColor = o->style()->backgroundColor();
+    if (o->style()->visitedDependentColor(CSSPropertyBackgroundColor).isValid())
+        backgroundColor = o->style()->visitedDependentColor(CSSPropertyBackgroundColor);
 
     // If we have background-image, don't fill the content area to expose the
     // parent's background. Also, we shouldn't fill the content area if the
@@ -631,26 +686,99 @@ bool RenderThemeChromiumWin::paintTextFieldInternal(RenderObject* o,
         // background (themed or filled) appropriately.
         // FIXME: make sure we do the right thing if css background-clip is set.
         i.context->save();
-        IntSize topLeft, topRight, bottomLeft, bottomRight;
-        o->style()->getBorderRadiiForRect(r, topLeft, topRight, bottomLeft, bottomRight);
-        i.context->addRoundedRectClip(r, topLeft, topRight, bottomLeft, bottomRight);
+        i.context->addRoundedRectClip(o->style()->getRoundedBorderFor(r));
     }
     {
         const ThemeData& themeData = getThemeData(o);
-        WebCore::ThemePainter painter(i.context, r);
-        ChromiumBridge::paintTextField(painter.context(),
-                                       themeData.m_part,
-                                       themeData.m_state,
-                                       themeData.m_classicState,
-                                       painter.drawRect(),
-                                       backgroundColor,
-                                       fillContentArea,
-                                       drawEdges);
+        ThemePainter painter(i.context, r);
+        PlatformSupport::paintTextField(painter.context(),
+                                        themeData.m_part,
+                                        themeData.m_state,
+                                        themeData.m_classicState,
+                                        painter.drawRect(),
+                                        backgroundColor,
+                                        fillContentArea,
+                                        drawEdges);
         // End of block commits the painter before restoring context.
     }
     if (o->style()->hasBorderRadius())
         i.context->restore();
     return false;
 }
+
+void RenderThemeChromiumWin::adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle* style, Element*) const
+{
+    int width = ScrollbarTheme::theme()->scrollbarThickness();
+    style->setWidth(Length(width, Fixed));
+    style->setMinWidth(Length(width, Fixed));
+}
+
+bool RenderThemeChromiumWin::paintInnerSpinButton(RenderObject* object, const PaintInfo& info, const IntRect& rect)
+{
+    IntRect half = rect;
+
+    // Need explicit blocks to avoid to create multiple ThemePainter instances.
+    {
+        half.setHeight(rect.height() / 2);
+        const ThemeData& upThemeData = getThemeData(object, SpinButtonUp);
+        ThemePainter upPainter(info.context, half);
+        PlatformSupport::paintSpinButton(upPainter.context(),
+                                         upThemeData.m_part,
+                                         upThemeData.m_state,
+                                         upThemeData.m_classicState,
+                                         upPainter.drawRect());
+    }
+
+    {
+        half.setY(rect.y() + rect.height() / 2);
+        const ThemeData& downThemeData = getThemeData(object, SpinButtonDown);
+        ThemePainter downPainter(info.context, half);
+        PlatformSupport::paintSpinButton(downPainter.context(),
+                                         downThemeData.m_part,
+                                         downThemeData.m_state,
+                                         downThemeData.m_classicState,
+                                         downPainter.drawRect());
+    }
+    return false;
+}
+
+#if ENABLE(PROGRESS_TAG)
+
+// MSDN says that update intervals for the bar is 30ms.
+// http://msdn.microsoft.com/en-us/library/bb760842(v=VS.85).aspx
+static const double progressAnimationFrameRate = 0.033;
+
+double RenderThemeChromiumWin::animationRepeatIntervalForProgressBar(RenderProgress*) const
+{
+    return progressAnimationFrameRate;
+}
+
+double RenderThemeChromiumWin::animationDurationForProgressBar(RenderProgress* renderProgress) const
+{
+    // On Chromium Windows port, animationProgress() and associated values aren't used.
+    // So here we can return arbitrary positive value.
+    return progressAnimationFrameRate;
+}
+
+void RenderThemeChromiumWin::adjustProgressBarStyle(StyleResolver*, RenderStyle*, Element*) const
+{
+}
+
+bool RenderThemeChromiumWin::paintProgressBar(RenderObject* o, const PaintInfo& i, const IntRect& r)
+{
+    if (!o->isProgress())
+        return true;
+
+    RenderProgress* renderProgress = toRenderProgress(o);
+    // For indeterminate bar, valueRect is ignored and it is computed by the theme engine
+    // because the animation is a platform detail and WebKit doesn't need to know how.
+    IntRect valueRect = renderProgress->isDeterminate() ? determinateProgressValueRectFor(renderProgress, r) : IntRect(0, 0, 0, 0);
+    double animatedSeconds = renderProgress->animationStartTime() ?  WTF::currentTime() - renderProgress->animationStartTime() : 0;
+    ThemePainter painter(i.context, r);
+    PlatformSupport::paintProgressBar(painter.context(), r, valueRect, renderProgress->isDeterminate(), animatedSeconds);
+    return false;
+}
+
+#endif
 
 } // namespace WebCore

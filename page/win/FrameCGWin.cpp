@@ -26,16 +26,14 @@
 #include "config.h"
 #include "FrameWin.h"
 
-#include <windows.h>
-
 #include "BitmapInfo.h"
+#include "Frame.h"
 #include "FrameView.h"
-#include "GraphicsContext.h"
+#include "GraphicsContextCG.h"
+#include "RenderObject.h"
 #include "Settings.h"
-
 #include <CoreGraphics/CoreGraphics.h>
-
-using std::min;
+#include <windows.h>
 
 namespace WebCore {
 
@@ -45,7 +43,7 @@ static void drawRectIntoContext(IntRect rect, FrameView* view, GraphicsContext* 
     rect.move(-offset.width(), -offset.height());
     rect = view->convertToContainingWindow(rect);
 
-    gc->concatCTM(TransformationMatrix().translate(-rect.x(), -rect.y()));
+    gc->concatCTM(AffineTransform().translate(-rect.x(), -rect.y()));
 
     view->paint(gc, rect);
 }
@@ -63,10 +61,8 @@ static HBITMAP imageFromRect(const Frame* frame, IntRect& ir)
 
     HBITMAP hbmp = CreateDIBSection(0, &bmp, DIB_RGB_COLORS, static_cast<void**>(&bits), 0, 0);
     HBITMAP hbmpOld = static_cast<HBITMAP>(SelectObject(hdc, hbmp));
-    CGColorSpaceRef deviceRGB = CGColorSpaceCreateDeviceRGB();
     CGContextRef context = CGBitmapContextCreate(static_cast<void*>(bits), w, h,
-        8, w * sizeof(RGBQUAD), deviceRGB, kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
-    CGColorSpaceRelease(deviceRGB);
+        8, w * sizeof(RGBQUAD), deviceRGBColorSpaceRef(), kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
     CGContextSaveGState(context);
 
     GraphicsContext gc(context);
@@ -87,7 +83,7 @@ HBITMAP imageFromSelection(Frame* frame, bool forceBlackText)
     frame->document()->updateLayout();
 
     frame->view()->setPaintBehavior(PaintBehaviorSelectionOnly | (forceBlackText ? PaintBehaviorForceBlackText : 0));
-    FloatRect fr = frame->selectionBounds();
+    FloatRect fr = frame->selection()->bounds();
     IntRect ir(static_cast<int>(fr.x()), static_cast<int>(fr.y()),
                static_cast<int>(fr.width()), static_cast<int>(fr.height()));
     HBITMAP image = imageFromRect(frame, ir);
@@ -95,14 +91,14 @@ HBITMAP imageFromSelection(Frame* frame, bool forceBlackText)
     return image;
 }
 
-HBITMAP Frame::nodeImage(Node* node) const
+DragImageRef Frame::nodeImage(Node* node)
 {
     RenderObject* renderer = node->renderer();
     if (!renderer)
         return 0;
 
-    IntRect topLevelRect;
-    IntRect paintingRect = renderer->paintingRootRect(topLevelRect);
+    LayoutRect topLevelRect;
+    IntRect paintingRect = pixelSnappedIntRect(renderer->paintingRootRect(topLevelRect));
 
     document()->updateLayout();
 

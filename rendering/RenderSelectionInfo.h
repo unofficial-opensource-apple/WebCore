@@ -22,15 +22,16 @@
  *
  */
 
-#ifndef SelectionInfo_h
-#define SelectionInfo_h
+#ifndef RenderSelectionInfo_h
+#define RenderSelectionInfo_h
 
 #include "IntRect.h"
 #include "RenderBox.h"
 
 namespace WebCore {
 
-class RenderSelectionInfoBase : public Noncopyable {
+class RenderSelectionInfoBase {
+    WTF_MAKE_NONCOPYABLE(RenderSelectionInfoBase); WTF_MAKE_FAST_ALLOCATED;
 public:
     RenderSelectionInfoBase()
         : m_object(0)
@@ -61,7 +62,7 @@ class RenderSelectionInfo : public RenderSelectionInfoBase {
 public:
     RenderSelectionInfo(RenderObject* o, bool clipToVisibleContent)
         : RenderSelectionInfoBase(o)
-        , m_rect(o->needsLayout() ? IntRect() : o->selectionRectForRepaint(m_repaintContainer, clipToVisibleContent))
+        , m_rect(o->canUpdateSelectionOnRootLineBoxes() ? o->selectionRectForRepaint(m_repaintContainer, clipToVisibleContent) : LayoutRect())
     {
     }
     
@@ -70,10 +71,10 @@ public:
         m_object->repaintUsingContainer(m_repaintContainer, m_rect);
     }
 
-    IntRect rect() const { return m_rect; }
+    LayoutRect rect() const { return m_rect; }
 
 private:
-    IntRect m_rect; // relative to repaint container
+    LayoutRect m_rect; // relative to repaint container
 };
 
 
@@ -82,7 +83,7 @@ class RenderBlockSelectionInfo : public RenderSelectionInfoBase {
 public:
     RenderBlockSelectionInfo(RenderBlock* b)
         : RenderSelectionInfoBase(b)
-        , m_rects(b->needsLayout() ? GapRects() : block()->selectionGapRectsForRepaint(m_repaintContainer))
+        , m_rects(b->canUpdateSelectionOnRootLineBoxes() ? block()->selectionGapRectsForRepaint(m_repaintContainer) : GapRects())
     { 
     }
 
@@ -101,4 +102,4 @@ private:
 } // namespace WebCore
 
 
-#endif // SelectionInfo_h
+#endif // RenderSelectionInfo_h

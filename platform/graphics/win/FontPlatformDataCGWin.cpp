@@ -1,5 +1,5 @@
 /*
- * This file is part of the internal font implementation.  It should not be included by anyone other than
+ * This file is part of the internal font implementation. It should not be included by anyone other than
  * FontMac.cpp, FontWin.cpp and Font.cpp.
  *
  * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc.
@@ -25,12 +25,12 @@
 #include "FontPlatformData.h"
 
 #include "PlatformString.h"
-#include "StringHash.h"
 #include <ApplicationServices/ApplicationServices.h>
 #include <WebKitSystemInterface/WebKitSystemInterface.h>
 #include <wtf/HashMap.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
+#include <wtf/text/StringHash.h>
 
 using std::min;
 
@@ -109,43 +109,50 @@ static CFStringRef getPostScriptName(CFStringRef faceName, HDC dc)
 
 void FontPlatformData::platformDataInit(HFONT font, float size, HDC hdc, WCHAR* faceName)
 {
-    if (wkCanCreateCGFontWithLOGFONT()) {
-        LOGFONT logfont;
-        GetObject(font, sizeof(logfont), &logfont);
-        m_cgFont.adoptCF(CGFontCreateWithPlatformFont(&logfont));
-        return;
-    }
-
-    // Try the face name first.  Windows may end up localizing this name, and CG doesn't know about
-    // the localization.  If the create fails, we'll try the PostScript name.
-    RetainPtr<CFStringRef> fullName(AdoptCF, CFStringCreateWithCharacters(NULL, (const UniChar*)faceName, wcslen(faceName)));
-    m_cgFont.adoptCF(CGFontCreateWithFontName(fullName.get()));
-    if (!m_cgFont) {
-        CFStringRef postScriptName = getPostScriptName(fullName.get(), hdc);
-        if (postScriptName) {
-            m_cgFont.adoptCF(CGFontCreateWithFontName(postScriptName));
-            ASSERT(m_cgFont);
-        }
-    }
-    if (m_useGDI) {
-        LOGFONT* logfont = static_cast<LOGFONT*>(malloc(sizeof(LOGFONT)));
-        GetObject(font, sizeof(*logfont), logfont);
-        wkSetFontPlatformInfo(m_cgFont.get(), logfont, free);
-    }
+    LOGFONT logfont;
+    GetObject(font, sizeof(logfont), &logfont);
+    m_cgFont.adoptCF(CGFontCreateWithPlatformFont(&logfont));
 }
 
 FontPlatformData::FontPlatformData(HFONT hfont, CGFontRef font, float size, bool bold, bool oblique, bool useGDI)
-    : m_font(RefCountedHFONT::create(hfont))
-    , m_size(size)
-    , m_cgFont(font)
-    , m_syntheticBold(bold)
+    : m_syntheticBold(bold)
     , m_syntheticOblique(oblique)
+    , m_orientation(Horizontal)
+    , m_textOrientation(TextOrientationVerticalRight)
+    , m_size(size)
+    , m_widthVariant(RegularWidth)
+    , m_font(RefCountedGDIHandle<HFONT>::create(hfont))
+    , m_cgFont(font)
+    , m_isColorBitmapFont(false)
     , m_useGDI(useGDI)
 {
 }
 
 FontPlatformData::~FontPlatformData()
 {
+}
+
+void FontPlatformData::platformDataInit(const FontPlatformData& source)
+{
+    m_font = source.m_font;
+    m_cgFont = source.m_cgFont;
+    m_useGDI = source.m_useGDI;
+}
+
+const FontPlatformData& FontPlatformData::platformDataAssign(const FontPlatformData& other)
+{
+    m_font = other.m_font;
+    m_cgFont = other.m_cgFont;
+    m_useGDI = other.m_useGDI;
+
+    return *this;
+}
+
+bool FontPlatformData::platformIsEqual(const FontPlatformData& other) const
+{
+    return m_font == other.m_font
+        && m_cgFont == other.m_cgFont
+        && m_useGDI == other.m_useGDI;
 }
 
 }

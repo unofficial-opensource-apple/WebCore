@@ -26,82 +26,103 @@
 #define BorderData_h
 
 #include "BorderValue.h"
-#include "IntSize.h"
+#include "IntRect.h"
+#include "LengthSize.h"
 #include "NinePieceImage.h"
 
 namespace WebCore {
 
 class BorderData {
+friend class RenderStyle;
 public:
-    BorderValue left;
-    BorderValue right;
-    BorderValue top;
-    BorderValue bottom;
-
-    NinePieceImage image;
-
-    IntSize topLeft;
-    IntSize topRight;
-    IntSize bottomLeft;
-    IntSize bottomRight;
-
+    BorderData() : m_topLeft(Length(0, Fixed), Length(0, Fixed))
+                 , m_topRight(Length(0, Fixed), Length(0, Fixed))
+                 , m_bottomLeft(Length(0, Fixed), Length(0, Fixed))
+                 , m_bottomRight(Length(0, Fixed), Length(0, Fixed))
+    {
+    }
     bool hasBorder() const
     {
-        bool haveImage = image.hasImage();
-        return left.nonZero(!haveImage) || right.nonZero(!haveImage) || top.nonZero(!haveImage) || bottom.nonZero(!haveImage);
+        bool haveImage = m_image.hasImage();
+        return m_left.nonZero(!haveImage) || m_right.nonZero(!haveImage) || m_top.nonZero(!haveImage) || m_bottom.nonZero(!haveImage);
     }
 
     bool hasBorderRadius() const
     {
-        if (topLeft.width() > 0)
+        if (!m_topLeft.width().isZero())
             return true;
-        if (topRight.width() > 0)
+        if (!m_topRight.width().isZero())
             return true;
-        if (bottomLeft.width() > 0)
+        if (!m_bottomLeft.width().isZero())
             return true;
-        if (bottomRight.width() > 0)
+        if (!m_bottomRight.width().isZero())
             return true;
         return false;
     }
     
-    unsigned short borderLeftWidth() const
+    unsigned borderLeftWidth() const
     {
-        if (!image.hasImage() && (left.style() == BNONE || left.style() == BHIDDEN))
+        if (!m_image.hasImage() && (m_left.style() == BNONE || m_left.style() == BHIDDEN))
             return 0; 
-        return left.width;
+        return m_left.width();
     }
     
-    unsigned short borderRightWidth() const
+    unsigned borderRightWidth() const
     {
-        if (!image.hasImage() && (right.style() == BNONE || right.style() == BHIDDEN))
+        if (!m_image.hasImage() && (m_right.style() == BNONE || m_right.style() == BHIDDEN))
             return 0;
-        return right.width;
+        return m_right.width();
     }
     
-    unsigned short borderTopWidth() const
+    unsigned borderTopWidth() const
     {
-        if (!image.hasImage() && (top.style() == BNONE || top.style() == BHIDDEN))
+        if (!m_image.hasImage() && (m_top.style() == BNONE || m_top.style() == BHIDDEN))
             return 0;
-        return top.width;
+        return m_top.width();
     }
     
-    unsigned short borderBottomWidth() const
+    unsigned borderBottomWidth() const
     {
-        if (!image.hasImage() && (bottom.style() == BNONE || bottom.style() == BHIDDEN))
+        if (!m_image.hasImage() && (m_bottom.style() == BNONE || m_bottom.style() == BHIDDEN))
             return 0;
-        return bottom.width;
+        return m_bottom.width();
     }
     
     bool operator==(const BorderData& o) const
     {
-        return left == o.left && right == o.right && top == o.top && bottom == o.bottom && image == o.image &&
-               topLeft == o.topLeft && topRight == o.topRight && bottomLeft == o.bottomLeft && bottomRight == o.bottomRight;
+        return m_left == o.m_left && m_right == o.m_right && m_top == o.m_top && m_bottom == o.m_bottom && m_image == o.m_image
+               && m_topLeft == o.m_topLeft && m_topRight == o.m_topRight && m_bottomLeft == o.m_bottomLeft && m_bottomRight == o.m_bottomRight;
     }
     
     bool operator!=(const BorderData& o) const
     {
         return !(*this == o);
     }
+    
+    const BorderValue& left() const { return m_left; }
+    const BorderValue& right() const { return m_right; }
+    const BorderValue& top() const { return m_top; }
+    const BorderValue& bottom() const { return m_bottom; }
+    
+    const NinePieceImage& image() const { return m_image; }
+    
+    const LengthSize& topLeft() const { return m_topLeft; }
+    const LengthSize& topRight() const { return m_topRight; }
+    const LengthSize& bottomLeft() const { return m_bottomLeft; }
+    const LengthSize& bottomRight() const { return m_bottomRight; }
+
+private:
+    BorderValue m_left;
+    BorderValue m_right;
+    BorderValue m_top;
+    BorderValue m_bottom;
+
+    NinePieceImage m_image;
+
+    LengthSize m_topLeft;
+    LengthSize m_topRight;
+    LengthSize m_bottomLeft;
+    LengthSize m_bottomRight;
 };
 
 } // namespace WebCore

@@ -1,6 +1,7 @@
 namespace="MathML"
 namespaceURI="http://www.w3.org/1998/Math/MathML"
 guardFactoryWith="ENABLE(MATHML)"
+fallbackInterfaceName="MathMLElement"
 
 math
 mfrac interfaceName=MathMLInlineContainerElement
@@ -12,9 +13,16 @@ munder interfaceName=MathMLInlineContainerElement
 munderover interfaceName=MathMLInlineContainerElement
 msqrt interfaceName=MathMLInlineContainerElement
 mroot interfaceName=MathMLInlineContainerElement
-mi interfaceName=MathMLElement, createWithNew
-mn interfaceName=MathMLElement, createWithNew
-mo interfaceName=MathMLElement, createWithNew
-msub interfaceName=MathMLElement, createWithNew
-msup interfaceName=MathMLElement, createWithNew
+mi interfaceName=MathMLTextElement
+mn interfaceName=MathMLTextElement
+mo interfaceName=MathMLTextElement
+mtext interfaceName=MathMLTextElement
+msub interfaceName=MathMLInlineContainerElement
+msup interfaceName=MathMLInlineContainerElement
 
+#if 0 // Curently only for MathMLNames used by HTMLTreeBuilder.
+ms
+mglyph
+malignmark
+annotation-xml
+#endif

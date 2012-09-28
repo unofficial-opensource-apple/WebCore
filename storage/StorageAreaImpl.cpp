@@ -26,30 +26,28 @@
 #include "config.h"
 #include "StorageAreaImpl.h"
 
-#if ENABLE(DOM_STORAGE)
-
+#include "Document.h"
 #include "ExceptionCode.h"
 #include "Frame.h"
 #include "Page.h"
+#include "SchemeRegistry.h"
+#include "SecurityOrigin.h"
 #include "Settings.h"
 #include "StorageAreaSync.h"
 #include "StorageEventDispatcher.h"
 #include "StorageMap.h"
 #include "StorageSyncManager.h"
+#include "StorageTracker.h"
+#include <wtf/MainThread.h>
 
 namespace WebCore {
 
 StorageAreaImpl::~StorageAreaImpl()
 {
-    ASSERT(isMainThread());
+    ASSERT(isMainThread() || pthread_main_np());
 }
 
-PassRefPtr<StorageAreaImpl> StorageAreaImpl::create(StorageType storageType, PassRefPtr<SecurityOrigin> origin, PassRefPtr<StorageSyncManager> syncManager, unsigned quota)
-{
-    return adoptRef(new StorageAreaImpl(storageType, origin, syncManager, quota));
-}
-
-StorageAreaImpl::StorageAreaImpl(StorageType storageType, PassRefPtr<SecurityOrigin> origin, PassRefPtr<StorageSyncManager> syncManager, unsigned quota)
+inline StorageAreaImpl::StorageAreaImpl(StorageType storageType, PassRefPtr<SecurityOrigin> origin, PassRefPtr<StorageSyncManager> syncManager, unsigned quota)
     : m_storageType(storageType)
     , m_securityOrigin(origin)
     , m_storageMap(StorageMap::create(quota))
@@ -57,17 +55,30 @@ StorageAreaImpl::StorageAreaImpl(StorageType storageType, PassRefPtr<SecurityOri
 #ifndef NDEBUG
     , m_isShutdown(false)
 #endif
+    , m_accessCount(0)
+    , m_closeDatabaseTimer(this, &StorageAreaImpl::closeDatabaseTimerFired)
 {
-    ASSERT(isMainThread());
+    ASSERT(isMainThread() || pthread_main_np());
     ASSERT(m_securityOrigin);
     ASSERT(m_storageMap);
+    
+    // Accessing the shared global StorageTracker when a StorageArea is created 
+    // ensures that the tracker is properly initialized before anyone actually needs to use it.
+    StorageTracker::tracker();
+}
+
+PassRefPtr<StorageAreaImpl> StorageAreaImpl::create(StorageType storageType, PassRefPtr<SecurityOrigin> origin, PassRefPtr<StorageSyncManager> syncManager, unsigned quota)
+{
+    RefPtr<StorageAreaImpl> area = adoptRef(new StorageAreaImpl(storageType, origin, syncManager, quota));
 
     // FIXME: If there's no backing storage for LocalStorage, the default WebKit behavior should be that of private browsing,
-    // not silently ignoring it.  https://bugs.webkit.org/show_bug.cgi?id=25894
-    if (m_storageSyncManager) {
-        m_storageAreaSync = StorageAreaSync::create(m_storageSyncManager, this, m_securityOrigin->databaseIdentifier());
-        ASSERT(m_storageAreaSync);
+    // not silently ignoring it. https://bugs.webkit.org/show_bug.cgi?id=25894
+    if (area->m_storageSyncManager) {
+        area->m_storageAreaSync = StorageAreaSync::create(area->m_storageSyncManager, area.get(), area->m_securityOrigin->databaseIdentifier());
+        ASSERT(area->m_storageAreaSync);
     }
+
+    return area.release();
 }
 
 PassRefPtr<StorageAreaImpl> StorageAreaImpl::copy()
@@ -84,14 +95,16 @@ StorageAreaImpl::StorageAreaImpl(StorageAreaImpl* area)
 #ifndef NDEBUG
     , m_isShutdown(area->m_isShutdown)
 #endif
+    , m_accessCount(0)
+    , m_closeDatabaseTimer(this, &StorageAreaImpl::closeDatabaseTimerFired)
 {
-    ASSERT(isMainThread());
+    ASSERT(isMainThread() || pthread_main_np());
     ASSERT(m_securityOrigin);
     ASSERT(m_storageMap);
     ASSERT(!m_isShutdown);
 }
 
-static bool privateBrowsingEnabled(Frame* frame)
+bool StorageAreaImpl::disabledByPrivateBrowsingInFrame(const Frame* frame) const
 {
 #if PLATFORM(CHROMIUM)
     // The frame pointer can be NULL in Chromium since this call is made in a different
@@ -100,11 +113,17 @@ static bool privateBrowsingEnabled(Frame* frame)
     ASSERT(!frame);
     return false;
 #else
-    return frame->page()->settings()->privateBrowsingEnabled();
+    if (!frame->page())
+        return true;
+    if (!frame->page()->settings()->privateBrowsingEnabled())
+        return false;
+    if (m_storageType != LocalStorage)
+        return true;
+    return !SchemeRegistry::allowsLocalStorageAccessInPrivateBrowsing(frame->document()->securityOrigin()->protocol());
 #endif
 }
 
-unsigned StorageAreaImpl::length() const
+unsigned StorageAreaImpl::length(Frame*) const
 {
     ASSERT(!m_isShutdown);
     blockUntilImportComplete();
@@ -112,7 +131,7 @@ unsigned StorageAreaImpl::length() const
     return m_storageMap->length();
 }
 
-String StorageAreaImpl::key(unsigned index) const
+String StorageAreaImpl::key(unsigned index, Frame*) const
 {
     ASSERT(!m_isShutdown);
     blockUntilImportComplete();
@@ -120,7 +139,7 @@ String StorageAreaImpl::key(unsigned index) const
     return m_storageMap->key(index);
 }
 
-String StorageAreaImpl::getItem(const String& key) const
+String StorageAreaImpl::getItem(const String& key, Frame*) const
 {
     ASSERT(!m_isShutdown);
     blockUntilImportComplete();
@@ -134,7 +153,7 @@ String StorageAreaImpl::setItem(const String& key, const String& value, Exceptio
     ASSERT(!value.isNull());
     blockUntilImportComplete();
 
-    if (privateBrowsingEnabled(frame)) {
+    if (disabledByPrivateBrowsingInFrame(frame)) {
         ec = QUOTA_EXCEEDED_ERR;
         return String();
     }
@@ -164,7 +183,7 @@ String StorageAreaImpl::removeItem(const String& key, Frame* frame)
     ASSERT(!m_isShutdown);
     blockUntilImportComplete();
 
-    if (privateBrowsingEnabled(frame))
+    if (disabledByPrivateBrowsingInFrame(frame))
         return String();
 
     String oldValue;
@@ -186,7 +205,7 @@ bool StorageAreaImpl::clear(Frame* frame)
     ASSERT(!m_isShutdown);
     blockUntilImportComplete();
 
-    if (privateBrowsingEnabled(frame))
+    if (disabledByPrivateBrowsingInFrame(frame))
         return false;
 
     if (!m_storageMap->length())
@@ -201,7 +220,7 @@ bool StorageAreaImpl::clear(Frame* frame)
     return true;
 }
 
-bool StorageAreaImpl::contains(const String& key) const
+bool StorageAreaImpl::contains(const String& key, Frame*) const
 {
     ASSERT(!m_isShutdown);
     blockUntilImportComplete();
@@ -225,12 +244,62 @@ void StorageAreaImpl::close()
 #endif
 }
 
+void StorageAreaImpl::clearForOriginDeletion()
+{
+    ASSERT(!m_isShutdown);
+    blockUntilImportComplete();
+    
+    if (m_storageMap->length()) {
+        unsigned quota = m_storageMap->quota();
+        m_storageMap = StorageMap::create(quota);
+    }
+
+    if (m_storageAreaSync) {
+        m_storageAreaSync->scheduleClear();
+        m_storageAreaSync->scheduleCloseDatabase();
+    }
+}
+    
+void StorageAreaImpl::sync()
+{
+    ASSERT(!m_isShutdown);
+    blockUntilImportComplete();
+    
+    if (m_storageAreaSync)
+        m_storageAreaSync->scheduleSync();
+}
+
 void StorageAreaImpl::blockUntilImportComplete() const
 {
     if (m_storageAreaSync)
         m_storageAreaSync->blockUntilImportComplete();
 }
 
+void StorageAreaImpl::incrementAccessCount()
+{
+    m_accessCount++;
+
+    if (m_closeDatabaseTimer.isActive())
+        m_closeDatabaseTimer.stop();
 }
 
-#endif // ENABLE(DOM_STORAGE)
+void StorageAreaImpl::decrementAccessCount()
+{
+    ASSERT(m_accessCount);
+    --m_accessCount;
+
+    if (!m_accessCount) {
+        if (m_closeDatabaseTimer.isActive())
+            m_closeDatabaseTimer.stop();
+        m_closeDatabaseTimer.startOneShot(StorageTracker::tracker().storageDatabaseIdleInterval());
+    }
+}
+
+void StorageAreaImpl::closeDatabaseTimerFired(Timer<StorageAreaImpl> *)
+{
+    blockUntilImportComplete();
+    if (m_storageAreaSync)
+        m_storageAreaSync->scheduleCloseDatabase();
+}
+
+}

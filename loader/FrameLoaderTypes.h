@@ -42,7 +42,7 @@ namespace WebCore {
     enum PolicyAction {
         PolicyUse,
         PolicyDownload,
-        PolicyIgnore,
+        PolicyIgnore
     };
 
     // NOTE: Keep in sync with WebKit/mac/WebView/WebFramePrivate.h and WebKit/win/Interfaces/IWebFramePrivate.idl
@@ -57,7 +57,6 @@ namespace WebCore {
         FrameLoadTypeRedirectWithLockedBackForwardList, // FIXME: Merge "lockBackForwardList", "lockHistory", "quickRedirect" and "clientRedirect" into a single concept of redirect.
         FrameLoadTypeReplace,
         FrameLoadTypeReloadFromOrigin,
-        FrameLoadTypeBackWMLDeckNotAccessible
     };
 
     enum NavigationType {
@@ -69,9 +68,9 @@ namespace WebCore {
         NavigationTypeOther
     };
 
-    enum DatabasePolicy {
-        DatabasePolicyStop,    // The database thread should be stopped and database connections closed.
-        DatabasePolicyContinue
+    enum ClearProvisionalItemPolicy {
+        ShouldClearProvisionalItem,
+        ShouldNotClearProvisionalItem
     };
 
     enum ObjectContentType {
@@ -88,27 +87,25 @@ namespace WebCore {
         UnloadEventPolicyUnloadAndPageHide
     };
 
-    enum ReferrerPolicy {
-        SendReferrer,
-        NoReferrer
-    };
-    
-    enum SandboxFlag {
-        SandboxNone = 0,
-        SandboxNavigation = 1,
-        SandboxPlugins = 1 << 1,
-        SandboxOrigin = 1 << 2,
-        SandboxForms = 1 << 3,
-        SandboxScripts = 1 << 4,
-        SandboxAll = -1 // Mask with all bits set to 1.
-    };
-    
-    enum SecurityCheckPolicy {
-        SkipSecurityCheck,
-        DoSecurityCheck
+    enum ShouldSendReferrer {
+        MaybeSendReferrer,
+        NeverSendReferrer
     };
 
-    typedef int SandboxFlags;
+    // Passed to FrameLoader::urlSelected() and ScriptController::executeIfJavaScriptURL()
+    // to control whether, in the case of a JavaScript URL, executeIfJavaScriptURL() should
+    // replace the document.  It is a FIXME to eliminate this extra parameter from
+    // executeIfJavaScriptURL(), in which case this enum can go away.
+    enum ShouldReplaceDocumentIfJavaScriptURL {
+        ReplaceDocumentIfJavaScriptURL,
+        DoNotReplaceDocumentIfJavaScriptURL
+    };
+
+    enum ReasonForCallingAllowPlugins {
+        AboutToInstantiatePlugin,
+        NotAboutToInstantiatePlugin
+    };
+
 }
 
 #endif

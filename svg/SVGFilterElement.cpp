@@ -1,24 +1,25 @@
 /*
-    Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
-    Copyright (C) 2004, 2005, 2006 Rob Buis <buis@kde.org>
-    Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
-    Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
-
-    This library is free software; you can redistribute it and/or
-    modify it under the terms of the GNU Library General Public
-    License as published by the Free Software Foundation; either
-    version 2 of the License, or (at your option) any later version.
-
-    This library is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-    Library General Public License for more details.
-
-    You should have received a copy of the GNU Library General Public License
-    along with this library; see the file COPYING.LIB.  If not, write to
-    the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
-    Boston, MA 02110-1301, USA.
-*/
+ * Copyright (C) 2004, 2005, 2006, 2007 Nikolas Zimmermann <zimmermann@kde.org>
+ * Copyright (C) 2004, 2005, 2006 Rob Buis <buis@kde.org>
+ * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
+ * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
+ * Copyright (C) Research In Motion Limited 2010. All rights reserved.
+ *
+ * This library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ * This library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Library General Public License for more details.
+ *
+ * You should have received a copy of the GNU Library General Public License
+ * along with this library; see the file COPYING.LIB.  If not, write to
+ * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
+ * Boston, MA 02110-1301, USA.
+ */
 
 #include "config.h"
 
@@ -26,27 +27,43 @@
 #include "SVGFilterElement.h"
 
 #include "Attr.h"
-#include "FloatSize.h"
-#include "MappedAttribute.h"
-#include "PlatformString.h"
+#include "NodeRenderingContext.h"
+#include "RenderSVGResourceFilter.h"
+#include "SVGElementInstance.h"
 #include "SVGFilterBuilder.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
-#include "SVGLength.h"
 #include "SVGNames.h"
 #include "SVGParserUtilities.h"
-#include "SVGResourceFilter.h"
-#include "SVGUnitTypes.h"
 
 namespace WebCore {
 
-char SVGFilterResXIdentifier[] = "SVGFilterResX";
-char SVGFilterResYIdentifier[] = "SVGFilterResY";
+// Animated property definitions
+DEFINE_ANIMATED_ENUMERATION(SVGFilterElement, SVGNames::filterUnitsAttr, FilterUnits, filterUnits, SVGUnitTypes::SVGUnitType)
+DEFINE_ANIMATED_ENUMERATION(SVGFilterElement, SVGNames::primitiveUnitsAttr, PrimitiveUnits, primitiveUnits, SVGUnitTypes::SVGUnitType)
+DEFINE_ANIMATED_LENGTH(SVGFilterElement, SVGNames::xAttr, X, x)
+DEFINE_ANIMATED_LENGTH(SVGFilterElement, SVGNames::yAttr, Y, y)
+DEFINE_ANIMATED_LENGTH(SVGFilterElement, SVGNames::widthAttr, Width, width)
+DEFINE_ANIMATED_LENGTH(SVGFilterElement, SVGNames::heightAttr, Height, height)
+DEFINE_ANIMATED_INTEGER_MULTIPLE_WRAPPERS(SVGFilterElement, SVGNames::filterResAttr, filterResXIdentifier(), FilterResX, filterResX)
+DEFINE_ANIMATED_INTEGER_MULTIPLE_WRAPPERS(SVGFilterElement, SVGNames::filterResAttr, filterResYIdentifier(), FilterResY, filterResY)
+DEFINE_ANIMATED_STRING(SVGFilterElement, XLinkNames::hrefAttr, Href, href)
+DEFINE_ANIMATED_BOOLEAN(SVGFilterElement, SVGNames::externalResourcesRequiredAttr, ExternalResourcesRequired, externalResourcesRequired)
 
-SVGFilterElement::SVGFilterElement(const QualifiedName& tagName, Document* doc)
-    : SVGStyledElement(tagName, doc)
-    , SVGURIReference()
-    , SVGLangSpace()
-    , SVGExternalResourcesRequired()
+BEGIN_REGISTER_ANIMATED_PROPERTIES(SVGFilterElement)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(filterUnits)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(primitiveUnits)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(x)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(y)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(width)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(height)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(filterResX)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(filterResY)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(href)
+    REGISTER_LOCAL_ANIMATED_PROPERTY(externalResourcesRequired)
+END_REGISTER_ANIMATED_PROPERTIES
+
+inline SVGFilterElement::SVGFilterElement(const QualifiedName& tagName, Document* document)
+    : SVGStyledElement(tagName, document)
     , m_filterUnits(SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
     , m_primitiveUnits(SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE)
     , m_x(LengthModeWidth, "-10%")
@@ -56,172 +73,174 @@ SVGFilterElement::SVGFilterElement(const QualifiedName& tagName, Document* doc)
 {
     // Spec: If the x/y attribute is not specified, the effect is as if a value of "-10%" were specified.
     // Spec: If the width/height attribute is not specified, the effect is as if a value of "120%" were specified.
+    ASSERT(hasTagName(SVGNames::filterTag));
+    registerAnimatedPropertiesForSVGFilterElement();
 }
 
-SVGFilterElement::~SVGFilterElement()
+PassRefPtr<SVGFilterElement> SVGFilterElement::create(const QualifiedName& tagName, Document* document)
 {
+    return adoptRef(new SVGFilterElement(tagName, document));
 }
 
-void SVGFilterElement::setFilterRes(unsigned long, unsigned long) const
+const AtomicString& SVGFilterElement::filterResXIdentifier()
 {
+    DEFINE_STATIC_LOCAL(AtomicString, s_identifier, ("SVGFilterResX"));
+    return s_identifier;
 }
 
-void SVGFilterElement::parseMappedAttribute(MappedAttribute* attr)
+const AtomicString& SVGFilterElement::filterResYIdentifier()
 {
-    const String& value = attr->value();
-    if (attr->name() == SVGNames::filterUnitsAttr) {
-        if (value == "userSpaceOnUse")
-            setFilterUnitsBaseValue(SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE);
-        else if (value == "objectBoundingBox")
-            setFilterUnitsBaseValue(SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX);
+    DEFINE_STATIC_LOCAL(AtomicString, s_identifier, ("SVGFilterResY"));
+    return s_identifier;
+}
+
+void SVGFilterElement::setFilterRes(unsigned filterResX, unsigned filterResY)
+{
+    setFilterResXBaseValue(filterResX);
+    setFilterResYBaseValue(filterResY);
+
+    if (RenderObject* object = renderer())
+        object->setNeedsLayout(true);
+}
+
+bool SVGFilterElement::isSupportedAttribute(const QualifiedName& attrName)
+{
+    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
+    if (supportedAttributes.isEmpty()) {
+        SVGURIReference::addSupportedAttributes(supportedAttributes);
+        SVGLangSpace::addSupportedAttributes(supportedAttributes);
+        SVGExternalResourcesRequired::addSupportedAttributes(supportedAttributes);
+        supportedAttributes.add(SVGNames::filterUnitsAttr);
+        supportedAttributes.add(SVGNames::primitiveUnitsAttr);
+        supportedAttributes.add(SVGNames::xAttr);
+        supportedAttributes.add(SVGNames::yAttr);
+        supportedAttributes.add(SVGNames::widthAttr);
+        supportedAttributes.add(SVGNames::heightAttr);
+        supportedAttributes.add(SVGNames::filterResAttr);
+    }
+    return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
+}
+
+void SVGFilterElement::parseAttribute(Attribute* attr)
+{
+    SVGParsingError parseError = NoError;
+    const AtomicString& value = attr->value();
+
+    if (!isSupportedAttribute(attr->name()))
+        SVGStyledElement::parseAttribute(attr);
+    else if (attr->name() == SVGNames::filterUnitsAttr) {
+        SVGUnitTypes::SVGUnitType propertyValue = SVGPropertyTraits<SVGUnitTypes::SVGUnitType>::fromString(value);
+        if (propertyValue > 0)
+            setFilterUnitsBaseValue(propertyValue);
     } else if (attr->name() == SVGNames::primitiveUnitsAttr) {
-        if (value == "userSpaceOnUse")
-            setPrimitiveUnitsBaseValue(SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE);
-        else if (value == "objectBoundingBox")
-            setPrimitiveUnitsBaseValue(SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX);
+        SVGUnitTypes::SVGUnitType propertyValue = SVGPropertyTraits<SVGUnitTypes::SVGUnitType>::fromString(value);
+        if (propertyValue > 0)
+            setPrimitiveUnitsBaseValue(propertyValue);
     } else if (attr->name() == SVGNames::xAttr)
-        setXBaseValue(SVGLength(LengthModeWidth, value));
+        setXBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
     else if (attr->name() == SVGNames::yAttr)
-        setYBaseValue(SVGLength(LengthModeHeight, value));
+        setYBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
     else if (attr->name() == SVGNames::widthAttr)
-        setWidthBaseValue(SVGLength(LengthModeWidth, value));
+        setWidthBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
     else if (attr->name() == SVGNames::heightAttr)
-        setHeightBaseValue(SVGLength(LengthModeHeight, value));
+        setHeightBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
     else if (attr->name() == SVGNames::filterResAttr) {
         float x, y;
         if (parseNumberOptionalNumber(value, x, y)) {
             setFilterResXBaseValue(x);
             setFilterResYBaseValue(y);
         }
-    } else {
-        if (SVGURIReference::parseMappedAttribute(attr))
-            return;
-        if (SVGLangSpace::parseMappedAttribute(attr))
-            return;
-        if (SVGExternalResourcesRequired::parseMappedAttribute(attr))
-            return;
+    } else if (SVGURIReference::parseAttribute(attr)
+             || SVGLangSpace::parseAttribute(attr)
+             || SVGExternalResourcesRequired::parseAttribute(attr)) {
+    } else
+        ASSERT_NOT_REACHED();
 
-        SVGStyledElement::parseMappedAttribute(attr);
-    }
+    reportAttributeParsingError(parseError, attr);
 }
 
-void SVGFilterElement::synchronizeProperty(const QualifiedName& attrName)
+void SVGFilterElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    SVGStyledElement::synchronizeProperty(attrName);
-
-    if (attrName == anyQName()) {
-        synchronizeX();
-        synchronizeY();
-        synchronizeWidth();
-        synchronizeHeight();
-        synchronizeFilterUnits();
-        synchronizePrimitiveUnits();
-        synchronizeFilterResX();
-        synchronizeFilterResY();
-        synchronizeExternalResourcesRequired();
-        synchronizeHref();
+    if (!isSupportedAttribute(attrName)) {
+        SVGStyledElement::svgAttributeChanged(attrName);
         return;
     }
 
-    if (attrName == SVGNames::xAttr)
-        synchronizeX();
-    else if (attrName == SVGNames::yAttr)
-        synchronizeY();
-    else if (attrName == SVGNames::widthAttr)
-        synchronizeWidth();
-    else if (attrName == SVGNames::heightAttr)
-        synchronizeHeight();
-    else if (attrName == SVGNames::filterUnitsAttr)
-        synchronizeFilterUnits();
-    else if (attrName == SVGNames::primitiveUnitsAttr)
-        synchronizePrimitiveUnits();
-    else if (attrName == SVGNames::filterResAttr) {
-        synchronizeFilterResX();
-        synchronizeFilterResY();
-    } else if (SVGExternalResourcesRequired::isKnownAttribute(attrName))
-        synchronizeExternalResourcesRequired();
-    else if (SVGURIReference::isKnownAttribute(attrName))
-        synchronizeHref();
+    SVGElementInstance::InvalidationGuard invalidationGuard(this);
+    
+    if (attrName == SVGNames::xAttr
+        || attrName == SVGNames::yAttr
+        || attrName == SVGNames::widthAttr
+        || attrName == SVGNames::heightAttr)
+        updateRelativeLengthsInformation();
+
+    if (RenderObject* object = renderer())
+        object->setNeedsLayout(true);
 }
 
-FloatRect SVGFilterElement::filterBoundingBox(const FloatRect& objectBoundingBox) const
+void SVGFilterElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
-    FloatRect filterBBox;
-    if (filterUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX)
-        filterBBox = FloatRect(x().valueAsPercentage() * objectBoundingBox.width() + objectBoundingBox.x(),
-                               y().valueAsPercentage() * objectBoundingBox.height() + objectBoundingBox.y(),
-                               width().valueAsPercentage() * objectBoundingBox.width(),
-                               height().valueAsPercentage() * objectBoundingBox.height());
-    else
-        filterBBox = FloatRect(x().value(this),
-                               y().value(this),
-                               width().value(this),
-                               height().value(this));
+    SVGStyledElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
 
-    return filterBBox;
+    if (changedByParser)
+        return;
+
+    if (RenderObject* object = renderer())
+        object->setNeedsLayout(true);
 }
 
-void SVGFilterElement::buildFilter(const FloatRect& targetRect) const
+RenderObject* SVGFilterElement::createRenderer(RenderArena* arena, RenderStyle*)
 {
-    bool filterBBoxMode = filterUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX;
-    bool primitiveBBoxMode = primitiveUnits() == SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX;
+    return new (arena) RenderSVGResourceFilter(this);
+}
 
-    FloatRect filterBBox;
-    if (filterBBoxMode)
-        filterBBox = FloatRect(x().valueAsPercentage(),
-                               y().valueAsPercentage(),
-                               width().valueAsPercentage(),
-                               height().valueAsPercentage());
-    else
-        filterBBox = FloatRect(x().value(this),
-                               y().value(this),
-                               width().value(this),
-                               height().value(this));
+bool SVGFilterElement::childShouldCreateRenderer(const NodeRenderingContext& childContext) const
+{
+    if (!childContext.node()->isSVGElement())
+        return false;
 
-    FloatRect filterRect = filterBBox;
-    if (filterBBoxMode)
-        filterRect = FloatRect(targetRect.x() + filterRect.x() * targetRect.width(),
-                               targetRect.y() + filterRect.y() * targetRect.height(),
-                               filterRect.width() * targetRect.width(),
-                               filterRect.height() * targetRect.height());
+    Element* element = static_cast<Element*>(childContext.node());
 
-    m_filter->setFilterBoundingBox(filterRect);
-    m_filter->setFilterRect(filterBBox);
-    m_filter->setEffectBoundingBoxMode(primitiveBBoxMode);
-    m_filter->setFilterBoundingBoxMode(filterBBoxMode);
-
-    if (hasAttribute(SVGNames::filterResAttr)) {
-        m_filter->setHasFilterResolution(true);
-        m_filter->setFilterResolution(FloatSize(filterResX(), filterResY()));
+    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, allowedChildElementTags, ());
+    if (allowedChildElementTags.isEmpty()) {
+        allowedChildElementTags.add(SVGNames::feBlendTag);
+        allowedChildElementTags.add(SVGNames::feColorMatrixTag);
+        allowedChildElementTags.add(SVGNames::feComponentTransferTag);
+        allowedChildElementTags.add(SVGNames::feCompositeTag);
+        allowedChildElementTags.add(SVGNames::feConvolveMatrixTag);
+        allowedChildElementTags.add(SVGNames::feDiffuseLightingTag);
+        allowedChildElementTags.add(SVGNames::feDisplacementMapTag);
+        allowedChildElementTags.add(SVGNames::feDistantLightTag);
+        allowedChildElementTags.add(SVGNames::feDropShadowTag);
+        allowedChildElementTags.add(SVGNames::feFloodTag);
+        allowedChildElementTags.add(SVGNames::feFuncATag);
+        allowedChildElementTags.add(SVGNames::feFuncBTag);
+        allowedChildElementTags.add(SVGNames::feFuncGTag);
+        allowedChildElementTags.add(SVGNames::feFuncRTag);
+        allowedChildElementTags.add(SVGNames::feGaussianBlurTag);
+        allowedChildElementTags.add(SVGNames::feImageTag);
+        allowedChildElementTags.add(SVGNames::feMergeTag);
+        allowedChildElementTags.add(SVGNames::feMergeNodeTag);
+        allowedChildElementTags.add(SVGNames::feMorphologyTag);
+        allowedChildElementTags.add(SVGNames::feOffsetTag);
+        allowedChildElementTags.add(SVGNames::fePointLightTag);
+        allowedChildElementTags.add(SVGNames::feSpecularLightingTag);
+        allowedChildElementTags.add(SVGNames::feSpotLightTag);
+        allowedChildElementTags.add(SVGNames::feTileTag);
+        allowedChildElementTags.add(SVGNames::feTurbulenceTag);
     }
 
-    // Add effects to the filter
-    m_filter->builder()->clearEffects();
-    for (Node* n = firstChild(); n != 0; n = n->nextSibling()) {
-        SVGElement* element = 0;
-        if (n->isSVGElement()) {
-            element = static_cast<SVGElement*>(n);
-            if (element->isFilterEffect()) {
-                SVGFilterPrimitiveStandardAttributes* effectElement = static_cast<SVGFilterPrimitiveStandardAttributes*>(element);
-                if (!effectElement->build(m_filter.get())) {
-                    m_filter->builder()->clearEffects();
-                    break;
-                }
-            }
-        }
-    }
+    return allowedChildElementTags.contains<QualifiedName, SVGAttributeHashTranslator>(element->tagQName());
 }
 
-SVGResource* SVGFilterElement::canvasResource(const RenderObject*)
+bool SVGFilterElement::selfHasRelativeLengths() const
 {
-    if (!attached())
-        return 0;
-
-    if (!m_filter)
-        m_filter = SVGResourceFilter::create(this);
-    return m_filter.get();
+    return x().isRelative()
+        || y().isRelative()
+        || width().isRelative()
+        || height().isRelative();
 }
 
 }
 
-#endif // ENABLE(SVG) && ENABLE(FILTERS)
+#endif

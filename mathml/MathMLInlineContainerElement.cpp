@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Alex Milowski (alex@milowski.com). All rights reserved.
+ * Copyright (C) 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +32,13 @@
 
 #include "MathMLNames.h"
 #include "RenderMathMLBlock.h"
+#include "RenderMathMLFenced.h"
+#include "RenderMathMLFraction.h"
+#include "RenderMathMLRoot.h"
+#include "RenderMathMLRow.h"
+#include "RenderMathMLSquareRoot.h"
+#include "RenderMathMLSubSup.h"
+#include "RenderMathMLUnderOver.h"
 
 namespace WebCore {
     
@@ -43,19 +51,37 @@ MathMLInlineContainerElement::MathMLInlineContainerElement(const QualifiedName& 
 
 PassRefPtr<MathMLInlineContainerElement> MathMLInlineContainerElement::create(const QualifiedName& tagName, Document* document)
 {
-    return new MathMLInlineContainerElement(tagName, document);
+    return adoptRef(new MathMLInlineContainerElement(tagName, document));
 }
 
-RenderObject* MathMLInlineContainerElement::createRenderer(RenderArena *arena, RenderStyle* style)
+RenderObject* MathMLInlineContainerElement::createRenderer(RenderArena* arena, RenderStyle*)
 {
-    // FIXME: This method will contain the specialized renderers based on element name
-    RenderObject* object = new (arena) RenderMathMLBlock(this);
-    object->setStyle(style);
-    return object;
+    if (hasLocalName(mrowTag))
+        return new (arena) RenderMathMLRow(this);
+    if (hasLocalName(msubTag))
+        return new (arena) RenderMathMLSubSup(this);
+    if (hasLocalName(msupTag))
+        return new (arena) RenderMathMLSubSup(this);
+    if (hasLocalName(msubsupTag))
+        return new (arena) RenderMathMLSubSup(this);
+    if (hasLocalName(moverTag))
+        return new (arena) RenderMathMLUnderOver(this);
+    if (hasLocalName(munderTag))
+        return new (arena) RenderMathMLUnderOver(this);
+    if (hasLocalName(munderoverTag))
+        return new (arena) RenderMathMLUnderOver(this);
+    if (hasLocalName(mfracTag))
+        return new (arena) RenderMathMLFraction(this);
+    if (hasLocalName(msqrtTag))
+        return new (arena) RenderMathMLSquareRoot(this);
+    if (hasLocalName(mrootTag))
+        return new (arena) RenderMathMLRoot(this);
+    if (hasLocalName(mfencedTag))
+        return new (arena) RenderMathMLFenced(this);
+
+    return new (arena) RenderMathMLBlock(this);
 }
-    
-    
+
 }
 
 #endif // ENABLE(MATHML)
-

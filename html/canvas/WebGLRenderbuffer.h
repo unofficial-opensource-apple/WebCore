@@ -26,30 +26,60 @@
 #ifndef WebGLRenderbuffer_h
 #define WebGLRenderbuffer_h
 
-#include "CanvasObject.h"
+#include "WebGLSharedObject.h"
 
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 
 namespace WebCore {
-    
-    class WebGLRenderbuffer : public CanvasObject {
-    public:
-        virtual ~WebGLRenderbuffer() { deleteObject(); }
-        
-        static PassRefPtr<WebGLRenderbuffer> create(WebGLRenderingContext*);
-        
-        // For querying previously created objects via e.g. getFramebufferAttachmentParameter
-        // FIXME: should consider canonicalizing these objects
-        static PassRefPtr<WebGLRenderbuffer> create(WebGLRenderingContext*, Platform3DObject renderbuffer);
 
-    protected:
-        WebGLRenderbuffer(WebGLRenderingContext*);
-        WebGLRenderbuffer(WebGLRenderingContext*, Platform3DObject);
-        
-        virtual void _deleteObject(Platform3DObject);
-    };
-    
+class WebGLRenderbuffer : public WebGLSharedObject {
+public:
+    virtual ~WebGLRenderbuffer();
+
+    static PassRefPtr<WebGLRenderbuffer> create(WebGLRenderingContext*);
+
+    void setInternalFormat(GC3Denum internalformat)
+    {
+        m_internalFormat = internalformat;
+        m_initialized = false;
+    }
+    GC3Denum getInternalFormat() const { return m_internalFormat; }
+
+    void setSize(GC3Dsizei width, GC3Dsizei height)
+    {
+        m_width = width;
+        m_height = height;
+    }
+    GC3Dsizei getWidth() const { return m_width; }
+    GC3Dsizei getHeight() const { return m_height; }
+
+    void setIsValid(bool isValid) { m_isValid = isValid; }
+    bool isValid() const { return m_isValid; }
+
+    bool isInitialized() const { return m_initialized; }
+    void setInitialized() { m_initialized = true; }
+
+    bool hasEverBeenBound() const { return object() && m_hasEverBeenBound; }
+
+    void setHasEverBeenBound() { m_hasEverBeenBound = true; }
+
+protected:
+    WebGLRenderbuffer(WebGLRenderingContext*);
+
+    virtual void deleteObjectImpl(GraphicsContext3D*, Platform3DObject);
+
+private:
+    virtual bool isRenderbuffer() const { return true; }
+
+    GC3Denum m_internalFormat;
+    bool m_initialized;
+    GC3Dsizei m_width, m_height;
+    bool m_isValid; // This is only false if internalFormat is DEPTH_STENCIL and packed_depth_stencil is not supported.
+
+    bool m_hasEverBeenBound;
+};
+
 } // namespace WebCore
 
 #endif // WebGLRenderbuffer_h

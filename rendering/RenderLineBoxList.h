@@ -63,10 +63,14 @@ public:
     void dirtyLineBoxes();
     void dirtyLinesFromChangedChild(RenderObject* parent, RenderObject* child);
 
-    void paint(RenderBoxModelObject*, RenderObject::PaintInfo&, int x, int y) const;
-    bool hitTest(RenderBoxModelObject*, const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction) const;
+    void paint(RenderBoxModelObject*, PaintInfo&, const LayoutPoint&) const;
+    bool hitTest(RenderBoxModelObject*, const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) const;
     
 private:
+    bool anyLineIntersectsRect(RenderBoxModelObject*, const LayoutRect&, const LayoutPoint&, bool usePrintRect = false, LayoutUnit outlineSize = 0) const;
+    bool lineIntersectsDirtyRect(RenderBoxModelObject*, InlineFlowBox*, const PaintInfo&, const LayoutPoint&) const;
+    bool rangeIntersectsRect(RenderBoxModelObject*, LayoutUnit logicalTop, LayoutUnit logicalBottom, const LayoutRect&, const LayoutPoint&) const;
+
     // For block flows, each box represents the root inline box for a line in the
     // paragraph.
     // For inline flows, each box represents a portion of that inline.

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2010 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -20,12 +20,16 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "config.h"
 #include "CSSFontFaceSrcValue.h"
 #include "CSSStyleSheet.h"
+#include "CachedFont.h"
+#include "CachedResourceLoader.h"
+#include "Document.h"
+#include "FontCustomPlatformData.h"
 #include "Node.h"
 
 namespace WebCore {
@@ -43,19 +47,19 @@ bool CSSFontFaceSrcValue::isSupportedFormat() const
     // we will also check to see if the URL ends with .eot.  If so, we'll go ahead and assume that we shouldn't load it.
     if (m_format.isEmpty()) {
         // Check for .eot.
-        if (m_resource.endsWith("eot", false))
+        if (!m_resource.startsWith("data:", false) && m_resource.endsWith(".eot", false))
             return false;
         return true;
     }
 
-    return equalIgnoringCase(m_format, "truetype") || equalIgnoringCase(m_format, "opentype")
+    return FontCustomPlatformData::supportsFormat(m_format)
 #if ENABLE(SVG_FONTS)
            || isSVGFontFaceSrc()
 #endif
            ;
 }
 
-String CSSFontFaceSrcValue::cssText() const
+String CSSFontFaceSrcValue::customCssText() const
 {
     String result;
     if (isLocal())
@@ -69,10 +73,26 @@ String CSSFontFaceSrcValue::cssText() const
     return result;
 }
 
-void CSSFontFaceSrcValue::addSubresourceStyleURLs(ListHashSet<KURL>& urls, const CSSStyleSheet* styleSheet)
+void CSSFontFaceSrcValue::addSubresourceStyleURLs(ListHashSet<KURL>& urls, const StyleSheetInternal* styleSheet)
 {
     if (!isLocal())
         addSubresourceURL(urls, styleSheet->completeURL(m_resource));
+}
+
+bool CSSFontFaceSrcValue::hasFailedOrCanceledSubresources() const
+{
+    if (!m_cachedFont)
+        return false;
+    return m_cachedFont->loadFailedOrCanceled();
+}
+
+CachedFont* CSSFontFaceSrcValue::cachedFont(Document* document)
+{
+    if (!m_cachedFont) {
+        ResourceRequest request(document->completeURL(m_resource));
+        m_cachedFont = document->cachedResourceLoader()->requestFont(request);
+    }
+    return m_cachedFont.get();
 }
 
 }

@@ -27,50 +27,50 @@
 #ifndef DOMTimer_h
 #define DOMTimer_h
 
-#include "ActiveDOMObject.h"
-#include "Timer.h"
+#include "SuspendableTimer.h"
 #include <wtf/OwnPtr.h>
+#include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
-    class InspectorTimelineAgent;
     class ScheduledAction;
+    class Settings;
 
-    class DOMTimer : public TimerBase, public ActiveDOMObject {
+    class DOMTimer : public SuspendableTimer {
+        friend class Settings;
     public:
         virtual ~DOMTimer();
         // Creates a new timer owned by specified ScriptExecutionContext, starts it
         // and returns its Id.
-        static int install(ScriptExecutionContext*, ScheduledAction*, int timeout, bool singleShot);
+        static int install(ScriptExecutionContext*, PassOwnPtr<ScheduledAction>, int timeout, bool singleShot);
         static void removeById(ScriptExecutionContext*, int timeoutId);
 
         // ActiveDOMObject
-        virtual bool hasPendingActivity() const;
         virtual void contextDestroyed();
         virtual void stop();
-        virtual bool canSuspend() const;
-        virtual void suspend();
-        virtual void resume();
 
-        // The lowest allowable timer setting (in seconds, 0.001 == 1 ms).
-        // Default is 10ms.
-        // Chromium uses a non-default timeout.
-        static double minTimerInterval() { return s_minTimerInterval; }
-        static void setMinTimerInterval(double value) { s_minTimerInterval = value; }
+        // Adjust to a change in the ScriptExecutionContext's minimum timer interval.
+        // This allows the minimum allowable interval time to be changed in response
+        // to events like moving a tab to the background.
+        void adjustMinimumTimerInterval(double oldMinimumTimerInterval);
 
     private:
-        DOMTimer(ScriptExecutionContext*, ScheduledAction*, int timeout, bool singleShot);
+        DOMTimer(ScriptExecutionContext*, PassOwnPtr<ScheduledAction>, int interval, bool singleShot);
         virtual void fired();
+
+        double intervalClampedToMinimum(int timeout, double minimumTimerInterval) const;
+
+        // The default minimum allowable timer setting (in seconds, 0.001 == 1 ms).
+        // These are only modified via static methods in Settings.
+        static double defaultMinTimerInterval() { return s_minDefaultTimerInterval; }
+        static void setDefaultMinTimerInterval(double value) { s_minDefaultTimerInterval = value; }
 
         int m_timeoutId;
         int m_nestingLevel;
         OwnPtr<ScheduledAction> m_action;
-        double m_nextFireInterval;
-        double m_repeatInterval;
-#if !ASSERT_DISABLED
-        bool m_suspended;
-#endif
-        static double s_minTimerInterval;
+        int m_originalInterval;
+        bool m_shouldForwardUserGesture;
+        static double s_minDefaultTimerInterval;
     };
 
 } // namespace WebCore

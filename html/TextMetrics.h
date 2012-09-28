@@ -26,6 +26,7 @@
 #ifndef TextMetrics_h
 #define TextMetrics_h
 
+#include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 
 namespace WebCore {
@@ -34,7 +35,7 @@ class TextMetrics : public RefCounted<TextMetrics> {
 public:
     static PassRefPtr<TextMetrics> create() { return adoptRef(new TextMetrics); }
 
-    unsigned width() const { return m_width; }
+    float width() const { return m_width; }
     void setWidth(float w) { m_width = w; }
 
 private:

@@ -26,11 +26,17 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// This file intentionally calls objc_finalizeOnMainThread, which is deprecated.
+// According to http://gcc.gnu.org/onlinedocs/gcc-4.2.1/gcc/Diagnostic-Pragmas.html#Diagnostic-Pragmas
+// we need to place this directive before any data or functions are defined.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+
 #include "config.h"
 #include "WebCoreObjCExtras.h"
 
 #include <objc/objc-auto.h>
 #include <objc/objc-runtime.h>
+#include <utility>
 #include <wtf/Assertions.h>
 #include <wtf/MainThread.h>
 #include <wtf/Threading.h>
@@ -40,19 +46,13 @@ void WebCoreObjCFinalizeOnMainThread(Class cls)
 {
     // This method relies on threading being initialized by the caller, otherwise
     // WebCoreObjCScheduleDeallocateOnMainThread will crash.
-#if !defined(BUILDING_ON_TIGER) && !defined(DONT_FINALIZE_ON_MAIN_THREAD)
+#ifndef DONT_FINALIZE_ON_MAIN_THREAD
     objc_finalizeOnMainThread(cls);
 #else
     UNUSED_PARAM(cls);
 #endif
 }
 
-#ifdef BUILDING_ON_TIGER
-static inline IMP method_getImplementation(Method method) 
-{
-    return method->method_imp;
-}
-#endif
 
 typedef std::pair<Class, id> ClassAndIdPair;
 
@@ -71,14 +71,9 @@ static void deallocCallback(void* context)
 bool WebCoreObjCScheduleDeallocateOnMainThread(Class cls, id object)
 {
     ASSERT([object isKindOfClass:cls]);
-    
-#if USE(WEB_THREAD)
+
     if (isMainThread())
         return false;
-#else
-    if (pthread_main_np() != 0)
-        return false;
-#endif
     
     ClassAndIdPair* pair = new ClassAndIdPair(cls, object);
     callOnMainThread(deallocCallback, pair);

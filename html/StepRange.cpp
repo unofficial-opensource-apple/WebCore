@@ -23,8 +23,9 @@
 
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
-#include "PlatformString.h"
+#include "HTMLParserIdioms.h"
 #include <wtf/MathExtras.h>
+#include <wtf/text/WTFString.h>
 
 using namespace std;
 
@@ -34,10 +35,11 @@ using namespace HTMLNames;
 
 StepRange::StepRange(const HTMLInputElement* element)
 {
-    if (element->hasAttribute(precisionAttr)) {
-        step = 1.0;
-        hasStep = !equalIgnoringCase(element->getAttribute(precisionAttr), "float");
-    } else
+    step = 1;
+    const AtomicString& precisionValue = element->fastGetAttribute(precisionAttr);
+    if (!precisionValue.isNull())
+        hasStep = !equalIgnoringCase(precisionValue, "float");
+    else
         hasStep = element->getAllowedValueStep(&step);
 
     maximum = element->maximum();
@@ -61,7 +63,7 @@ double StepRange::clampValue(double value)
 double StepRange::clampValue(const String& stringValue)
 {
     double value;
-    bool parseSuccess = HTMLInputElement::parseToDoubleForNumberType(stringValue, &value);
+    bool parseSuccess = parseToDoubleForNumberType(stringValue, &value);
     if (!parseSuccess)
         value = (minimum + maximum) / 2;
     return clampValue(value);
@@ -70,7 +72,7 @@ double StepRange::clampValue(const String& stringValue)
 double StepRange::valueFromElement(HTMLInputElement* element, bool* wasClamped)
 {
     double oldValue;
-    bool parseSuccess = HTMLInputElement::parseToDoubleForNumberType(element->value(), &oldValue);
+    bool parseSuccess = parseToDoubleForNumberType(element->value(), &oldValue);
     if (!parseSuccess)
         oldValue = (minimum + maximum) / 2;
     double newValue = clampValue(oldValue);

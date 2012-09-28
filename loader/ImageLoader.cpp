@@ -22,17 +22,26 @@
 #include "config.h"
 #include "ImageLoader.h"
 
-#include "CSSHelper.h"
 #include "CachedImage.h"
-#include "DocLoader.h"
+#include "CachedResourceLoader.h"
+#include "CrossOriginAccessControl.h"
 #include "Document.h"
 #include "Element.h"
-#include "RenderImage.h"
-
-#include "Frame.h"
+#include "Event.h"
+#include "EventSender.h"
 #include "HTMLNames.h"
-#include "Page.h"
-#include "Settings.h"
+#include "HTMLObjectElement.h"
+#include "HTMLParserIdioms.h"
+#include "RenderImage.h"
+#include "ScriptCallStack.h"
+#include "SecurityOrigin.h"
+
+#if ENABLE(SVG)
+#include "RenderSVGImage.h"
+#endif
+#if ENABLE(VIDEO)
+#include "RenderVideo.h"
+#endif
 
 #if !ASSERT_DISABLED
 // ImageLoader objects are allocated as members of other objects, so generic pointer check would always fail.
@@ -54,28 +63,6 @@ template<> struct ValueCheck<WebCore::ImageLoader*> {
 
 namespace WebCore {
 
-class ImageEventSender : public Noncopyable {
-public:
-    ImageEventSender(const AtomicString& eventType);
-
-    void dispatchEventSoon(ImageLoader*);
-    void cancelEvent(ImageLoader*);
-
-    void dispatchPendingEvents();
-
-#if !ASSERT_DISABLED
-    bool hasPendingEvents(ImageLoader* loader) { return m_dispatchSoonList.find(loader) != notFound; }
-#endif
-
-private:
-    void timerFired(Timer<ImageEventSender>*);
-
-    AtomicString m_eventType;
-    Timer<ImageEventSender> m_timer;
-    Vector<ImageLoader*> m_dispatchSoonList;
-    Vector<ImageLoader*> m_dispatchingList;
-};
-
 static ImageEventSender& beforeLoadEventSender()
 {
     DEFINE_STATIC_LOCAL(ImageEventSender, sender, (eventNames().beforeloadEvent));
@@ -88,11 +75,18 @@ static ImageEventSender& loadEventSender()
     return sender;
 }
 
+static ImageEventSender& errorEventSender()
+{
+    DEFINE_STATIC_LOCAL(ImageEventSender, sender, (eventNames().errorEvent));
+    return sender;
+}
+
 ImageLoader::ImageLoader(Element* element)
     : m_element(element)
     , m_image(0)
-    , m_firedBeforeLoad(true)
-    , m_firedLoad(true)
+    , m_hasPendingBeforeLoadEvent(false)
+    , m_hasPendingLoadEvent(false)
+    , m_hasPendingErrorEvent(false)
     , m_imageComplete(true)
     , m_loadManually(false)
 {
@@ -100,18 +94,20 @@ ImageLoader::ImageLoader(Element* element)
 
 ImageLoader::~ImageLoader()
 {
-    if (m_image && m_image->isLoaded())
-        m_element->document()->decrementTotalImageDataSize(m_image.get());
     if (m_image)
         m_image->removeClient(this);
 
-    ASSERT(!m_firedBeforeLoad || !beforeLoadEventSender().hasPendingEvents(this));
-    if (!m_firedBeforeLoad)
+    ASSERT(m_hasPendingBeforeLoadEvent || !beforeLoadEventSender().hasPendingEvents(this));
+    if (m_hasPendingBeforeLoadEvent)
         beforeLoadEventSender().cancelEvent(this);
 
-    ASSERT(!m_firedLoad || !loadEventSender().hasPendingEvents(this));
-    if (!m_firedLoad)
+    ASSERT(m_hasPendingLoadEvent || !loadEventSender().hasPendingEvents(this));
+    if (m_hasPendingLoadEvent)
         loadEventSender().cancelEvent(this);
+
+    ASSERT(m_hasPendingErrorEvent || !errorEventSender().hasPendingEvents(this));
+    if (m_hasPendingErrorEvent)
+        errorEventSender().cancelEvent(this);
 }
 
 void ImageLoader::setImage(CachedImage* newImage)
@@ -119,18 +115,18 @@ void ImageLoader::setImage(CachedImage* newImage)
     ASSERT(m_failedLoadURL.isEmpty());
     CachedImage* oldImage = m_image.get();
     if (newImage != oldImage) {
-        if (oldImage && oldImage->isLoaded())
-            m_element->document()->decrementTotalImageDataSize(oldImage);
-        if (newImage && newImage->isLoaded())
-            m_element->document()->incrementTotalImageDataSize(newImage);
         m_image = newImage;
-        if (!m_firedBeforeLoad) {
+        if (m_hasPendingBeforeLoadEvent) {
             beforeLoadEventSender().cancelEvent(this);
-            m_firedBeforeLoad = true;
+            m_hasPendingBeforeLoadEvent = false;
         }
-        if (!m_firedLoad) {
+        if (m_hasPendingLoadEvent) {
             loadEventSender().cancelEvent(this);
-            m_firedLoad = true;
+            m_hasPendingLoadEvent = false;
+        }
+        if (m_hasPendingErrorEvent) {
+            errorEventSender().cancelEvent(this);
+            m_hasPendingErrorEvent = false;
         }
         m_imageComplete = true;
         if (newImage)
@@ -139,11 +135,8 @@ void ImageLoader::setImage(CachedImage* newImage)
             oldImage->removeClient(this);
     }
 
-    if (RenderObject* renderer = m_element->renderer()) {
-        if (!renderer->isImage())
-            return;
-        toRenderImage(renderer)->resetAnimation();
-    }
+    if (RenderImageResource* imageResource = renderImageResource())
+        imageResource->resetAnimation();
 }
 
 void ImageLoader::updateFromElement()
@@ -153,11 +146,6 @@ void ImageLoader::updateFromElement()
     Document* document = m_element->document();
     if (!document->renderer())
         return;
-    // A manually loaded image is loaded through a different data source and does not use standard loading mechanisms.
-    // If don't have any information on the image itself at this point (m_image is null) we can reject the load if we've already passed the memory limit.
-    // Otherwise memory limits will be checked in CachedImage::data().
-    if (!(m_loadManually && !m_image.get()) && memoryLimitReached())
-        return;
 
     AtomicString attr = m_element->getAttribute(m_element->imageSourceAttributeName());
 
@@ -165,57 +153,71 @@ void ImageLoader::updateFromElement()
         return;
 
     // Do not load any image if the 'src' attribute is missing or if it is
-    // an empty string referring to a local file. The latter condition is
-    // a quirk that preserves old behavior that Dashboard widgets
-    // need (<rdar://problem/5994621>).
-    CachedImage* newImage = 0;
-    if (!(attr.isNull() || (attr.isEmpty() && document->baseURI().isLocalFile()))) {
+    // an empty string.
+    CachedResourceHandle<CachedImage> newImage = 0;
+    if (!attr.isNull() && !stripLeadingAndTrailingHTMLSpaces(attr).isEmpty()) {
+        ResourceRequest request = ResourceRequest(document->completeURL(sourceURI(attr)));
+
+        String crossOriginMode = m_element->fastGetAttribute(HTMLNames::crossoriginAttr);
+        if (!crossOriginMode.isNull()) {
+            StoredCredentials allowCredentials = equalIgnoringCase(crossOriginMode, "use-credentials") ? AllowStoredCredentials : DoNotAllowStoredCredentials;
+            updateRequestForAccessControl(request, document->securityOrigin(), allowCredentials);
+        }
+
         if (m_loadManually) {
-            document->docLoader()->setAutoLoadImages(false);
-            newImage = new CachedImage(sourceURI(attr));
+            bool autoLoadOtherImages = document->cachedResourceLoader()->autoLoadImages();
+            document->cachedResourceLoader()->setAutoLoadImages(false);
+            newImage = new CachedImage(request);
             newImage->setLoading(true);
-            newImage->setDocLoader(document->docLoader());
-            document->docLoader()->m_documentResources.set(newImage->url(), newImage);
+            newImage->setOwningCachedResourceLoader(document->cachedResourceLoader());
+            document->cachedResourceLoader()->m_documentResources.set(newImage->url(), newImage.get());
+            document->cachedResourceLoader()->setAutoLoadImages(autoLoadOtherImages);
         } else
-            newImage = document->docLoader()->requestImage(sourceURI(attr));
+            newImage = document->cachedResourceLoader()->requestImage(request);
 
         // If we do not have an image here, it means that a cross-site
         // violation occurred.
         m_failedLoadURL = !newImage ? attr : AtomicString();
+    } else if (!attr.isNull()) {
+        // Fire an error event if the url is empty.
+        // FIXME: Should we fire this event asynchronoulsy via errorEventSender()?
+        m_element->dispatchEvent(Event::create(eventNames().errorEvent, false, false));
     }
     
     CachedImage* oldImage = m_image.get();
     if (newImage != oldImage) {
-        if (oldImage && oldImage->isLoaded())
-            document->decrementTotalImageDataSize(oldImage);
-        if (newImage && newImage->isLoaded())
-            document->incrementTotalImageDataSize(newImage);
-        if (!m_firedBeforeLoad)
+        if (m_hasPendingBeforeLoadEvent)
             beforeLoadEventSender().cancelEvent(this);
-        if (!m_firedLoad)
+        if (m_hasPendingLoadEvent)
             loadEventSender().cancelEvent(this);
+        if (m_hasPendingErrorEvent)
+            errorEventSender().cancelEvent(this);
 
         m_image = newImage;
-        m_firedBeforeLoad = !newImage;
-        m_firedLoad = !newImage;
+        m_hasPendingBeforeLoadEvent = !m_element->document()->isImageDocument() && newImage;
+        m_hasPendingLoadEvent = newImage;
         m_imageComplete = !newImage;
 
         if (newImage) {
+            if (!m_element->document()->isImageDocument()) {
+                if (!m_element->document()->hasListenerType(Document::BEFORELOAD_LISTENER))
+                    dispatchPendingBeforeLoadEvent();
+                else
+                    beforeLoadEventSender().dispatchEventSoon(this);
+            } else
+                updateRenderer();
+
+            // If newImage is cached, addClient() will result in the load event
+            // being queued to fire. Ensure this happens after beforeload is
+            // dispatched.
             newImage->addClient(this);
-            if (!m_element->document()->hasListenerType(Document::BEFORELOAD_LISTENER))
-                dispatchPendingBeforeLoadEvent();
-            else
-                beforeLoadEventSender().dispatchEventSoon(this);
         }
         if (oldImage)
             oldImage->removeClient(this);
     }
 
-    if (RenderObject* renderer = m_element->renderer()) {
-        if (!renderer->isImage())
-            return;
-        toRenderImage(renderer)->resetAnimation();
-    }
+    if (RenderImageResource* imageResource = renderImageResource())
+        imageResource->resetAnimation();
 }
 
 void ImageLoader::updateFromElementIgnoringPreviousError()
@@ -225,54 +227,103 @@ void ImageLoader::updateFromElementIgnoringPreviousError()
     updateFromElement();
 }
 
-void ImageLoader::notifyFinished(CachedResource*)
+void ImageLoader::notifyFinished(CachedResource* resource)
 {
     ASSERT(m_failedLoadURL.isEmpty());
+    ASSERT(resource == m_image.get());
 
     m_imageComplete = true;
-    if (haveFiredBeforeLoadEvent())
+    if (!hasPendingBeforeLoadEvent())
         updateRenderer();
 
-    if (m_firedLoad)
+    if (!m_hasPendingLoadEvent)
         return;
 
-    loadEventSender().dispatchEventSoon(this);
-    Document* document = m_element->document();
-    Document* mainFrameDocument = document->topDocument();
-    document->incrementTotalImageDataSize(m_image.get());
-    unsigned animatedImageSize = m_image->animatedImageSize();
-    if (animatedImageSize) {
-        mainFrameDocument->incrementAnimatedImageDataCount(animatedImageSize);
-        if (mainFrameDocument->animatedImageDataCount() > 2 * 1024 * 1024)
-            m_image->stopAnimatedImage();
+    if (m_element->fastHasAttribute(HTMLNames::crossoriginAttr)
+        && !m_element->document()->securityOrigin()->canRequest(image()->response().url())
+        && !resource->passesAccessControlCheck(m_element->document()->securityOrigin())) {
+
+        setImage(0);
+
+        m_hasPendingErrorEvent = true;
+        errorEventSender().dispatchEventSoon(this);
+
+        DEFINE_STATIC_LOCAL(String, consoleMessage, ("Cross-origin image load denied by Cross-Origin Resource Sharing policy."));
+        m_element->document()->addConsoleMessage(JSMessageSource, LogMessageType, ErrorMessageLevel, consoleMessage);
+
+        ASSERT(!m_hasPendingLoadEvent);
+        return;
     }
+
+    if (resource->wasCanceled()) {
+        m_hasPendingLoadEvent = false;
+        return;
+    }
+
+    loadEventSender().dispatchEventSoon(this);
+}
+
+RenderImageResource* ImageLoader::renderImageResource()
+{
+    RenderObject* renderer = m_element->renderer();
+
+    if (!renderer)
+        return 0;
+
+    // We don't return style generated image because it doesn't belong to the ImageLoader.
+    // See <https://bugs.webkit.org/show_bug.cgi?id=42840>
+    if (renderer->isImage() && !static_cast<RenderImage*>(renderer)->isGeneratedContent())
+        return toRenderImage(renderer)->imageResource();
+
+#if ENABLE(SVG)
+    if (renderer->isSVGImage())
+        return toRenderSVGImage(renderer)->imageResource();
+#endif
+
+#if ENABLE(VIDEO)
+    if (renderer->isVideo())
+        return toRenderVideo(renderer)->imageResource();
+#endif
+
+    return 0;
 }
 
 void ImageLoader::updateRenderer()
 {
-    if (RenderObject* renderer = m_element->renderer()) {
-        if (!renderer->isImage() && !renderer->isVideo())
-            return;
-        RenderImage* imageRenderer = toRenderImage(renderer);
-        
-        // Only update the renderer if it doesn't have an image or if what we have
-        // is a complete image.  This prevents flickering in the case where a dynamic
-        // change is happening between two images.
-        CachedImage* cachedImage = imageRenderer->cachedImage();
-        if (m_image != cachedImage && (m_imageComplete || !imageRenderer->cachedImage()))
-            imageRenderer->setCachedImage(m_image.get());
-    }
+    RenderImageResource* imageResource = renderImageResource();
+
+    if (!imageResource)
+        return;
+
+    // Only update the renderer if it doesn't have an image or if what we have
+    // is a complete image.  This prevents flickering in the case where a dynamic
+    // change is happening between two images.
+    CachedImage* cachedImage = imageResource->cachedImage();
+    if (m_image != cachedImage && (m_imageComplete || !cachedImage))
+        imageResource->setCachedImage(m_image.get());
+}
+
+void ImageLoader::dispatchPendingEvent(ImageEventSender* eventSender)
+{
+    ASSERT(eventSender == &beforeLoadEventSender() || eventSender == &loadEventSender() || eventSender == &errorEventSender());
+    const AtomicString& eventType = eventSender->eventType();
+    if (eventType == eventNames().beforeloadEvent)
+        dispatchPendingBeforeLoadEvent();
+    if (eventType == eventNames().loadEvent)
+        dispatchPendingLoadEvent();
+    if (eventType == eventNames().errorEvent)
+        dispatchPendingErrorEvent();
 }
 
 void ImageLoader::dispatchPendingBeforeLoadEvent()
 {
-    if (m_firedBeforeLoad)
+    if (!m_hasPendingBeforeLoadEvent)
         return;
     if (!m_image)
         return;
     if (!m_element->document()->attached())
         return;
-    m_firedBeforeLoad = true;
+    m_hasPendingBeforeLoadEvent = false;
     if (m_element->dispatchBeforeLoadEvent(m_image->url())) {
         updateRenderer();
         return;
@@ -281,19 +332,34 @@ void ImageLoader::dispatchPendingBeforeLoadEvent()
         m_image->removeClient(this);
         m_image = 0;
     }
+
     loadEventSender().cancelEvent(this);
+    m_hasPendingLoadEvent = false;
+    
+    if (m_element->hasTagName(HTMLNames::objectTag))
+        static_cast<HTMLObjectElement*>(m_element)->renderFallbackContent();
 }
 
 void ImageLoader::dispatchPendingLoadEvent()
 {
-    if (m_firedLoad)
+    if (!m_hasPendingLoadEvent)
         return;
     if (!m_image)
         return;
     if (!m_element->document()->attached())
         return;
-    m_firedLoad = true;
+    m_hasPendingLoadEvent = false;
     dispatchLoadEvent();
+}
+
+void ImageLoader::dispatchPendingErrorEvent()
+{
+    if (!m_hasPendingErrorEvent)
+        return;
+    if (!m_element->document()->attached())
+        return;
+    m_hasPendingErrorEvent = false;
+    m_element->dispatchEvent(Event::create(eventNames().errorEvent, false, false));
 }
 
 void ImageLoader::dispatchPendingBeforeLoadEvents()
@@ -306,75 +372,14 @@ void ImageLoader::dispatchPendingLoadEvents()
     loadEventSender().dispatchPendingEvents();
 }
 
-ImageEventSender::ImageEventSender(const AtomicString& eventType)
-    : m_eventType(eventType)
-    , m_timer(this, &ImageEventSender::timerFired)
+void ImageLoader::dispatchPendingErrorEvents()
 {
+    errorEventSender().dispatchPendingEvents();
 }
 
-void ImageEventSender::dispatchEventSoon(ImageLoader* loader)
+void ImageLoader::elementDidMoveToNewDocument()
 {
-    m_dispatchSoonList.append(loader);
-    if (!m_timer.isActive())
-        m_timer.startOneShot(0);
-}
-
-void ImageEventSender::cancelEvent(ImageLoader* loader)
-{
-    // Remove instances of this loader from both lists.
-    // Use loops because we allow multiple instances to get into the lists.
-    size_t size = m_dispatchSoonList.size();
-    for (size_t i = 0; i < size; ++i) {
-        if (m_dispatchSoonList[i] == loader)
-            m_dispatchSoonList[i] = 0;
-    }
-    size = m_dispatchingList.size();
-    for (size_t i = 0; i < size; ++i) {
-        if (m_dispatchingList[i] == loader)
-            m_dispatchingList[i] = 0;
-    }
-    if (m_dispatchSoonList.isEmpty())
-        m_timer.stop();
-}
-
-void ImageEventSender::dispatchPendingEvents()
-{
-    // Need to avoid re-entering this function; if new dispatches are
-    // scheduled before the parent finishes processing the list, they
-    // will set a timer and eventually be processed.
-    if (!m_dispatchingList.isEmpty())
-        return;
-
-    m_timer.stop();
-
-    m_dispatchSoonList.checkConsistency();
-
-    m_dispatchingList.swap(m_dispatchSoonList);
-    size_t size = m_dispatchingList.size();
-    for (size_t i = 0; i < size; ++i) {
-        if (ImageLoader* loader = m_dispatchingList[i]) {
-            if (m_eventType == eventNames().beforeloadEvent)
-                loader->dispatchPendingBeforeLoadEvent();
-            else
-                loader->dispatchPendingLoadEvent();
-        }
-    }
-    m_dispatchingList.clear();
-}
-
-void ImageEventSender::timerFired(Timer<ImageEventSender>*)
-{
-    dispatchPendingEvents();
-}
-
-bool ImageLoader::memoryLimitReached()
-{
-    if (!element() || !element()->document() || !element()->document()->page() || !element()->document()->page()->mainFrame() || !element()->document()->page()->mainFrame()->document())
-        return false;
-    Frame *mainFrame = element()->document()->page()->mainFrame();
-    Document *mainFrameDocument = mainFrame->document();
-    static unsigned long maxImageSize = mainFrame->settings()->maximumDecodedImageSize() / 2; //allow half as much total encoded data as the max decoded size of one image. We can tweak this value...
-    return mainFrameDocument->totalImageDataSize() > maxImageSize;
+    setImage(0);
 }
 
 }

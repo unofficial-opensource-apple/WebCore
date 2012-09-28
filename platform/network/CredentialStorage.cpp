@@ -26,11 +26,11 @@
 #include "config.h"
 #include "CredentialStorage.h"
 
-#include "CString.h"
 #include "Credential.h"
 #include "KURL.h"
 #include "ProtectionSpaceHash.h"
-#include "StringHash.h"
+#include <wtf/text/WTFString.h>
+#include <wtf/text/StringHash.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/StdLibExtras.h>
@@ -60,9 +60,9 @@ static PathToDefaultProtectionSpaceMap& pathToDefaultProtectionSpaceMap()
 static String originStringFromURL(const KURL& url)
 {
     if (url.port())
-        return url.protocol() + "://" + url.host() + String::format(":%i/", url.port());
-    
-    return url.protocol() + "://" + url.host() + "/";
+        return url.protocol() + "://" + url.host() + ':' + String::number(url.port()) + '/';
+
+    return url.protocol() + "://" + url.host() + '/';
 }
 
 static String protectionSpaceMapKeyFromURL(const KURL& url)
@@ -75,18 +75,17 @@ static String protectionSpaceMapKeyFromURL(const KURL& url)
     unsigned directoryURLPathStart = url.pathStart();
     ASSERT(directoryURL[directoryURLPathStart] == '/');
     if (directoryURL.length() > directoryURLPathStart + 1) {
-        int index = directoryURL.reverseFind('/');
-        ASSERT(index > 0);
-        directoryURL = directoryURL.substring(0, (static_cast<unsigned>(index) != directoryURLPathStart) ? index : directoryURLPathStart + 1);
+        size_t index = directoryURL.reverseFind('/');
+        ASSERT(index != notFound);
+        directoryURL = directoryURL.substring(0, (index != directoryURLPathStart) ? index : directoryURLPathStart + 1);
     }
-    ASSERT(directoryURL.length() == directoryURLPathStart + 1 || directoryURL[directoryURL.length() - 1] != '/');
 
     return directoryURL;
 }
 
 void CredentialStorage::set(const Credential& credential, const ProtectionSpace& protectionSpace, const KURL& url)
 {
-    ASSERT(protectionSpace.isProxy() || url.protocolInHTTPFamily());
+    ASSERT(protectionSpace.isProxy() || url.protocolIsInHTTPFamily());
     ASSERT(protectionSpace.isProxy() || url.isValid());
 
     protectionSpaceToCredentialMap().set(protectionSpace, credential);
@@ -109,9 +108,14 @@ Credential CredentialStorage::get(const ProtectionSpace& protectionSpace)
     return protectionSpaceToCredentialMap().get(protectionSpace);
 }
 
+void CredentialStorage::remove(const ProtectionSpace& protectionSpace)
+{
+    protectionSpaceToCredentialMap().remove(protectionSpace);
+}
+
 static PathToDefaultProtectionSpaceMap::iterator findDefaultProtectionSpaceForURL(const KURL& url)
 {
-    ASSERT(url.protocolInHTTPFamily());
+    ASSERT(url.protocolIsInHTTPFamily());
     ASSERT(url.isValid());
 
     PathToDefaultProtectionSpaceMap& map = pathToDefaultProtectionSpaceMap();
@@ -130,9 +134,9 @@ static PathToDefaultProtectionSpaceMap::iterator findDefaultProtectionSpaceForUR
         if (directoryURL.length() == directoryURLPathStart + 1)  // path is "/" already, cannot shorten it any more
             return map.end();
 
-        int index = directoryURL.reverseFind('/', -2);
-        ASSERT(index > 0);
-        directoryURL = directoryURL.substring(0, (static_cast<unsigned>(index) == directoryURLPathStart) ? index + 1 : index);
+        size_t index = directoryURL.reverseFind('/', directoryURL.length() - 2);
+        ASSERT(index != notFound);
+        directoryURL = directoryURL.substring(0, (index == directoryURLPathStart) ? index + 1 : index);
         ASSERT(directoryURL.length() > directoryURLPathStart);
         ASSERT(directoryURL.length() == directoryURLPathStart + 1 || directoryURL[directoryURL.length() - 1] != '/');
     }
@@ -140,7 +144,7 @@ static PathToDefaultProtectionSpaceMap::iterator findDefaultProtectionSpaceForUR
 
 bool CredentialStorage::set(const Credential& credential, const KURL& url)
 {
-    ASSERT(url.protocolInHTTPFamily());
+    ASSERT(url.protocolIsInHTTPFamily());
     ASSERT(url.isValid());
     PathToDefaultProtectionSpaceMap::iterator iter = findDefaultProtectionSpaceForURL(url);
     if (iter == pathToDefaultProtectionSpaceMap().end())
@@ -158,4 +162,10 @@ Credential CredentialStorage::get(const KURL& url)
     return protectionSpaceToCredentialMap().get(iter->second);
 }
 
+void CredentialStorage::clearCredentials()
+{
+    pathToDefaultProtectionSpaceMap().clear();
+    originsWithCredentials().clear();
+    protectionSpaceToCredentialMap().clear();
+}
 } // namespace WebCore

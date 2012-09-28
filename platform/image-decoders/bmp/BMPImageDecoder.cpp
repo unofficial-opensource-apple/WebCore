@@ -32,6 +32,11 @@
 #include "BMPImageDecoder.h"
 
 #include "BMPImageReader.h"
+#include <wtf/PassOwnPtr.h>
+
+#if PLATFORM(CHROMIUM)
+#include "TraceEvent.h"
+#endif
 
 namespace WebCore {
 
@@ -40,9 +45,9 @@ namespace WebCore {
 // don't pack).
 static const size_t sizeOfFileHeader = 14;
 
-BMPImageDecoder::BMPImageDecoder()
-    : ImageDecoder()
-    , m_allDataReceived(false)
+BMPImageDecoder::BMPImageDecoder(ImageSource::AlphaOption alphaOption,
+                                 ImageSource::GammaAndColorProfileOption gammaAndColorProfileOption)
+    : ImageDecoder(alphaOption, gammaAndColorProfileOption)
     , m_decodedOffset(0)
 {
 }
@@ -53,54 +58,66 @@ void BMPImageDecoder::setData(SharedBuffer* data, bool allDataReceived)
         return;
 
     ImageDecoder::setData(data, allDataReceived);
-    m_allDataReceived = allDataReceived;
     if (m_reader)
         m_reader->setData(data);
 }
 
 bool BMPImageDecoder::isSizeAvailable()
 {
-    if (!ImageDecoder::isSizeAvailable() && !failed())
-        decodeWithCheckForDataEnded(true);
+    if (!ImageDecoder::isSizeAvailable())
+        decode(true);
 
     return ImageDecoder::isSizeAvailable();
 }
 
-RGBA32Buffer* BMPImageDecoder::frameBufferAtIndex(size_t index)
+ImageFrame* BMPImageDecoder::frameBufferAtIndex(size_t index)
 {
     if (index)
         return 0;
 
-    if (m_frameBufferCache.isEmpty())
+    if (m_frameBufferCache.isEmpty()) {
         m_frameBufferCache.resize(1);
+        m_frameBufferCache.first().setPremultiplyAlpha(m_premultiplyAlpha);
+    }
 
-    RGBA32Buffer* buffer = &m_frameBufferCache.first();
-    if (buffer->status() != RGBA32Buffer::FrameComplete && !failed())
-        decodeWithCheckForDataEnded(false);
+    ImageFrame* buffer = &m_frameBufferCache.first();
+    if (buffer->status() != ImageFrame::FrameComplete)
+        decode(false);
     return buffer;
 }
 
-void BMPImageDecoder::decodeWithCheckForDataEnded(bool onlySize)
+bool BMPImageDecoder::setFailed()
 {
+    m_reader.clear();
+    return ImageDecoder::setFailed();
+}
+
+void BMPImageDecoder::decode(bool onlySize)
+{
+#if PLATFORM(CHROMIUM)
+    TRACE_EVENT("BMPImageDecoder::decode", this, 0);
+#endif
     if (failed())
         return;
 
     // If we couldn't decode the image but we've received all the data, decoding
     // has failed.
-    if (!decode(onlySize) && m_allDataReceived)
+    if (!decodeHelper(onlySize) && isAllDataReceived())
         setFailed();
+    // If we're done decoding the image, we don't need the BMPImageReader
+    // anymore.  (If we failed, |m_reader| has already been cleared.)
+    else if (!m_frameBufferCache.isEmpty() && (m_frameBufferCache.first().status() == ImageFrame::FrameComplete))
+        m_reader.clear();
 }
 
-bool BMPImageDecoder::decode(bool onlySize)
+bool BMPImageDecoder::decodeHelper(bool onlySize)
 {
     size_t imgDataOffset = 0;
-    if ((m_decodedOffset < sizeOfFileHeader)
-        && !processFileHeader(&imgDataOffset))
+    if ((m_decodedOffset < sizeOfFileHeader) && !processFileHeader(&imgDataOffset))
         return false;
 
     if (!m_reader) {
-        m_reader.set(new BMPImageReader(this, m_decodedOffset, imgDataOffset,
-                                        false));
+        m_reader = adoptPtr(new BMPImageReader(this, m_decodedOffset, imgDataOffset, false));
         m_reader->setData(m_data.get());
     }
 
@@ -118,8 +135,7 @@ bool BMPImageDecoder::processFileHeader(size_t* imgDataOffset)
     ASSERT(!m_decodedOffset);
     if (m_data->size() < sizeOfFileHeader)
         return false;
-    const uint16_t fileType =
-        (m_data->data()[0] << 8) | static_cast<uint8_t>(m_data->data()[1]);
+    const uint16_t fileType = (m_data->data()[0] << 8) | static_cast<uint8_t>(m_data->data()[1]);
     *imgDataOffset = readUint32(10);
     m_decodedOffset = sizeOfFileHeader;
 
@@ -137,12 +153,7 @@ bool BMPImageDecoder::processFileHeader(size_t* imgDataOffset)
         BITMAPARRAY = 0x4241,  // "BA"
         */
     };
-    if (fileType != BMAP) {
-        setFailed();
-        return false;
-    }
-
-    return true;
+    return (fileType == BMAP) || setFailed();
 }
 
 } // namespace WebCore

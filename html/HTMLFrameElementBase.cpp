@@ -24,21 +24,20 @@
 #include "config.h"
 #include "HTMLFrameElementBase.h"
 
-#include "CSSHelper.h"
+#include "Attribute.h"
 #include "Document.h"
 #include "EventNames.h"
 #include "FocusController.h"
 #include "Frame.h"
 #include "FrameLoader.h"
-#include "FrameTree.h"
 #include "FrameView.h"
-#include "HTMLFrameSetElement.h"
 #include "HTMLNames.h"
-#include "ScriptEventListener.h"
+#include "HTMLParserIdioms.h"
 #include "KURL.h"
-#include "MappedAttribute.h"
 #include "Page.h"
-#include "RenderFrame.h"
+#include "RenderPart.h"
+#include "ScriptController.h"
+#include "ScriptEventListener.h"
 #include "Settings.h"
 
 namespace WebCore {
@@ -50,10 +49,7 @@ HTMLFrameElementBase::HTMLFrameElementBase(const QualifiedName& tagName, Documen
     , m_scrolling(ScrollbarAuto)
     , m_marginWidth(-1)
     , m_marginHeight(-1)
-    , m_checkAttachedTimer(this, &HTMLFrameElementBase::checkAttachedTimerFired)
     , m_viewSource(false)
-    , m_shouldOpenURLAfterAttach(false)
-    , m_remainsAliveOnRemovalFromTree(false)
 {
 }
 
@@ -64,15 +60,14 @@ bool HTMLFrameElementBase::isURLAllowed() const
 
     const KURL& completeURL = document()->completeURL(m_URL);
 
-    // Don't allow more than 200 total frames in a set. This seems
-    // like a reasonable upper bound, and otherwise mutually recursive
-    // frameset pages can quickly bring the program to its knees with
-    // exponential growth in the number of frames.
-    // FIXME: This limit could be higher, but because WebKit has some
-    // algorithms that happen while loading which appear to be N^2 or
-    // worse in the number of frames, we'll keep it at 200 for now.
+    if (protocolIsJavaScript(completeURL)) { 
+        Document* contentDoc = this->contentDocument();
+        if (contentDoc && !ScriptController::canAccessFromCurrentOrigin(contentDoc->frame()))
+            return false;
+    }
+
     if (Frame* parentFrame = document()->frame()) {
-        if (parentFrame->page()->frameCount() > 200)
+        if (parentFrame->page()->frameCount() >= Page::maxNumberOfFrames)
             return false;
     }
 
@@ -80,7 +75,7 @@ bool HTMLFrameElementBase::isURLAllowed() const
     // But we don't allow more than one.
     bool foundSelfReference = false;
     for (Frame* frame = document()->frame(); frame; frame = frame->tree()->parent()) {
-        if (equalIgnoringFragmentIdentifier(frame->loader()->url(), completeURL)) {
+        if (equalIgnoringFragmentIdentifier(frame->document()->url(), completeURL)) {
             if (foundSelfReference)
                 return false;
             foundSelfReference = true;
@@ -90,10 +85,8 @@ bool HTMLFrameElementBase::isURLAllowed() const
     return true;
 }
 
-void HTMLFrameElementBase::openURL()
+void HTMLFrameElementBase::openURL(bool lockHistory, bool lockBackForwardList)
 {
-    ASSERT(!m_frameName.isEmpty());
-
     if (!isURLAllowed())
         return;
 
@@ -104,18 +97,20 @@ void HTMLFrameElementBase::openURL()
     if (!parentFrame)
         return;
 
-    parentFrame->loader()->requestFrame(this, m_URL, m_frameName);
+    parentFrame->loader()->subframeLoader()->requestFrame(this, m_URL, m_frameName, lockHistory, lockBackForwardList);
     if (contentFrame())
         contentFrame()->setInViewSourceMode(viewSourceMode());
 }
 
-void HTMLFrameElementBase::parseMappedAttribute(MappedAttribute *attr)
+void HTMLFrameElementBase::parseAttribute(Attribute* attr)
 {
-    if (attr->name() == srcAttr)
-        setLocation(deprecatedParseURL(attr->value()));
-    else if (attr->name() == idAttributeName()) {
+    if (attr->name() == srcdocAttr)
+        setLocation("about:srcdoc");
+    else if (attr->name() == srcAttr && !fastHasAttribute(srcdocAttr))
+        setLocation(stripLeadingAndTrailingHTMLSpaces(attr->value()));
+    else if (isIdAttributeName(attr->name())) {
         // Important to call through to base for the id attribute so the hasID bit gets set.
-        HTMLFrameOwnerElement::parseMappedAttribute(attr);
+        HTMLFrameOwnerElement::parseAttribute(attr);
         m_frameName = attr->value();
     } else if (attr->name() == nameAttr) {
         m_frameName = attr->value();
@@ -147,63 +142,58 @@ void HTMLFrameElementBase::parseMappedAttribute(MappedAttribute *attr)
         // FIXME: should <frame> elements have beforeunload handlers?
         setAttributeEventListener(eventNames().beforeunloadEvent, createAttributeEventListener(this, attr));
     } else
-        HTMLFrameOwnerElement::parseMappedAttribute(attr);
+        HTMLFrameOwnerElement::parseAttribute(attr);
 }
 
 void HTMLFrameElementBase::setNameAndOpenURL()
 {
-    m_frameName = getAttribute(nameAttr);
+    m_frameName = getNameAttribute();
     if (m_frameName.isNull())
-        m_frameName = getAttribute(idAttributeName());
-    
-    if (Frame* parentFrame = document()->frame())
-        m_frameName = parentFrame->tree()->uniqueChildName(m_frameName);
-    
+        m_frameName = getIdAttribute();
     openURL();
 }
 
-void HTMLFrameElementBase::setNameAndOpenURLCallback(Node* n)
+Node::InsertionNotificationRequest HTMLFrameElementBase::insertedInto(Node* insertionPoint)
 {
-    static_cast<HTMLFrameElementBase*>(n)->setNameAndOpenURL();
+    HTMLFrameOwnerElement::insertedInto(insertionPoint);
+    if (insertionPoint->inDocument())
+        return InsertionShouldCallDidNotifyDescendantInseretions;
+    return InsertionDone;
 }
 
-void HTMLFrameElementBase::insertedIntoDocument()
+void HTMLFrameElementBase::didNotifyDescendantInseretions(Node* insertionPoint)
 {
-    HTMLFrameOwnerElement::insertedIntoDocument();
-    
-    // We delay frame loading until after the render tree is fully constructed.
-    // Othewise, a synchronous load that executed JavaScript would see incorrect 
-    // (0) values for the frame's renderer-dependent properties, like width.
-    m_shouldOpenURLAfterAttach = true;
-}
+    ASSERT_UNUSED(insertionPoint, insertionPoint->inDocument());
 
-void HTMLFrameElementBase::removedFromDocument()
-{
-    m_shouldOpenURLAfterAttach = false;
+    // DocumentFragments don't kick of any loads.
+    if (!document()->frame())
+        return;
 
-    HTMLFrameOwnerElement::removedFromDocument();
+    // JavaScript in src=javascript: and beforeonload can access the renderer
+    // during attribute parsing *before* the normal parser machinery would
+    // attach the element. To support this, we lazyAttach here, but only
+    // if we don't already have a renderer (if we're inserted
+    // as part of a DocumentFragment, insertedInto from an earlier element
+    // could have forced a style resolve and already attached us).
+    if (!renderer())
+        lazyAttach(DoNotSetAttached);
+    setNameAndOpenURL();
 }
 
 void HTMLFrameElementBase::attach()
 {
-    if (m_shouldOpenURLAfterAttach) {
-        m_shouldOpenURLAfterAttach = false;
-        if (!m_remainsAliveOnRemovalFromTree)
-            queuePostAttachCallback(&HTMLFrameElementBase::setNameAndOpenURLCallback, this);
-    }
-
-    setRemainsAliveOnRemovalFromTree(false);
-
     HTMLFrameOwnerElement::attach();
-    
-    if (RenderPart* renderPart = toRenderPart(renderer())) {
+
+    if (RenderPart* part = renderPart()) {
         if (Frame* frame = contentFrame())
-            renderPart->setWidget(frame->view());
+            part->setWidget(frame->view());
     }
 }
 
 KURL HTMLFrameElementBase::location() const
 {
+    if (fastHasAttribute(srcdocAttr))
+        return KURL(ParsedURLString, "about:srcdoc");
     return document()->completeURL(getAttribute(srcAttr));
 }
 
@@ -216,7 +206,7 @@ void HTMLFrameElementBase::setLocation(const String& str)
     m_URL = AtomicString(str);
 
     if (inDocument())
-        openURL();
+        openURL(false, false);
 }
 
 bool HTMLFrameElementBase::supportsFocus() const
@@ -227,60 +217,40 @@ bool HTMLFrameElementBase::supportsFocus() const
 void HTMLFrameElementBase::setFocus(bool received)
 {
     HTMLFrameOwnerElement::setFocus(received);
-    if (Page* page = document()->page())
-        page->focusController()->setFocusedFrame(received ? contentFrame() : 0);
+    if (Page* page = document()->page()) {
+        if (received)
+            page->focusController()->setFocusedFrame(contentFrame());
+        else if (page->focusController()->focusedFrame() == contentFrame()) // Focus may have already been given to another frame, don't take it away.
+            page->focusController()->setFocusedFrame(0);
+    }
 }
 
 bool HTMLFrameElementBase::isURLAttribute(Attribute *attr) const
 {
-    return attr->name() == srcAttr;
+    return attr->name() == srcAttr || HTMLFrameOwnerElement::isURLAttribute(attr);
 }
 
-int HTMLFrameElementBase::width() const
+int HTMLFrameElementBase::width()
 {
-    if (!renderer())
-        return 0;
-    
     document()->updateLayoutIgnorePendingStylesheets();
-    return toRenderBox(renderer())->width();
-}
-
-int HTMLFrameElementBase::height() const
-{
-    if (!renderer())
+    if (!renderBox())
         return 0;
-    
+    return renderBox()->width();
+}
+
+int HTMLFrameElementBase::height()
+{
     document()->updateLayoutIgnorePendingStylesheets();
-    return toRenderBox(renderer())->height();
+    if (!renderBox())
+        return 0;
+    return renderBox()->height();
 }
 
-void HTMLFrameElementBase::setRemainsAliveOnRemovalFromTree(bool value)
+#if ENABLE(FULLSCREEN_API)
+bool HTMLFrameElementBase::allowFullScreen() const
 {
-    m_remainsAliveOnRemovalFromTree = value;
-
-    // There is a possibility that JS will do document.adoptNode() on this element but will not insert it into the tree.
-    // Start the async timer that is normally stopped by attach(). If it's not stopped and fires, it'll unload the frame.
-    if (value)
-        m_checkAttachedTimer.startOneShot(0);
-    else
-        m_checkAttachedTimer.stop();
+    return hasAttribute(webkitallowfullscreenAttr);
 }
-
-void HTMLFrameElementBase::checkAttachedTimerFired(Timer<HTMLFrameElementBase>*)
-{
-    ASSERT(!attached());
-    ASSERT(m_remainsAliveOnRemovalFromTree);
-
-    m_remainsAliveOnRemovalFromTree = false;
-    willRemove();
-}
-
-void HTMLFrameElementBase::willRemove()
-{
-    if (m_remainsAliveOnRemovalFromTree)
-        return;
-
-    HTMLFrameOwnerElement::willRemove();
-}
+#endif
 
 } // namespace WebCore

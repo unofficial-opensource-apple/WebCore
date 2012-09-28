@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2009, 2011 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,13 +22,16 @@
 #include "config.h"
 #include "HTMLAreaElement.h"
 
+#include "AffineTransform.h"
+#include "Attribute.h"
+#include "Frame.h"
 #include "HTMLImageElement.h"
 #include "HTMLMapElement.h"
 #include "HTMLNames.h"
 #include "HitTestResult.h"
-#include "MappedAttribute.h"
 #include "Path.h"
-#include "RenderObject.h"
+#include "RenderImage.h"
+#include "RenderView.h"
 
 using namespace std;
 
@@ -50,7 +53,7 @@ PassRefPtr<HTMLAreaElement> HTMLAreaElement::create(const QualifiedName& tagName
     return adoptRef(new HTMLAreaElement(tagName, document));
 }
 
-void HTMLAreaElement::parseMappedAttribute(MappedAttribute* attr)
+void HTMLAreaElement::parseAttribute(Attribute* attr)
 {
     if (attr->name() == shapeAttr) {
         if (equalIgnoringCase(attr->value(), "default"))
@@ -61,22 +64,29 @@ void HTMLAreaElement::parseMappedAttribute(MappedAttribute* attr)
             m_shape = Poly;
         else if (equalIgnoringCase(attr->value(), "rect"))
             m_shape = Rect;
+        invalidateCachedRegion();
     } else if (attr->name() == coordsAttr) {
-        m_coords.set(newCoordsArray(attr->value().string(), m_coordsLen));
+        m_coords = newCoordsArray(attr->value().string(), m_coordsLen);
+        invalidateCachedRegion();
     } else if (attr->name() == altAttr || attr->name() == accesskeyAttr) {
         // Do nothing.
     } else
-        HTMLAnchorElement::parseMappedAttribute(attr);
+        HTMLAnchorElement::parseAttribute(attr);
 }
 
-bool HTMLAreaElement::mapMouseEvent(int x, int y, const IntSize& size, HitTestResult& result)
+void HTMLAreaElement::invalidateCachedRegion()
+{
+    m_lastSize = LayoutSize(-1, -1);
+}
+
+bool HTMLAreaElement::mapMouseEvent(LayoutPoint location, const LayoutSize& size, HitTestResult& result)
 {
     if (m_lastSize != size) {
-        m_region.set(new Path(getRegion(size)));
+        m_region = adoptPtr(new Path(getRegion(size)));
         m_lastSize = size;
     }
 
-    if (!m_region->contains(IntPoint(x, y)))
+    if (!m_region->contains(location))
         return false;
     
     result.setInnerNode(this);
@@ -84,7 +94,7 @@ bool HTMLAreaElement::mapMouseEvent(int x, int y, const IntSize& size, HitTestRe
     return true;
 }
 
-Path HTMLAreaElement::getPath(RenderObject* obj) const
+Path HTMLAreaElement::computePath(RenderObject* obj) const
 {
     if (!obj)
         return Path();
@@ -93,27 +103,34 @@ Path HTMLAreaElement::getPath(RenderObject* obj) const
     FloatPoint absPos = obj->localToAbsolute();
 
     // Default should default to the size of the containing object.
-    IntSize size = m_lastSize;
+    LayoutSize size = m_lastSize;
     if (m_shape == Default)
         size = obj->absoluteOutlineBounds().size();
     
     Path p = getRegion(size);
+    float zoomFactor = obj->style()->effectiveZoom();
+    if (zoomFactor != 1.0f) {
+        AffineTransform zoomTransform;
+        zoomTransform.scale(zoomFactor);
+        p.transform(zoomTransform);
+    }
+
     p.translate(absPos - FloatPoint());
     return p;
 }
     
-IntRect HTMLAreaElement::getRect(RenderObject* obj) const
+LayoutRect HTMLAreaElement::computeRect(RenderObject* obj) const
 {
-    return enclosingIntRect(getPath(obj).boundingRect());
+    return enclosingLayoutRect(computePath(obj).fastBoundingRect());
 }
 
-Path HTMLAreaElement::getRegion(const IntSize& size) const
+Path HTMLAreaElement::getRegion(const LayoutSize& size) const
 {
     if (!m_coords && m_shape != Default)
         return Path();
 
-    int width = size.width();
-    int height = size.height();
+    LayoutUnit width = size.width();
+    LayoutUnit height = size.height();
 
     // If element omits the shape attribute, select shape based on number of coordinates.
     Shape shape = m_shape;
@@ -127,29 +144,30 @@ Path HTMLAreaElement::getRegion(const IntSize& size) const
     }
 
     Path path;
+    RenderView* renderView = document()->renderView();
     switch (shape) {
         case Poly:
             if (m_coordsLen >= 6) {
                 int numPoints = m_coordsLen / 2;
-                path.moveTo(FloatPoint(m_coords[0].calcMinValue(width), m_coords[1].calcMinValue(height)));
+                path.moveTo(FloatPoint(minimumValueForLength(m_coords[0], width, renderView), minimumValueForLength(m_coords[1], height, renderView)));
                 for (int i = 1; i < numPoints; ++i)
-                    path.addLineTo(FloatPoint(m_coords[i * 2].calcMinValue(width), m_coords[i * 2 + 1].calcMinValue(height)));
+                    path.addLineTo(FloatPoint(minimumValueForLength(m_coords[i * 2], width, renderView), minimumValueForLength(m_coords[i * 2 + 1], height, renderView)));
                 path.closeSubpath();
             }
             break;
         case Circle:
             if (m_coordsLen >= 3) {
                 Length radius = m_coords[2];
-                int r = min(radius.calcMinValue(width), radius.calcMinValue(height));
-                path.addEllipse(FloatRect(m_coords[0].calcMinValue(width) - r, m_coords[1].calcMinValue(height) - r, 2 * r, 2 * r));
+                int r = min(minimumValueForLength(radius, width, renderView), minimumValueForLength(radius, height, renderView));
+                path.addEllipse(FloatRect(minimumValueForLength(m_coords[0], width, renderView) - r, minimumValueForLength(m_coords[1], height, renderView) - r, 2 * r, 2 * r));
             }
             break;
         case Rect:
             if (m_coordsLen >= 4) {
-                int x0 = m_coords[0].calcMinValue(width);
-                int y0 = m_coords[1].calcMinValue(height);
-                int x1 = m_coords[2].calcMinValue(width);
-                int y1 = m_coords[3].calcMinValue(height);
+                int x0 = minimumValueForLength(m_coords[0], width, renderView);
+                int y0 = minimumValueForLength(m_coords[1], height, renderView);
+                int x1 = minimumValueForLength(m_coords[2], width, renderView);
+                int y1 = minimumValueForLength(m_coords[3], height, renderView);
                 path.addRect(FloatRect(x0, y0, x1 - x0, y1 - y0));
             }
             break;
@@ -163,25 +181,10 @@ Path HTMLAreaElement::getRegion(const IntSize& size) const
     return path;
 }
 
-KURL HTMLAreaElement::href() const
-{
-    return document()->completeURL(getAttribute(hrefAttr));
-}
-
-bool HTMLAreaElement::noHref() const
-{
-    return !getAttribute(nohrefAttr).isNull();
-}
-
-void HTMLAreaElement::setNoHref(bool noHref)
-{
-    setAttribute(nohrefAttr, noHref ? "" : 0);
-}
-    
 HTMLImageElement* HTMLAreaElement::imageElement() const
 {
-    Node* mapElement = parent();
-    if (!mapElement->hasTagName(mapTag))
+    Node* mapElement = parentNode();
+    if (!mapElement || !mapElement->hasTagName(mapTag))
         return 0;
     
     return static_cast<HTMLMapElement*>(mapElement)->imageElement();
@@ -189,38 +192,51 @@ HTMLImageElement* HTMLAreaElement::imageElement() const
 
 bool HTMLAreaElement::isKeyboardFocusable(KeyboardEvent*) const
 {
-    return supportsFocus();
+    return isFocusable();
+}
+    
+bool HTMLAreaElement::isMouseFocusable() const
+{
+    return isFocusable();
 }
 
 bool HTMLAreaElement::isFocusable() const
 {
-    return supportsFocus();
+    HTMLImageElement* image = imageElement();
+    if (!image || !image->renderer() || image->renderer()->style()->visibility() != VISIBLE)
+        return false;
+
+    return supportsFocus() && Element::tabIndex() >= 0;
 }
     
-void HTMLAreaElement::dispatchBlurEvent()
+void HTMLAreaElement::setFocus(bool shouldBeFocused)
 {
-    HTMLAnchorElement::dispatchBlurEvent();
-    
-    // On a blur, we might need to remove our focus rings by repainting.
-    updateFocusAppearance(false);
+    if (focused() == shouldBeFocused)
+        return;
+
+    HTMLAnchorElement::setFocus(shouldBeFocused);
+
+    HTMLImageElement* imageElement = this->imageElement();
+    if (!imageElement)
+        return;
+
+    RenderObject* renderer = imageElement->renderer();
+    if (!renderer || !renderer->isImage())
+        return;
+
+    toRenderImage(renderer)->areaElementFocusChanged(this);
 }
     
 void HTMLAreaElement::updateFocusAppearance(bool restorePreviousSelection)
 {
-    Node* parent = parentNode();
-    if (!parent || !parent->hasTagName(mapTag))
+    if (!isFocusable())
         return;
-    
-    HTMLImageElement* imageElement = static_cast<HTMLMapElement*>(parent)->imageElement();
+
+    HTMLImageElement* imageElement = this->imageElement();
     if (!imageElement)
         return;
-    
-    // This will handle scrolling to the image if necessary.
+
     imageElement->updateFocusAppearance(restorePreviousSelection);
-    
-    RenderObject* imageRenderer = imageElement->renderer();
-    if (imageRenderer)
-        imageRenderer->setNeedsLayout(true);
 }
     
 bool HTMLAreaElement::supportsFocus() const
@@ -235,5 +251,17 @@ String HTMLAreaElement::target() const
 {
     return getAttribute(targetAttr);
 }
+
+#if ENABLE(MICRODATA)
+String HTMLAreaElement::itemValueText() const
+{
+    return getURLAttribute(hrefAttr);
+}
+
+void HTMLAreaElement::setItemValueText(const String& value, ExceptionCode&)
+{
+    setAttribute(hrefAttr, value);
+}
+#endif
 
 }

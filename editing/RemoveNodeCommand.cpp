@@ -41,8 +41,8 @@ RemoveNodeCommand::RemoveNodeCommand(PassRefPtr<Node> node)
 
 void RemoveNodeCommand::doApply()
 {
-    Node* parent = m_node->parentNode();
-    if (!parent || !parent->isContentEditable())
+    ContainerNode* parent = m_node->parentNode();
+    if (!parent || !parent->rendererIsEditable())
         return;
 
     m_parent = parent;
@@ -54,13 +54,22 @@ void RemoveNodeCommand::doApply()
 
 void RemoveNodeCommand::doUnapply()
 {
-    RefPtr<Node> parent = m_parent.release();
+    RefPtr<ContainerNode> parent = m_parent.release();
     RefPtr<Node> refChild = m_refChild.release();
-    if (!parent || !parent->isContentEditable())
+    if (!parent || !parent->rendererIsEditable())
         return;
 
     ExceptionCode ec;
     parent->insertBefore(m_node.get(), refChild.get(), ec);
 }
+
+#ifndef NDEBUG
+void RemoveNodeCommand::getNodesInCommand(HashSet<Node*>& nodes)
+{
+    addNodeAndDescendants(m_parent.get(), nodes);
+    addNodeAndDescendants(m_refChild.get(), nodes);
+    addNodeAndDescendants(m_node.get(), nodes);
+}
+#endif
 
 }

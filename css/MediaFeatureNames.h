@@ -20,7 +20,7 @@
 #ifndef MediaFeatureNames_h
 #define MediaFeatureNames_h
 
-#include "AtomicString.h"
+#include <wtf/text/AtomicString.h>
 
 namespace WebCore {
     namespace MediaFeatureNames {
@@ -59,11 +59,17 @@ namespace WebCore {
     macro(transform_3d, "-webkit-transform-3d") \
     macro(transition, "-webkit-transition") \
     macro(animation, "-webkit-animation") \
+    macro(view_mode, "-webkit-view-mode")
+
 // end of macro
+
+#define CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE_IOS(macro) \
+    CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE(macro) \
+    macro(video_playable_inline, "-webkit-video-playable-inline")
 
 #ifndef CSS_MEDIAQUERY_NAMES_HIDE_GLOBALS
     #define CSS_MEDIAQUERY_NAMES_DECLARE(name, str) extern const AtomicString name##MediaFeature;
-    CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE(CSS_MEDIAQUERY_NAMES_DECLARE)
+    CSS_MEDIAQUERY_NAMES_FOR_EACH_MEDIAFEATURE_IOS(CSS_MEDIAQUERY_NAMES_DECLARE)
     #undef CSS_MEDIAQUERY_NAMES_DECLARE
 #endif
 

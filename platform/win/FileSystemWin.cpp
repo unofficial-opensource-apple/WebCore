@@ -30,46 +30,66 @@
 #include "config.h"
 #include "FileSystem.h"
 
-#include "CString.h"
 #include "NotImplemented.h"
-#include "PlatformString.h"
+#include "PathWalker.h"
+#include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/HashMap.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 
 #include <windows.h>
-#include <winbase.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 
 namespace WebCore {
 
-static bool statFile(String path, struct _stat64& st)
+static const ULONGLONG kSecondsFromFileTimeToTimet = 11644473600;
+
+static bool getFindData(String path, WIN32_FIND_DATAW& findData)
 {
-    ASSERT_ARG(path, !path.isNull());
-    return !_wstat64(path.charactersWithNullTermination(), &st) && (st.st_mode & _S_IFMT) == _S_IFREG;
+    HANDLE handle = FindFirstFileW(path.charactersWithNullTermination(), &findData);
+    if (handle == INVALID_HANDLE_VALUE)
+        return false;
+    FindClose(handle);
+    return true;
 }
 
 bool getFileSize(const String& path, long long& result)
 {
-    struct _stat64 sb;
-    if (!statFile(path, sb))
+    WIN32_FIND_DATAW findData;
+    if (!getFindData(path, findData))
         return false;
-    result = sb.st_size;
+
+    ULARGE_INTEGER fileSize;
+    fileSize.HighPart = findData.nFileSizeHigh;
+    fileSize.LowPart = findData.nFileSizeLow;
+
+    if (fileSize.QuadPart > static_cast<ULONGLONG>(std::numeric_limits<long long>::max()))
+        return false;
+
+    result = fileSize.QuadPart;
     return true;
 }
 
 bool getFileModificationTime(const String& path, time_t& result)
 {
-    struct _stat64 st;
-    if (!statFile(path, st))
+    WIN32_FIND_DATAW findData;
+    if (!getFindData(path, findData))
         return false;
-    result = st.st_mtime;
+
+    ULARGE_INTEGER fileSize;
+    fileSize.HighPart = findData.ftLastWriteTime.dwHighDateTime;
+    fileSize.LowPart = findData.ftLastWriteTime.dwLowDateTime;
+
+    // Information about converting time_t to FileTime is available at http://msdn.microsoft.com/en-us/library/ms724228%28v=vs.85%29.aspx
+    result = fileSize.QuadPart / 10000000 - kSecondsFromFileTimeToTimet;
     return true;
 }
 
-bool fileExists(const String& path) 
+bool fileExists(const String& path)
 {
-    struct _stat64 st;
-    return statFile(path, st);
+    WIN32_FIND_DATAW findData;
+    return getFindData(path, findData);
 }
 
 bool deleteFile(const String& path)
@@ -103,10 +123,15 @@ String pathByAppendingComponent(const String& path, const String& component)
     return String::adopt(buffer);
 }
 
+#if !USE(CF)
+
 CString fileSystemRepresentation(const String&)
 {
+    ASSERT_NOT_REACHED();
     return "";
 }
+
+#endif !USE(CF)
 
 bool makeAllDirectories(const String& path)
 {
@@ -134,16 +159,20 @@ String pathGetFileName(const String& path)
 
 String directoryName(const String& path)
 {
-    String fileName = pathGetFileName(path);
-    String dirName = String(path);
-    dirName.truncate(dirName.length() - pathGetFileName(path).length());
-    return dirName;
+    String name = path.left(path.length() - pathGetFileName(path).length());
+    if (name.characterStartingAt(name.length() - 1) == '\\') {
+        // Remove any trailing "\".
+        name.truncate(name.length() - 1);
+    }
+    return name;
 }
 
 static String bundleName()
 {
-    static bool initialized;
     static String name = "WebKit";
+
+#if USE(CF)
+    static bool initialized;
 
     if (!initialized) {
         initialized = true;
@@ -153,6 +182,7 @@ static String bundleName()
                 if (CFGetTypeID(bundleExecutable) == CFStringGetTypeID())
                     name = reinterpret_cast<CFStringRef>(bundleExecutable);
     }
+#endif
 
     return name;
 }
@@ -187,25 +217,20 @@ static String cachedStorageDirectory(DWORD pathIdentifier)
     return directory;
 }
 
-CString openTemporaryFile(const char*, PlatformFileHandle& handle)
+String openTemporaryFile(const String&, PlatformFileHandle& handle)
 {
     handle = INVALID_HANDLE_VALUE;
 
-    char tempPath[MAX_PATH];
-    int tempPathLength = ::GetTempPathA(_countof(tempPath), tempPath);
-    if (tempPathLength <= 0 || tempPathLength > _countof(tempPath))
-        return CString();
+    wchar_t tempPath[MAX_PATH];
+    int tempPathLength = ::GetTempPathW(WTF_ARRAY_LENGTH(tempPath), tempPath);
+    if (tempPathLength <= 0 || tempPathLength > WTF_ARRAY_LENGTH(tempPath))
+        return String();
 
-    HCRYPTPROV hCryptProv = 0;
-    if (!CryptAcquireContext(&hCryptProv, 0, 0, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
-        return CString();
-
-    char proposedPath[MAX_PATH];
-    while (1) {
-        char tempFile[] = "XXXXXXXX.tmp"; // Use 8.3 style name (more characters aren't helpful due to 8.3 short file names)
+    String proposedPath;
+    do {
+        wchar_t tempFile[] = L"XXXXXXXX.tmp"; // Use 8.3 style name (more characters aren't helpful due to 8.3 short file names)
         const int randomPartLength = 8;
-        if (!CryptGenRandom(hCryptProv, randomPartLength, reinterpret_cast<BYTE*>(tempFile)))
-            break;
+        cryptographicallyRandomValues(tempFile, randomPartLength * sizeof(wchar_t));
 
         // Limit to valid filesystem characters, also excluding others that could be problematic, like punctuation.
         // don't include both upper and lowercase since Windows file systems are typically not case sensitive.
@@ -213,25 +238,41 @@ CString openTemporaryFile(const char*, PlatformFileHandle& handle)
         for (int i = 0; i < randomPartLength; ++i)
             tempFile[i] = validChars[tempFile[i] % (sizeof(validChars) - 1)];
 
-        ASSERT(strlen(tempFile) == sizeof(tempFile) - 1);
+        ASSERT(wcslen(tempFile) == WTF_ARRAY_LENGTH(tempFile) - 1);
 
-        if (!PathCombineA(proposedPath, tempPath, tempFile))
+        proposedPath = pathByAppendingComponent(tempPath, tempFile);
+        if (proposedPath.isEmpty())
             break;
- 
+
         // use CREATE_NEW to avoid overwriting an existing file with the same name
-        handle = CreateFileA(proposedPath, GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
-        if (!isHandleValid(handle) && GetLastError() == ERROR_ALREADY_EXISTS)
-            continue;
-
-        break;
-    }
-
-    CryptReleaseContext(hCryptProv, 0);
+        handle = ::CreateFileW(proposedPath.charactersWithNullTermination(), GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+    } while (!isHandleValid(handle) && GetLastError() == ERROR_ALREADY_EXISTS);
 
     if (!isHandleValid(handle))
-        return CString();
+        return String();
 
     return proposedPath;
+}
+
+PlatformFileHandle openFile(const String& path, FileOpenMode mode)
+{
+    DWORD desiredAccess = 0;
+    DWORD creationDisposition = 0;
+    switch (mode) {
+    case OpenForRead:
+        desiredAccess = GENERIC_READ;
+        creationDisposition = OPEN_EXISTING;
+        break;
+    case OpenForWrite:
+        desiredAccess = GENERIC_WRITE;
+        creationDisposition = CREATE_ALWAYS;
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
+
+    String destination = path;
+    return CreateFile(destination.charactersWithNullTermination(), desiredAccess, 0, 0, creationDisposition, FILE_ATTRIBUTE_NORMAL, 0);
 }
 
 void closeFile(PlatformFileHandle& handle)
@@ -270,11 +311,13 @@ String roamingUserSpecificStorageDirectory()
     return cachedStorageDirectory(CSIDL_APPDATA);
 }
 
+#if USE(CF)
+
 bool safeCreateFile(const String& path, CFDataRef data)
 {
     // Create a temporary file.
     WCHAR tempDirPath[MAX_PATH];
-    if (!GetTempPathW(ARRAYSIZE(tempDirPath), tempDirPath))
+    if (!GetTempPathW(WTF_ARRAY_LENGTH(tempDirPath), tempDirPath))
         return false;
 
     WCHAR tempPath[MAX_PATH];
@@ -300,10 +343,23 @@ bool safeCreateFile(const String& path, CFDataRef data)
     return true;
 }
 
-Vector<String> listDirectory(const String& path, const String& filter)
+#endif // USE(CF)
+
+Vector<String> listDirectory(const String& directory, const String& filter)
 {
     Vector<String> entries;
-    notImplemented();
+
+    PathWalker walker(directory, filter);
+    if (!walker.isValid())
+        return entries;
+
+    do {
+        if (walker.data().dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+
+        entries.append(directory + "\\" + reinterpret_cast<const UChar*>(walker.data().cFileName));
+    } while (walker.step());
+
     return entries;
 }
 

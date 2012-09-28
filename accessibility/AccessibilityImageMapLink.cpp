@@ -33,18 +33,15 @@
 #include "AccessibilityRenderObject.h"
 #include "Document.h"
 #include "HTMLNames.h"
-#include "IntRect.h"
-#include "RenderObject.h"
-
-using namespace std;
+#include "RenderBoxModelObject.h"
 
 namespace WebCore {
     
 using namespace HTMLNames;
 
 AccessibilityImageMapLink::AccessibilityImageMapLink()
-    : m_areaElement(0), 
-      m_mapElement(0)
+    : m_areaElement(0)
+    , m_mapElement(0)
 {
 }
 
@@ -62,7 +59,7 @@ AccessibilityObject* AccessibilityImageMapLink::parentObject() const
     if (m_parent)
         return m_parent;
     
-    if (!m_mapElement || !m_mapElement->renderer())
+    if (!m_mapElement.get() || !m_mapElement->renderer())
         return 0;
     
     return m_mapElement->document()->axObjectCache()->getOrCreate(m_mapElement->renderer());
@@ -73,7 +70,7 @@ AccessibilityRole AccessibilityImageMapLink::roleValue() const
     if (!m_areaElement)
         return WebCoreLinkRole;
     
-    const AtomicString& ariaRole = m_areaElement->getAttribute(roleAttr);
+    const AtomicString& ariaRole = getAttribute(roleAttr);
     if (!ariaRole.isEmpty())
         return AccessibilityObject::ariaRoleToWebCoreRole(ariaRole);
 
@@ -87,12 +84,12 @@ Element* AccessibilityImageMapLink::actionElement() const
     
 Element* AccessibilityImageMapLink::anchorElement() const
 {
-    return m_areaElement;
+    return m_areaElement.get();
 }
 
 KURL AccessibilityImageMapLink::url() const
 {
-    if (!m_areaElement)
+    if (!m_areaElement.get())
         return KURL();
     
     return m_areaElement->href();
@@ -100,10 +97,10 @@ KURL AccessibilityImageMapLink::url() const
     
 String AccessibilityImageMapLink::accessibilityDescription() const
 {
-    if (!m_areaElement)
-        return String();
-
-    const AtomicString& alt = m_areaElement->getAttribute(altAttr);
+    const AtomicString& ariaLabel = getAttribute(aria_labelAttr);
+    if (!ariaLabel.isEmpty())
+        return ariaLabel;
+    const AtomicString& alt = getAttribute(altAttr);
     if (!alt.isEmpty())
         return alt;
 
@@ -112,23 +109,20 @@ String AccessibilityImageMapLink::accessibilityDescription() const
     
 String AccessibilityImageMapLink::title() const
 {
-    if (!m_areaElement)
-        return String();
-    
-    const AtomicString& title = m_areaElement->getAttribute(titleAttr);
+    const AtomicString& title = getAttribute(titleAttr);
     if (!title.isEmpty())
         return title;
-    const AtomicString& summary = m_areaElement->getAttribute(summaryAttr);
+    const AtomicString& summary = getAttribute(summaryAttr);
     if (!summary.isEmpty())
         return summary;
 
     return String();
 }
-    
-IntRect AccessibilityImageMapLink::elementRect() const
+
+LayoutRect AccessibilityImageMapLink::elementRect() const
 {
-    if (!m_mapElement || !m_areaElement)
-        return IntRect();
+    if (!m_mapElement.get() || !m_areaElement.get())
+        return LayoutRect();
 
     RenderObject* renderer;
     if (m_parent && m_parent->isAccessibilityRenderObject())
@@ -137,16 +131,11 @@ IntRect AccessibilityImageMapLink::elementRect() const
         renderer = m_mapElement->renderer();
     
     if (!renderer)
-        return IntRect();
+        return LayoutRect();
     
-    return m_areaElement->getRect(renderer);
+    return m_areaElement->computeRect(renderer);
 }
     
-IntSize AccessibilityImageMapLink::size() const
-{
-    return elementRect().size();
-}
-
 String AccessibilityImageMapLink::stringValueForMSAA() const
 {
     return url();

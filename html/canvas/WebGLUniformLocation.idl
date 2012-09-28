@@ -25,6 +25,8 @@
  */
 
 module html {
-    interface [Conditional=3D_CANVAS, OmitConstructor] WebGLUniformLocation {
+    interface [
+        Conditional=WEBGL
+    ] WebGLUniformLocation {
     };
 }

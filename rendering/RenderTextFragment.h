@@ -35,10 +35,11 @@ class RenderTextFragment : public RenderText {
 public:
     RenderTextFragment(Node*, StringImpl*, int startOffset, int length);
     RenderTextFragment(Node*, StringImpl*);
+    virtual ~RenderTextFragment();
 
     virtual bool isTextFragment() const { return true; }
 
-    virtual void destroy();
+    virtual bool canBeSelectionLeaf() const OVERRIDE { return node() && node()->rendererIsEditable(); }
 
     unsigned start() const { return m_start; }
     unsigned end() const { return m_end; }
@@ -49,15 +50,39 @@ public:
     StringImpl* contentString() const { return m_contentString.get(); }
     virtual PassRefPtr<StringImpl> originalText() const;
 
+    virtual void setText(PassRefPtr<StringImpl>, bool force = false) OVERRIDE;
+
+    virtual void transformText() OVERRIDE;
+
+protected:
+    virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
+
 private:
-    virtual void setTextInternal(PassRefPtr<StringImpl>);
-    virtual UChar previousCharacter();
+    virtual void willBeDestroyed();
+
+    virtual UChar previousCharacter() const;
+    RenderBlock* blockForAccompanyingFirstLetter() const;
 
     unsigned m_start;
     unsigned m_end;
     RefPtr<StringImpl> m_contentString;
     RenderObject* m_firstLetter;
 };
+
+inline RenderTextFragment* toRenderTextFragment(RenderObject* object)
+{ 
+    ASSERT(!object || toRenderText(object)->isTextFragment());
+    return static_cast<RenderTextFragment*>(object);
+}
+
+inline const RenderTextFragment* toRenderTextFragment(const RenderObject* object)
+{ 
+    ASSERT(!object || toRenderText(object)->isTextFragment());
+    return static_cast<const RenderTextFragment*>(object);
+}
+
+// This will catch anyone doing an unnecessary cast.
+void toRenderTextFragment(const RenderTextFragment*);
 
 } // namespace WebCore
 

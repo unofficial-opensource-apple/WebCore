@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2009, 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,27 +31,33 @@
 #ifndef DocumentThreadableLoader_h
 #define DocumentThreadableLoader_h
 
+#include "CachedRawResource.h"
+#include "CachedResourceHandle.h"
 #include "FrameLoaderTypes.h"
-#include "SubresourceLoaderClient.h"
 #include "ThreadableLoader.h"
+#include <wtf/Forward.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
     class Document;
     class KURL;
     class ResourceRequest;
+    class SecurityOrigin;
     class ThreadableLoaderClient;
 
-    class DocumentThreadableLoader : public RefCounted<DocumentThreadableLoader>, public ThreadableLoader, private SubresourceLoaderClient  {
+    class DocumentThreadableLoader : public RefCounted<DocumentThreadableLoader>, public ThreadableLoader, private CachedRawResourceClient  {
+        WTF_MAKE_FAST_ALLOCATED;
     public:
         static void loadResourceSynchronously(Document*, const ResourceRequest&, ThreadableLoaderClient&, const ThreadableLoaderOptions&);
         static PassRefPtr<DocumentThreadableLoader> create(Document*, ThreadableLoaderClient*, const ResourceRequest&, const ThreadableLoaderOptions&);
         virtual ~DocumentThreadableLoader();
 
         virtual void cancel();
+        virtual void setDefersLoading(bool);
 
         using RefCounted<DocumentThreadableLoader>::ref;
         using RefCounted<DocumentThreadableLoader>::deref;
@@ -66,36 +72,46 @@ namespace WebCore {
             LoadAsynchronously
         };
 
-        DocumentThreadableLoader(Document*, ThreadableLoaderClient*, BlockingBehavior blockingBehavior, const ResourceRequest&, const ThreadableLoaderOptions& options);
+        DocumentThreadableLoader(Document*, ThreadableLoaderClient*, BlockingBehavior, const ResourceRequest&, const ThreadableLoaderOptions&);
 
-        virtual void willSendRequest(SubresourceLoader*, ResourceRequest&, const ResourceResponse& redirectResponse);
-        virtual void didSendData(SubresourceLoader*, unsigned long long bytesSent, unsigned long long totalBytesToBeSent);
+        void clearResource();
 
-        virtual void didReceiveResponse(SubresourceLoader*, const ResourceResponse&);
-        virtual void didReceiveData(SubresourceLoader*, const char*, int lengthReceived);
-        virtual void didFinishLoading(SubresourceLoader*);
-        virtual void didFail(SubresourceLoader*, const ResourceError&);
+        // CachedRawResourceClient
+        virtual void dataSent(CachedResource*, unsigned long long bytesSent, unsigned long long totalBytesToBeSent);
+        virtual void responseReceived(CachedResource*, const ResourceResponse&);
+        virtual void dataReceived(CachedResource*, const char* data, int dataLength);
+        virtual void redirectReceived(CachedResource*, ResourceRequest&, const ResourceResponse&);
+        virtual void notifyFinished(CachedResource*);
+#if PLATFORM(CHROMIUM)
+        virtual void dataDownloaded(CachedResource*, int);
+#endif
 
-        virtual bool getShouldUseCredentialStorage(SubresourceLoader*, bool& shouldUseCredentialStorage);
-        virtual void didReceiveAuthenticationChallenge(SubresourceLoader*, const AuthenticationChallenge&);
-        virtual void receivedCancellation(SubresourceLoader*, const AuthenticationChallenge&);
-
-        void didFinishLoading(unsigned long identifier);
+        void didReceiveResponse(unsigned long identifier, const ResourceResponse&);
+        void didFinishLoading(unsigned long identifier, double finishTime);
+        void didFail(const ResourceError&);
+        void makeCrossOriginAccessRequest(const ResourceRequest&);
         void makeSimpleCrossOriginAccessRequest(const ResourceRequest& request);
         void makeCrossOriginAccessRequestWithPreflight(const ResourceRequest& request);
         void preflightSuccess();
-        void preflightFailure();
+        void preflightFailure(const String& url, const String& errorDescription);
 
         void loadRequest(const ResourceRequest&, SecurityCheckPolicy);
         bool isAllowedRedirect(const KURL&);
 
-        RefPtr<SubresourceLoader> m_loader;
+        SecurityOrigin* securityOrigin() const;
+
+        CachedResourceHandle<CachedRawResource> m_resource;
         ThreadableLoaderClient* m_client;
         Document* m_document;
         ThreadableLoaderOptions m_options;
         bool m_sameOriginRequest;
+        bool m_simpleRequest;
         bool m_async;
         OwnPtr<ResourceRequest> m_actualRequest;  // non-null during Access Control preflight checks
+
+#if ENABLE(INSPECTOR)
+        unsigned long m_preflightRequestIdentifier;
+#endif
     };
 
 } // namespace WebCore

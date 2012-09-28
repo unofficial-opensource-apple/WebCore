@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2009, 2010, 2011 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,15 +29,18 @@
 #if ENABLE(VIDEO)
 
 #include "MediaPlayer.h"
+#include "TimeRanges.h"
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
 class IntRect;
 class IntSize;
-class String;
 
-class MediaPlayerPrivateInterface : public Noncopyable {
+class MediaPlayerPrivateInterface {
+    WTF_MAKE_NONCOPYABLE(MediaPlayerPrivateInterface); WTF_MAKE_FAST_ALLOCATED;
 public:
+    MediaPlayerPrivateInterface() { }
     virtual ~MediaPlayerPrivateInterface() { }
 
     virtual void load(const String& url) = 0;
@@ -45,12 +48,16 @@ public:
     
     virtual void prepareToPlay() { }
     virtual PlatformMedia platformMedia() const { return NoPlatformMedia; }
+#if USE(ACCELERATED_COMPOSITING)
+    virtual PlatformLayer* platformLayer() const { return 0; }
+#endif
 
     virtual void play() = 0;
     virtual void pause() = 0;    
 
     virtual bool supportsFullscreen() const { return false; }
     virtual bool supportsSave() const { return false; }
+    virtual bool supportsScanning() const { return false; }
 
     virtual IntSize naturalSize() const = 0;
 
@@ -67,12 +74,18 @@ public:
 
     virtual float startTime() const { return 0; }
 
+    virtual double initialTime() const { return 0; }
+
     virtual void setRate(float) = 0;
     virtual void setPreservesPitch(bool) { }
 
     virtual bool paused() const = 0;
 
     virtual void setVolume(float) = 0;
+    virtual float volume() const { return 1; }
+
+    virtual bool supportsMuting() const { return false; }
+    virtual void setMuted(bool) { }
 
     virtual bool hasClosedCaptions() const { return false; }    
     virtual void setClosedCaptionsVisible(bool) { }
@@ -80,6 +93,7 @@ public:
     virtual MediaPlayer::NetworkState networkState() const = 0;
     virtual MediaPlayer::ReadyState readyState() const = 0;
 
+    virtual PassRefPtr<TimeRanges> seekable() const { return maxTimeSeekable() ? TimeRanges::create(0, maxTimeSeekable()) : TimeRanges::create(); }
     virtual float maxTimeSeekable() const = 0;
     virtual PassRefPtr<TimeRanges> buffered() const = 0;
 
@@ -91,7 +105,7 @@ public:
 
     virtual void paintCurrentFrameInContext(GraphicsContext* c, const IntRect& r) { paint(c, r); }
 
-    virtual void setAutobuffer(bool) { };
+    virtual void setPreload(MediaPlayer::Preload) { };
 
     virtual bool hasAvailableVideoFrame() const { return readyState() >= MediaPlayer::HaveCurrentData; }
 
@@ -102,8 +116,11 @@ public:
     virtual void deliverNotification(MediaPlayerProxyNotificationType) = 0;
     virtual void setMediaPlayerProxy(WebMediaPlayerProxy*) = 0;
     virtual void setControls(bool) { }
-    virtual void enterFullScreen() { }
-    virtual void exitFullScreen() { }
+#endif
+
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO) || USE(NATIVE_FULLSCREEN_VIDEO)
+    virtual bool enterFullscreen() const { return false; }
+    virtual void exitFullscreen() { }
 #endif
 
 #if USE(ACCELERATED_COMPOSITING)
@@ -117,6 +134,48 @@ public:
 
     virtual MediaPlayer::MovieLoadType movieLoadType() const { return MediaPlayer::Unknown; }
 
+    virtual void prepareForRendering() { }
+
+    // Time value in the movie's time scale. It is only necessary to override this if the media
+    // engine uses rational numbers to represent media time.
+    virtual float mediaTimeForTimeValue(float timeValue) const { return timeValue; }
+
+    // Overide this if it is safe for HTMLMediaElement to cache movie time and report
+    // 'currentTime' as [cached time + elapsed wall time]. Returns the maximum wall time
+    // it is OK to calculate movie time before refreshing the cached time.
+    virtual double maximumDurationToCacheMediaTime() const { return 0; }
+
+    virtual unsigned decodedFrameCount() const { return 0; }
+    virtual unsigned droppedFrameCount() const { return 0; }
+    virtual unsigned audioDecodedByteCount() const { return 0; }
+    virtual unsigned videoDecodedByteCount() const { return 0; }
+
+    void getSitesInMediaCache(Vector<String>&) { }
+    void clearMediaCache() { }
+    void clearMediaCacheForSite(const String&) { }
+
+    virtual void setPrivateBrowsingMode(bool) { }
+
+
+#if ENABLE(WEB_AUDIO)
+    virtual AudioSourceProvider* audioSourceProvider() { return 0; }
+#endif
+
+#if ENABLE(MEDIA_SOURCE)
+    virtual MediaPlayer::AddIdStatus sourceAddId(const String&, const String&) { return MediaPlayer::NotSupported; }
+    virtual bool sourceRemoveId(const String&) { return false; }
+    virtual bool sourceAppend(const unsigned char*, unsigned) { return false; }
+    virtual void sourceEndOfStream(MediaPlayer::EndOfStreamStatus) { };
+#endif
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    virtual MediaPlayer::MediaKeyException addKey(const String& keySystem, const unsigned char* key, unsigned keyLength, const unsigned char* initData, unsigned initDataLength, const String& sessionId) { return MediaPlayer::KeySystemNotSupported; }
+    virtual MediaPlayer::MediaKeyException generateKeyRequest(const String& keySystem, const unsigned char* initData, unsigned initDataLength) { return MediaPlayer::KeySystemNotSupported; }
+    virtual MediaPlayer::MediaKeyException cancelKeyRequest(const String& keySystem, const String& sessionId) { return MediaPlayer::KeySystemNotSupported; }
+#endif
+
+    virtual void attributeChanged(const String&, const String&) { }
+    virtual bool readyForPlayback() const { return true; }
 };
 
 }

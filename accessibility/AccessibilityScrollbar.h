@@ -29,34 +29,39 @@
 #ifndef AccessibilityScrollbar_h
 #define AccessibilityScrollbar_h
 
-#include "AccessibilityObject.h"
+#include "AccessibilityMockObject.h"
 
 namespace WebCore {
 
 class Scrollbar;
 
-class AccessibilityScrollbar : public AccessibilityObject {
+class AccessibilityScrollbar : public AccessibilityMockObject {
 public:
-    static PassRefPtr<AccessibilityScrollbar> create();
+    static PassRefPtr<AccessibilityScrollbar> create(Scrollbar*);
 
-    void setScrollbar(Scrollbar* scrollbar) { m_scrollbar = scrollbar; }
-
-    virtual AccessibilityRole roleValue() const { return ScrollBarRole; }
-
-    virtual float valueForRange() const;
-
+    Scrollbar* scrollbar() const { return m_scrollbar.get(); }
+    
 private:
-    AccessibilityScrollbar();
+    AccessibilityScrollbar(Scrollbar*);
 
     virtual bool accessibilityIsIgnored() const { return false; }
+    virtual bool canSetValueAttribute() const { return true; }
+    virtual bool canSetNumericValue() const { return true; }
 
-    // These should never be reached since the AccessibilityScrollbar is not part of
-    // the accessibility tree.
-    virtual IntSize size() const { ASSERT_NOT_REACHED(); return IntSize(); }
-    virtual IntRect elementRect() const { ASSERT_NOT_REACHED(); return IntRect(); }
-    virtual AccessibilityObject* parentObject() const { ASSERT_NOT_REACHED(); return 0; }
+    virtual bool isAccessibilityScrollbar() const { return true; }
+    virtual LayoutRect elementRect() const;
+    
+    virtual AccessibilityRole roleValue() const { return ScrollBarRole; }
+    virtual AccessibilityOrientation orientation() const;
+    virtual Document* document() const;
+    virtual bool isEnabled() const;
+    
+    // Assumes float [0..1]
+    virtual void setValue(float);
+    virtual float valueForRange() const;
 
-    Scrollbar* m_scrollbar;
+    RefPtr<Scrollbar> m_scrollbar;
+    AccessibilityOrientation m_orientation;
 };
 
 } // namespace WebCore

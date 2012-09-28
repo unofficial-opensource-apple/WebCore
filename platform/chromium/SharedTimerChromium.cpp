@@ -26,23 +26,25 @@
 #include "config.h"
 #include "SharedTimer.h"
 
-#include "ChromiumBridge.h"
+#include "PlatformSupport.h"
+
+#include <public/Platform.h>
 
 namespace WebCore {
 
 void setSharedTimerFiredFunction(void (*f)())
 {                   
-    ChromiumBridge::setSharedTimerFiredFunction(f);
+    PlatformSupport::setSharedTimerFiredFunction(f);
 }
 
-void setSharedTimerFireTime(double fireTime)
+void setSharedTimerFireInterval(double fireTime)
 {
-    ChromiumBridge::setSharedTimerFireTime(fireTime);
+    PlatformSupport::setSharedTimerFireInterval(fireTime);
 }
 
 void stopSharedTimer()
 {
-    ChromiumBridge::stopSharedTimer();
+    WebKit::Platform::current()->stopSharedTimer();
 }
 
 } // namespace WebCore

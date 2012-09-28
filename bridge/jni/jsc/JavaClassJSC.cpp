@@ -26,10 +26,11 @@
 #include "config.h"
 #include "JavaClassJSC.h"
 
-#if ENABLE(MAC_JAVA_BRIDGE)
+#if ENABLE(JAVA_BRIDGE)
 
-#include "JNIUtility.h"
 #include "JSDOMWindow.h"
+#include "JavaFieldJSC.h"
+#include "JavaMethodJSC.h"
 #include <runtime/Identifier.h>
 #include <runtime/JSLock.h>
 
@@ -40,17 +41,17 @@ JavaClass::JavaClass(jobject anInstance)
     jobject aClass = callJNIMethod<jobject>(anInstance, "getClass", "()Ljava/lang/Class;");
 
     if (!aClass) {
-        fprintf(stderr, "%s:  unable to call getClass on instance %p\n", __PRETTY_FUNCTION__, anInstance);
-        m_name = strdup("<Unknown>");
+        LOG_ERROR("Unable to call getClass on instance %p", anInstance);
+        m_name = fastStrDup("<Unknown>");
         return;
     }
 
     if (jstring className = (jstring)callJNIMethod<jobject>(aClass, "getName", "()Ljava/lang/String;")) {
         const char* classNameC = getCharactersFromJString(className);
-        m_name = strdup(classNameC);
+        m_name = fastStrDup(classNameC);
         releaseCharactersForJString(className, classNameC);
     } else
-        m_name = strdup("<Unknown>");
+        m_name = fastStrDup("<Unknown>");
 
     int i;
     JNIEnv* env = getJNIEnv();
@@ -62,8 +63,8 @@ JavaClass::JavaClass(jobject anInstance)
             jobject aJField = env->GetObjectArrayElement((jobjectArray)fields, i);
             JavaField* aField = new JavaField(env, aJField); // deleted in the JavaClass destructor
             {
-                JSLock lock(SilenceAssertionsOnly);
-                m_fields.set(((UString)aField->name()).rep(), aField);
+                // FIXME: Should we acquire a JSLock here?
+                m_fields.set(aField->name().impl(), aField);
             }
             env->DeleteLocalRef(aJField);
         }
@@ -78,12 +79,12 @@ JavaClass::JavaClass(jobject anInstance)
             JavaMethod* aMethod = new JavaMethod(env, aJMethod); // deleted in the JavaClass destructor
             MethodList* methodList;
             {
-                JSLock lock(SilenceAssertionsOnly);
+                // FIXME: Should we acquire a JSLock here?
 
-                methodList = m_methods.get(((UString)aMethod->name()).rep());
+                methodList = m_methods.get(aMethod->name().impl());
                 if (!methodList) {
                     methodList = new MethodList();
-                    m_methods.set(((UString)aMethod->name()).rep(), methodList);
+                    m_methods.set(aMethod->name().impl(), methodList);
                 }
             }
             methodList->append(aMethod);
@@ -97,9 +98,9 @@ JavaClass::JavaClass(jobject anInstance)
 
 JavaClass::~JavaClass()
 {
-    free(const_cast<char*>(m_name));
+    fastFree(const_cast<char*>(m_name));
 
-    JSLock lock(SilenceAssertionsOnly);
+    // FIXME: Should we acquire a JSLock here?
 
     deleteAllValues(m_fields);
     m_fields.clear();
@@ -115,7 +116,7 @@ JavaClass::~JavaClass()
 
 MethodList JavaClass::methodsNamed(const Identifier& identifier, Instance*) const
 {
-    MethodList* methodList = m_methods.get(identifier.ustring().rep());
+    MethodList* methodList = m_methods.get(identifier.ustring().impl());
 
     if (methodList)
         return *methodList;
@@ -124,7 +125,7 @@ MethodList JavaClass::methodsNamed(const Identifier& identifier, Instance*) cons
 
 Field* JavaClass::fieldNamed(const Identifier& identifier, Instance*) const
 {
-    return m_fields.get(identifier.ustring().rep());
+    return m_fields.get(identifier.ustring().impl());
 }
 
 bool JavaClass::isNumberClass() const
@@ -147,4 +148,4 @@ bool JavaClass::isStringClass() const
     return !strcmp(m_name, "java.lang.String");
 }
 
-#endif // ENABLE(MAC_JAVA_BRIDGE)
+#endif // ENABLE(JAVA_BRIDGE)

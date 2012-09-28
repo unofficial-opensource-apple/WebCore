@@ -42,9 +42,9 @@ ContextMenuItem* ContextMenu::itemWithId(int id)
     return new ContextMenuItem(ActionType, s_itemActions.get(id), "");
 }
 
-ContextMenu::ContextMenu(const HitTestResult& result) : m_hitTestResult(result)
+ContextMenu::ContextMenu()
 {
-    m_platformDescription = new wxMenu(0);
+    m_platformDescription = new wxMenu((long)0);
 }
 
 ContextMenu::~ContextMenu()
@@ -57,8 +57,6 @@ void ContextMenu::appendItem(ContextMenuItem& item)
 {
     if (!m_platformDescription)
         return;
-    
-    checkOrEnableIfNeeded(item);
         
     PlatformMenuItemDescription itemDescription = item.releasePlatformDescription();    
     wxItemKind menuKindWx = ( itemDescription.type == CheckableActionType ) ? wxITEM_CHECK : wxITEM_NORMAL;
@@ -111,4 +109,12 @@ PlatformMenuDescription ContextMenu::releasePlatformDescription()
     m_platformDescription = 0;
 
     return description;
+}
+
+unsigned ContextMenu::itemCount() const
+{
+    if (m_platformDescription)
+        return m_platformDescription->GetMenuItemCount();
+    
+    return 0;
 }

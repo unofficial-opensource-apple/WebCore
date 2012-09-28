@@ -27,16 +27,19 @@
 #include "config.h"
 #include "Image.h"
 
-#include "TransformationMatrix.h"
+#include "AffineTransform.h"
 #include "BitmapImage.h"
 #include "GraphicsContext.h"
 #include "IntRect.h"
+#include "Length.h"
 #include "MIMETypeRegistry.h"
+#include "SharedBuffer.h"
+#include "WKGraphics.h"
+#include <math.h>
+#include <wtf/MainThread.h>
 #include <wtf/StdLibExtras.h>
 
-#include <math.h>
-
-#if PLATFORM(CG)
+#if USE(CG)
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
@@ -53,6 +56,7 @@ Image::~Image()
 
 Image* Image::nullImage()
 {
+    ASSERT(isMainThread() || pthread_main_np());
     DEFINE_STATIC_LOCAL(RefPtr<Image>, nullImage, (BitmapImage::create()));;
     return nullImage.get();
 }
@@ -80,29 +84,11 @@ void Image::fillWithSolidColor(GraphicsContext* ctxt, const FloatRect& dstRect, 
     if (color.alpha() <= 0)
         return;
     
-    ctxt->save();
+    CompositeOperator previousOperator = ctxt->compositeOperation();
     ctxt->setCompositeOperation(!color.hasAlpha() && op == CompositeSourceOver ? CompositeCopy : op);
     ctxt->fillRect(dstRect, color, styleColorSpace);
-    ctxt->restore();
+    ctxt->setCompositeOperation(previousOperator);
 }
-
-static inline FloatSize calculatePatternScale(const FloatRect& dstRect, const FloatRect& srcRect, Image::TileRule hRule, Image::TileRule vRule)
-{
-    float scaleX = 1.0f, scaleY = 1.0f;
-    
-    if (hRule == Image::StretchTile)
-        scaleX = dstRect.width() / srcRect.width();
-    if (vRule == Image::StretchTile)
-        scaleY = dstRect.height() / srcRect.height();
-    
-    if (hRule == Image::RepeatTile)
-        scaleX = scaleY;
-    if (vRule == Image::RepeatTile)
-        scaleY = scaleX;
-    
-    return FloatSize(scaleX, scaleY);
-}
-
 
 void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& destRect, const FloatPoint& srcPoint, const FloatSize& scaledTileSize, ColorSpace styleColorSpace, CompositeOperator op)
 {    
@@ -110,6 +96,11 @@ void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& destRect, const Fl
         fillWithSolidColor(ctxt, destRect, solidColor(), styleColorSpace, op);
         return;
     }
+
+    // See <https://webkit.org/b/59043>.
+#if !PLATFORM(WX)
+    ASSERT(!isBitmapImage() || notSolidColor());
+#endif
 
     FloatSize intrinsicTileSize = size();
     if (hasRelativeWidth())
@@ -134,6 +125,28 @@ void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& destRect, const Fl
         visibleSrcRect.setHeight(destRect.height() / scale.height());
         draw(ctxt, destRect, visibleSrcRect, styleColorSpace, op);
         return;
+    }
+
+    // When using accelerated drawing on iOS, it's faster to stretch an image than to tile it.
+    if (ctxt->isAcceleratedContext()) {
+        if (size().width() == 1 && intersection(oneTileRect, destRect).height() == destRect.height()) {
+            FloatRect visibleSrcRect;
+            visibleSrcRect.setX(0);
+            visibleSrcRect.setY((destRect.y() - oneTileRect.y()) / scale.height());
+            visibleSrcRect.setWidth(1);
+            visibleSrcRect.setHeight(destRect.height() / scale.height());
+            draw(ctxt, destRect, visibleSrcRect, styleColorSpace, op);
+            return;
+        }
+        if (size().height() == 1 && intersection(oneTileRect, destRect).width() == destRect.width()) {
+            FloatRect visibleSrcRect;
+            visibleSrcRect.setX((destRect.x() - oneTileRect.x()) / scale.width());
+            visibleSrcRect.setY(0);
+            visibleSrcRect.setWidth(destRect.width() / scale.width());
+            visibleSrcRect.setHeight(1);
+            draw(ctxt, destRect, visibleSrcRect, styleColorSpace, op);
+            return;
+        }
     }
 
     // CGPattern uses lots of memory got caching when the tile size is large (4691859, 6239505).
@@ -161,7 +174,7 @@ void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& destRect, const Fl
         return;
     }
 
-    TransformationMatrix patternTransform = TransformationMatrix().scaleNonUniform(scale.width(), scale.height());
+    AffineTransform patternTransform = AffineTransform().scaleNonUniform(scale.width(), scale.height());
     FloatRect tileRect(FloatPoint(), intrinsicTileSize);    
     drawPattern(ctxt, tileRect, patternTransform, oneTileRect.location(), styleColorSpace, op, destRect);
     
@@ -169,30 +182,32 @@ void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& destRect, const Fl
 }
 
 // FIXME: Merge with the other drawTiled eventually, since we need a combination of both for some things.
-void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& dstRect, const FloatRect& srcRect, TileRule hRule, TileRule vRule, ColorSpace styleColorSpace, CompositeOperator op)
+void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& dstRect, const FloatRect& srcRect,
+    const FloatSize& tileScaleFactor, TileRule hRule, TileRule vRule, ColorSpace styleColorSpace, CompositeOperator op)
 {    
     if (mayFillWithSolidColor()) {
         fillWithSolidColor(ctxt, dstRect, solidColor(), styleColorSpace, op);
         return;
     }
     
-    // FIXME: We do not support 'round' yet.  For now just map it to 'repeat'.
-    if (hRule == RoundTile)
+    // FIXME: We do not support 'round' or 'space' yet. For now just map them to 'repeat'.
+    if (hRule == RoundTile || hRule == SpaceTile)
         hRule = RepeatTile;
-    if (vRule == RoundTile)
+    if (vRule == RoundTile || vRule == SpaceTile)
         vRule = RepeatTile;
 
-    FloatSize scale = calculatePatternScale(dstRect, srcRect, hRule, vRule);
-    TransformationMatrix patternTransform = TransformationMatrix().scaleNonUniform(scale.width(), scale.height());
+    AffineTransform patternTransform = AffineTransform().scaleNonUniform(tileScaleFactor.width(), tileScaleFactor.height());
 
     // We want to construct the phase such that the pattern is centered (when stretch is not
     // set for a particular rule).
-    float hPhase = scale.width() * srcRect.x();
-    float vPhase = scale.height() * srcRect.y();
+    float hPhase = tileScaleFactor.width() * srcRect.x();
+    float vPhase = tileScaleFactor.height() * srcRect.y();
+    float scaledTileWidth = tileScaleFactor.width() * srcRect.width();
+    float scaledTileHeight = tileScaleFactor.height() * srcRect.height();
     if (hRule == Image::RepeatTile)
-        hPhase -= fmodf(dstRect.width(), scale.width() * srcRect.width()) / 2.0f;
+        hPhase -= (dstRect.width() - scaledTileWidth) / 2;
     if (vRule == Image::RepeatTile)
-        vPhase -= fmodf(dstRect.height(), scale.height() * srcRect.height()) / 2.0f;
+        vPhase -= (dstRect.height() - scaledTileHeight) / 2; 
     FloatPoint patternPhase(dstRect.x() - hPhase, dstRect.y() - vPhase);
     
     drawPattern(ctxt, srcRect, patternTransform, patternPhase, styleColorSpace, op, dstRect);
@@ -200,5 +215,11 @@ void Image::drawTiled(GraphicsContext* ctxt, const FloatRect& dstRect, const Flo
     startAnimation(false);
 }
 
+void Image::computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsicHeight, FloatSize& intrinsicRatio)
+{
+    intrinsicRatio = size();
+    intrinsicWidth = Length(intrinsicRatio.width(), Fixed);
+    intrinsicHeight = Length(intrinsicRatio.height(), Fixed);
+}
 
 }

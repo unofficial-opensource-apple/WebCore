@@ -33,38 +33,47 @@
 #include "FloatRect.h"
 #include "Frame.h"
 #include "FrameView.h"
+#include "InspectorInstrumentation.h"
 #include "PlatformScreen.h"
 #include "Widget.h"
 
 namespace WebCore {
 
 Screen::Screen(Frame* frame)
-    : m_frame(frame)
+    : DOMWindowProperty(frame)
 {
 }
 
-Frame* Screen::frame() const
+unsigned Screen::horizontalDPI() const
 {
-    return m_frame;
+    if (!m_frame)
+        return 0;
+    return static_cast<unsigned>(screenHorizontalDPI(m_frame->view()));
 }
 
-void Screen::disconnectFrame()
+unsigned Screen::verticalDPI() const
 {
-    m_frame = 0;
+    if (!m_frame)
+        return 0;
+    return static_cast<unsigned>(screenVerticalDPI(m_frame->view()));
 }
 
 unsigned Screen::height() const
 {
     if (!m_frame)
         return 0;
-    return static_cast<unsigned>(screenRect(m_frame->view()).height());
+    long height = static_cast<long>(screenRect(m_frame->view()).height());
+    InspectorInstrumentation::applyScreenHeightOverride(m_frame, &height);
+    return static_cast<unsigned>(height);
 }
 
 unsigned Screen::width() const
 {
     if (!m_frame)
         return 0;
-    return static_cast<unsigned>(screenRect(m_frame->view()).width());
+    long width = static_cast<long>(screenRect(m_frame->view()).width());
+    InspectorInstrumentation::applyScreenWidthOverride(m_frame, &width);
+    return static_cast<unsigned>(width);
 }
 
 unsigned Screen::colorDepth() const
@@ -81,18 +90,18 @@ unsigned Screen::pixelDepth() const
     return static_cast<unsigned>(screenDepth(m_frame->view()));
 }
 
-unsigned Screen::availLeft() const
+int Screen::availLeft() const
 {
     if (!m_frame)
         return 0;
-    return static_cast<unsigned>(screenAvailableRect(m_frame->view()).x());
+    return static_cast<int>(screenAvailableRect(m_frame->view()).x());
 }
 
-unsigned Screen::availTop() const
+int Screen::availTop() const
 {
     if (!m_frame)
         return 0;
-    return static_cast<unsigned>(screenAvailableRect(m_frame->view()).y());
+    return static_cast<int>(screenAvailableRect(m_frame->view()).y());
 }
 
 unsigned Screen::availHeight() const

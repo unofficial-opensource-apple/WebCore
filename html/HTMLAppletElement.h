@@ -31,32 +31,24 @@ class HTMLAppletElement : public HTMLPlugInElement {
 public:
     static PassRefPtr<HTMLAppletElement> create(const QualifiedName&, Document*);
 
-    String hspace() const;
-    void setHspace(const String&);
-
-    String vspace() const;
-    void setVspace(const String&);
-
 private:
     HTMLAppletElement(const QualifiedName&, Document*);
 
-    virtual int tagPriority() const { return 1; }
-
-    virtual void parseMappedAttribute(MappedAttribute*);
+    virtual void parseAttribute(Attribute*) OVERRIDE;
     
-    virtual bool rendererIsNeeded(RenderStyle*);
+    virtual bool rendererIsNeeded(const NodeRenderingContext&);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     virtual void finishParsingChildren();
-    
-    virtual RenderWidget* renderWidgetForJSBindings() const;
+
+    virtual void defaultEventHandler(Event*);
+
+    virtual RenderWidget* renderWidgetForJSBindings();
 
     void setupApplet() const;
     bool canEmbedJava() const;
 
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
-
-    AtomicString m_id;
+    virtual bool shouldRegisterAsNamedItem() const OVERRIDE { return true; }
+    virtual bool shouldRegisterAsExtraNamedItem() const OVERRIDE { return true; }
 };
 
 }

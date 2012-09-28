@@ -30,10 +30,6 @@
 #include "config.h"
 #include "FileSystem.h"
 
-#include "CString.h"
-#include "NotImplemented.h"
-#include "PlatformString.h"
-
 #include <wx/wx.h>
 #include <wx/datetime.h>
 #include <wx/dir.h>
@@ -41,6 +37,10 @@
 #include <wx/file.h>
 #include <wx/filefn.h>
 #include <wx/filename.h>
+
+#include "NotImplemented.h"
+#include "PlatformString.h"
+#include <wtf/text/CString.h>
 
 #if OS(DARWIN)
 #include <CoreFoundation/CoreFoundation.h>
@@ -78,8 +78,11 @@ bool getFileSize(const String& path, long long& resultSize)
 
 bool getFileModificationTime(const String& path, time_t& t)
 {
-    t = wxFileName(path).GetModificationTime().GetTicks();
-    return true;
+    if (wxFileExists(path)) {
+        t = wxFileName(path).GetModificationTime().GetTicks();
+        return true;
+    }
+    return false;
 }
 
 bool makeAllDirectories(const String& path)
@@ -107,22 +110,32 @@ String directoryName(const String& path)
     return wxFileName(path).GetPath();
 }
 
-CString openTemporaryFile(const char* prefix, PlatformFileHandle& handle)
+String openTemporaryFile(const String& prefix, PlatformFileHandle& handle)
 {
-    notImplemented();
-    handle = invalidPlatformFileHandle;
-    return CString();
+    wxString sFilename = wxFileName::CreateTempFileName(prefix);
+    wxFile* temp = new wxFile();
+    temp->Open(sFilename.c_str(), wxFile::read_write);
+    handle = temp;
+    return String(sFilename);
 }
-
-void closeFile(PlatformFileHandle&)
-{
-    notImplemented();
-}
-
-int writeToFile(PlatformFileHandle, const char* data, int length)
+    
+PlatformFileHandle openFile(const String& path, FileOpenMode mode)
 {
     notImplemented();
     return 0;
+}
+    
+void closeFile(PlatformFileHandle& handle)
+{
+    if (handle && handle != invalidPlatformFileHandle)
+        delete handle;
+}
+
+int writeToFile(PlatformFileHandle handle, const char* data, int length)
+{
+    if (handle)
+        return static_cast<wxFile*>(handle)->Write(data, length);
+    return -1;
 }
 
 bool unloadModule(PlatformModule mod)

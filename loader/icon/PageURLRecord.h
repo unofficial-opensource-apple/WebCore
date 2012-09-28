@@ -42,16 +42,21 @@ class PageURLSnapshot {
 public:
     PageURLSnapshot() { }
     
-    PageURLSnapshot(const String& page, const String& icon)
-        : pageURL(page)
-        , iconURL(icon)
+    PageURLSnapshot(const String& pageURL, const String& iconURL)
+        : m_pageURL(pageURL)
+        , m_iconURL(iconURL)
     { }
-    
-    String pageURL;
-    String iconURL;
+
+    const String& pageURL() const { return m_pageURL; }
+    const String& iconURL() const { return m_iconURL; }
+
+private:
+    String m_pageURL;
+    String m_iconURL;
 };
 
-class PageURLRecord : public Noncopyable {
+class PageURLRecord {
+    WTF_MAKE_NONCOPYABLE(PageURLRecord); WTF_MAKE_FAST_ALLOCATED;
 public:
     PageURLRecord(const String& pageURL);
     ~PageURLRecord();
@@ -64,13 +69,19 @@ public:
     PageURLSnapshot snapshot(bool forDeletion = false) const;
 
     // Returns false if the page wasn't retained beforehand, true if the retain count was already 1 or higher
-    inline bool retain() { return m_retainCount++; }
+    bool retain(int count)
+    {
+        bool wasRetained = m_retainCount > 0;
+        m_retainCount += count;
+        return wasRetained;
+    }
 
     // Returns true if the page is still retained after the call.  False if the retain count just dropped to 0
-    inline bool release()
+    bool release(int count)
     {
-        ASSERT(m_retainCount > 0);
-        return --m_retainCount;
+        ASSERT(m_retainCount >= count);
+        m_retainCount -= count;
+        return m_retainCount > 0;
     }
 
     inline int retainCount() const { return m_retainCount; }

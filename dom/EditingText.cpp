@@ -20,6 +20,8 @@
 #include "config.h"
 #include "EditingText.h"
 
+#include "Document.h"
+
 // FIXME: Does this really require a class? Perhaps instead any text node
 // inside an editable element could have the "always create a renderer" behavior.
 
@@ -35,7 +37,7 @@ PassRefPtr<EditingText> EditingText::create(Document* document, const String& da
     return adoptRef(new EditingText(document, data));
 }
 
-bool EditingText::rendererIsNeeded(RenderStyle*)
+bool EditingText::rendererIsNeeded(const NodeRenderingContext&)
 {
     return true;
 }

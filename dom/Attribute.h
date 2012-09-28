@@ -3,7 +3,7 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Peter Kelly (pmk@post.com)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2008, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -29,63 +29,49 @@
 
 namespace WebCore {
 
-class Attr;
-class CSSStyleDeclaration;
-class Element;
-class NamedNodeMap;
-
 // This has no counterpart in DOM.
 // It is an internal representation of the node value of an Attr.
 // The actual Attr with its value as a Text child is allocated only if needed.
-class Attribute : public RefCounted<Attribute> {
-    friend class Attr;
-    friend class NamedNodeMap;
+class Attribute {
 public:
-    static PassRefPtr<Attribute> create(const QualifiedName& name, const AtomicString& value)
+    Attribute(const QualifiedName& name, const AtomicString& value)
+        : m_name(name)
+        , m_value(value)
     {
-        return adoptRef(new Attribute(name, value));
     }
-    virtual ~Attribute() { }
-    
+
+    Attribute(const AtomicString& name, const AtomicString& value)
+        : m_name(nullAtom, name, nullAtom)
+        , m_value(value)
+    {
+    }
+
+    // NOTE: The references returned by these functions are only valid for as long
+    // as the Attribute stays in place. For example, calling a function that mutates
+    // an Element's internal attribute storage may invalidate them.
     const AtomicString& value() const { return m_value; }
     const AtomicString& prefix() const { return m_name.prefix(); }
     const AtomicString& localName() const { return m_name.localName(); }
     const AtomicString& namespaceURI() const { return m_name.namespaceURI(); }
-    
+
     const QualifiedName& name() const { return m_name; }
-    
-    Attr* attr() const { return m_impl; }
-    PassRefPtr<Attr> createAttrIfNeeded(Element*);
 
     bool isNull() const { return m_value.isNull(); }
     bool isEmpty() const { return m_value.isEmpty(); }
-    
-    virtual PassRefPtr<Attribute> clone() const;
 
-    // An extension to get the style information for presentational attributes.
-    virtual CSSStyleDeclaration* style() const { return 0; }
-    
     void setValue(const AtomicString& value) { m_value = value; }
     void setPrefix(const AtomicString& prefix) { m_name.setPrefix(prefix); }
 
-    virtual bool isMappedAttribute() { return false; }
-
-protected:
-    Attribute(const QualifiedName& name, const AtomicString& value)
-        : m_name(name), m_value(value), m_impl(0)
-    {
-    }
-    Attribute(const AtomicString& name, const AtomicString& value)
-        : m_name(nullAtom, name, nullAtom), m_value(value), m_impl(0)
-    {
-    }
+    // Note: This API is only for HTMLTreeBuilder.  It is not safe to change the
+    // name of an attribute once parseAttribute has been called as DOM
+    // elements may have placed the Attribute in a hash by name.
+    void parserSetName(const QualifiedName& name) { m_name = name; }
 
 private:
     QualifiedName m_name;
     AtomicString m_value;
-    Attr* m_impl;
 };
 
-} //namespace
+} // namespace WebCore
 
-#endif
+#endif // Attribute_h

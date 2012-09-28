@@ -21,6 +21,8 @@
 #include "config.h"
 #include "Notation.h"
 
+#include "Document.h"
+
 namespace WebCore {
 
 Notation::Notation(Document* document, const String& name, const String& publicId, const String& systemId)
@@ -47,7 +49,7 @@ PassRefPtr<Node> Notation::cloneNode(bool /*deep*/)
     return 0;
 }
 
-bool Notation::childTypeAllowed(NodeType)
+bool Notation::childTypeAllowed(NodeType) const
 {
     return false;
 }

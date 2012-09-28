@@ -27,12 +27,10 @@
 #define TextEncoding_h
 
 #include "TextCodec.h"
+#include <wtf/Forward.h>
 #include <wtf/unicode/Unicode.h>
 
 namespace WebCore {
-
-    class CString;
-    class String;
 
     class TextEncoding {
     public:
@@ -73,8 +71,9 @@ namespace WebCore {
         String decode(const char*, size_t length, bool stopOnError, bool& sawError) const;
         CString encode(const UChar*, size_t length, UnencodableHandling) const;
 
-    private:
         UChar backslashAsCurrencySymbol() const;
+
+    private:
         bool isNonByteBasedEncoding() const;
         bool isUTF7Encoding() const;
 

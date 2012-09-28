@@ -25,21 +25,22 @@
 #ifndef CursorData_h
 #define CursorData_h
 
-#include "CachedImage.h"
-#include "CachedResourceHandle.h"
 #include "IntPoint.h"
+#include "StyleImage.h"
 
 namespace WebCore {
 
-struct CursorData {
-    CursorData()
-        : cursorImage(0)
+class CursorData {
+public:
+    CursorData(PassRefPtr<StyleImage> image, const IntPoint& hotSpot)
+        : m_image(image)
+        , m_hotSpot(hotSpot)
     {
     }
 
     bool operator==(const CursorData& o) const
     {
-        return hotSpot == o.hotSpot && cursorImage == o.cursorImage;
+        return m_hotSpot == o.m_hotSpot && m_image == o.m_image;
     }
 
     bool operator!=(const CursorData& o) const
@@ -47,8 +48,14 @@ struct CursorData {
         return !(*this == o);
     }
 
-    IntPoint hotSpot; // for CSS3 support
-    CachedResourceHandle<CachedImage> cursorImage;
+    StyleImage* image() const { return m_image.get(); }    
+    void setImage(PassRefPtr<StyleImage> image) { m_image = image; }    
+
+    const IntPoint& hotSpot() const { return m_hotSpot; }
+    
+private:
+    RefPtr<StyleImage> m_image;
+    IntPoint m_hotSpot; // for CSS3 support
 };
 
 } // namespace WebCore

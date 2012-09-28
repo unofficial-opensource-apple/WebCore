@@ -32,55 +32,54 @@ struct NPObject;
 
 namespace WebCore {
 
+class RenderEmbeddedObject;
 class RenderWidget;
+class Widget;
 
 class HTMLPlugInElement : public HTMLFrameOwnerElement {
 public:
     virtual ~HTMLPlugInElement();
 
-    String height() const;
-    void setHeight(const String&);
-    
-    String width() const;
-    void setWidth(const String&);
+    virtual bool willRespondToMouseMoveEvents() OVERRIDE { return false; }
+    virtual bool willRespondToMouseClickEvents() OVERRIDE { return true; }
 
-    virtual bool willRespondToMouseMoveEvents() { return false; }
-    virtual bool willRespondToMouseClickEvents() { return true; }
+    PassScriptInstance getInstance();
 
-    PassScriptInstance getInstance() const;
+    Widget* pluginWidget();
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
     NPObject* getNPObject();
 #endif
 
+    bool isCapturingMouseEvents() const { return m_isCapturingMouseEvents; }
+    void setIsCapturingMouseEvents(bool capturing) { m_isCapturingMouseEvents = capturing; }
+
+    bool canContainRangeEndPoint() const { return false; }
+
 protected:
     HTMLPlugInElement(const QualifiedName& tagName, Document*);
 
     virtual void detach();
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForAttribute(Attribute*, StylePropertySet*) OVERRIDE;
 
-    static void updateWidgetCallback(Node*);
-
-    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
-    virtual void parseMappedAttribute(MappedAttribute*);
+    bool m_inBeforeLoadEventHandler;
+    // Subclasses should use guardedDispatchBeforeLoadEvent instead of calling dispatchBeforeLoadEvent directly.
+    bool guardedDispatchBeforeLoadEvent(const String& sourceURL);
 
 private:
+    bool dispatchBeforeLoadEvent(const String& sourceURL); // Not implemented, generates a compile error if subclasses call this by mistake.
+
     virtual void defaultEventHandler(Event*);
 
-    virtual RenderWidget* renderWidgetForJSBindings() const = 0;
-
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
-    virtual bool checkDTD(const Node* newChild);
-
-    virtual void updateWidget() { }
-
-protected:
-    AtomicString m_name;
+    virtual RenderWidget* renderWidgetForJSBindings() = 0;
 
 private:
     mutable ScriptInstance m_instance;
 #if ENABLE(NETSCAPE_PLUGIN_API)
     NPObject* m_NPObject;
 #endif
+    bool m_isCapturingMouseEvents;
 };
 
 } // namespace WebCore

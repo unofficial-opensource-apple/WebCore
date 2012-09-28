@@ -33,7 +33,7 @@
 
 #include "Image.h"
 #include "IntPoint.h"
-#include "RefPtr.h"
+#include <wtf/RefPtr.h>
 
 namespace WebCore {
 
@@ -81,6 +81,8 @@ namespace WebCore {
             TypeNotAllowed,
             TypeZoomIn,
             TypeZoomOut,
+            TypeGrab,
+            TypeGrabbing,
             TypeCustom
         };
 

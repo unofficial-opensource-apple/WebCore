@@ -26,29 +26,31 @@
 #ifndef RenderScrollbar_h
 #define RenderScrollbar_h
 
+#include "Node.h"
 #include "RenderStyleConstants.h"
 #include "Scrollbar.h"
 #include <wtf/HashMap.h>
 
 namespace WebCore {
 
+class Frame;
 class RenderBox;
 class RenderScrollbarPart;
 class RenderStyle;
 
 class RenderScrollbar : public Scrollbar {
 protected:
-    RenderScrollbar(ScrollbarClient*, ScrollbarOrientation, RenderBox*);
+    RenderScrollbar(ScrollableArea*, ScrollbarOrientation, Node*, Frame*);
 
 public:
     friend class Scrollbar;
-    static PassRefPtr<Scrollbar> createCustomScrollbar(ScrollbarClient*, ScrollbarOrientation, RenderBox*);
+    static PassRefPtr<Scrollbar> createCustomScrollbar(ScrollableArea*, ScrollbarOrientation, Node*, Frame* owningFrame = 0);
     virtual ~RenderScrollbar();
 
     static ScrollbarPart partForStyleResolve();
     static RenderScrollbar* scrollbarForStyleResolve();
 
-    RenderBox* owningRenderer() const { return m_owner; }
+    RenderBox* owningRenderer() const;
 
     void paintPart(GraphicsContext*, ScrollbarPart, const IntRect&);
 
@@ -57,6 +59,8 @@ public:
     IntRect trackPieceRectWithMargins(ScrollbarPart, const IntRect&);
 
     int minimumThumbLength();
+
+    virtual bool isOverlayScrollbar() const { return false; }
 
 private:
     virtual void setParent(ScrollView*);
@@ -73,14 +77,23 @@ private:
 
     void updateScrollbarParts(bool destroy = false);
 
+public:
     PassRefPtr<RenderStyle> getScrollbarPseudoStyle(ScrollbarPart, PseudoId);
+private:
+
     void updateScrollbarPart(ScrollbarPart, bool destroy = false);
 
-    RenderBox* m_owner;
+    // This Scrollbar(Widget) may outlive the DOM which created it (during tear down),
+    // so we keep a reference to the Node which caused this custom scrollbar creation.
+    // This will not create a reference cycle as the Widget tree is owned by our containing
+    // FrameView which this Node pointer can in no way keep alive. See webkit bug 80610.
+    RefPtr<Node> m_owner;
+
+    Frame* m_owningFrame;
     HashMap<unsigned, RenderScrollbarPart*> m_parts;
 };
 
-inline RenderScrollbar* toRenderScrollbar(Scrollbar* scrollbar)
+inline RenderScrollbar* toRenderScrollbar(ScrollbarThemeClient* scrollbar)
 {
     ASSERT(!scrollbar || scrollbar->isCustomScrollbar());
     return static_cast<RenderScrollbar*>(scrollbar);

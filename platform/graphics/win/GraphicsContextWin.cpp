@@ -26,12 +26,13 @@
 #include "config.h"
 #include "GraphicsContext.h"
 
-#if PLATFORM(CG)
+#if USE(CG)
 #include "GraphicsContextPlatformPrivateCG.h"
-#elif PLATFORM(CAIRO)
+#elif USE(CAIRO)
 #include "GraphicsContextPlatformPrivateCairo.h"
 #endif
 
+#include "AffineTransform.h"
 #include "BitmapInfo.h"
 #include "TransformationMatrix.h"
 #include "NotImplemented.h"
@@ -42,8 +43,6 @@ using namespace std;
 
 namespace WebCore {
 
-class SVGResourceImage;
-
 static void fillWithClearColor(HBITMAP bitmap)
 {
     BITMAP bmpInfo;
@@ -51,8 +50,6 @@ static void fillWithClearColor(HBITMAP bitmap)
     int bufferSize = bmpInfo.bmWidthBytes * bmpInfo.bmHeight;
     memset(bmpInfo.bmBits, 0, bufferSize);
 }
-
-bool GraphicsContext::inTransparencyLayer() const { return m_data->m_transparencyCount; }
 
 void GraphicsContext::setShouldIncludeChildWindows(bool include)
 {
@@ -64,23 +61,22 @@ bool GraphicsContext::shouldIncludeChildWindows() const
     return m_data->m_shouldIncludeChildWindows;
 }
 
-GraphicsContext::WindowsBitmap::WindowsBitmap(HDC hdc, IntSize size)
+GraphicsContext::WindowsBitmap::WindowsBitmap(HDC hdc, const IntSize& size)
     : m_hdc(0)
-    , m_size(size)
 {
-    BitmapInfo bitmapInfo = BitmapInfo::create(m_size);
+    BitmapInfo bitmapInfo = BitmapInfo::create(size);
 
-    m_bitmap = CreateDIBSection(0, &bitmapInfo, DIB_RGB_COLORS, reinterpret_cast<void**>(&m_bitmapBuffer), 0, 0);
+    void* storage = 0;
+    m_bitmap = CreateDIBSection(0, &bitmapInfo, DIB_RGB_COLORS, &storage, 0, 0);
     if (!m_bitmap)
         return;
 
     m_hdc = CreateCompatibleDC(hdc);
     SelectObject(m_hdc, m_bitmap);
 
-    BITMAP bmpInfo;
-    GetObject(m_bitmap, sizeof(bmpInfo), &bmpInfo);
-    m_bytesPerRow = bmpInfo.bmWidthBytes;
-    m_bitmapBufferLength = bmpInfo.bmWidthBytes * bmpInfo.bmHeight;
+    m_pixelData.initialize(m_bitmap);
+
+    ASSERT(storage == m_pixelData.buffer());
 
     SetGraphicsMode(m_hdc, GM_ADVANCED);
 }
@@ -94,15 +90,15 @@ GraphicsContext::WindowsBitmap::~WindowsBitmap()
     DeleteObject(m_bitmap);
 }
 
-GraphicsContext::WindowsBitmap* GraphicsContext::createWindowsBitmap(IntSize size)
+PassOwnPtr<GraphicsContext::WindowsBitmap> GraphicsContext::createWindowsBitmap(const IntSize& size)
 {
-    return new WindowsBitmap(m_data->m_hdc, size);
+    return adoptPtr(new WindowsBitmap(m_data->m_hdc, size));
 }
 
 HDC GraphicsContext::getWindowsContext(const IntRect& dstRect, bool supportAlphaBlend, bool mayCreateBitmap)
 {
     // FIXME: Should a bitmap be created also when a shadow is set?
-    if (mayCreateBitmap && inTransparencyLayer()) {
+    if (mayCreateBitmap && (!m_data->m_hdc || isInTransparencyLayer())) {
         if (dstRect.isEmpty())
             return 0;
 
@@ -155,7 +151,7 @@ void GraphicsContextPlatformPrivate::clip(const FloatRect& clipRect)
 {
     if (!m_hdc)
         return;
-    IntersectClipRect(m_hdc, clipRect.x(), clipRect.y(), clipRect.right(), clipRect.bottom());
+    IntersectClipRect(m_hdc, clipRect.x(), clipRect.y(), clipRect.maxX(), clipRect.maxY());
 }
 
 void GraphicsContextPlatformPrivate::clip(const Path&)
@@ -189,22 +185,22 @@ void GraphicsContextPlatformPrivate::translate(float x , float y)
     ModifyWorldTransform(m_hdc, &xform, MWT_LEFTMULTIPLY);
 }
 
-void GraphicsContextPlatformPrivate::concatCTM(const TransformationMatrix& transform)
+void GraphicsContextPlatformPrivate::concatCTM(const AffineTransform& transform)
 {
     if (!m_hdc)
         return;
 
-    XFORM xform = transform;
+    XFORM xform = transform.toTransformationMatrix();
     ModifyWorldTransform(m_hdc, &xform, MWT_LEFTMULTIPLY);
 }
 
-#if ENABLE(SVG)
-GraphicsContext* contextForImage(SVGResourceImage*)
+void GraphicsContextPlatformPrivate::setCTM(const AffineTransform& transform)
 {
-    // FIXME: This should go in GraphicsContextCG.cpp
-    notImplemented();
-    return 0;
+    if (!m_hdc)
+        return;
+
+    XFORM xform = transform.toTransformationMatrix();
+    SetWorldTransform(m_hdc, &xform);
 }
-#endif
 
 }

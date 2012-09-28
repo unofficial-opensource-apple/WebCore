@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2006 Nikolas Zimmermann <zimmermann@kde.org>
  * Copyright (C) 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2010 Torch Mobile (Beijing) Co. Ltd. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,85 +28,131 @@
 #ifndef ImageBuffer_h
 #define ImageBuffer_h
 
-#include "TransformationMatrix.h"
-#include "Image.h"
+#include "AffineTransform.h"
+#include "ColorSpace.h"
+#include "FloatRect.h"
+#include "GraphicsContext.h"
+#if USE(ACCELERATED_COMPOSITING)
+#include "GraphicsLayer.h"
+#endif
+#include "GraphicsTypes.h"
 #include "IntSize.h"
 #include "ImageBufferData.h"
+#include <wtf/Forward.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/PassRefPtr.h>
+#include <wtf/Uint8ClampedArray.h>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
-    class GraphicsContext;
+    class Image;
     class ImageData;
     class IntPoint;
     class IntRect;
-    class String;
-
-    enum ImageColorSpace {
-        Unknown,
-        DeviceRGB, // like sRGB
-        GrayScale,
-        LinearRGB
-    };
 
     enum Multiply {
         Premultiplied,
         Unmultiplied
     };
 
-    class ImageBuffer : public Noncopyable {
+    enum RenderingMode {
+        Unaccelerated,
+        UnacceleratedNonPlatformBuffer, // Use plain memory allocation rather than platform API to allocate backing store.
+        Accelerated
+    };
+    
+    enum BackingStoreCopy {
+        CopyBackingStore, // Guarantee subsequent draws don't affect the copy.
+        DontCopyBackingStore // Subsequent draws may affect the copy.
+    };
+
+    enum DeferralMode {
+        NonDeferred,
+        Deferred
+    };
+
+    class ImageBuffer {
+        WTF_MAKE_NONCOPYABLE(ImageBuffer); WTF_MAKE_FAST_ALLOCATED;
     public:
         // Will return a null pointer on allocation failure.
-        static PassOwnPtr<ImageBuffer> create(const IntSize& size, ImageColorSpace colorSpace = DeviceRGB)
+        static PassOwnPtr<ImageBuffer> create(const IntSize& size, float resolutionScale = 1, ColorSpace colorSpace = ColorSpaceDeviceRGB, RenderingMode renderingMode = Unaccelerated, DeferralMode deferralMode = NonDeferred)
         {
             bool success = false;
-            OwnPtr<ImageBuffer> buf(new ImageBuffer(size, colorSpace, success));
-            if (success)
-                return buf.release();
-            return 0;
+            OwnPtr<ImageBuffer> buf = adoptPtr(new ImageBuffer(size, resolutionScale, colorSpace, renderingMode, deferralMode, success));
+            if (!success)
+                return nullptr;
+            return buf.release();
         }
 
         ~ImageBuffer();
 
-        const IntSize& size() const { return m_size; }
+        // The actual resolution of the backing store
+        const IntSize& internalSize() const { return m_size; }
+        const IntSize& logicalSize() const { return m_logicalSize; }
+
         GraphicsContext* context() const;
 
-        Image* image() const;
+        PassRefPtr<Image> copyImage(BackingStoreCopy = CopyBackingStore) const;
 
-        void clearImage() { m_image.clear(); }
+        enum CoordinateSystem { LogicalCoordinateSystem, BackingStoreCoordinateSystem };
 
-        PassRefPtr<ImageData> getUnmultipliedImageData(const IntRect&) const;
-        PassRefPtr<ImageData> getPremultipliedImageData(const IntRect&) const;
+        PassRefPtr<Uint8ClampedArray> getUnmultipliedImageData(const IntRect&, CoordinateSystem = LogicalCoordinateSystem) const;
+        PassRefPtr<Uint8ClampedArray> getPremultipliedImageData(const IntRect&, CoordinateSystem = LogicalCoordinateSystem) const;
 
-        void putUnmultipliedImageData(ImageData*, const IntRect& sourceRect, const IntPoint& destPoint);
-        void putPremultipliedImageData(ImageData*, const IntRect& sourceRect, const IntPoint& destPoint);
-
-        String toDataURL(const String& mimeType) const;
-#if !PLATFORM(CG)
-        TransformationMatrix baseTransform() const { return TransformationMatrix(); }
-        void transformColorSpace(ImageColorSpace srcColorSpace, ImageColorSpace dstColorSpace);
+        void putByteArray(Multiply multiplied, Uint8ClampedArray*, const IntSize& sourceSize, const IntRect& sourceRect, const IntPoint& destPoint, CoordinateSystem = LogicalCoordinateSystem);
+        
+        void convertToLuminanceMask();
+        
+        String toDataURL(const String& mimeType, const double* quality = 0, CoordinateSystem = LogicalCoordinateSystem) const;
+#if !USE(CG)
+        AffineTransform baseTransform() const { return AffineTransform(); }
+        void transformColorSpace(ColorSpace srcColorSpace, ColorSpace dstColorSpace);
         void platformTransformColorSpace(const Vector<int>&);
 #else
-        TransformationMatrix baseTransform() const { return TransformationMatrix(1, 0, 0, -1, 0, m_size.height()); }
+        AffineTransform baseTransform() const { return AffineTransform(1, 0, 0, -1, 0, internalSize().height()); }
 #endif
+#if USE(ACCELERATED_COMPOSITING)
+        PlatformLayer* platformLayer() const;
+#endif
+
+    private:
+#if USE(CG)
+        NativeImagePtr copyNativeImage(BackingStoreCopy = CopyBackingStore) const;
+#endif
+        void clip(GraphicsContext*, const FloatRect&) const;
+
+        void draw(GraphicsContext*, ColorSpace, const FloatRect& destRect, const FloatRect& srcRect = FloatRect(0, 0, -1, -1), CompositeOperator = CompositeSourceOver, bool useLowQualityScale = false);
+        void drawPattern(GraphicsContext*, const FloatRect& srcRect, const AffineTransform& patternTransform, const FloatPoint& phase, ColorSpace styleColorSpace, CompositeOperator, const FloatRect& destRect);
+
+        inline void genericConvertToLuminanceMask();
+
+        friend class GraphicsContext;
+        friend class GeneratedImage;
+        friend class CrossfadeGeneratedImage;
+        friend class GeneratorGeneratedImage;
+
     private:
         ImageBufferData m_data;
-
         IntSize m_size;
+        IntSize m_logicalSize;
+        float m_resolutionScale;
         OwnPtr<GraphicsContext> m_context;
-        mutable RefPtr<Image> m_image;
 
-#if !PLATFORM(CG)
+#if !USE(CG)
         Vector<int> m_linearRgbLUT;
         Vector<int> m_deviceRgbLUT;
 #endif
 
         // This constructor will place its success into the given out-variable
         // so that create() knows when it should return failure.
-        ImageBuffer(const IntSize&, ImageColorSpace colorSpace, bool& success);
+        ImageBuffer(const IntSize&, float resolutionScale, ColorSpace, RenderingMode, DeferralMode, bool& success);
     };
+
+#if USE(CG) || USE(SKIA)
+    String ImageDataToDataURL(const ImageData&, const String& mimeType, const double* quality);
+#endif
 
 } // namespace WebCore
 

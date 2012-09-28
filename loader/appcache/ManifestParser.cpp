@@ -26,11 +26,9 @@
 #include "config.h"
 #include "ManifestParser.h"
 
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-
-#include "CharacterNames.h"
 #include "KURL.h"
 #include "TextResourceDecoder.h"
+#include <wtf/unicode/CharacterNames.h>
 
 using namespace std;
 
@@ -98,7 +96,7 @@ bool parseManifest(const KURL& manifestURL, const char* data, int length, Manife
             mode = Fallback;
         else if (line == "NETWORK:")
             mode = OnlineWhitelist;
-        else if (line.endsWith(":"))
+        else if (line.endsWith(':'))
             mode = Unknown;
         else if (mode == Unknown)
             continue;
@@ -125,6 +123,9 @@ bool parseManifest(const KURL& manifestURL, const char* data, int length, Manife
                 url.removeFragmentIdentifier();
             
             if (!equalIgnoringCase(url.protocol(), manifestURL.protocol()))
+                continue;
+            
+            if (mode == Explicit && manifestURL.protocolIs("https") && !protocolHostAndPortAreEqual(manifestURL, url))
                 continue;
             
             if (mode == Explicit)
@@ -179,7 +180,5 @@ bool parseManifest(const KURL& manifestURL, const char* data, int length, Manife
 
     return true;
 }
-    
-}
 
-#endif // ENABLE(OFFLINE_WEB_APPLICATIONS)
+}

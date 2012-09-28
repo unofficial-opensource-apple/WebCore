@@ -34,20 +34,23 @@
 #include "PlatformString.h"
 #include "V8AbstractEventListener.h"
 #include <v8.h>
+#include <wtf/text/TextPosition.h>
 #include <wtf/PassRefPtr.h>
 
 namespace WebCore {
 
     class Event;
     class Frame;
+    class HTMLFormElement;
+    class Node;
 
     // V8LazyEventListener is a wrapper for a JavaScript code string that is compiled and evaluated when an event is fired.
-    // A V8LazyEventListener is always a HTML event handler.
+    // A V8LazyEventListener is either a HTML or SVG event handler.
     class V8LazyEventListener : public V8AbstractEventListener {
     public:
-        static PassRefPtr<V8LazyEventListener> create(const String& functionName, bool isSVGEvent, const String& code, const String& sourceURL, int lineNumber, int columnNumber, const WorldContextHandle& worldContext)
+        static PassRefPtr<V8LazyEventListener> create(const AtomicString& functionName, const AtomicString& eventParameterName, const String& code, const String& sourceURL, const TextPosition& position, Node* node, const WorldContextHandle& worldContext)
         {
-            return adoptRef(new V8LazyEventListener(functionName, isSVGEvent, code, sourceURL, lineNumber, columnNumber, worldContext));
+            return adoptRef(new V8LazyEventListener(functionName, eventParameterName, code, sourceURL, position, node, worldContext));
         }
 
         virtual bool isLazy() const { return true; }
@@ -56,16 +59,22 @@ namespace WebCore {
         virtual void prepareListenerObject(ScriptExecutionContext*);
 
     private:
-        V8LazyEventListener(const String& functionName, bool isSVGEvent, const String& code, const String sourceURL, int lineNumber, int columnNumber, const WorldContextHandle& worldContext);
+        V8LazyEventListener(const AtomicString& functionName, const AtomicString& eventParameterName, const String& code, const String sourceURL, const TextPosition&, Node*, const WorldContextHandle&);
 
         virtual v8::Local<v8::Value> callListenerFunction(ScriptExecutionContext*, v8::Handle<v8::Value> jsEvent, Event*);
 
-        String m_functionName;
-        bool m_isSVGEvent;
+        // Needs to return true for all event handlers implemented in JavaScript so that
+        // the SVG code does not add the event handler in both
+        // SVGUseElement::buildShadowTree and again in
+        // SVGUseElement::transferEventListenersToShadowTree
+        virtual bool wasCreatedFromMarkup() const { return true; }
+
+        AtomicString m_functionName;
+        AtomicString m_eventParameterName;
         String m_code;
         String m_sourceURL;
-        int m_lineNumber;
-        int m_columnNumber;
+        Node* m_node;
+        TextPosition m_position;
     };
 
 } // namespace WebCore

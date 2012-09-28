@@ -31,6 +31,7 @@
 
 #include "AccessibilityObject.h"
 #include "HTMLElement.h"
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
@@ -38,7 +39,6 @@ class AccessibilityListBox;
 class Element;
 class HTMLElement;
 class HTMLSelectElement;
-class String;
     
 class AccessibilityListBoxOption : public AccessibilityObject {
 
@@ -51,17 +51,17 @@ public:
     void setHTMLElement(HTMLElement* element) { m_optionElement = element; }
     
     virtual AccessibilityRole roleValue() const { return ListBoxOptionRole; }
-    virtual bool accessibilityIsIgnored() const { return false; }
+    virtual bool accessibilityIsIgnored() const;
     virtual bool isSelected() const;
     virtual bool isEnabled() const;
+    virtual bool isSelectedOptionActive() const;
     virtual String stringValue() const;
     virtual Element* actionElement() const;
-    
+    virtual Node* node() const { return m_optionElement; }
     virtual void setSelected(bool);
     virtual bool canSetSelectedAttribute() const;
 
-    virtual IntRect elementRect() const;
-    virtual IntSize size() const;
+    virtual LayoutRect elementRect() const;
     virtual AccessibilityObject* parentObject() const;
     bool isListBoxOption() const { return true; }
     
@@ -72,7 +72,7 @@ private:
     HTMLSelectElement* listBoxOptionParentNode() const;
     int listBoxOptionIndex() const;
     IntRect listBoxOptionRect() const;
-    AccessibilityObject* listBoxOptionAccessibilityObject(HTMLElement* element) const;
+    AccessibilityObject* listBoxOptionAccessibilityObject(HTMLElement*) const;
 };
     
 } // namespace WebCore 

@@ -26,77 +26,78 @@
 #include "config.h"
 #include "VisibleSelection.h"
 
-#include "CharacterNames.h"
-#include "CString.h"
 #include "Document.h"
 #include "Element.h"
 #include "htmlediting.h"
 #include "TextIterator.h"
+#include "TreeScopeAdjuster.h"
 #include "VisiblePosition.h"
 #include "visible_units.h"
 #include "Range.h"
-
-#include <wtf/Assertions.h>
 #include <stdio.h>
+#include <wtf/Assertions.h>
+#include <wtf/text/CString.h>
+#include <wtf/unicode/CharacterNames.h>
 
 namespace WebCore {
 
 VisibleSelection::VisibleSelection()
     : m_affinity(DOWNSTREAM)
-    , m_granularity(CharacterGranularity)
     , m_selectionType(NoSelection)
     , m_baseIsFirst(true)
+    , m_isDirectional(false)
 {
 }
 
-VisibleSelection::VisibleSelection(const Position& pos, EAffinity affinity)
+VisibleSelection::VisibleSelection(const Position& pos, EAffinity affinity, bool isDirectional)
     : m_base(pos)
     , m_extent(pos)
     , m_affinity(affinity)
-    , m_granularity(CharacterGranularity)
+    , m_isDirectional(isDirectional)
 {
     validate();
 }
 
-VisibleSelection::VisibleSelection(const Position& base, const Position& extent, EAffinity affinity)
+VisibleSelection::VisibleSelection(const Position& base, const Position& extent, EAffinity affinity, bool isDirectional)
     : m_base(base)
     , m_extent(extent)
     , m_affinity(affinity)
-    , m_granularity(CharacterGranularity)
+    , m_isDirectional(isDirectional)
 {
     validate();
 }
 
-VisibleSelection::VisibleSelection(const VisiblePosition& pos)
+VisibleSelection::VisibleSelection(const VisiblePosition& pos, bool isDirectional)
     : m_base(pos.deepEquivalent())
     , m_extent(pos.deepEquivalent())
     , m_affinity(pos.affinity())
-    , m_granularity(CharacterGranularity)
+    , m_isDirectional(isDirectional)
 {
     validate();
 }
 
-VisibleSelection::VisibleSelection(const VisiblePosition& base, const VisiblePosition& extent)
+VisibleSelection::VisibleSelection(const VisiblePosition& base, const VisiblePosition& extent, bool isDirectional)
     : m_base(base.deepEquivalent())
     , m_extent(extent.deepEquivalent())
     , m_affinity(base.affinity())
-    , m_granularity(CharacterGranularity)
+    , m_isDirectional(isDirectional)
 {
     validate();
 }
 
-VisibleSelection::VisibleSelection(const Range* range, EAffinity affinity)
+VisibleSelection::VisibleSelection(const Range* range, EAffinity affinity, bool isDirectional)
     : m_base(range->startPosition())
     , m_extent(range->endPosition())
     , m_affinity(affinity)
-    , m_granularity(CharacterGranularity)
+    , m_isDirectional(isDirectional)
 {
     validate();
 }
 
 VisibleSelection VisibleSelection::selectionFromContentsOfNode(Node* node)
 {
-    return VisibleSelection(firstDeepEditingPositionForNode(node), lastDeepEditingPositionForNode(node), DOWNSTREAM);
+    ASSERT(!editingIgnoresContent(node));
+    return VisibleSelection(firstPositionInNode(node), lastPositionInNode(node), DOWNSTREAM);
 }
 
 void VisibleSelection::setBase(const Position& position)
@@ -127,9 +128,9 @@ PassRefPtr<Range> VisibleSelection::firstRange() const
 {
     if (isNone())
         return 0;
-    Position start = rangeCompliantEquivalent(m_start);
-    Position end = rangeCompliantEquivalent(m_end);
-    return Range::create(start.node()->document(), start, end);
+    Position start = m_start.parentAnchoredEquivalent();
+    Position end = m_end.parentAnchoredEquivalent();
+    return Range::create(start.anchorNode()->document(), start, end);
 }
 
 PassRefPtr<Range> VisibleSelection::toNormalizedRange() const
@@ -141,7 +142,7 @@ PassRefPtr<Range> VisibleSelection::toNormalizedRange() const
     // in the course of running edit commands which modify the DOM.
     // Failing to call this can result in equivalentXXXPosition calls returning
     // incorrect results.
-    m_start.node()->document()->updateLayout();
+    m_start.anchorNode()->document()->updateLayout();
 
     // Check again, because updating layout can clear the selection.
     if (isNone())
@@ -152,7 +153,7 @@ PassRefPtr<Range> VisibleSelection::toNormalizedRange() const
         // If the selection is a caret, move the range start upstream. This helps us match
         // the conventions of text editors tested, which make style determinations based
         // on the character before the caret, if any. 
-        s = rangeCompliantEquivalent(m_start.upstream());
+        s = m_start.upstream().parentAnchoredEquivalent();
         e = s;
     } else {
         // If the selection is a range, select the minimum range that encompasses the selection.
@@ -176,13 +177,16 @@ PassRefPtr<Range> VisibleSelection::toNormalizedRange() const
             s = e;
             e = tmp;
         }
-        s = rangeCompliantEquivalent(s);
-        e = rangeCompliantEquivalent(e);
+        s = s.parentAnchoredEquivalent();
+        e = e.parentAnchoredEquivalent();
     }
+
+    if (!s.containerNode() || !e.containerNode())
+        return 0;
 
     // VisibleSelections are supposed to always be valid.  This constructor will ASSERT
     // if a valid range could not be created, which is fine for this callsite.
-    return Range::create(s.node()->document(), s, e);
+    return Range::create(s.anchorNode()->document(), s, e);
 }
 
 bool VisibleSelection::expandUsingGranularity(TextGranularity granularity)
@@ -190,14 +194,13 @@ bool VisibleSelection::expandUsingGranularity(TextGranularity granularity)
     if (isNone())
         return false;
 
-    m_granularity = granularity;
-    validate();
+    validate(granularity);
     return true;
 }
 
 static PassRefPtr<Range> makeSearchRange(const Position& pos)
 {
-    Node* n = pos.node();
+    Node* n = pos.deprecatedNode();
     if (!n)
         return 0;
     Document* d = n->document();
@@ -211,9 +214,9 @@ static PassRefPtr<Range> makeSearchRange(const Position& pos)
     RefPtr<Range> searchRange(Range::create(d));
     ExceptionCode ec = 0;
 
-    Position start(rangeCompliantEquivalent(pos));
+    Position start(pos.parentAnchoredEquivalent());
     searchRange->selectNodeContents(boundary, ec);
-    searchRange->setStart(start.node(), start.deprecatedEditingOffset(), ec);
+    searchRange->setStart(start.containerNode(), start.offsetInContainerNode(), ec);
 
     ASSERT(!ec);
     if (ec)
@@ -222,9 +225,9 @@ static PassRefPtr<Range> makeSearchRange(const Position& pos)
     return searchRange.release();
 }
 
-bool VisibleSelection::isAll(StayInEditableContent stayInEditableContent) const
+bool VisibleSelection::isAll(EditingBoundaryCrossingRule rule) const
 {
-    return !shadowTreeRootNode() && visibleStart().previous(stayInEditableContent).isNull() && visibleEnd().next(stayInEditableContent).isNull();
+    return !nonBoundaryShadowTreeRootNode() && visibleStart().previous(rule).isNull() && visibleEnd().next(rule).isNull();
 }
 
 void VisibleSelection::appendTrailingWhitespace()
@@ -233,7 +236,7 @@ void VisibleSelection::appendTrailingWhitespace()
     if (!searchRange)
         return;
 
-    CharacterIterator charIt(searchRange.get(), true);
+    CharacterIterator charIt(searchRange.get(), TextIteratorEmitsCharactersBetweenAllVisiblePositions);
 
     for (; charIt.length(); charIt.advance(1)) {
         UChar c = charIt.characters()[0];
@@ -268,7 +271,7 @@ void VisibleSelection::setBaseAndExtentToDeepEquivalents()
         m_baseIsFirst = comparePositions(m_base, m_extent) <= 0;
 }
 
-void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity()
+void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity(TextGranularity granularity)
 {
     if (m_baseIsFirst) {
         m_start = m_base;
@@ -278,7 +281,7 @@ void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity()
         m_end = m_base;
     }
 
-    switch (m_granularity) {
+    switch (granularity) {
         case CharacterGranularity:
             // Don't do any expansion.
             break;
@@ -301,7 +304,7 @@ void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity()
             VisiblePosition wordEnd(endOfWord(originalEnd, side));
             VisiblePosition end(wordEnd);
             
-            if (isEndOfParagraph(originalEnd) && !isEmptyTableCell(m_start.node())) {
+            if (isEndOfParagraph(originalEnd) && !isEmptyTableCell(m_start.deprecatedNode())) {
                 // Select the paragraph break (the space from the end of a paragraph to the start of 
                 // the next one) to match TextEdit.
                 end = wordEnd.next();
@@ -310,7 +313,7 @@ void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity()
                     // The paragraph break after the last paragraph in the last cell of a block table ends
                     // at the start of the paragraph after the table.
                     if (isBlock(table))
-                        end = end.next(true);
+                        end = end.next(CannotCrossEditingBoundary);
                     else
                         end = wordEnd;
                 }
@@ -322,7 +325,7 @@ void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity()
                 
             m_end = end.deepEquivalent();
             // End must not be before start.
-            if (m_start.node() == m_end.node() && m_start.deprecatedEditingOffset() > m_end.deprecatedEditingOffset()) {
+            if (m_start.deprecatedNode() == m_end.deprecatedNode() && m_start.deprecatedEditingOffset() > m_end.deprecatedEditingOffset()) {
                 Position swap(m_start);
                 m_start = m_end;    
                 m_end = swap;    
@@ -366,7 +369,7 @@ void VisibleSelection::setStartAndEndFromBaseAndExtentRespectingGranularity()
                 // The paragraph break after the last paragraph in the last cell of a block table ends
                 // at the start of the paragraph after the table, not at the position just after the table.
                 if (isBlock(table))
-                    end = end.next(true);
+                    end = end.next(CannotCrossEditingBoundary);
                 // There is no parargraph break after the last paragraph in the last cell of an inline table.
                 else
                     end = visibleParagraphEnd;
@@ -414,10 +417,11 @@ void VisibleSelection::updateSelectionType()
         m_affinity = DOWNSTREAM;
 }
 
-void VisibleSelection::validate()
+void VisibleSelection::validate(TextGranularity granularity)
 {
     setBaseAndExtentToDeepEquivalents();
-    setStartAndEndFromBaseAndExtentRespectingGranularity();
+    setStartAndEndFromBaseAndExtentRespectingGranularity(granularity);
+    adjustSelectionToAvoidCrossingShadowBoundaries();
     adjustSelectionToAvoidCrossingEditingBoundaries();
     updateSelectionType();
 
@@ -445,9 +449,7 @@ void VisibleSelection::setWithoutValidation(const Position& base, const Position
 {
     ASSERT(!base.isNull());
     ASSERT(!extent.isNull());
-    ASSERT(base != extent);
     ASSERT(m_affinity == DOWNSTREAM);
-    ASSERT(m_granularity == CharacterGranularity);
     m_base = base;
     m_extent = extent;
     m_baseIsFirst = comparePositions(base, extent) <= 0;
@@ -458,7 +460,26 @@ void VisibleSelection::setWithoutValidation(const Position& base, const Position
         m_start = extent;
         m_end = base;
     }
-    m_selectionType = RangeSelection;
+    m_selectionType = base == extent ? CaretSelection : RangeSelection;
+}
+
+void VisibleSelection::adjustSelectionToAvoidCrossingShadowBoundaries()
+{
+    if (m_base.isNull() || m_start.isNull() || m_end.isNull())
+        return;
+
+    if (m_start.anchorNode()->treeScope() == m_end.anchorNode()->treeScope())
+        return;
+
+    if (m_baseIsFirst) {
+        m_extent = TreeScopeAdjuster(m_start.anchorNode()->treeScope()).adjustPositionBefore(m_end);
+        m_end = m_extent;
+    } else {
+        m_extent = TreeScopeAdjuster(m_end.anchorNode()->treeScope()).adjustPositionAfter(m_start);
+        m_start = m_extent;
+    }
+
+    ASSERT(m_start.anchorNode()->treeScope() == m_end.anchorNode()->treeScope());
 }
 
 void VisibleSelection::adjustSelectionToAvoidCrossingEditingBoundaries()
@@ -475,7 +496,7 @@ void VisibleSelection::adjustSelectionToAvoidCrossingEditingBoundaries()
     Node* startRoot = highestEditableRoot(m_start);
     Node* endRoot = highestEditableRoot(m_end);
     
-    Node* baseEditableAncestor = lowestEditableAncestor(m_base.node());
+    Node* baseEditableAncestor = lowestEditableAncestor(m_base.containerNode());
     
     // The base, start and end are all in the same region.  No adjustment necessary.
     if (baseRoot == startRoot && baseRoot == endRoot)
@@ -500,10 +521,8 @@ void VisibleSelection::adjustSelectionToAvoidCrossingEditingBoundaries()
         if (endRoot != baseRoot) {
             VisiblePosition last = lastEditablePositionBeforePositionInRoot(m_end, baseRoot);
             m_end = last.deepEquivalent();
-            if (m_end.isNull()) {
-                ASSERT_NOT_REACHED();
+            if (m_end.isNull())
                 m_end = m_start;
-            }
         }
     // The selection is based in non-editable content.
     } else {
@@ -512,19 +531,19 @@ void VisibleSelection::adjustSelectionToAvoidCrossingEditingBoundaries()
     
         // The selection ends in editable content or non-editable content inside a different editable ancestor, 
         // move backward until non-editable content inside the same lowest editable ancestor is reached.
-        Node* endEditableAncestor = lowestEditableAncestor(m_end.node());
+        Node* endEditableAncestor = lowestEditableAncestor(m_end.containerNode());
         if (endRoot || endEditableAncestor != baseEditableAncestor) {
             
             Position p = previousVisuallyDistinctCandidate(m_end);
             Node* shadowAncestor = endRoot ? endRoot->shadowAncestorNode() : 0;
             if (p.isNull() && endRoot && (shadowAncestor != endRoot))
-                p = lastDeepEditingPositionForNode(shadowAncestor);
-            while (p.isNotNull() && !(lowestEditableAncestor(p.node()) == baseEditableAncestor && !isEditablePosition(p))) {
+                p = positionAfterNode(shadowAncestor);
+            while (p.isNotNull() && !(lowestEditableAncestor(p.containerNode()) == baseEditableAncestor && !isEditablePosition(p))) {
                 Node* root = editableRootForPosition(p);
                 shadowAncestor = root ? root->shadowAncestorNode() : 0;
-                p = isAtomicNode(p.node()) ? positionInParentBeforeNode(p.node()) : previousVisuallyDistinctCandidate(p);
+                p = isAtomicNode(p.containerNode()) ? positionInParentBeforeNode(p.containerNode()) : previousVisuallyDistinctCandidate(p);
                 if (p.isNull() && (shadowAncestor != root))
-                    p = lastDeepEditingPositionForNode(shadowAncestor);
+                    p = positionAfterNode(shadowAncestor);
             }
             VisiblePosition previous(p);
 
@@ -542,18 +561,18 @@ void VisibleSelection::adjustSelectionToAvoidCrossingEditingBoundaries()
 
         // The selection starts in editable content or non-editable content inside a different editable ancestor, 
         // move forward until non-editable content inside the same lowest editable ancestor is reached.
-        Node* startEditableAncestor = lowestEditableAncestor(m_start.node());      
+        Node* startEditableAncestor = lowestEditableAncestor(m_start.containerNode());      
         if (startRoot || startEditableAncestor != baseEditableAncestor) {
             Position p = nextVisuallyDistinctCandidate(m_start);
             Node* shadowAncestor = startRoot ? startRoot->shadowAncestorNode() : 0;
             if (p.isNull() && startRoot && (shadowAncestor != startRoot))
-                p = Position(shadowAncestor, 0);
-            while (p.isNotNull() && !(lowestEditableAncestor(p.node()) == baseEditableAncestor && !isEditablePosition(p))) {
+                p = positionBeforeNode(shadowAncestor);
+            while (p.isNotNull() && !(lowestEditableAncestor(p.containerNode()) == baseEditableAncestor && !isEditablePosition(p))) {
                 Node* root = editableRootForPosition(p);
                 shadowAncestor = root ? root->shadowAncestorNode() : 0;
-                p = isAtomicNode(p.node()) ? positionInParentAfterNode(p.node()) : nextVisuallyDistinctCandidate(p);
+                p = isAtomicNode(p.containerNode()) ? positionInParentAfterNode(p.containerNode()) : nextVisuallyDistinctCandidate(p);
                 if (p.isNull() && (shadowAncestor != root))
-                    p = Position(shadowAncestor, 0);
+                    p = positionBeforeNode(shadowAncestor);
             }
             VisiblePosition next(p);
             
@@ -571,7 +590,7 @@ void VisibleSelection::adjustSelectionToAvoidCrossingEditingBoundaries()
     }
     
     // Correct the extent if necessary.
-    if (baseEditableAncestor != lowestEditableAncestor(m_extent.node()))
+    if (baseEditableAncestor != lowestEditableAncestor(m_extent.containerNode()))
         m_extent = m_baseIsFirst ? m_end : m_start;
 }
 
@@ -590,34 +609,31 @@ Element* VisibleSelection::rootEditableElement() const
     return editableRootForPosition(start());
 }
 
-Node* VisibleSelection::shadowTreeRootNode() const
+Node* VisibleSelection::nonBoundaryShadowTreeRootNode() const
 {
-    return start().node() ? start().node()->shadowTreeRootNode() : 0;
+    return start().deprecatedNode() ? start().deprecatedNode()->nonBoundaryShadowTreeRootNode() : 0;
 }
+
+#ifndef NDEBUG
 
 void VisibleSelection::debugPosition() const
 {
-    if (!m_start.node())
-        return;
+    fprintf(stderr, "VisibleSelection ===============\n");
 
-    fprintf(stderr, "VisibleSelection =================\n");
-
-    if (m_start == m_end) {
-        Position pos = m_start;
-        fprintf(stderr, "pos:        %s %p:%d\n", pos.node()->nodeName().utf8().data(), pos.node(), pos.deprecatedEditingOffset());
+    if (!m_start.anchorNode())
+        fputs("pos:   null", stderr);
+    else if (m_start == m_end) {
+        fprintf(stderr, "pos:   %s ", m_start.anchorNode()->nodeName().utf8().data());
+        m_start.showAnchorTypeAndOffset();
     } else {
-        Position pos = m_start;
-        fprintf(stderr, "start:      %s %p:%d\n", pos.node()->nodeName().utf8().data(), pos.node(), pos.deprecatedEditingOffset());
-        fprintf(stderr, "-----------------------------------\n");
-        pos = m_end;
-        fprintf(stderr, "end:        %s %p:%d\n", pos.node()->nodeName().utf8().data(), pos.node(), pos.deprecatedEditingOffset());
-        fprintf(stderr, "-----------------------------------\n");
+        fprintf(stderr, "start: %s ", m_start.anchorNode()->nodeName().utf8().data());
+        m_start.showAnchorTypeAndOffset();
+        fprintf(stderr, "end:   %s ", m_end.anchorNode()->nodeName().utf8().data());
+        m_end.showAnchorTypeAndOffset();
     }
 
     fprintf(stderr, "================================\n");
 }
-
-#ifndef NDEBUG
 
 void VisibleSelection::formatForDebugger(char* buffer, unsigned length) const
 {
@@ -642,9 +658,12 @@ void VisibleSelection::formatForDebugger(char* buffer, unsigned length) const
 
 void VisibleSelection::showTreeForThis() const
 {
-    if (start().node()) {
-        start().node()->showTreeAndMark(start().node(), "S", end().node(), "E");
-        fprintf(stderr, "start offset: %d, end offset: %d\n", start().deprecatedEditingOffset(), end().deprecatedEditingOffset());
+    if (start().anchorNode()) {
+        start().anchorNode()->showTreeAndMark(start().anchorNode(), "S", end().anchorNode(), "E");
+        fputs("start: ", stderr);
+        start().showAnchorTypeAndOffset();
+        fputs("end: ", stderr);
+        end().showAnchorTypeAndOffset();
     }
 }
 

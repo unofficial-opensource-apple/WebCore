@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2009 Google Inc. All rights reserved.
+ * Copyright (C) 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -34,9 +34,11 @@
 #include "Clipboard.h"
 #include "ClipboardEvent.h"
 #include "Event.h"
-#include "MouseEvent.h"
+#include "EventHeaders.h"
+#include "EventInterfaces.h"
+#include "EventNames.h"
 #include "V8Binding.h"
-#include "V8CustomBinding.h"
+#include "V8Clipboard.h"
 #include "V8Proxy.h"
 
 namespace WebCore {
@@ -52,7 +54,7 @@ v8::Handle<v8::Value> V8Event::dataTransferAccessorGetter(v8::Local<v8::String> 
     Event* event = V8Event::toNative(info.Holder());
 
     if (event->isDragEvent())
-        return V8DOMWrapper::convertToV8Object(V8ClassIndex::CLIPBOARD, static_cast<MouseEvent*>(event)->clipboard());
+        return toV8(static_cast<MouseEvent*>(event)->clipboard(), info.GetIsolate());
 
     return v8::Undefined();
 }
@@ -62,9 +64,29 @@ v8::Handle<v8::Value> V8Event::clipboardDataAccessorGetter(v8::Local<v8::String>
     Event* event = V8Event::toNative(info.Holder());
 
     if (event->isClipboardEvent())
-        return V8DOMWrapper::convertToV8Object(V8ClassIndex::CLIPBOARD, static_cast<ClipboardEvent*>(event)->clipboard());
+        return toV8(static_cast<ClipboardEvent*>(event)->clipboard(), info.GetIsolate());
 
     return v8::Undefined();
+}
+
+#define TRY_TO_WRAP_WITH_INTERFACE(interfaceName) \
+    if (eventNames().interfaceFor##interfaceName == desiredInterface) \
+        return toV8(static_cast<interfaceName*>(event), isolate);
+
+v8::Handle<v8::Value> toV8(Event* event, v8::Isolate *isolate)
+{
+    if (!event)
+        return v8::Null();
+
+    String desiredInterface = event->interfaceName();
+
+    // We need to check Event first to avoid infinite recursion.
+    if (eventNames().interfaceForEvent == desiredInterface)
+        return V8Event::wrap(event, isolate);
+
+    DOM_EVENT_INTERFACES_FOR_EACH(TRY_TO_WRAP_WITH_INTERFACE)
+
+    return V8Event::wrap(event, isolate);
 }
 
 } // namespace WebCore

@@ -38,28 +38,39 @@
 #include "AccessibilityListBoxOption.h"
 #include "AccessibilityMediaControls.h"
 #include "AccessibilityMenuList.h"
-#include "AccessibilityMenuListPopup.h"
 #include "AccessibilityMenuListOption.h"
+#include "AccessibilityMenuListPopup.h"
+#include "AccessibilityProgressIndicator.h"
 #include "AccessibilityRenderObject.h"
+#include "AccessibilityScrollView.h"
 #include "AccessibilityScrollbar.h"
 #include "AccessibilitySlider.h"
+#include "AccessibilitySpinButton.h"
 #include "AccessibilityTable.h"
 #include "AccessibilityTableCell.h"
 #include "AccessibilityTableColumn.h"
 #include "AccessibilityTableHeaderContainer.h"
 #include "AccessibilityTableRow.h"
+#include "Document.h"
 #include "FocusController.h"
 #include "Frame.h"
 #include "HTMLAreaElement.h"
 #include "HTMLImageElement.h"
+#include "HTMLInputElement.h"
 #include "HTMLNames.h"
 #if ENABLE(VIDEO)
 #include "MediaControlElements.h"
 #endif
-#include "InputElement.h"
 #include "Page.h"
-#include "RenderObject.h"
+#include "RenderListBox.h"
+#include "RenderMenuList.h"
+#include "RenderProgress.h"
+#include "RenderSlider.h"
+#include "RenderTable.h"
+#include "RenderTableCell.h"
+#include "RenderTableRow.h"
 #include "RenderView.h"
+#include "ScrollView.h"
 
 #include <wtf/PassRefPtr.h>
 
@@ -70,9 +81,10 @@ using namespace HTMLNames;
 bool AXObjectCache::gAccessibilityEnabled = false;
 bool AXObjectCache::gAccessibilityEnhancedUserInterfaceEnabled = false;
 
-AXObjectCache::AXObjectCache()
+AXObjectCache::AXObjectCache(const Document* doc)
     : m_notificationPostTimer(this, &AXObjectCache::notificationPostTimerFired)
 {
+    m_document = const_cast<Document*>(doc);
 }
 
 AXObjectCache::~AXObjectCache()
@@ -117,6 +129,9 @@ AccessibilityObject* AXObjectCache::focusedImageMapUIElement(HTMLAreaElement* ar
     
 AccessibilityObject* AXObjectCache::focusedUIElementForPage(const Page* page)
 {
+    if (!gAccessibilityEnabled)
+        return 0;
+
     // get the focused node in the page
     Document* focusedDocument = page->focusController()->focusedOrMainFrame()->document();
     Node* focusedNode = focusedDocument->focusedNode();
@@ -144,90 +159,154 @@ AccessibilityObject* AXObjectCache::focusedUIElementForPage(const Page* page)
     return obj;
 }
 
+AccessibilityObject* AXObjectCache::get(Widget* widget)
+{
+    if (!widget)
+        return 0;
+        
+    AXID axID = m_widgetObjectMapping.get(widget);
+    ASSERT(!HashTraits<AXID>::isDeletedValue(axID));
+    if (!axID)
+        return 0;
+    
+    return m_objects.get(axID).get();    
+}
+    
 AccessibilityObject* AXObjectCache::get(RenderObject* renderer)
 {
     if (!renderer)
         return 0;
     
-    AccessibilityObject* obj = 0;
     AXID axID = m_renderObjectMapping.get(renderer);
     ASSERT(!HashTraits<AXID>::isDeletedValue(axID));
+    if (!axID)
+        return 0;
 
-    if (axID)
-        obj = m_objects.get(axID).get();
-    
-    return obj;
+    return m_objects.get(axID).get();    
 }
-    
-bool AXObjectCache::nodeIsAriaType(Node* node, String role)
+
+// FIXME: This probably belongs on Node.
+// FIXME: This should take a const char*, but one caller passes nullAtom.
+bool nodeHasRole(Node* node, const String& role)
 {
     if (!node || !node->isElementNode())
         return false;
-    
+
     return equalIgnoringCase(static_cast<Element*>(node)->getAttribute(roleAttr), role);
 }
 
+static PassRefPtr<AccessibilityObject> createFromRenderer(RenderObject* renderer)
+{
+    // FIXME: How could renderer->node() ever not be an Element?
+    Node* node = renderer->node();
+
+    // If the node is aria role="list" or the aria role is empty and its a
+    // ul/ol/dl type (it shouldn't be a list if aria says otherwise).
+    if (node && ((nodeHasRole(node, "list") || nodeHasRole(node, "directory"))
+                      || (nodeHasRole(node, nullAtom) && (node->hasTagName(ulTag) || node->hasTagName(olTag) || node->hasTagName(dlTag)))))
+        return AccessibilityList::create(renderer);
+
+    // aria tables
+    if (nodeHasRole(node, "grid") || nodeHasRole(node, "treegrid"))
+        return AccessibilityARIAGrid::create(renderer);
+    if (nodeHasRole(node, "row"))
+        return AccessibilityARIAGridRow::create(renderer);
+    if (nodeHasRole(node, "gridcell") || nodeHasRole(node, "columnheader") || nodeHasRole(node, "rowheader"))
+        return AccessibilityARIAGridCell::create(renderer);
+
+#if ENABLE(VIDEO)
+    // media controls
+    if (node && node->isMediaControlElement())
+        return AccessibilityMediaControl::create(renderer);
+#endif
+
+    if (renderer->isBoxModelObject()) {
+        RenderBoxModelObject* cssBox = toRenderBoxModelObject(renderer);
+        if (cssBox->isListBox())
+            return AccessibilityListBox::create(toRenderListBox(cssBox));
+        if (cssBox->isMenuList())
+            return AccessibilityMenuList::create(toRenderMenuList(cssBox));
+
+        // standard tables
+        if (cssBox->isTable())
+            return AccessibilityTable::create(toRenderTable(cssBox));
+        if (cssBox->isTableRow())
+            return AccessibilityTableRow::create(toRenderTableRow(cssBox));
+        if (cssBox->isTableCell())
+            return AccessibilityTableCell::create(toRenderTableCell(cssBox));
+
+#if ENABLE(PROGRESS_TAG)
+        // progress bar
+        if (cssBox->isProgress())
+            return AccessibilityProgressIndicator::create(toRenderProgress(cssBox));
+#endif
+
+        // input type=range
+        if (cssBox->isSlider())
+            return AccessibilitySlider::create(toRenderSlider(cssBox));
+    }
+
+    return AccessibilityRenderObject::create(renderer);
+}
+
+AccessibilityObject* AXObjectCache::getOrCreate(Widget* widget)
+{
+    if (!widget)
+        return 0;
+
+    if (AccessibilityObject* obj = get(widget))
+        return obj;
+    
+    RefPtr<AccessibilityObject> newObj = 0;
+    if (widget->isFrameView())
+        newObj = AccessibilityScrollView::create(static_cast<ScrollView*>(widget));
+    else if (widget->isScrollbar())
+        newObj = AccessibilityScrollbar::create(static_cast<Scrollbar*>(widget));
+        
+    getAXID(newObj.get());
+    
+    m_widgetObjectMapping.set(widget, newObj->axObjectID());
+    m_objects.set(newObj->axObjectID(), newObj);    
+    attachWrapper(newObj.get());
+    return newObj.get();
+}
+    
 AccessibilityObject* AXObjectCache::getOrCreate(RenderObject* renderer)
 {
     if (!renderer)
         return 0;
+
+    if (AccessibilityObject* obj = get(renderer))
+        return obj;
+
+    RefPtr<AccessibilityObject> newObj = createFromRenderer(renderer);
+
+    getAXID(newObj.get());
+
+    m_renderObjectMapping.set(renderer, newObj->axObjectID());
+    m_objects.set(newObj->axObjectID(), newObj);
+    attachWrapper(newObj.get());
+    return newObj.get();
+}
     
-    AccessibilityObject* obj = get(renderer);
-
-    if (!obj) {
-        Node* node = renderer->node();
-        RefPtr<AccessibilityObject> newObj = 0;
-        if (renderer->isListBox())
-            newObj = AccessibilityListBox::create(renderer);
-        else if (renderer->isMenuList())
-            newObj = AccessibilityMenuList::create(renderer);
-
-        // If the node is aria role="list" or the aria role is empty and its a ul/ol/dl type (it shouldn't be a list if aria says otherwise). 
-        else if (node && ((nodeIsAriaType(node, "list") || nodeIsAriaType(node, "directory"))
-                          || (nodeIsAriaType(node, nullAtom) && (node->hasTagName(ulTag) || node->hasTagName(olTag) || node->hasTagName(dlTag)))))
-            newObj = AccessibilityList::create(renderer);
-        
-        // aria tables
-        else if (nodeIsAriaType(node, "grid") || nodeIsAriaType(node, "treegrid"))
-            newObj = AccessibilityARIAGrid::create(renderer);
-        else if (nodeIsAriaType(node, "row"))
-            newObj = AccessibilityARIAGridRow::create(renderer);
-        else if (nodeIsAriaType(node, "gridcell") || nodeIsAriaType(node, "columnheader") || nodeIsAriaType(node, "rowheader"))
-            newObj = AccessibilityARIAGridCell::create(renderer);
-
-        // standard tables
-        else if (renderer->isTable())
-            newObj = AccessibilityTable::create(renderer);
-        else if (renderer->isTableRow())
-            newObj = AccessibilityTableRow::create(renderer);
-        else if (renderer->isTableCell())
-            newObj = AccessibilityTableCell::create(renderer);
-
-#if ENABLE(VIDEO)
-        // media controls
-        else if (renderer->node() && renderer->node()->isMediaControlElement())
-            newObj = AccessibilityMediaControl::create(renderer);
-#endif
-
-        // input type=range
-        else if (renderer->isSlider())
-            newObj = AccessibilitySlider::create(renderer);
-
-        else
-            newObj = AccessibilityRenderObject::create(renderer);
-        
-        obj = newObj.get();
-        
-        getAXID(obj);
-        
-        m_renderObjectMapping.set(renderer, obj->axObjectID());
-        m_objects.set(obj->axObjectID(), obj);    
-        attachWrapper(obj);
-    }
+AccessibilityObject* AXObjectCache::rootObject()
+{
+    if (!gAccessibilityEnabled)
+        return 0;
     
-    return obj;
+    return getOrCreate(m_document->view());
 }
 
+AccessibilityObject* AXObjectCache::rootObjectForFrame(Frame* frame)
+{
+    if (!gAccessibilityEnabled)
+        return 0;
+
+    if (!frame)
+        return 0;
+    return getOrCreate(frame->view());
+}    
+    
 AccessibilityObject* AXObjectCache::getOrCreate(AccessibilityRole role)
 {
     RefPtr<AccessibilityObject> obj = 0;
@@ -255,8 +334,11 @@ AccessibilityObject* AXObjectCache::getOrCreate(AccessibilityRole role)
     case MenuListOptionRole:
         obj = AccessibilityMenuListOption::create();
         break;
-    case ScrollBarRole:
-        obj = AccessibilityScrollbar::create();
+    case SpinButtonRole:
+        obj = AccessibilitySpinButton::create();
+        break;
+    case SpinButtonPartRole:
+        obj = AccessibilitySpinButtonPart::create();
         break;
     default:
         obj = 0;
@@ -303,7 +385,18 @@ void AXObjectCache::remove(RenderObject* renderer)
     m_renderObjectMapping.remove(renderer);
 }
 
-#if !PLATFORM(WIN)
+void AXObjectCache::remove(Widget* view)
+{
+    if (!view)
+        return;
+        
+    AXID axID = m_widgetObjectMapping.get(view);
+    remove(axID);
+    m_widgetObjectMapping.remove(view);
+}
+    
+    
+#if !PLATFORM(WIN) || OS(WINCE)
 AXID AXObjectCache::platformGenerateAXID() const
 {
     static AXID lastUsedID = 0;
@@ -397,7 +490,8 @@ void AXObjectCache::notificationPostTimerFired(Timer<AXObjectCache>*)
     
     m_notificationsToPost.clear();
 }
-
+    
+#if HAVE(ACCESSIBILITY)
 void AXObjectCache::postNotification(RenderObject* renderer, AXNotification notification, bool postToElement, PostType postType)
 {
     // Notifications for text input objects are sent to that object.
@@ -438,11 +532,65 @@ void AXObjectCache::postNotification(AccessibilityObject* object, Document* docu
         postPlatformNotification(object, notification);
 }
 
-void AXObjectCache::selectedChildrenChanged(RenderObject* renderer)
+void AXObjectCache::checkedStateChanged(RenderObject* renderer)
 {
-    postNotification(renderer, AXSelectedChildrenChanged, true);
+    postNotification(renderer, AXObjectCache::AXCheckedStateChanged, true);
 }
 
+void AXObjectCache::selectedChildrenChanged(RenderObject* renderer)
+{
+    // postToElement is false so that you can pass in any child of an element and it will go up the parent tree
+    // to find the container which should send out the notification.
+    postNotification(renderer, AXSelectedChildrenChanged, false);
+}
+
+void AXObjectCache::nodeTextChangeNotification(RenderObject* renderer, AXTextChange textChange, unsigned offset, const String& text)
+{
+    if (!renderer)
+        return;
+
+    // Delegate on the right platform
+    AccessibilityObject* obj = getOrCreate(renderer);
+    nodeTextChangePlatformNotification(obj, textChange, offset, text);
+}
+
+void AXObjectCache::frameLoadingEventNotification(Frame* frame, AXLoadingEvent loadingEvent)
+{
+    if (!frame)
+        return;
+
+    // Delegate on the right platform
+    RenderView* contentRenderer = frame->contentRenderer();
+    if (!contentRenderer)
+        return;
+
+    AccessibilityObject* obj = getOrCreate(contentRenderer);
+    frameLoadingEventPlatformNotification(obj, loadingEvent);
+}
+#endif
+
+#if HAVE(ACCESSIBILITY)
+
+void AXObjectCache::handleScrollbarUpdate(ScrollView* view)
+{
+    if (!view)
+        return;
+    
+    // We don't want to create a scroll view from this method, only update an existing one.
+    AccessibilityObject* scrollViewObject = get(view);
+    if (scrollViewObject)
+        scrollViewObject->updateChildrenIfNecessary();
+}
+    
+void AXObjectCache::handleAriaExpandedChange(RenderObject *renderer)
+{
+    if (!renderer)
+        return;
+    AccessibilityObject* obj = getOrCreate(renderer);
+    if (obj)
+        obj->handleAriaExpandedChanged();
+}
+    
 void AXObjectCache::handleActiveDescendantChanged(RenderObject* renderer)
 {
     if (!renderer)
@@ -460,15 +608,20 @@ void AXObjectCache::handleAriaRoleChanged(RenderObject* renderer)
     if (obj && obj->isAccessibilityRenderObject())
         static_cast<AccessibilityRenderObject*>(obj)->updateAccessibilityRole();
 }
-    
+#endif
+
 VisiblePosition AXObjectCache::visiblePositionForTextMarkerData(TextMarkerData& textMarkerData)
 {
-    VisiblePosition visiblePos = VisiblePosition(textMarkerData.node, textMarkerData.offset, textMarkerData.affinity);
+    if (!isNodeInUse(textMarkerData.node))
+        return VisiblePosition();
+    
+    // FIXME: Accessability should make it clear these are DOM-compliant offsets or store Position objects.
+    VisiblePosition visiblePos = VisiblePosition(createLegacyEditingPosition(textMarkerData.node, textMarkerData.offset), textMarkerData.affinity);
     Position deepPos = visiblePos.deepEquivalent();
     if (deepPos.isNull())
         return VisiblePosition();
     
-    RenderObject* renderer = deepPos.node()->renderer();
+    RenderObject* renderer = deepPos.deprecatedNode()->renderer();
     if (!renderer)
         return VisiblePosition();
     
@@ -476,7 +629,7 @@ VisiblePosition AXObjectCache::visiblePositionForTextMarkerData(TextMarkerData& 
     if (!cache->isIDinUse(textMarkerData.axID))
         return VisiblePosition();
     
-    if (deepPos.node() != textMarkerData.node || deepPos.deprecatedEditingOffset() != textMarkerData.offset)
+    if (deepPos.deprecatedNode() != textMarkerData.node || deepPos.deprecatedEditingOffset() != textMarkerData.offset)
         return VisiblePosition();
     
     return visiblePos;
@@ -492,13 +645,13 @@ void AXObjectCache::textMarkerDataForVisiblePosition(TextMarkerData& textMarkerD
         return;
     
     Position deepPos = visiblePos.deepEquivalent();
-    Node* domNode = deepPos.node();
+    Node* domNode = deepPos.deprecatedNode();
     ASSERT(domNode);
     if (!domNode)
         return;
     
     if (domNode->isHTMLElement()) {
-        InputElement* inputElement = toInputElement(static_cast<Element*>(domNode));
+        HTMLInputElement* inputElement = domNode->toInputElement();
         if (inputElement && inputElement->isPasswordField())
             return;
     }
@@ -514,7 +667,31 @@ void AXObjectCache::textMarkerDataForVisiblePosition(TextMarkerData& textMarkerD
     textMarkerData.axID = obj.get()->axObjectID();
     textMarkerData.node = domNode;
     textMarkerData.offset = deepPos.deprecatedEditingOffset();
-    textMarkerData.affinity = visiblePos.affinity();    
-}
+    textMarkerData.affinity = visiblePos.affinity();   
     
+    cache->setNodeInUse(domNode);
+}
+
+const Element* AXObjectCache::rootAXEditableElement(const Node* node)
+{
+    const Element* result = node->rootEditableElement();
+    const Element* element = node->isElementNode() ? toElement(node) : node->parentElement();
+
+    for (; element; element = element->parentElement()) {
+        if (nodeIsTextControl(element))
+            result = element;
+    }
+
+    return result;
+}
+
+bool AXObjectCache::nodeIsTextControl(const Node* node)
+{
+    if (!node)
+        return false;
+
+    const AccessibilityObject* axObject = getOrCreate(node->renderer());
+    return axObject && axObject->isTextControl();
+}
+
 } // namespace WebCore

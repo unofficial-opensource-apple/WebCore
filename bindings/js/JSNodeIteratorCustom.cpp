@@ -29,42 +29,16 @@ using namespace JSC;
 
 namespace WebCore {
 
-void JSNodeIterator::markChildren(MarkStack& markStack)
+void JSNodeIterator::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
-    Base::markChildren(markStack);
+    JSNodeIterator* thisObject = jsCast<JSNodeIterator*>(cell);
+    ASSERT_GC_OBJECT_INHERITS(thisObject, &s_info);
+    COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
+    ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
+    Base::visitChildren(thisObject, visitor);
 
-    if (NodeFilter* filter = m_impl->filter())
-        filter->markAggregate(markStack);
-}
-
-JSValue JSNodeIterator::nextNode(ExecState* exec, const ArgList&)
-{
-    ExceptionCode ec = 0;
-    RefPtr<Node> node = impl()->nextNode(exec, ec);
-    if (ec) {
-        setDOMException(exec, ec);
-        return jsUndefined();
-    }
-
-    if (exec->hadException())
-        return jsUndefined();
-
-    return toJS(exec, node.get());
-}
-
-JSValue JSNodeIterator::previousNode(ExecState* exec, const ArgList&)
-{
-    ExceptionCode ec = 0;
-    RefPtr<Node> node = impl()->previousNode(exec, ec);
-    if (ec) {
-        setDOMException(exec, ec);
-        return jsUndefined();
-    }
-
-    if (exec->hadException())
-        return jsUndefined();
-
-    return toJS(exec, node.get());
+    if (NodeFilter* filter = thisObject->m_impl->filter())
+        visitor.addOpaqueRoot(filter);
 }
 
 }

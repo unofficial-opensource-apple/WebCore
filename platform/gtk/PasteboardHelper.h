@@ -1,6 +1,8 @@
 /*
  * Copyright (C) 2007 Luca Bruno <lethalman88@gmail.com>
  * Copyright (C) 2009 Holger Hans Peter Freyther
+ * Copyright (C) 2010 Martin Robinson <mrobinson@webkit.org>
+ * Copyright (C) 2010 Igalia S.L.
  * All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -23,27 +25,40 @@
 #ifndef PasteboardHelper_h
 #define PasteboardHelper_h
 
-/*
- * FIXME: this is for WebCore support and must be removed once
- * a better solution is found
- */
-
 #include "Frame.h"
-
-typedef struct _GtkClipboard GtkClipboard;
-typedef struct _GtkTargetList GtkTargetList;
 
 namespace WebCore {
 
+class DataObjectGtk;
+
 class PasteboardHelper {
 public:
-    virtual ~PasteboardHelper() {};
+    PasteboardHelper();
+    virtual ~PasteboardHelper();
+    static PasteboardHelper* defaultPasteboardHelper();
 
-    virtual GtkClipboard* getCurrentTarget(Frame*) const = 0;
-    virtual GtkClipboard* getClipboard(Frame*) const = 0;
-    virtual GtkClipboard* getPrimary(Frame*) const = 0;
-    virtual GtkTargetList* targetList() const = 0;
-    virtual gint getWebViewTargetInfoHtml() const = 0;
+    void setUsePrimarySelectionClipboard(bool usePrimary) { m_usePrimarySelectionClipboard = usePrimary; }
+    bool usePrimarySelectionClipboard() { return m_usePrimarySelectionClipboard; }
+
+    enum SmartPasteInclusion { IncludeSmartPaste, DoNotIncludeSmartPaste };
+
+    GtkClipboard* getCurrentClipboard(Frame*);
+    GtkClipboard* getClipboard(Frame*) const;
+    GtkClipboard* getPrimarySelectionClipboard(Frame*) const;
+    GtkTargetList* targetList() const;
+    GtkTargetList* targetListForDataObject(DataObjectGtk*, SmartPasteInclusion = DoNotIncludeSmartPaste);
+    void fillSelectionData(GtkSelectionData*, guint, DataObjectGtk*);
+    void fillDataObjectFromDropData(GtkSelectionData*, guint, DataObjectGtk*);
+    Vector<GdkAtom> dropAtomsForContext(GtkWidget*, GdkDragContext*);
+    void writeClipboardContents(GtkClipboard*, SmartPasteInclusion = DoNotIncludeSmartPaste, GClosure* = 0);
+    void getClipboardContents(GtkClipboard*);
+
+    enum PasteboardTargetType { TargetTypeMarkup, TargetTypeText, TargetTypeImage, TargetTypeURIList, TargetTypeNetscapeURL, TargetTypeSmartPaste, TargetTypeUnknown };
+    bool clipboardContentSupportsSmartReplace(GtkClipboard*);
+
+private:
+    GtkTargetList* m_targetList;
+    bool m_usePrimarySelectionClipboard;
 };
 
 }

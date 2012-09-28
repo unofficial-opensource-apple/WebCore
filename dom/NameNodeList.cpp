@@ -31,15 +31,20 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-NameNodeList::NameNodeList(PassRefPtr<Node> rootNode, const String& name, DynamicNodeList::Caches* caches)
-    : DynamicNodeList(rootNode, caches)
+NameNodeList::NameNodeList(PassRefPtr<Node> rootNode, const String& name)
+    : DynamicSubtreeNodeList(rootNode)
     , m_nodeName(name)
 {
 }
 
+NameNodeList::~NameNodeList()
+{
+    rootNode()->removeCachedNameNodeList(this, m_nodeName);
+} 
+
 bool NameNodeList::nodeMatches(Element* testNode) const
 {
-    return testNode->getAttribute(nameAttr) == m_nodeName;
+    return testNode->getNameAttribute() == m_nodeName;
 }
 
 } // namespace WebCore

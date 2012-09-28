@@ -26,8 +26,10 @@
 #ifndef ProgressTracker_h
 #define ProgressTracker_h
 
+#include <wtf/Forward.h>
 #include <wtf/HashMap.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/OwnPtr.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
@@ -36,12 +38,13 @@ class Frame;
 class ResourceResponse;
 struct ProgressItem;
 
-class ProgressTracker : public Noncopyable {
+class ProgressTracker {
+    WTF_MAKE_NONCOPYABLE(ProgressTracker); WTF_MAKE_FAST_ALLOCATED;
 public:
-    ProgressTracker();
     ~ProgressTracker();
-    
-    unsigned long createUniqueIdentifier();
+
+    static PassOwnPtr<ProgressTracker> create();
+    static unsigned long createUniqueIdentifier();
 
     double estimatedProgress() const;
 
@@ -56,10 +59,12 @@ public:
     long long totalBytesReceived() const { return m_totalBytesReceived; }
 
 private:
+    ProgressTracker();
+
     void reset();
     void finalProgressComplete();
     
-    unsigned long m_uniqueIdentifier;
+    static unsigned long s_uniqueIdentifier;
     
     long long m_totalPageAndResourceBytesToLoad;
     long long m_totalBytesReceived;
@@ -72,7 +77,7 @@ private:
     RefPtr<Frame> m_originatingProgressFrame;
     
     int m_numProgressTrackedFrames;
-    HashMap<unsigned long, ProgressItem*> m_progressItems;
+    HashMap<unsigned long, OwnPtr<ProgressItem> > m_progressItems;
 };
     
 }

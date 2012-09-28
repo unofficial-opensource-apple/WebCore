@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2004, 2005, 2006, 2010 Apple Inc. All rights reserved.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -24,6 +24,7 @@
 
 #include "config.h"
 #include "HTMLFieldSetElement.h"
+#include "HTMLLegendElement.h"
 
 #include "HTMLNames.h"
 #include "RenderFieldset.h"
@@ -33,19 +34,26 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLFieldSetElement::HTMLFieldSetElement(const QualifiedName& tagName, Document *doc, HTMLFormElement *f)
-    : HTMLFormControlElement(tagName, doc, f)
+inline HTMLFieldSetElement::HTMLFieldSetElement(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
+    : HTMLFormControlElement(tagName, document, form)
 {
     ASSERT(hasTagName(fieldsetTag));
 }
 
-HTMLFieldSetElement::~HTMLFieldSetElement()
+PassRefPtr<HTMLFieldSetElement> HTMLFieldSetElement::create(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
 {
+    return adoptRef(new HTMLFieldSetElement(tagName, document, form));
 }
 
-bool HTMLFieldSetElement::checkDTD(const Node* newChild)
+void HTMLFieldSetElement::disabledAttributeChanged()
 {
-    return newChild->hasTagName(legendTag) || HTMLElement::checkDTD(newChild);
+    // This element must be updated before the style of nodes in its subtree gets recalculated.
+    HTMLFormControlElement::disabledAttributeChanged();
+
+    for (Node* currentNode = this; currentNode; currentNode = currentNode->traverseNextNode(this)) {
+        if (currentNode && currentNode->isElementNode() && toElement(currentNode)->isFormControlElement())
+            static_cast<HTMLFormControlElement*>(currentNode)->setNeedsStyleRecalc();
+    }
 }
 
 bool HTMLFieldSetElement::supportsFocus() const
@@ -62,6 +70,15 @@ const AtomicString& HTMLFieldSetElement::formControlType() const
 RenderObject* HTMLFieldSetElement::createRenderer(RenderArena* arena, RenderStyle*)
 {
     return new (arena) RenderFieldset(this);
+}
+
+HTMLLegendElement* HTMLFieldSetElement::legend() const
+{
+    for (Element* node = firstElementChild(); node; node = node->nextElementSibling()) {
+        if (node->hasTagName(legendTag))
+            return static_cast<HTMLLegendElement*>(node);
+    }
+    return 0;
 }
 
 } // namespace

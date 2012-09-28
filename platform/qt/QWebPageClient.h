@@ -30,60 +30,85 @@
 #include <QCursor>
 #endif
 
+#if USE(ACCELERATED_COMPOSITING)
+#include <GraphicsLayer.h>
+#endif
+
+#if ENABLE(WEBGL)
+#include <GraphicsContext3D.h>
+#endif
+
+#include <QPalette>
 #include <QRect>
 
 QT_BEGIN_NAMESPACE
-class QGraphicsItem;
 class QStyle;
 QT_END_NAMESPACE
+
+namespace WebCore {
+class Widget;
+}
 
 class QWebPageClient {
 public:
     virtual ~QWebPageClient() { }
-        
+
+    virtual bool isQWidgetClient() const { return false; }
+
     virtual void scroll(int dx, int dy, const QRect&) = 0;
     virtual void update(const QRect&) = 0;
     virtual void setInputMethodEnabled(bool enable) = 0;
     virtual bool inputMethodEnabled() const = 0;
 #if USE(ACCELERATED_COMPOSITING)
-    // this gets called when we start/stop compositing.
-    virtual void setRootGraphicsLayer(QGraphicsItem* layer) {}
+    virtual void setRootGraphicsLayer(WebCore::GraphicsLayer* layer) { }
 
     // this gets called when the compositor wants us to sync the layers
     // if scheduleSync is true, we schedule a sync ourselves. otherwise,
     // we wait for the next update and sync the layers then.
     virtual void markForSync(bool scheduleSync = false) {}
+    virtual bool allowsAcceleratedCompositing() const { return false; }
 #endif
 
-#if QT_VERSION >= 0x040600
-    virtual void setInputMethodHint(Qt::InputMethodHint hint, bool enable) = 0;
-#endif
+    virtual void setInputMethodHints(Qt::InputMethodHints hint) = 0;
+
+#ifndef QT_NO_CURSOR
     inline void resetCursor()
     {
-#ifndef QT_NO_CURSOR
         if (!cursor().bitmap() && cursor().shape() == m_lastCursor.shape())
             return;
         updateCursor(m_lastCursor);
-#endif
     }
 
     inline void setCursor(const QCursor& cursor)
     {
-#ifndef QT_NO_CURSOR
         m_lastCursor = cursor;
         if (!cursor.bitmap() && cursor.shape() == this->cursor().shape())
             return;
         updateCursor(cursor);
-#endif
     }
+#endif
 
     virtual QPalette palette() const = 0;
     virtual int screenNumber() const = 0;
     virtual QWidget* ownerWidget() const = 0;
+    virtual QRect geometryRelativeToOwnerWidget() const = 0;
 
     virtual QObject* pluginParent() const = 0;
 
     virtual QStyle* style() const = 0;
+
+    virtual QRectF graphicsItemVisibleRect() const { return QRectF(); }
+
+    virtual bool viewResizesToContentsEnabled() const = 0;
+
+    virtual QRectF windowRect() const = 0;
+
+    virtual void setWidgetVisible(WebCore::Widget*, bool visible) = 0;
+
+#if ENABLE(WEBGL)
+    virtual void createPlatformGraphicsContext3D(PlatformGraphicsContext3D*,
+                                                 PlatformGraphicsSurface3D*) = 0;
+#endif
 
 protected:
 #ifndef QT_NO_CURSOR

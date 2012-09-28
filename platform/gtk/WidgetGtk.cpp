@@ -28,19 +28,21 @@
 #include "config.h"
 #include "Widget.h"
 
+#include "Chrome.h"
 #include "Cursor.h"
+#include "Frame.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
+#include "GtkVersioning.h"
 #include "HostWindow.h"
 #include "IntRect.h"
+#include "Page.h"
 #include "RenderObject.h"
 
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
 
 namespace WebCore {
-
-static GdkCursor* lastSetCursor;
 
 Widget::Widget(PlatformWidget widget)
 {
@@ -50,48 +52,36 @@ Widget::Widget(PlatformWidget widget)
 Widget::~Widget()
 {
     ASSERT(!parent());
+
     releasePlatformWidget();
 }
 
-void Widget::setFocus()
+void Widget::setFocus(bool focused)
 {
-    gtk_widget_grab_focus(platformWidget() ? platformWidget() : GTK_WIDGET(root()->hostWindow()->platformPageClient()));
 }
 
-static GdkDrawable* gdkDrawable(PlatformWidget widget)
-{
-    return widget ? widget->window : 0;
-}
-    
 void Widget::setCursor(const Cursor& cursor)
 {
-    GdkCursor* platformCursor = cursor.impl();
-
-    // http://bugs.webkit.org/show_bug.cgi?id=16388
-    // [GTK] Widget::setCursor() gets called frequently
-    //
-    // gdk_window_set_cursor() in certain GDK backends seems to be an
-    // expensive operation, so avoid it if possible.
-
-    if (platformCursor == lastSetCursor)
+    ScrollView* view = root();
+    if (!view)
         return;
-
-    gdk_window_set_cursor(gdkDrawable(platformWidget()) ? GDK_WINDOW(gdkDrawable(platformWidget())) : GTK_WIDGET(root()->hostWindow()->platformPageClient())->window, platformCursor);
-    lastSetCursor = platformCursor;
+    view->hostWindow()->setCursor(cursor);
 }
 
 void Widget::show()
 {
-    if (!platformWidget())
-         return;
-    gtk_widget_show(platformWidget());
+    setSelfVisible(true);
+
+    if (isParentVisible() && platformWidget())
+        gtk_widget_show(platformWidget());
 }
 
 void Widget::hide()
 {
-    if (!platformWidget())
-         return;
-    gtk_widget_hide(platformWidget());
+    setSelfVisible(false);
+
+    if (isParentVisible() && platformWidget())
+        gtk_widget_hide(platformWidget());
 }
 
 void Widget::paint(GraphicsContext* context, const IntRect& rect)
@@ -121,6 +111,7 @@ IntRect Widget::frameRect() const
 void Widget::setFrameRect(const IntRect& rect)
 {
     m_frame = rect;
+    frameRectsChanged();
 }
 
 void Widget::releasePlatformWidget()

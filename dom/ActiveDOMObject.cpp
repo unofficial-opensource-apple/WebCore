@@ -34,27 +34,39 @@
 namespace WebCore {
 
 ActiveDOMObject::ActiveDOMObject(ScriptExecutionContext* scriptExecutionContext, void* upcastPointer)
-    : m_scriptExecutionContext(scriptExecutionContext)
+    : ContextDestructionObserver(scriptExecutionContext)
     , m_pendingActivityCount(0)
-{
-#if ENABLE(WORKERS)
-    ASSERT((m_scriptExecutionContext->isDocument() && isMainThread())
-        || (m_scriptExecutionContext->isWorkerContext() && currentThread() == static_cast<WorkerContext*>(m_scriptExecutionContext)->thread()->threadID()));
+#if !ASSERT_DISABLED
+    , m_suspendIfNeededCalled(false)
 #endif
+{
+    if (!m_scriptExecutionContext)
+        return;
 
-    m_scriptExecutionContext->createdActiveDOMObject(this, upcastPointer);
+    ASSERT(m_scriptExecutionContext->isContextThread());
+    m_scriptExecutionContext->didCreateActiveDOMObject(this, upcastPointer);
 }
 
 ActiveDOMObject::~ActiveDOMObject()
 {
-    if (m_scriptExecutionContext) {
-#if ENABLE(WORKERS)
-        ASSERT((m_scriptExecutionContext->isDocument() && isMainThread())
-            || (m_scriptExecutionContext->isWorkerContext() && currentThread() == static_cast<WorkerContext*>(m_scriptExecutionContext)->thread()->threadID()));
-#endif
+    if (!m_scriptExecutionContext)
+        return;
 
-        m_scriptExecutionContext->destroyedActiveDOMObject(this);
-    }
+    ASSERT(m_suspendIfNeededCalled);
+    ASSERT(m_scriptExecutionContext->isContextThread());
+    m_scriptExecutionContext->willDestroyActiveDOMObject(this);
+}
+
+void ActiveDOMObject::suspendIfNeeded()
+{
+#if !ASSERT_DISABLED
+    ASSERT(!m_suspendIfNeededCalled);
+    m_suspendIfNeededCalled = true;
+#endif
+    if (!m_scriptExecutionContext)
+        return;
+
+    m_scriptExecutionContext->suspendActiveDOMObjectIfNeeded(this);
 }
 
 bool ActiveDOMObject::hasPendingActivity() const
@@ -62,17 +74,12 @@ bool ActiveDOMObject::hasPendingActivity() const
     return m_pendingActivityCount;
 }
 
-void ActiveDOMObject::contextDestroyed()
-{
-    m_scriptExecutionContext = 0;
-}
-
 bool ActiveDOMObject::canSuspend() const
 {
     return false;
 }
 
-void ActiveDOMObject::suspend()
+void ActiveDOMObject::suspend(ReasonForSuspension)
 {
 }
 

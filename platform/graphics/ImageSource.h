@@ -27,13 +27,16 @@
 #ifndef ImageSource_h
 #define ImageSource_h
 
+#include "ImageOrientation.h"
+
+#include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/Vector.h>
 
 #if PLATFORM(WX)
 class wxBitmap;
 class wxGraphicsBitmap;
-#elif PLATFORM(CG)
+#elif USE(CG)
 typedef struct CGImageSource* CGImageSourceRef;
 typedef struct CGImage* CGImageRef;
 typedef const struct __CFData* CFDataRef;
@@ -42,26 +45,36 @@ typedef const struct __CFData* CFDataRef;
 QT_BEGIN_NAMESPACE
 class QPixmap;
 QT_END_NAMESPACE
-#elif PLATFORM(CAIRO)
-struct _cairo_surface;
-typedef struct _cairo_surface cairo_surface_t;
-#elif PLATFORM(SKIA)
+#elif USE(CAIRO)
+#include "NativeImageCairo.h"
+#elif USE(SKIA)
+namespace WebCore {
 class NativeImageSkia;
-#elif PLATFORM(HAIKU)
-class BBitmap;
+}
 #elif OS(WINCE)
 #include "SharedBitmap.h"
 #endif
 
 namespace WebCore {
 
+class ImageOrientation;
+class IntPoint;
 class IntSize;
 class SharedBuffer;
-class String;
 
-#if PLATFORM(CG)
+#if USE(CG)
+#if USE(WEBKIT_IMAGE_DECODERS)
+class ImageDecoder;
+typedef ImageDecoder* NativeImageSourcePtr;
+#else
 typedef CGImageSourceRef NativeImageSourcePtr;
+#endif
 typedef CGImageRef NativeImagePtr;
+#elif PLATFORM(OPENVG)
+class ImageDecoder;
+class TiledImageOpenVG;
+typedef ImageDecoder* NativeImageSourcePtr;
+typedef TiledImageOpenVG* NativeImagePtr;
 #elif PLATFORM(QT)
 class ImageDecoderQt;
 typedef ImageDecoderQt* NativeImageSourcePtr;
@@ -75,23 +88,58 @@ typedef wxGraphicsBitmap* NativeImagePtr;
 #else
 typedef wxBitmap* NativeImagePtr;
 #endif
-#elif PLATFORM(CAIRO)
-typedef cairo_surface_t* NativeImagePtr;
-#elif PLATFORM(SKIA)
-typedef NativeImageSkia* NativeImagePtr;
-#elif PLATFORM(HAIKU)
-typedef BBitmap* NativeImagePtr;
+#elif USE(CAIRO)
+typedef WebCore::NativeImageCairo* NativeImagePtr;
+#elif USE(SKIA)
+typedef WebCore::NativeImageSkia* NativeImagePtr;
 #elif OS(WINCE)
 typedef RefPtr<SharedBitmap> NativeImagePtr;
+#elif PLATFORM(BLACKBERRY)
+class ImageDecoder;
+typedef ImageDecoder* NativeImageSourcePtr;
+typedef void* NativeImagePtr;
 #endif
 #endif
 
-const int cAnimationLoopOnce = -1;
+// Right now GIFs are the only recognized image format that supports animation.
+// The animation system and the constants below are designed with this in mind.
+// GIFs have an optional 16-bit unsigned loop count that describes how an
+// animated GIF should be cycled.  If the loop count is absent, the animation
+// cycles once; if it is 0, the animation cycles infinitely; otherwise the
+// animation plays n + 1 cycles (where n is the specified loop count).  If the
+// GIF decoder defaults to cAnimationLoopOnce in the absence of any loop count
+// and translates an explicit "0" loop count to cAnimationLoopInfinite, then we
+// get a couple of nice side effects:
+//   * By making cAnimationLoopOnce be 0, we allow the animation cycling code in
+//     BitmapImage.cpp to avoid special-casing it, and simply treat all
+//     non-negative loop counts identically.
+//   * By making the other two constants negative, we avoid conflicts with any
+//     real loop count values.
+const int cAnimationLoopOnce = 0;
+const int cAnimationLoopInfinite = -1;
 const int cAnimationNone = -2;
 
-class ImageSource : public Noncopyable {
+class ImageSource {
+    WTF_MAKE_NONCOPYABLE(ImageSource);
 public:
-    ImageSource();
+    enum AlphaOption {
+        AlphaPremultiplied,
+        AlphaNotPremultiplied
+    };
+
+    enum GammaAndColorProfileOption {
+        GammaAndColorProfileApplied,
+        GammaAndColorProfileIgnored
+    };
+
+#if USE(CG)
+    enum ShouldSkipMetadata {
+        DoNotSkipMetadata,
+        SkipMetadata
+    };
+#endif
+
+    ImageSource(AlphaOption alphaOption = AlphaPremultiplied, GammaAndColorProfileOption gammaAndColorProfileOption = GammaAndColorProfileApplied);
     ~ImageSource();
 
     // Tells the ImageSource that the Image no longer cares about decoded frame
@@ -126,11 +174,14 @@ public:
     String filenameExtension() const;
 
     bool isSizeAvailable();
-    IntSize size() const;
-    IntSize frameSizeAtIndex(size_t) const;
-#if ENABLE(RESPECT_EXIF_ORIENTATION)
-    int orientationAtIndex(size_t) const; // EXIF image orientation
-#endif
+    IntSize size(RespectImageOrientationEnum = DoNotRespectImageOrientation) const;
+    IntSize frameSizeAtIndex(size_t, RespectImageOrientationEnum = DoNotRespectImageOrientation) const;
+
+    IntSize originalSize(RespectImageOrientationEnum = DoNotRespectImageOrientation) const;
+
+    bool getHotSpot(IntPoint&) const;
+
+    size_t bytesDecodedToDetermineProperties() const;
 
     int repetitionCount();
 
@@ -139,16 +190,35 @@ public:
     // Callers should not call this after calling clear() with a higher index;
     // see comments on clear() above.
     NativeImagePtr createFrameAtIndex(size_t, float scaleHint, float* actualScaleOut, ssize_t* bytesOut);
+    bool isSubsampled() const { return m_baseSubsampling; }
 
     float frameDurationAtIndex(size_t);
     bool frameHasAlphaAtIndex(size_t); // Whether or not the frame actually used any alpha.
     bool frameIsCompleteAtIndex(size_t); // Whether or not the frame is completely decoded.
+    ImageOrientation orientationAtIndex(size_t) const; // EXIF image orientation
+
+#if ENABLE(IMAGE_DECODER_DOWN_SAMPLING)
+    static unsigned maxPixelsPerDecodedImage() { return s_maxPixelsPerDecodedImage; }
+    static void setMaxPixelsPerDecodedImage(unsigned maxPixels) { s_maxPixelsPerDecodedImage = maxPixels; }
+#endif
+
+    bool shouldSubsampleImageWithSize(unsigned size) const;
+    static unsigned maximumImageSizeBeforeSubsampling();
+    static void setMaximumImageSizeBeforeSubsampling(unsigned maximum);
+    static bool acceleratedImageDecodingEnabled() { return s_acceleratedImageDecoding; }
+    static void setAcceleratedImageDecodingEnabled(bool flag) { s_acceleratedImageDecoding = flag; }
 
 private:
     NativeImageSourcePtr m_decoder;
+    AlphaOption m_alphaOption;
+    GammaAndColorProfileOption m_gammaAndColorProfileOption;
+#if ENABLE(IMAGE_DECODER_DOWN_SAMPLING)
+    static unsigned s_maxPixelsPerDecodedImage;
+#endif
     mutable int m_baseSubsampling;
     mutable bool m_isProgressive;
-    CFDictionaryRef imageSourceOptions(int subsampling = 0) const;
+    CFDictionaryRef imageSourceOptions(ShouldSkipMetadata, int subsampling = 0) const;
+    static bool s_acceleratedImageDecoding;
 };
 
 }

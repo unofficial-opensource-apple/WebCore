@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003 Apple Computer, Inc.
+ * Copyright (C) 2003, 2010 Apple Inc. ALl rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -19,53 +19,75 @@
  * Boston, MA 02110-1301, USA.
  *
  */
+
 #ifndef HTMLStyleElement_h
 #define HTMLStyleElement_h
 
-#include "CSSStyleSheet.h"
 #include "HTMLElement.h"
 #include "StyleElement.h"
 
 namespace WebCore {
 
-class HTMLStyleElement : public HTMLElement, public StyleElement {
+class HTMLStyleElement;
+class StyleSheet;
+
+template<typename T> class EventSender;
+typedef EventSender<HTMLStyleElement> StyleEventSender;
+
+class HTMLStyleElement : public HTMLElement, private StyleElement {
 public:
-    HTMLStyleElement(const QualifiedName&, Document*, bool createdByParser);
+    static PassRefPtr<HTMLStyleElement> create(const QualifiedName&, Document*, bool createdByParser);
+    virtual ~HTMLStyleElement();
 
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusRequired; }
-    virtual int tagPriority() const { return 1; }
-    virtual bool checkDTD(const Node* newChild) { return newChild->isTextNode(); }
+    void setType(const AtomicString&);
 
-    // overload from HTMLElement
-    virtual void parseMappedAttribute(MappedAttribute*);
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
-    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
+#if ENABLE(STYLE_SCOPED)
+    bool scoped() const;
+    void setScoped(bool);
+    Element* scopingElement() const;
+#endif
 
-    virtual void finishParsingChildren();
-
-    virtual bool isLoading() const;
-    virtual bool sheetLoaded();
+    using StyleElement::sheet;
 
     bool disabled() const;
     void setDisabled(bool);
 
-    virtual const AtomicString& media() const;
-    void setMedia(const AtomicString&);
+    void dispatchPendingEvent(StyleEventSender*);
+    static void dispatchPendingLoadEvents();
 
-    virtual const AtomicString& type() const;
-    void setType(const AtomicString&);
+private:
+    HTMLStyleElement(const QualifiedName&, Document*, bool createdByParser);
 
-    StyleSheet* sheet();
+    // overload from HTMLElement
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+    virtual InsertionNotificationRequest insertedInto(Node*) OVERRIDE;
+    virtual void removedFrom(Node*) OVERRIDE;
+#if ENABLE(STYLE_SCOPED)
+    virtual void willRemove();
+#endif
+    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
-    virtual void setLoading(bool loading) { m_loading = loading; }
+    virtual void finishParsingChildren();
+
+    virtual bool isLoading() const { return StyleElement::isLoading(); }
+    virtual bool sheetLoaded() { return StyleElement::sheetLoaded(document()); }
+    virtual void notifyLoadedSheetAndAllCriticalSubresources(bool errorOccurred);
+    virtual void startLoadingDynamicSheet() { StyleElement::startLoadingDynamicSheet(document()); }
 
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
-protected:
-    String m_media;
-    bool m_loading;
-    bool m_createdByParser;
+    virtual const AtomicString& media() const;
+    virtual const AtomicString& type() const;
+
+    void registerWithScopingNode();
+    void unregisterWithScopingNode();
+
+    bool m_firedLoad;
+    bool m_loadedSheet;
+
+#if ENABLE(STYLE_SCOPED)
+    bool m_isRegisteredWithScopingNode;
+#endif
 };
 
 } //namespace

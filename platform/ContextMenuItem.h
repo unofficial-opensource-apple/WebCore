@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2010 Igalia S.L
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,29 +27,24 @@
 #ifndef ContextMenuItem_h
 #define ContextMenuItem_h
 
+#if ENABLE(CONTEXT_MENUS)
+
 #include "PlatformMenuDescription.h"
 #include "PlatformString.h"
 #include <wtf/OwnPtr.h>
 
 #if PLATFORM(MAC)
 #include <wtf/RetainPtr.h>
-
-#ifdef __OBJC__
-@class NSMenuItem;
-#else
-class NSMenuItem;
-#endif
+OBJC_CLASS NSMenuItem;
 #elif PLATFORM(WIN)
-typedef struct tagMENUITEMINFOW* LPMENUITEMINFO;
+typedef struct tagMENUITEMINFOW MENUITEMINFO;
 #elif PLATFORM(GTK)
 typedef struct _GtkMenuItem GtkMenuItem;
-#elif PLATFORM(QT)
-#include <QAction>
+typedef struct _GtkAction GtkAction;
 #elif PLATFORM(WX)
 class wxMenuItem;
-#elif PLATFORM(HAIKU)
-class BMenuItem;
 #endif
+#endif // ENABLE(CONTEXT_MENUS)
 
 namespace WebCore {
 
@@ -64,6 +60,9 @@ namespace WebCore {
         ContextMenuItemTagOpenImageInNewWindow,
         ContextMenuItemTagDownloadImageToDisk,
         ContextMenuItemTagCopyImageToClipboard,
+#if PLATFORM(QT) || PLATFORM(GTK) || PLATFORM(EFL)
+        ContextMenuItemTagCopyImageUrlToClipboard,
+#endif
         ContextMenuItemTagOpenFrameInNewWindow,
         ContextMenuItemTagCopy,
         ContextMenuItemTagGoBack,
@@ -74,9 +73,23 @@ namespace WebCore {
         ContextMenuItemTagPaste,
 #if PLATFORM(GTK)
         ContextMenuItemTagDelete,
+#endif
+#if PLATFORM(GTK) || PLATFORM(QT) || PLATFORM (EFL)
         ContextMenuItemTagSelectAll,
+#endif
+#if PLATFORM(GTK)
         ContextMenuItemTagInputMethods,
         ContextMenuItemTagUnicode,
+        ContextMenuItemTagUnicodeInsertLRMMark,
+        ContextMenuItemTagUnicodeInsertRLMMark,
+        ContextMenuItemTagUnicodeInsertLREMark,
+        ContextMenuItemTagUnicodeInsertRLEMark,
+        ContextMenuItemTagUnicodeInsertLROMark,
+        ContextMenuItemTagUnicodeInsertRLOMark,
+        ContextMenuItemTagUnicodeInsertPDFMark,
+        ContextMenuItemTagUnicodeInsertZWSMark,
+        ContextMenuItemTagUnicodeInsertZWJMark,
+        ContextMenuItemTagUnicodeInsertZWNJMark,
 #endif
         ContextMenuItemTagSpellingGuess,
         ContextMenuItemTagNoGuessesFound,
@@ -143,7 +156,16 @@ namespace WebCore {
         ContextMenuItemTagCapitalize,
         ContextMenuItemTagChangeBack,
 #endif
+        ContextMenuItemTagOpenMediaInNewWindow,
+        ContextMenuItemTagCopyMediaLinkToClipboard,
+        ContextMenuItemTagToggleMediaControls,
+        ContextMenuItemTagToggleMediaLoop,
+        ContextMenuItemTagEnterVideoFullscreen,
+        ContextMenuItemTagMediaPlayPause,
+        ContextMenuItemTagMediaMute,
         ContextMenuItemBaseCustomTag = 5000,
+        ContextMenuItemCustomTagNoAction = 5998,
+        ContextMenuItemLastCustomTag = 5999,
         ContextMenuItemBaseApplicationTag = 10000
     };
 
@@ -154,10 +176,9 @@ namespace WebCore {
         SubmenuType
     };
 
+#if ENABLE(CONTEXT_MENUS)
 #if PLATFORM(MAC)
     typedef NSMenuItem* PlatformMenuItemDescription;
-#elif PLATFORM(WIN)
-    typedef LPMENUITEMINFO PlatformMenuItemDescription;
 #elif PLATFORM(QT)
     struct PlatformMenuItemDescription {
         PlatformMenuItemDescription()
@@ -175,22 +196,7 @@ namespace WebCore {
         bool enabled;
     };
 #elif PLATFORM(GTK)
-    struct PlatformMenuItemDescription {
-        PlatformMenuItemDescription()
-            : type(ActionType)
-            , action(ContextMenuItemTagNoAction)
-            , subMenu(0)
-            , checked(false)
-            , enabled(true)
-        {}
-
-        ContextMenuItemType type;
-        ContextMenuAction action;
-        String title;
-        GtkMenu* subMenu;
-        bool checked;
-        bool enabled;
-    };
+    typedef GtkMenuItem* PlatformMenuItemDescription;
 #elif PLATFORM(WX)
     struct PlatformMenuItemDescription {
         PlatformMenuItemDescription()
@@ -207,9 +213,7 @@ namespace WebCore {
         bool checked;
         bool enabled;
     };
-#elif PLATFORM(HAIKU)
-    typedef BMenuItem* PlatformMenuItemDescription;
-#elif PLATFORM(CHROMIUM)
+#elif PLATFORM(CHROMIUM) || PLATFORM(EFL)
     struct PlatformMenuItemDescription {
         PlatformMenuItemDescription()
             : type(ActionType)
@@ -226,29 +230,19 @@ namespace WebCore {
     typedef void* PlatformMenuItemDescription;
 #endif
 
-    class ContextMenuItem : public FastAllocBase {
+    class ContextMenuItem {
+        WTF_MAKE_FAST_ALLOCATED;
     public:
-        ContextMenuItem(PlatformMenuItemDescription);
-        ContextMenuItem(ContextMenu* subMenu = 0);
-        ContextMenuItem(ContextMenuItemType type, ContextMenuAction action, const String& title, ContextMenu* subMenu = 0);
-#if PLATFORM(GTK)
-        ContextMenuItem(GtkMenuItem*);
-#endif
+        ContextMenuItem(ContextMenuItemType, ContextMenuAction, const String&, ContextMenu* subMenu = 0);
+        ContextMenuItem(ContextMenuItemType, ContextMenuAction, const String&, bool enabled, bool checked);
+
         ~ContextMenuItem();
 
-        PlatformMenuItemDescription releasePlatformDescription();
-
-        ContextMenuItemType type() const;
         void setType(ContextMenuItemType);
+        ContextMenuItemType type() const;
 
-        ContextMenuAction action() const;
         void setAction(ContextMenuAction);
-
-        String title() const;
-        void setTitle(const String&);
-
-        PlatformMenuDescription platformSubMenu() const;
-        void setSubMenu(ContextMenu*);
+        ContextMenuAction action() const;
 
         void setChecked(bool = true);
         bool checked() const;
@@ -256,19 +250,62 @@ namespace WebCore {
         void setEnabled(bool = true);
         bool enabled() const;
 
-        // FIXME: Do we need a keyboard accelerator here?
+        void setSubMenu(ContextMenu*);
+
 #if PLATFORM(GTK)
-        static GtkMenuItem* createNativeMenuItem(const PlatformMenuItemDescription&);
+        GtkAction* gtkAction() const;
 #endif
 
+#if USE(CROSS_PLATFORM_CONTEXT_MENUS)
+#if PLATFORM(WIN)
+        typedef MENUITEMINFO NativeItem;
+#elif PLATFORM(EFL)
+        typedef void* NativeItem;
+#endif
+        ContextMenuItem(ContextMenuAction, const String&, bool enabled, bool checked, const Vector<ContextMenuItem>& subMenuItems);
+        explicit ContextMenuItem(const NativeItem&);
+
+        // On Windows, the title (dwTypeData of the MENUITEMINFO) is not set in this function. Callers can set the title themselves,
+        // and handle the lifetime of the title, if they need it.
+        NativeItem nativeMenuItem() const;
+
+        void setTitle(const String& title) { m_title = title; }
+        const String& title() const { return m_title; }
+
+        const Vector<ContextMenuItem>& subMenuItems() const { return m_subMenuItems; }
+#else
+    public:
+        ContextMenuItem(PlatformMenuItemDescription);
+        ContextMenuItem(ContextMenu* subMenu = 0);
+        ContextMenuItem(ContextMenuAction, const String&, bool enabled, bool checked, Vector<ContextMenuItem>& submenuItems);
+
+        PlatformMenuItemDescription releasePlatformDescription();
+
+        String title() const;
+        void setTitle(const String&);
+
+        PlatformMenuDescription platformSubMenu() const;
+        void setSubMenu(Vector<ContextMenuItem>&);
+
+#endif // USE(CROSS_PLATFORM_CONTEXT_MENUS)
     private:
+#if USE(CROSS_PLATFORM_CONTEXT_MENUS)
+        ContextMenuItemType m_type;
+        ContextMenuAction m_action;
+        String m_title;
+        bool m_enabled;
+        bool m_checked;
+        Vector<ContextMenuItem> m_subMenuItems;
+#else
 #if PLATFORM(MAC)
         RetainPtr<NSMenuItem> m_platformDescription;
 #else
         PlatformMenuItemDescription m_platformDescription;
 #endif
+#endif // USE(CROSS_PLATFORM_CONTEXT_MENUS)
     };
 
+#endif // ENABLE(CONTEXT_MENUS)
 }
 
 #endif // ContextMenuItem_h

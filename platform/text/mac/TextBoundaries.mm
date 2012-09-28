@@ -26,19 +26,22 @@
 #import "config.h"
 #import "TextBoundaries.h"
 
+using namespace WTF::Unicode;
+
+#import "TextBreakIteratorInternalICU.h"
 #import <CoreFoundation/CFStringTokenizer.h>
 #import <Foundation/Foundation.h>
 #import <unicode/ubrk.h>
 #import <unicode/uchar.h>
 #import <unicode/ustring.h>
 #import <unicode/utypes.h>
-
-using namespace WTF::Unicode;
+#import <wtf/unicode/CharacterNames.h>
+#import <wtf/RetainPtr.h>
 
 namespace WebCore {
 
 
-static bool isSkipCharacter(UChar c)
+static bool isSkipCharacter(UChar32 c)
 {
     return c == 0xA0 || 
         c == '\n' || 
@@ -51,17 +54,30 @@ static bool isSkipCharacter(UChar c)
         u_isspace(c);
 }
 
-static bool isWhitespaceCharacter(UChar c)
+static bool isWhitespaceCharacter(UChar32 c)
 {
     return c == 0xA0 || 
         c == '\n' || 
         u_isspace(c);
 }
 
-static bool isWordDelimitingCharacter(UChar c)
+static bool isWordDelimitingCharacter(UChar32 c)
 {
     CFCharacterSetRef set = CFCharacterSetGetPredefined(kCFCharacterSetAlphaNumeric);
-    return !CFCharacterSetIsCharacterMember(set, c) && c != '\'' && c != '&';
+    // Ampersand is an exception added to treat AT&T as a single word (see <rdar://problem/5022264>).
+    return !CFCharacterSetIsLongCharacterMember(set, c) && c != '&';
+}
+
+static bool isSymbolCharacter(UChar32 c)
+{
+    CFCharacterSetRef set = CFCharacterSetGetPredefined(kCFCharacterSetSymbol);
+    return CFCharacterSetIsLongCharacterMember(set, c);
+}
+
+static bool isAmbiguousBoundaryCharacter(UChar32 character)
+{
+    // These are characters that can behave as word boundaries, but can appear within words.
+    return character == '\'' || character == rightSingleQuotationMark || character == hebrewPunctuationGershayim;
 }
 
 static CFStringTokenizerRef tokenizerForString(CFStringRef str)
@@ -71,11 +87,10 @@ static CFStringTokenizerRef tokenizerForString(CFStringRef str)
     
     if (locale == NULL) {
         const char *currentLocaleID = currentTextBreakLocaleID();
-        CFStringRef lang = CFStringCreateWithBytesNoCopy(NULL, reinterpret_cast<const UInt8 *>(currentLocaleID), strlen(currentLocaleID),  kCFStringEncodingASCII, false, kCFAllocatorNull);
-        locale = CFLocaleCreate(NULL, lang);
+        RetainPtr<CFStringRef> lang(AdoptCF, CFStringCreateWithBytesNoCopy(NULL, reinterpret_cast<const UInt8 *>(currentLocaleID), strlen(currentLocaleID),  kCFStringEncodingASCII, false, kCFAllocatorNull));
+        locale = CFLocaleCreate(NULL, lang.get());
         if (!locale)
             return NULL;
-        CFRelease(lang);
     }
 
     CFRange entireRange = CFRangeMake(0, CFStringGetLength(str));    
@@ -92,15 +107,60 @@ static CFStringTokenizerRef tokenizerForString(CFStringRef str)
 // Simple case: a word is a stream of characters
 // delimited by a special set of word-delimiting characters.
 static void findSimpleWordBoundary(const UChar* chars, int len, int position, int* start, int* end)
-{    
+{
+    ASSERT(position >= 0);
+    ASSERT(position < len);
+
     int startPos = position;
-    while (startPos > 0 && !isWordDelimitingCharacter(chars[startPos-1]))
-        startPos--;
+    while (startPos > 0) {
+        int i = startPos;
+        UChar32 characterBeforeStartPos;
+        U16_PREV(chars, 0, i, characterBeforeStartPos);
+        if (isWordDelimitingCharacter(characterBeforeStartPos)) {
+            ASSERT(i >= 0);
+            if (!i)
+                break;
+
+            if (!isAmbiguousBoundaryCharacter(characterBeforeStartPos))
+                break;
+
+            UChar32 characterBeforeBeforeStartPos;
+            U16_PREV(chars, 0, i, characterBeforeBeforeStartPos);
+            if (isWordDelimitingCharacter(characterBeforeBeforeStartPos))
+                break;
+        }
+        U16_BACK_1(chars, 0, startPos);
+    }
     
     int endPos = position;
-    while (endPos < len && !isWordDelimitingCharacter(chars[endPos]))
-        endPos++;
-    
+    while (endPos < len) {
+        UChar32 character;
+        U16_GET(chars, 0, endPos, len, character);
+        if (isWordDelimitingCharacter(character)) {
+            int i = endPos;
+            U16_FWD_1(chars, i, len);
+            ASSERT(i <= len);
+            if (i == len)
+                break;
+            UChar32 characterAfterEndPos;
+            U16_NEXT(chars, i, len, characterAfterEndPos);
+            if (!isAmbiguousBoundaryCharacter(character))
+                break;
+            if (isWordDelimitingCharacter(characterAfterEndPos))
+                break;
+        }
+        U16_FWD_1(chars, endPos, len);
+    }
+
+    // The text may consist of all delimiter characters (e.g. "++++++++" or a series of emoji), and returning an empty range
+    // makes no sense (and doesn't match findComplexWordBoundary() behavior).
+    if (startPos == endPos && endPos < len) {
+        UChar32 character;
+        U16_GET(chars, 0, endPos, len, character);
+        if (isSymbolCharacter(character))
+            U16_FWD_1(chars, endPos, len);
+    }
+
     *start = startPos;
     *end = endPos;
 }
@@ -146,17 +206,27 @@ void findWordBoundary(const UChar* chars, int len, int position, int* start, int
     int i = pos;
     U16_NEXT(chars,i,len,ch);
     bool isComplex = requiresContextForWordBoundary(ch);
+    
+    // FIXME: This check improves our word boundary behavior, but doesn't actually go far enough.
+    // See <rdar://problem/8853951> Take complex word boundary finding path when necessary
+    if (!isComplex) {
+        // Check again for complex text, at the start of the run.
+        i = 0;
+        U16_NEXT(chars, i, len, ch);
+        isComplex = requiresContextForWordBoundary(ch);
+    }
+    
     if (isComplex) {
         findComplexWordBoundary(chars,len, position, start, end);
     } else {
         findSimpleWordBoundary(chars,len, position, start, end);
     }
 
-#define LOG_WORD_BREAK  0
+#define LOG_WORD_BREAK 0
 #if LOG_WORD_BREAK
     CFStringRef uniString = CFStringCreateWithCharacters(NULL, chars, len);
     CFStringRef foundWord = CFStringCreateWithCharacters(NULL, (const UniChar *) chars + *start, *end - *start);        
-    NSLog(@"%s_BREAK '%@' (%d,%d) in '%@' (#%xd) at %d, length=%d", isComplex ? "COMPLEX" : "SIMPLE", foundWord, *start, *end, uniString, CFHashCode(uniString), position, len);
+    NSLog(@"%s_BREAK '%@' (%d,%d) in '%@' (%p) at %d, length=%d", isComplex ? "COMPLEX" : "SIMPLE", foundWord, *start, *end, uniString, uniString, position, len);
     CFRelease(foundWord);
     CFRelease(uniString);
 #endif
@@ -179,7 +249,7 @@ int findNextWordFromIndex(const UChar* chars, int len, int position, bool forwar
                 if (pos == UBRK_DONE) {
                     pos = len;
                 }
-            } while (pos <= len && (pos == 0 || !isSkipCharacter(chars[pos-1])) && isSkipCharacter(chars[pos]));
+            } while (pos < len && (pos == 0 || !isSkipCharacter(chars[pos-1])) && isSkipCharacter(chars[pos]));
         }
         else {
             do {

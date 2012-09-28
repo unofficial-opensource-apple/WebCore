@@ -34,7 +34,6 @@
 #include "htmlediting.h"
 #include "HTMLElement.h"
 #include "HTMLNames.h"
-#include "NamedAttrMap.h"
 
 #include <wtf/Assertions.h>
 
@@ -42,29 +41,30 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-ReplaceNodeWithSpanCommand::ReplaceNodeWithSpanCommand(PassRefPtr<Node> node)
-    : CompositeEditCommand(node->document())
-    , m_node(node)
+ReplaceNodeWithSpanCommand::ReplaceNodeWithSpanCommand(PassRefPtr<HTMLElement> element)
+    : SimpleEditCommand(element->document())
+    , m_elementToReplace(element)
 {
-    ASSERT(m_node);
+    ASSERT(m_elementToReplace);
 }
 
-static void swapInNodePreservingAttributesAndChildren(Node* newNode, Node* nodeToReplace)
+static void swapInNodePreservingAttributesAndChildren(HTMLElement* newNode, HTMLElement* nodeToReplace)
 {
     ASSERT(nodeToReplace->inDocument());
     ExceptionCode ec = 0;
-    Node* parentNode = nodeToReplace->parentNode();
+    RefPtr<ContainerNode> parentNode = nodeToReplace->parentNode();
     parentNode->insertBefore(newNode, nodeToReplace, ec);
     ASSERT(!ec);
 
-    Node* nextChild;
-    for (Node* child = nodeToReplace->firstChild(); child; child = nextChild) {
-        nextChild = child->nextSibling();
-        newNode->appendChild(child, ec);
+    NodeVector children;
+    getChildNodes(nodeToReplace, children);
+    for (size_t i = 0; i < children.size(); ++i) {
+        newNode->appendChild(children[i], ec);
         ASSERT(!ec);
     }
 
-    newNode->attributes()->setAttributes(*nodeToReplace->attributes());
+    // FIXME: Fix this to send the proper MutationRecords when MutationObservers are present.
+    newNode->setAttributesFromElement(*nodeToReplace);
 
     parentNode->removeChild(nodeToReplace, ec);
     ASSERT(!ec);
@@ -72,18 +72,26 @@ static void swapInNodePreservingAttributesAndChildren(Node* newNode, Node* nodeT
 
 void ReplaceNodeWithSpanCommand::doApply()
 {
-    if (!m_node->inDocument())
+    if (!m_elementToReplace->inDocument())
         return;
     if (!m_spanElement)
-        m_spanElement = createHTMLElement(m_node->document(), spanTag);
-    swapInNodePreservingAttributesAndChildren(m_spanElement.get(), m_node.get());
+        m_spanElement = createHTMLElement(m_elementToReplace->document(), spanTag);
+    swapInNodePreservingAttributesAndChildren(m_spanElement.get(), m_elementToReplace.get());
 }
 
 void ReplaceNodeWithSpanCommand::doUnapply()
 {
     if (!m_spanElement->inDocument())
         return;
-    swapInNodePreservingAttributesAndChildren(m_node.get(), m_spanElement.get());
+    swapInNodePreservingAttributesAndChildren(m_elementToReplace.get(), m_spanElement.get());
 }
+
+#ifndef NDEBUG
+void ReplaceNodeWithSpanCommand::getNodesInCommand(HashSet<Node*>& nodes)
+{
+    addNodeAndDescendants(m_elementToReplace.get(), nodes);
+    addNodeAndDescendants(m_spanElement.get(), nodes);
+}
+#endif
 
 } // namespace WebCore

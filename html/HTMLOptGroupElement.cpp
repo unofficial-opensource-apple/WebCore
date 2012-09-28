@@ -2,7 +2,7 @@
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2010 Apple Inc. All rights reserved.
  *           (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
  * This library is free software; you can redistribute it and/or
@@ -25,23 +25,28 @@
 #include "config.h"
 #include "HTMLOptGroupElement.h"
 
-#include "CSSStyleSelector.h"
 #include "Document.h"
 #include "HTMLNames.h"
 #include "HTMLSelectElement.h"
 #include "RenderMenuList.h"
 #include "NodeRenderStyle.h"
+#include "NodeRenderingContext.h"
+#include "StyleResolver.h"
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-HTMLOptGroupElement::HTMLOptGroupElement(const QualifiedName& tagName, Document* doc, HTMLFormElement* f)
-    : HTMLFormControlElement(tagName, doc, f)
-    , m_style(0)
+inline HTMLOptGroupElement::HTMLOptGroupElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(optgroupTag));
+}
+
+PassRefPtr<HTMLOptGroupElement> HTMLOptGroupElement::create(const QualifiedName& tagName, Document* document)
+{
+    return adoptRef(new HTMLOptGroupElement(tagName, document));
 }
 
 bool HTMLOptGroupElement::supportsFocus() const
@@ -61,84 +66,38 @@ const AtomicString& HTMLOptGroupElement::formControlType() const
     return optgroup;
 }
 
-bool HTMLOptGroupElement::insertBefore(PassRefPtr<Node> newChild, Node* refChild, ExceptionCode& ec, bool shouldLazyAttach)
-{
-    bool result = HTMLFormControlElement::insertBefore(newChild, refChild, ec, shouldLazyAttach);
-    return result;
-}
-
-bool HTMLOptGroupElement::replaceChild(PassRefPtr<Node> newChild, Node* oldChild, ExceptionCode& ec, bool shouldLazyAttach)
-{
-    bool result = HTMLFormControlElement::replaceChild(newChild, oldChild, ec, shouldLazyAttach);
-    return result;
-}
-
-bool HTMLOptGroupElement::removeChild(Node* oldChild, ExceptionCode& ec)
-{
-    bool result = HTMLFormControlElement::removeChild(oldChild, ec);
-    return result;
-}
-
-bool HTMLOptGroupElement::appendChild(PassRefPtr<Node> newChild, ExceptionCode& ec, bool shouldLazyAttach)
-{
-    bool result = HTMLFormControlElement::appendChild(newChild, ec, shouldLazyAttach);
-    return result;
-}
-
-bool HTMLOptGroupElement::removeChildren()
-{
-    bool result = HTMLFormControlElement::removeChildren();
-    return result;
-}
-
 void HTMLOptGroupElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
     recalcSelectOptions();
-    HTMLFormControlElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+    HTMLElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
 }
 
-void HTMLOptGroupElement::parseMappedAttribute(MappedAttribute* attr)
+void HTMLOptGroupElement::parseAttribute(Attribute* attr)
 {
-    HTMLFormControlElement::parseMappedAttribute(attr);
+    HTMLElement::parseAttribute(attr);
     recalcSelectOptions();
 }
 
 void HTMLOptGroupElement::recalcSelectOptions()
 {
-    Node* select = parentNode();
+    ContainerNode* select = parentNode();
     while (select && !select->hasTagName(selectTag))
         select = select->parentNode();
     if (select)
-        static_cast<HTMLSelectElement*>(select)->setRecalcListItems();
-}
-
-String HTMLOptGroupElement::label() const
-{
-    return getAttribute(labelAttr);
-}
-
-void HTMLOptGroupElement::setLabel(const String &value)
-{
-    setAttribute(labelAttr, value);
-}
-
-bool HTMLOptGroupElement::checkDTD(const Node* newChild)
-{
-    // Make sure to keep this in sync with <select> (other than not allowing an optgroup).
-    return newChild->isTextNode() || newChild->hasTagName(HTMLNames::optionTag) || newChild->hasTagName(HTMLNames::hrTag) || newChild->hasTagName(HTMLNames::scriptTag);
+        toHTMLSelectElement(select)->setRecalcListItems();
 }
 
 void HTMLOptGroupElement::attach()
 {
     if (parentNode()->renderStyle())
         setRenderStyle(styleForRenderer());
-    HTMLFormControlElement::attach();
+    HTMLElement::attach();
 }
 
 void HTMLOptGroupElement::detach()
 {
     m_style.clear();
-    HTMLFormControlElement::detach();
+    HTMLElement::detach();
 }
 
 void HTMLOptGroupElement::setRenderStyle(PassRefPtr<RenderStyle> newStyle)
@@ -165,14 +124,14 @@ String HTMLOptGroupElement::groupLabelText() const
     
 HTMLSelectElement* HTMLOptGroupElement::ownerSelectElement() const
 {
-    Node* select = parentNode();
+    ContainerNode* select = parentNode();
     while (select && !select->hasTagName(selectTag))
         select = select->parentNode();
     
     if (!select)
        return 0;
     
-    return static_cast<HTMLSelectElement*>(select);
+    return toHTMLSelectElement(select);
 }
 
 void HTMLOptGroupElement::accessKeyAction(bool)
@@ -182,5 +141,5 @@ void HTMLOptGroupElement::accessKeyAction(bool)
     if (select && !select->focused())
         select->accessKeyAction(false);
 }
-    
+
 } // namespace

@@ -26,30 +26,44 @@
 #include "config.h"
 #include "RemoveCSSPropertyCommand.h"
 
-#include "CSSMutableStyleDeclaration.h"
+#include "CSSStyleDeclaration.h"
+#include "StylePropertySet.h"
 #include <wtf/Assertions.h>
 
 namespace WebCore {
 
-RemoveCSSPropertyCommand::RemoveCSSPropertyCommand(Document* document, PassRefPtr<CSSMutableStyleDeclaration> style, CSSPropertyID property)
+RemoveCSSPropertyCommand::RemoveCSSPropertyCommand(Document* document, PassRefPtr<StyledElement> element, CSSPropertyID property)
     : SimpleEditCommand(document)
-    , m_style(style)
+    , m_element(element)
     , m_property(property)
     , m_important(false)
 {
-    ASSERT(m_style);
+    ASSERT(m_element);
 }
 
 void RemoveCSSPropertyCommand::doApply()
 {
-    m_oldValue = m_style->getPropertyValue(m_property);
-    m_important = m_style->getPropertyPriority(m_property);
-    m_style->removeProperty(m_property);
+    const StylePropertySet* style = m_element->inlineStyle();
+    m_oldValue = style->getPropertyValue(m_property);
+    m_important = style->propertyIsImportant(m_property);
+
+    // Mutate using the CSSOM wrapper so we get the same event behavior as a script.
+    ExceptionCode ec;
+    // Setting to null string removes the property. We don't have internal version of removeProperty.
+    m_element->style()->setPropertyInternal(m_property, String(), false, ec);
 }
 
 void RemoveCSSPropertyCommand::doUnapply()
 {
-    m_style->setProperty(m_property, m_oldValue, m_important);
+    ExceptionCode ec;
+    m_element->style()->setPropertyInternal(m_property, m_oldValue, m_important, ec);
 }
+
+#ifndef NDEBUG
+void RemoveCSSPropertyCommand::getNodesInCommand(HashSet<Node*>& nodes)
+{
+    addNodeAndDescendants(m_element.get(), nodes);
+}
+#endif
 
 } // namespace WebCore

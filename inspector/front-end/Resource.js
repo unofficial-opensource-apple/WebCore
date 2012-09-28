@@ -6,13 +6,13 @@
  * are met:
  *
  * 1.  Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer. 
+ *     notice, this list of conditions and the following disclaimer.
  * 2.  Redistributions in binary form must reproduce the above copyright
  *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution. 
+ *     documentation and/or other materials provided with the distribution.
  * 3.  Neither the name of Apple Computer, Inc. ("Apple") nor the names of
  *     its contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission. 
+ *     from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY APPLE AND ITS CONTRIBUTORS "AS IS" AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -26,113 +26,144 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WebInspector.Resource = function(identifier, url)
+/**
+ * @constructor
+ * @extends {WebInspector.Object}
+ * @implements {WebInspector.ContentProvider}
+ * @param {?WebInspector.NetworkRequest} request
+ * @param {string} url
+ * @param {string} documentURL
+ * @param {NetworkAgent.FrameId} frameId
+ * @param {NetworkAgent.LoaderId} loaderId
+ * @param {WebInspector.ResourceType} type
+ * @param {string} mimeType
+ */
+WebInspector.Resource = function(request, url, documentURL, frameId, loaderId, type, mimeType)
 {
-    this.identifier = identifier;
-    this._url = url;
-    this._startTime = -1;
-    this._endTime = -1;
-    this._requestMethod = "";
-    this._requestFormData = "";
-    this._category = WebInspector.resourceCategories.other;
+    this._request = request;
+    if (this._request)
+        this._request.setResource(this);
+    this.url = url;
+    this._documentURL = documentURL;
+    this._frameId = frameId;
+    this._loaderId = loaderId;
+    this._type = type || WebInspector.resourceTypes.Other;
+    this._mimeType = mimeType;
+    this.history = [];
+
+    /** @type {?string} */ this._content;
+    /** @type {boolean} */ this._contentEncoded;
+    this._pendingContentCallbacks = [];
 }
 
-WebInspector.Resource.StatusText = {
-    100: "Continue",
-    101: "Switching Protocols",
-    102: "Processing (WebDav)",
-    200: "OK",
-    201: "Created",
-    202: "Accepted",
-    203: "Non-Authoritative Information",
-    204: "No Content",
-    205: "Reset Content",
-    206: "Partial Content",
-    207: "Multi-Status (WebDav)",
-    300: "Multiple Choices",
-    301: "Moved Permanently",
-    302: "Found",
-    303: "See Other",
-    304: "Not Modified",
-    305: "Use Proxy",
-    306: "Switch Proxy",
-    307: "Temporary",
-    400: "Bad Request",
-    401: "Unauthorized",
-    402: "Payment Required",
-    403: "Forbidden",
-    404: "Not Found",
-    405: "Method Not Allowed",
-    406: "Not Acceptable",
-    407: "Proxy Authentication Required",
-    408: "Request Timeout",
-    409: "Conflict",
-    410: "Gone",
-    411: "Length Required",
-    412: "Precondition Failed",
-    413: "Request Entity Too Large",
-    414: "Request-URI Too Long",
-    415: "Unsupported Media Type",
-    416: "Requested Range Not Satisfiable",
-    417: "Expectation Failed",
-    418: "I'm a teapot",
-    422: "Unprocessable Entity (WebDav)",
-    423: "Locked (WebDav)",
-    424: "Failed Dependency (WebDav)",
-    425: "Unordered Collection",
-    426: "Upgrade Required",
-    449: "Retry With",
-    500: "Internal Server Error",
-    501: "Not Implemented",
-    502: "Bad Gateway",
-    503: "Service Unavailable",
-    504: "Gateway Timeout",
-    505: "HTTP Version Not Supported",
-    506: "Variant Also Negotiates",
-    507: "Insufficient Storage (WebDav)",
-    509: "Bandwidth Limit Exceeded",
-    510: "Not Extended"
-};
+WebInspector.Resource._domainModelBindings = [];
 
-// Keep these in sync with WebCore::InspectorResource::Type
-WebInspector.Resource.Type = {
-    Document:   0,
-    Stylesheet: 1,
-    Image:      2,
-    Font:       3,
-    Script:     4,
-    XHR:        5,
-    Media:      6,
-    Other:      7,
+/**
+ * @param {WebInspector.ResourceType} type
+ * @param {WebInspector.ResourceDomainModelBinding} binding
+ */
+WebInspector.Resource.registerDomainModelBinding = function(type, binding)
+{
+    WebInspector.Resource._domainModelBindings[type.name()] = binding;
+}
 
-    isTextType: function(type)
-    {
-        return (type === this.Document) || (type === this.Stylesheet) || (type === this.Script) || (type === this.XHR);
-    },
+WebInspector.Resource._resourceRevisionRegistry = function()
+{
+    if (!WebInspector.Resource._resourceRevisionRegistryObject) {
+        if (window.localStorage) {
+            var resourceHistory = window.localStorage["resource-history"];
+            try {
+                WebInspector.Resource._resourceRevisionRegistryObject = resourceHistory ? JSON.parse(resourceHistory) : {};
+            } catch (e) {
+                WebInspector.Resource._resourceRevisionRegistryObject = {};
+            }
+        } else
+            WebInspector.Resource._resourceRevisionRegistryObject = {};
+    }
+    return WebInspector.Resource._resourceRevisionRegistryObject;
+}
 
-    toString: function(type)
-    {
-        switch (type) {
-            case this.Document:
-                return WebInspector.UIString("document");
-            case this.Stylesheet:
-                return WebInspector.UIString("stylesheet");
-            case this.Image:
-                return WebInspector.UIString("image");
-            case this.Font:
-                return WebInspector.UIString("font");
-            case this.Script:
-                return WebInspector.UIString("script");
-            case this.XHR:
-                return WebInspector.UIString("XHR");
-            case this.Other:
-            default:
-                return WebInspector.UIString("other");
+WebInspector.Resource.restoreRevisions = function()
+{
+    var registry = WebInspector.Resource._resourceRevisionRegistry();
+    var filteredRegistry = {};
+    for (var url in registry) {
+        var historyItems = registry[url];
+        var resource = WebInspector.resourceForURL(url);
+
+        var filteredHistoryItems = [];
+        for (var i = 0; historyItems && i < historyItems.length; ++i) {
+            var historyItem = historyItems[i];
+            if (resource && historyItem.loaderId === resource.loaderId) {
+                resource.addRevision(window.localStorage[historyItem.key], new Date(historyItem.timestamp), true);
+                filteredHistoryItems.push(historyItem);
+                filteredRegistry[url] = filteredHistoryItems;
+            } else
+                delete window.localStorage[historyItem.key];
         }
     }
+    WebInspector.Resource._resourceRevisionRegistryObject = filteredRegistry;
+
+    function persist()
+    {
+        window.localStorage["resource-history"] = JSON.stringify(filteredRegistry);
+    }
+
+    // Schedule async storage.
+    setTimeout(persist, 0);
+}
+
+/**
+ * @param {WebInspector.Resource} resource
+ */
+WebInspector.Resource.persistRevision = function(resource)
+{
+    if (!window.localStorage)
+        return;
+
+    var url = resource.url;
+    var loaderId = resource.loaderId;
+    var timestamp = resource._contentTimestamp.getTime();
+    var key = "resource-history|" + url + "|" + loaderId + "|" + timestamp;
+    var content = resource._content;
+
+    var registry = WebInspector.Resource._resourceRevisionRegistry();
+
+    var historyItems = registry[resource.url];
+    if (!historyItems) {
+        historyItems = [];
+        registry[resource.url] = historyItems;
+    }
+    historyItems.push({url: url, loaderId: loaderId, timestamp: timestamp, key: key});
+
+    function persist()
+    {
+        window.localStorage[key] = content;
+        window.localStorage["resource-history"] = JSON.stringify(registry);
+    }
+
+    // Schedule async storage.
+    setTimeout(persist, 0);
+}
+
+WebInspector.Resource.Events = {
+    RevisionAdded: "revision-added",
+    MessageAdded: "message-added",
+    MessagesCleared: "messages-cleared",
 }
 
 WebInspector.Resource.prototype = {
+    /**
+     * @return {?WebInspector.NetworkRequest}
+     */
+    get request()
+    {
+        return this._request;
+    },
+
+    /**
+     * @return {string}
+     */
     get url()
     {
         return this._url;
@@ -140,374 +171,88 @@ WebInspector.Resource.prototype = {
 
     set url(x)
     {
-        if (this._url === x)
-            return;
-
-        var oldURL = this._url;
         this._url = x;
-
-        // FIXME: We should make the WebInspector object listen for the "url changed" event.
-        // Then resourceURLChanged can be removed.
-        WebInspector.resourceURLChanged(this, oldURL);
-
-        this.dispatchEventToListeners("url changed");
+        this._parsedURL = new WebInspector.ParsedURL(x);
     },
 
+    get parsedURL()
+    {
+        return this._parsedURL;
+    },
+
+    /**
+     * @return {string}
+     */
     get documentURL()
     {
         return this._documentURL;
     },
 
-    set documentURL(x)
+    /**
+     * @return {NetworkAgent.FrameId}
+     */
+    get frameId()
     {
-        if (this._documentURL === x)
-            return;
-        this._documentURL = x;
+        return this._frameId;
     },
 
-    get domain()
+    /**
+     * @return {NetworkAgent.LoaderId}
+     */
+    get loaderId()
     {
-        return this._domain;
+        return this._loaderId;
     },
 
-    set domain(x)
-    {
-        if (this._domain === x)
-            return;
-        this._domain = x;
-    },
-
-    get lastPathComponent()
-    {
-        return this._lastPathComponent;
-    },
-
-    set lastPathComponent(x)
-    {
-        if (this._lastPathComponent === x)
-            return;
-        this._lastPathComponent = x;
-        this._lastPathComponentLowerCase = x ? x.toLowerCase() : null;
-    },
-
+    /**
+     * @return {string}
+     */
     get displayName()
     {
-        var title = this.lastPathComponent;
-        if (!title)
-            title = this.displayDomain;
-        if (!title && this.url)
-            title = this.url.trimURL(WebInspector.mainResource ? WebInspector.mainResource.domain : "");
-        if (title === "/")
-            title = this.url;
-        return title;
+        return this._parsedURL.displayName;
     },
 
-    get displayDomain()
-    {
-        // WebInspector.Database calls this, so don't access more than this.domain.
-        if (this.domain && (!WebInspector.mainResource || (WebInspector.mainResource && this.domain !== WebInspector.mainResource.domain)))
-            return this.domain;
-        return "";
-    },
-
-    get startTime()
-    {
-        return this._startTime || -1;
-    },
-
-    set startTime(x)
-    {
-        if (this._startTime === x)
-            return;
-
-        this._startTime = x;
-
-        if (WebInspector.panels.resources)
-            WebInspector.panels.resources.refreshResource(this);
-    },
-
-    get responseReceivedTime()
-    {
-        return this._responseReceivedTime || -1;
-    },
-
-    set responseReceivedTime(x)
-    {
-        if (this._responseReceivedTime === x)
-            return;
-
-        this._responseReceivedTime = x;
-
-        if (WebInspector.panels.resources)
-            WebInspector.panels.resources.refreshResource(this);
-    },
-
-    get endTime()
-    {
-        return this._endTime || -1;
-    },
-
-    set endTime(x)
-    {
-        if (this._endTime === x)
-            return;
-
-        this._endTime = x;
-
-        if (WebInspector.panels.resources)
-            WebInspector.panels.resources.refreshResource(this);
-    },
-
-    get duration()
-    {
-        if (this._endTime === -1 || this._startTime === -1)
-            return -1;
-        return this._endTime - this._startTime;
-    },
-
-    get latency()
-    {
-        if (this._responseReceivedTime === -1 || this._startTime === -1)
-            return -1;
-        return this._responseReceivedTime - this._startTime;
-    },
-
-    get contentLength()
-    {
-        return this._contentLength || 0;
-    },
-
-    set contentLength(x)
-    {
-        if (this._contentLength === x)
-            return;
-
-        this._contentLength = x;
-
-        if (WebInspector.panels.resources)
-            WebInspector.panels.resources.refreshResource(this);
-    },
-
-    get expectedContentLength()
-    {
-        return this._expectedContentLength || 0;
-    },
-
-    set expectedContentLength(x)
-    {
-        if (this._expectedContentLength === x)
-            return;
-        this._expectedContentLength = x;
-    },
-
-    get finished()
-    {
-        return this._finished;
-    },
-
-    set finished(x)
-    {
-        if (this._finished === x)
-            return;
-
-        this._finished = x;
-
-        if (x) {
-            this._checkWarnings();
-            this.dispatchEventToListeners("finished");
-        }
-    },
-
-    get failed()
-    {
-        return this._failed;
-    },
-
-    set failed(x)
-    {
-        this._failed = x;
-    },
-
-    get category()
-    {
-        return this._category;
-    },
-
-    set category(x)
-    {
-        if (this._category === x)
-            return;
-
-        var oldCategory = this._category;
-        if (oldCategory)
-            oldCategory.removeResource(this);
-
-        this._category = x;
-
-        if (this._category)
-            this._category.addResource(this);
-
-        if (WebInspector.panels.resources) {
-            WebInspector.panels.resources.refreshResource(this);
-            WebInspector.panels.resources.recreateViewForResourceIfNeeded(this);
-        }
-    },
-
-    get mimeType()
-    {
-        return this._mimeType;
-    },
-
-    set mimeType(x)
-    {
-        if (this._mimeType === x)
-            return;
-
-        this._mimeType = x;
-    },
-
+    /**
+     * @return {WebInspector.ResourceType}
+     */
     get type()
     {
-        return this._type;
+        return this._request ? this._request.type : this._type;
     },
 
-    set type(x)
+    /**
+     * @return {string}
+     */
+    get mimeType()
     {
-        if (this._type === x)
+        return this._request ? this._request.mimeType : this._mimeType;
+    },
+
+    /**
+     * @return {Array.<WebInspector.ConsoleMessage>}
+     */
+    get messages()
+    {
+        return this._messages || [];
+    },
+
+    /**
+     * @param {WebInspector.ConsoleMessage} msg
+     */
+    addMessage: function(msg)
+    {
+        if (!msg.isErrorOrWarning() || !msg.message)
             return;
 
-        this._type = x;
-
-        switch (x) {
-            case WebInspector.Resource.Type.Document:
-                this.category = WebInspector.resourceCategories.documents;
-                break;
-            case WebInspector.Resource.Type.Stylesheet:
-                this.category = WebInspector.resourceCategories.stylesheets;
-                break;
-            case WebInspector.Resource.Type.Script:
-                this.category = WebInspector.resourceCategories.scripts;
-                break;
-            case WebInspector.Resource.Type.Image:
-                this.category = WebInspector.resourceCategories.images;
-                break;
-            case WebInspector.Resource.Type.Font:
-                this.category = WebInspector.resourceCategories.fonts;
-                break;
-            case WebInspector.Resource.Type.XHR:
-                this.category = WebInspector.resourceCategories.xhr;
-                break;
-            case WebInspector.Resource.Type.Other:
-            default:
-                this.category = WebInspector.resourceCategories.other;
-                break;
-        }
+        if (!this._messages)
+            this._messages = [];
+        this._messages.push(msg);
+        this.dispatchEventToListeners(WebInspector.Resource.Events.MessageAdded, msg);
     },
 
-    get requestHeaders()
-    {
-        if (this._requestHeaders === undefined)
-            this._requestHeaders = {};
-        return this._requestHeaders;
-    },
-
-    set requestHeaders(x)
-    {
-        if (this._requestHeaders === x)
-            return;
-
-        this._requestHeaders = x;
-        delete this._sortedRequestHeaders;
-
-        this.dispatchEventToListeners("requestHeaders changed");
-    },
-
-    get sortedRequestHeaders()
-    {
-        if (this._sortedRequestHeaders !== undefined)
-            return this._sortedRequestHeaders;
-
-        this._sortedRequestHeaders = [];
-        for (var key in this.requestHeaders)
-            this._sortedRequestHeaders.push({header: key, value: this.requestHeaders[key]});
-        this._sortedRequestHeaders.sort(function(a,b) { return a.header.localeCompare(b.header) });
-
-        return this._sortedRequestHeaders;
-    },
-
-    get responseHeaders()
-    {
-        if (this._responseHeaders === undefined)
-            this._responseHeaders = {};
-        return this._responseHeaders;
-    },
-
-    set responseHeaders(x)
-    {
-        if (this._responseHeaders === x)
-            return;
-
-        this._responseHeaders = x;
-        delete this._sortedResponseHeaders;
-
-        this.dispatchEventToListeners("responseHeaders changed");
-    },
-
-    get sortedResponseHeaders()
-    {
-        if (this._sortedResponseHeaders !== undefined)
-            return this._sortedResponseHeaders;
-
-        this._sortedResponseHeaders = [];
-        for (var key in this.responseHeaders)
-            this._sortedResponseHeaders.push({header: key, value: this.responseHeaders[key]});
-        this._sortedResponseHeaders.sort(function(a,b) { return a.header.localeCompare(b.header) });
-
-        return this._sortedResponseHeaders;
-    },
-
-    get scripts()
-    {
-        if (!("_scripts" in this))
-            this._scripts = [];
-        return this._scripts;
-    },
-
-    addScript: function(script)
-    {
-        if (!script)
-            return;
-        this.scripts.unshift(script);
-        script.resource = this;
-    },
-
-    removeAllScripts: function()
-    {
-        if (!this._scripts)
-            return;
-
-        for (var i = 0; i < this._scripts.length; ++i) {
-            if (this._scripts[i].resource === this)
-                delete this._scripts[i].resource;
-        }
-
-        delete this._scripts;
-    },
-
-    removeScript: function(script)
-    {
-        if (!script)
-            return;
-
-        if (script.resource === this)
-            delete script.resource;
-
-        if (!this._scripts)
-            return;
-
-        this._scripts.remove(script);
-    },
-
+    /**
+     * @return {number}
+     */
     get errors()
     {
         return this._errors || 0;
@@ -518,6 +263,9 @@ WebInspector.Resource.prototype = {
         this._errors = x;
     },
 
+    /**
+     * @return {number}
+     */
     get warnings()
     {
         return this._warnings || 0;
@@ -528,85 +276,314 @@ WebInspector.Resource.prototype = {
         this._warnings = x;
     },
 
-    _mimeTypeIsConsistentWithType: function()
+    clearErrorsAndWarnings: function()
     {
-        if (typeof this.type === "undefined"
-         || this.type === WebInspector.Resource.Type.Other
-         || this.type === WebInspector.Resource.Type.XHR)
-            return true;
-
-        if (this.mimeType in WebInspector.MIMETypes)
-            return this.type in WebInspector.MIMETypes[this.mimeType];
-
-        return false;
+        this._messages = [];
+        this._warnings = 0;
+        this._errors = 0;
+        this.dispatchEventToListeners(WebInspector.Resource.Events.MessagesCleared);
     },
 
-    _checkWarnings: function()
+    /**
+     * @return {?string}
+     */
+    get content()
     {
-        for (var warning in WebInspector.Warnings)
-            this._checkWarning(WebInspector.Warnings[warning]);
+        return this._content;
     },
 
-    _checkWarning: function(warning)
+    /**
+     * @return {boolean}
+     */
+    get contentEncoded()
     {
-        var msg;
-        switch (warning.id) {
-            case WebInspector.Warnings.IncorrectMIMEType.id:
-                if (!this._mimeTypeIsConsistentWithType())
-                    msg = new WebInspector.ConsoleMessage(WebInspector.ConsoleMessage.MessageSource.Other,
-                        WebInspector.ConsoleMessage.MessageType.Log, 
-                        WebInspector.ConsoleMessage.MessageLevel.Warning, -1, this.url, null, 1,
-                        String.sprintf(WebInspector.Warnings.IncorrectMIMEType.message,
-                        WebInspector.Resource.Type.toString(this.type), this.mimeType));
-                break;
+        return this._contentEncoded;
+    },
+
+    /**
+     * @return {number}
+     */
+    get contentTimestamp()
+    {
+        return this._contentTimestamp;
+    },
+
+    /**
+     * @return {boolean}
+     */
+    isEditable: function()
+    {
+        if (this._actualResource)
+            return false;
+        var binding = WebInspector.Resource._domainModelBindings[this.type.name()];
+        return binding && binding.canSetContent(this);
+    },
+
+    /**
+     * @param {string} newContent
+     * @param {boolean} majorChange
+     * @param {function(?string)} callback
+     */
+    setContent: function(newContent, majorChange, callback)
+    {
+        if (!this.isEditable()) {
+            if (callback)
+                callback("Resource is not editable");
+            return;
+        }
+        var binding = WebInspector.Resource._domainModelBindings[this.type.name()];
+        binding.setContent(this, newContent, majorChange, callback);
+    },
+
+    /**
+     * @param {string} newContent
+     * @param {Date=} timestamp
+     * @param {boolean=} restoringHistory
+     */
+    addRevision: function(newContent, timestamp, restoringHistory)
+    {
+        var revision = new WebInspector.ResourceRevision(this, this._content, this._contentTimestamp);
+        this.history.push(revision);
+
+        this._content = newContent;
+        this._contentTimestamp = timestamp || new Date();
+
+        this.dispatchEventToListeners(WebInspector.Resource.Events.RevisionAdded, revision);
+        if (!restoringHistory)
+            this._persistRevision();
+        WebInspector.resourceTreeModel.dispatchEventToListeners(WebInspector.ResourceTreeModel.EventTypes.ResourceContentCommitted, { resource: this, content: newContent });
+    },
+
+    _persistRevision: function()
+    {
+        WebInspector.Resource.persistRevision(this);
+    },
+
+    /**
+     * @return {?string}
+     */
+    contentURL: function()
+    {
+        return this._url;
+    },
+
+    /**
+     * @param {function(?string, boolean, string)} callback
+     */
+    requestContent: function(callback)
+    {
+        if (typeof this._content !== "undefined") {
+            callback(this._content, !!this._contentEncoded, this.canonicalMimeType());
+            return;
         }
 
-        if (msg)
-            WebInspector.console.addMessage(msg);
+        this._pendingContentCallbacks.push(callback);
+        this._innerRequestContent();
+    },
+
+    canonicalMimeType: function()
+    {
+        if (this.type === WebInspector.resourceTypes.Document)
+            return "text/html";
+        if (this.type === WebInspector.resourceTypes.Script)
+            return "text/javascript";
+        if (this.type === WebInspector.resourceTypes.Stylesheet)
+            return "text/css";
+        return this.mimeType;
+    },
+
+    /**
+     * @param {string} query
+     * @param {boolean} caseSensitive
+     * @param {boolean} isRegex
+     * @param {function(Array.<WebInspector.ContentProvider.SearchMatch>)} callback
+     */
+    searchInContent: function(query, caseSensitive, isRegex, callback)
+    {
+        /**
+         * @param {?Protocol.Error} error
+         * @param {Array.<PageAgent.SearchMatch>} searchMatches
+         */
+        function callbackWrapper(error, searchMatches)
+        {
+            callback(searchMatches || []);
+        }
+
+        if (this.frameId)
+            PageAgent.searchInResource(this.frameId, this.url, query, caseSensitive, isRegex, callbackWrapper);
+        else
+            callback([]);
+    },
+
+    /**
+     * @param {Element} image
+     */
+    populateImageSource: function(image)
+    {
+        function onResourceContent()
+        {
+            image.src = this._contentURL();
+        }
+
+        this.requestContent(onResourceContent.bind(this));
+    },
+
+    /**
+     * @return {string}
+     */
+    _contentURL: function()
+    {
+        const maxDataUrlSize = 1024 * 1024;
+        // If resource content is not available or won't fit a data URL, fall back to using original URL.
+        if (this._content == null || this._content.length > maxDataUrlSize)
+            return this.url;
+
+        return "data:" + this.mimeType + (this._contentEncoded ? ";base64," : ",") + this._content;
+    },
+
+    _innerRequestContent: function()
+    {
+        if (this._contentRequested)
+            return;
+        this._contentRequested = true;
+
+        /**
+         * @param {?Protocol.Error} error
+         * @param {string} content
+         * @param {boolean} contentEncoded
+         */
+        function callback(error, content, contentEncoded)
+        {
+            this._content = error ? null : content;
+            this._contentEncoded = contentEncoded;
+            this._originalContent = content;
+            var callbacks = this._pendingContentCallbacks.slice();
+            for (var i = 0; i < callbacks.length; ++i)
+                callbacks[i](this._content, this._contentEncoded, this.canonicalMimeType());
+            this._pendingContentCallbacks.length = 0;
+            delete this._contentRequested;
+        }
+        PageAgent.getResourceContent(this.frameId, this.url, callback.bind(this));
     }
 }
 
 WebInspector.Resource.prototype.__proto__ = WebInspector.Object.prototype;
 
-WebInspector.Resource.CompareByStartTime = function(a, b)
+/**
+ * @constructor
+ * @implements {WebInspector.ContentProvider}
+ * @param {WebInspector.Resource} resource
+ * @param {?string|undefined} content
+ * @param {number} timestamp
+ */
+WebInspector.ResourceRevision = function(resource, content, timestamp)
 {
-    return a.startTime - b.startTime;
+    this._resource = resource;
+    this._content = content;
+    this._timestamp = timestamp;
 }
 
-WebInspector.Resource.CompareByResponseReceivedTime = function(a, b)
-{
-    var aVal = a.responseReceivedTime;
-    var bVal = b.responseReceivedTime;
-    if (aVal === -1 ^ bVal === -1)
-        return bVal - aVal;
-    return aVal - bVal;
+WebInspector.ResourceRevision.prototype = {
+    /**
+     * @return {WebInspector.Resource}
+     */
+    get resource()
+    {
+        return this._resource;
+    },
+
+    /**
+     * @return {number}
+     */
+    get timestamp()
+    {
+        return this._timestamp;
+    },
+
+    /**
+     * @return {?string}
+     */
+    get content()
+    {
+        return this._content || null;
+    },
+
+    revertToThis: function()
+    {
+        function revert(content)
+        {
+            this._resource.setContent(content, true);
+        }
+        this.requestContent(revert.bind(this));
+    },
+
+    /**
+     * @return {?string}
+     */
+    contentURL: function()
+    {
+        return this._resource.url;
+    },
+
+    /**
+     * @param {function(?string, boolean, string)} callback
+     */
+    requestContent: function(callback)
+    {
+        if (typeof this._content === "string") {
+            callback(this._content, false, this.resource.mimeType);
+            return;
+        }
+
+        // If we are here, this is initial revision. First, look up content fetched over the wire.
+        if (typeof this.resource._originalContent === "string") {
+            this._content = this._resource._originalContent;
+            callback(this._content, false, this.resource.mimeType);
+            return;
+        }
+
+        /**
+         * @param {?Protocol.Error} error
+         * @param {string} content
+         * @param {boolean} contentEncoded
+         */
+        function callbackWrapper(error, content, contentEncoded)
+        {
+            callback(error ? null : content, contentEncoded, this.resource.mimeType);
+        }
+
+        PageAgent.getResourceContent(this._resource.frameId, this._resource.url, callbackWrapper.bind(this));
+    },
+
+    /**
+     * @param {string} query
+     * @param {boolean} caseSensitive
+     * @param {boolean} isRegex
+     * @param {function(Array.<WebInspector.ContentProvider.SearchMatch>)} callback
+     */
+    searchInContent: function(query, caseSensitive, isRegex, callback)
+    {
+        callback([]);
+    }
 }
 
-WebInspector.Resource.CompareByEndTime = function(a, b)
-{
-    var aVal = a.endTime;
-    var bVal = b.endTime;
-    if (aVal === -1 ^ bVal === -1)
-        return bVal - aVal;
-    return aVal - bVal;
-}
+/**
+ * @interface
+ */
+WebInspector.ResourceDomainModelBinding = function() { }
 
-WebInspector.Resource.CompareByDuration = function(a, b)
-{
-    return a.duration - b.duration;
-}
+WebInspector.ResourceDomainModelBinding.prototype = {
+    /**
+     * @param {WebInspector.Resource} resource
+     * @return {boolean}
+     */
+    canSetContent: function(resource) { return true; },
 
-WebInspector.Resource.CompareByLatency = function(a, b)
-{
-    return a.latency - b.latency;
-}
-
-WebInspector.Resource.CompareBySize = function(a, b)
-{
-    return a.contentLength - b.contentLength;
-}
-
-WebInspector.Resource.StatusTextForCode = function(code)
-{
-    return code ? code + " " + WebInspector.Resource.StatusText[code] : "";
+    /**
+     * @param {WebInspector.Resource} resource
+     * @param {string} content
+     * @param {boolean} majorChange
+     * @param {function(?string)} callback
+     */
+    setContent: function(resource, content, majorChange, callback) { }
 }

@@ -28,57 +28,40 @@
 #define EditorClient_h
 
 #include "EditorInsertAction.h"
-#include "PlatformString.h"
+#include "FloatRect.h"
 #include "TextAffinity.h"
+#include "TextChecking.h"
+#include "UndoStep.h"
 #include <wtf/Forward.h>
 #include <wtf/Vector.h>
 
 #if PLATFORM(MAC)
-class NSArray;
-class NSData;
-class NSString;
-class NSURL;
+OBJC_CLASS NSAttributedString;
+OBJC_CLASS NSString;
+OBJC_CLASS NSURL;
+OBJC_CLASS NSArray;
+OBJC_CLASS NSDictionary;
 #endif
 
 namespace WebCore {
 
-class CSSStyleDeclaration;
-class EditCommand;
+class ArchiveResource;
+class DocumentFragment;
+class Editor;
 class Element;
 class Frame;
 class HTMLElement;
 class KeyboardEvent;
 class Node;
 class Range;
+class SpellChecker;
+class StylePropertySet;
+class TextCheckerClient;
 class VisibleSelection;
-class String;
 class VisiblePosition;
 
-struct GrammarDetail {
-    int location;
-    int length;
-    Vector<String> guesses;
-    String userDescription;
-};
+struct GrammarDetail;
 
-enum TextCheckingType {
-    TextCheckingTypeSpelling    = 1 << 1,
-    TextCheckingTypeGrammar     = 1 << 2,
-    TextCheckingTypeLink        = 1 << 5,
-    TextCheckingTypeQuote       = 1 << 6,
-    TextCheckingTypeDash        = 1 << 7,
-    TextCheckingTypeReplacement = 1 << 8,
-    TextCheckingTypeCorrection  = 1 << 9
-};
-
-struct TextCheckingResult {
-    TextCheckingType type;
-    int location;
-    int length;
-    Vector<GrammarDetail> details;
-    String replacement;
-};
- 
 class EditorClient {
 public:
     virtual ~EditorClient() {  }
@@ -93,8 +76,6 @@ public:
     virtual bool isGrammarCheckingEnabled() = 0;
     virtual void toggleGrammarChecking() = 0;
     virtual int spellCheckerDocumentTag() = 0;
-    
-    virtual bool isEditable() = 0;
 
     virtual bool shouldBeginEditing(Range*) = 0;
     virtual bool shouldEndEditing(Range*) = 0;
@@ -102,25 +83,22 @@ public:
     virtual bool shouldInsertText(const String&, Range*, EditorInsertAction) = 0;
     virtual bool shouldChangeSelectedRange(Range* fromRange, Range* toRange, EAffinity, bool stillSelecting) = 0;
     
-    virtual bool shouldApplyStyle(CSSStyleDeclaration*, Range*) = 0;
-//  virtual bool shouldChangeTypingStyle(CSSStyleDeclaration* fromStyle, CSSStyleDeclaration* toStyle) = 0;
-//  virtual bool doCommandBySelector(SEL selector) = 0;
+    virtual bool shouldApplyStyle(StylePropertySet*, Range*) = 0;
     virtual bool shouldMoveRangeAfterDelete(Range*, Range*) = 0;
 
     virtual void didBeginEditing() = 0;
     virtual void respondToChangedContents() = 0;
-    virtual void respondToChangedSelection() = 0;
+    virtual void respondToChangedSelection(Frame*) = 0;
     virtual void didEndEditing() = 0;
     virtual void didWriteSelectionToPasteboard() = 0;
     virtual void didSetSelectionTypesForPasteboard() = 0;
-//  virtual void didChangeTypingStyle:(NSNotification *)notification = 0;
-//  virtual void didChangeSelection:(NSNotification *)notification = 0;
-//  virtual NSUndoManager* undoManager:(WebView *)webView = 0;
     
-    virtual void registerCommandForUndo(PassRefPtr<EditCommand>) = 0;
-    virtual void registerCommandForRedo(PassRefPtr<EditCommand>) = 0;
+    virtual void registerUndoStep(PassRefPtr<UndoStep>) = 0;
+    virtual void registerRedoStep(PassRefPtr<UndoStep>) = 0;
     virtual void clearUndoRedoOperations() = 0;
 
+    virtual bool canCopyCut(Frame*, bool defaultValue) const = 0;
+    virtual bool canPaste(Frame*, bool defaultValue) const = 0;
     virtual bool canUndo() const = 0;
     virtual bool canRedo() const = 0;
     
@@ -140,30 +118,58 @@ public:
     virtual void restoreSelectionNotifications() = 0;
     virtual void startDelayingAndCoalescingContentChangeNotifications() = 0;
     virtual void stopDelayingAndCoalescingContentChangeNotifications() = 0;
+    virtual void writeDataToPasteboard(NSDictionary*) = 0;
+    virtual NSArray* supportedPasteboardTypesForCurrentSelection() = 0;
+    virtual NSArray* readDataFromPasteboard(NSString* type, int index) = 0;
+    virtual bool hasRichlyEditableSelection() = 0;
+    virtual int getPasteboardItemsCount() = 0;
+    virtual DocumentFragment* documentFragmentFromDelegate(int index) = 0;
+    virtual bool performsTwoStepPaste(DocumentFragment*) = 0;
+    virtual int pasteboardChangeCount() = 0;
 
 #if PLATFORM(MAC)
     virtual NSString* userVisibleString(NSURL*) = 0;
-#ifdef BUILDING_ON_TIGER
-    virtual NSArray* pasteboardTypesForSelection(Frame*) = 0;
-#endif
+    virtual DocumentFragment* documentFragmentFromAttributedString(NSAttributedString*, Vector< RefPtr<ArchiveResource> >&) = 0;
+    virtual void setInsertionPasteboard(const String& pasteboardName) = 0;
+    virtual NSURL* canonicalizeURL(NSURL*) = 0;
+    virtual NSURL* canonicalizeURLString(NSString*) = 0;
 #endif
 
+#if USE(APPKIT)
+    virtual void uppercaseWord() = 0;
+    virtual void lowercaseWord() = 0;
+    virtual void capitalizeWord() = 0;
+#endif
+#if USE(AUTOMATIC_TEXT_REPLACEMENT)
+    virtual void showSubstitutionsPanel(bool show) = 0;
+    virtual bool substitutionsPanelIsShowing() = 0;
+    virtual void toggleSmartInsertDelete() = 0;
+    virtual bool isAutomaticQuoteSubstitutionEnabled() = 0;
+    virtual void toggleAutomaticQuoteSubstitution() = 0;
+    virtual bool isAutomaticLinkDetectionEnabled() = 0;
+    virtual void toggleAutomaticLinkDetection() = 0;
+    virtual bool isAutomaticDashSubstitutionEnabled() = 0;
+    virtual void toggleAutomaticDashSubstitution() = 0;
+    virtual bool isAutomaticTextReplacementEnabled() = 0;
+    virtual void toggleAutomaticTextReplacement() = 0;
+    virtual bool isAutomaticSpellingCorrectionEnabled() = 0;
+    virtual void toggleAutomaticSpellingCorrection() = 0;
+#endif
 
-    virtual void ignoreWordInSpellDocument(const String&) = 0;
-    virtual void learnWord(const String&) = 0;
-    virtual void checkSpellingOfString(const UChar*, int length, int* misspellingLocation, int* misspellingLength) = 0;
-    virtual String getAutoCorrectSuggestionForMisspelledWord(const String& misspelledWord) = 0;
-    virtual void checkGrammarOfString(const UChar*, int length, Vector<GrammarDetail>&, int* badGrammarLocation, int* badGrammarLength) = 0;
-    virtual void checkTextOfParagraph(const UChar* text, int length, uint64_t checkingTypes, Vector<TextCheckingResult>& results) = 0;
+#if PLATFORM(GTK)
+    virtual bool shouldShowUnicodeMenu() = 0;
+#endif
+
+    virtual TextCheckerClient* textChecker() = 0;
+
     virtual void updateSpellingUIWithGrammarString(const String&, const GrammarDetail& detail) = 0;
     virtual void updateSpellingUIWithMisspelledWord(const String&) = 0;
     virtual void showSpellingUI(bool show) = 0;
     virtual bool spellingUIIsShowing() = 0;
-    virtual void getGuessesForWord(const String&, Vector<String>& guesses) = 0;
+    virtual void willSetInputMethodState() = 0;
     virtual void setInputMethodState(bool enabled) = 0;
 };
 
 }
 
 #endif // EditorClient_h
-

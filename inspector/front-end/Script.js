@@ -23,28 +23,196 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-WebInspector.Script = function(sourceID, sourceURL, source, startingLine, errorLine, errorMessage)
+/**
+ * @constructor
+ * @implements {WebInspector.ContentProvider}
+ * @param {string} scriptId
+ * @param {string} sourceURL
+ * @param {number} startLine
+ * @param {number} startColumn
+ * @param {number} endLine
+ * @param {number} endColumn
+ * @param {boolean} isContentScript
+ * @param {string=} sourceMapURL
+ */
+WebInspector.Script = function(scriptId, sourceURL, startLine, startColumn, endLine, endColumn, isContentScript, sourceMapURL)
 {
-    this.sourceID = sourceID;
+    this.scriptId = scriptId;
     this.sourceURL = sourceURL;
-    this.source = source;
-    this.startingLine = startingLine;
-    this.errorLine = errorLine;
-    this.errorMessage = errorMessage;
-
-    // if no URL, look for "//@ sourceURL=" decorator
-    // note that this sourceURL comment decorator is behavior that FireBug added
-    // in it's 1.1 release as noted in the release notes:
-    // http://fbug.googlecode.com/svn/branches/firebug1.1/docs/ReleaseNotes_1.1.txt
-    if (!sourceURL) {
-        // use of [ \t] rather than \s is to prevent \n from matching
-        var pattern = /^\s*\/\/[ \t]*@[ \t]*sourceURL[ \t]*=[ \t]*(\S+).*$/m;
-        var match = pattern.exec(source);
-
-        if (match)
-            this.sourceURL = WebInspector.UIString("(program): %s", match[1]);
-    }
+    this.lineOffset = startLine;
+    this.columnOffset = startColumn;
+    this.endLine = endLine;
+    this.endColumn = endColumn;
+    this.isContentScript = isContentScript;
+    this.sourceMapURL = sourceMapURL;
+    this._locations = [];
 }
 
 WebInspector.Script.prototype = {
+    /**
+     * @return {?string}
+     */
+    contentURL: function()
+    {
+        return this.sourceURL;
+    },
+
+    /**
+     * @param {function(?string,boolean,string)} callback
+     */
+    requestContent: function(callback)
+    {
+        if (this._source) {
+            callback(this._source, false, "text/javascript");
+            return;
+        }
+
+        /**
+         * @this {WebInspector.Script}
+         * @param {?Protocol.Error} error
+         * @param {string} source
+         */
+        function didGetScriptSource(error, source)
+        {
+            this._source = error ? "" : source;
+            callback(this._source, false, "text/javascript");
+        }
+        if (this.scriptId) {
+            // Script failed to parse.
+            DebuggerAgent.getScriptSource(this.scriptId, didGetScriptSource.bind(this));
+        } else
+            callback("", false, "text/javascript");
+    },
+
+    /**
+     * @param {string} query
+     * @param {boolean} caseSensitive
+     * @param {boolean} isRegex
+     * @param {function(Array.<PageAgent.SearchMatch>)} callback
+     */
+    searchInContent: function(query, caseSensitive, isRegex, callback)
+    {
+        /**
+         * @this {WebInspector.Script}
+         * @param {?Protocol.Error} error
+         * @param {Array.<PageAgent.SearchMatch>} searchMatches
+         */
+        function innerCallback(error, searchMatches)
+        {
+            if (error)
+                console.error(error);
+            var result = [];
+            for (var i = 0; i < searchMatches.length; ++i) {
+                var searchMatch = new WebInspector.ContentProvider.SearchMatch(searchMatches[i].lineNumber, searchMatches[i].lineContent);
+                result.push(searchMatch);
+            }
+            callback(result || []);
+        }
+
+        if (this.scriptId) {
+            // Script failed to parse.
+            DebuggerAgent.searchInContent(this.scriptId, query, caseSensitive, isRegex, innerCallback.bind(this));
+        } else
+            callback([]);
+    },
+
+    /**
+     * @param {string} newSource
+     * @param {function(?Protocol.Error, Array.<DebuggerAgent.CallFrame>=)} callback
+     */
+    editSource: function(newSource, callback)
+    {
+        /**
+         * @this {WebInspector.Script}
+         * @param {?Protocol.Error} error
+         * @param {Array.<DebuggerAgent.CallFrame>|undefined} callFrames
+         * @param {Object=} debugData
+         */
+        function didEditScriptSource(error, callFrames, debugData)
+        {
+            if (!error)
+                this._source = newSource;
+            callback(error, callFrames);
+        }
+        if (this.scriptId) {
+            // Script failed to parse.
+            DebuggerAgent.setScriptSource(this.scriptId, newSource, undefined, didEditScriptSource.bind(this));
+        } else
+            callback("Script failed to parse");
+    },
+
+    /**
+     * @return {boolean}
+     */
+    isInlineScript: function()
+    {
+        return !!this.sourceURL && this.lineOffset !== 0 && this.columnOffset !== 0;
+    },
+
+    /**
+     * @param {DebuggerAgent.Location} rawLocation
+     * @return {WebInspector.UILocation}
+     */
+    rawLocationToUILocation: function(rawLocation)
+    {
+        console.assert(rawLocation.scriptId === this.scriptId);
+        return this._sourceMapping.rawLocationToUILocation(rawLocation);
+    },
+
+    /**
+     * @param {WebInspector.SourceMapping} sourceMapping
+     */
+    setSourceMapping: function(sourceMapping)
+    {
+        this._sourceMapping = sourceMapping;
+        for (var i = 0; i < this._locations.length; ++i)
+            this._locations[i].update();
+    },
+
+    /**
+     * @param {DebuggerAgent.Location} rawLocation
+     * @param {function(WebInspector.UILocation):(boolean|undefined)} updateDelegate
+     * @return {WebInspector.Script.Location}
+     */
+    createLiveLocation: function(rawLocation, updateDelegate)
+    {
+        console.assert(rawLocation.scriptId === this.scriptId);
+        var location = new WebInspector.Script.Location(this, rawLocation, updateDelegate);
+        this._locations.push(location);
+        location.update();
+        return location;
+    }
+}
+
+/**
+ * @constructor
+ * @implements {WebInspector.LiveLocation}
+ * @param {WebInspector.Script} script
+ * @param {DebuggerAgent.Location} rawLocation
+ * @param {function(WebInspector.UILocation):(boolean|undefined)} updateDelegate
+ */
+WebInspector.Script.Location = function(script, rawLocation, updateDelegate)
+{
+    this._script = script;
+    this._rawLocation = rawLocation;
+    this._updateDelegate = updateDelegate;
+}
+
+WebInspector.Script.Location.prototype = {
+    dispose: function()
+    {
+        this._script._locations.remove(this);
+    },
+
+    update: function()
+    {
+        if (!this._script._sourceMapping)
+            return;
+        var uiLocation = this._script._sourceMapping.rawLocationToUILocation(this._rawLocation);
+        if (uiLocation) {
+            var oneTime = this._updateDelegate(uiLocation);
+            if (oneTime)
+                this.dispose();
+        }
+    }
 }

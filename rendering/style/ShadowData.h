@@ -26,39 +26,38 @@
 #define ShadowData_h
 
 #include "Color.h"
-#include <wtf/FastAllocBase.h>
+#include "LayoutTypes.h"
+#include <wtf/OwnPtr.h>
+#include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
 enum ShadowStyle { Normal, Inset };
 
-// This struct holds information about shadows for the text-shadow and box-shadow properties.
+// This class holds information about shadows for the text-shadow and box-shadow properties.
 
-struct ShadowData : FastAllocBase {
+class ShadowData {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
     ShadowData()
-        : x(0)
-        , y(0)
-        , blur(0)
-        , spread(0)
-        , style(Normal)
-        , next(0)
+        : m_blur(0)
+        , m_spread(0)
+        , m_style(Normal)
+        , m_isWebkitBoxShadow(false)
     {
     }
 
-    ShadowData(int x, int y, int blur, int spread, ShadowStyle style, const Color& color)
-        : x(x)
-        , y(y)
-        , blur(blur)
-        , spread(spread)
-        , style(style)
-        , color(color)
-        , next(0)
+    ShadowData(const IntPoint& location, int blur, int spread, ShadowStyle style, bool isWebkitBoxShadow, const Color& color)
+        : m_location(location)
+        , m_blur(blur)
+        , m_spread(spread)
+        , m_color(color)
+        , m_style(style)
+        , m_isWebkitBoxShadow(isWebkitBoxShadow)
     {
     }
 
     ShadowData(const ShadowData& o);
-
-    ~ShadowData() { delete next; }
 
     bool operator==(const ShadowData& o) const;
     bool operator!=(const ShadowData& o) const
@@ -66,13 +65,29 @@ struct ShadowData : FastAllocBase {
         return !(*this == o);
     }
     
-    int x;
-    int y;
-    int blur;
-    int spread;
-    ShadowStyle style;
-    Color color;
-    ShadowData* next;
+    int x() const { return m_location.x(); }
+    int y() const { return m_location.y(); }
+    IntPoint location() const { return m_location; }
+    int blur() const { return m_blur; }
+    int spread() const { return m_spread; }
+    ShadowStyle style() const { return m_style; }
+    const Color& color() const { return m_color; }
+    bool isWebkitBoxShadow() const { return m_isWebkitBoxShadow; }
+
+    const ShadowData* next() const { return m_next.get(); }
+    void setNext(PassOwnPtr<ShadowData> shadow) { m_next = shadow; }
+
+    void adjustRectForShadow(LayoutRect&, int additionalOutlineSize = 0) const;
+    void adjustRectForShadow(FloatRect&, int additionalOutlineSize = 0) const;
+
+private:
+    IntPoint m_location;
+    int m_blur;
+    int m_spread;
+    Color m_color;
+    ShadowStyle m_style;
+    bool m_isWebkitBoxShadow;
+    OwnPtr<ShadowData> m_next;
 };
 
 } // namespace WebCore

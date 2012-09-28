@@ -28,23 +28,29 @@
 #include "Document.h"
 #include "Node.h"
 #include "NotImplemented.h"
+#include "XSLImportRule.h"
 #include "XSLTProcessor.h"
-#include "loader.h"
 
 namespace WebCore {
 
-XSLStyleSheet::XSLStyleSheet(Node* parentNode, const String& href, const KURL& baseURL,  bool embedded)
-    : StyleSheet(parentNode, href, baseURL)
-    , m_ownerDocument(parentNode->document())
+XSLStyleSheet::XSLStyleSheet(Node* parentNode, const String& originalURL, const KURL& finalURL,  bool embedded)
+    : m_ownerNode(parentNode)
+    , m_originalURL(originalURL)
+    , m_finalURL(finalURL)
+    , m_isDisabled(false)
     , m_embedded(embedded)
 {
 }
 
 XSLStyleSheet::~XSLStyleSheet()
 {
+    for (unsigned i = 0; i < m_children.size(); ++i) {
+        ASSERT(m_children.at(i)->parentStyleSheet() == this);
+        m_children.at(i)->setParentStyleSheet(0);
+    }
 }
 
-bool XSLStyleSheet::isLoading()
+bool XSLStyleSheet::isLoading() const
 {
     notImplemented();
     return false;
@@ -61,14 +67,15 @@ void XSLStyleSheet::clearDocuments()
     notImplemented();
 }
 
-DocLoader* XSLStyleSheet::docLoader()
+CachedResourceLoader* XSLStyleSheet::cachedResourceLoader()
 {
-    if (!m_ownerDocument)
+    Document* document = ownerDocument();
+    if (!document)
         return 0;
-    return m_ownerDocument->docLoader();
+    return document->cachedResourceLoader();
 }
 
-bool XSLStyleSheet::parseString(const String& string, bool)
+bool XSLStyleSheet::parseString(const String& string)
 {
     // FIXME: Fix QXmlQuery so that it allows compiling the stylesheet before setting the document
     // to be transformed. This way we could not only check if the stylesheet is correct before using it
@@ -86,6 +93,12 @@ void XSLStyleSheet::loadChildSheets()
 void XSLStyleSheet::loadChildSheet(const String&)
 {
     notImplemented();
+}
+
+Document* XSLStyleSheet::ownerDocument()
+{
+    Node* node = ownerNode();
+    return node ? node->document() : 0;
 }
 
 void XSLStyleSheet::setParentStyleSheet(XSLStyleSheet*)

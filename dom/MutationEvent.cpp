@@ -23,6 +23,8 @@
 #include "config.h"
 #include "MutationEvent.h"
 
+#include "EventNames.h"
+
 namespace WebCore {
 
 MutationEvent::MutationEvent()
@@ -42,6 +44,10 @@ MutationEvent::MutationEvent(const AtomicString& type, bool canBubble, bool canc
 {
 }
 
+MutationEvent::~MutationEvent()
+{
+}
+
 void MutationEvent::initMutationEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<Node> relatedNode,
                                       const String& prevValue, const String& newValue,
                                       const String& attrName, unsigned short attrChange)
@@ -58,9 +64,9 @@ void MutationEvent::initMutationEvent(const AtomicString& type, bool canBubble, 
     m_attrChange = attrChange;
 }
 
-bool MutationEvent::isMutationEvent() const
+const AtomicString& MutationEvent::interfaceName() const
 {
-    return true;
+    return eventNames().interfaceForMutationEvent;
 }
 
 } // namespace WebCore

@@ -31,50 +31,49 @@
 
 namespace WebCore {
 
-MoveSelectionCommand::MoveSelectionCommand(PassRefPtr<DocumentFragment> fragment, const Position& position, bool smartMove) 
-    : CompositeEditCommand(position.node()->document()), m_fragment(fragment), m_position(position), m_smartMove(smartMove)
+MoveSelectionCommand::MoveSelectionCommand(PassRefPtr<DocumentFragment> fragment, const Position& position, bool smartInsert, bool smartDelete) 
+    : CompositeEditCommand(position.anchorNode()->document()), m_fragment(fragment), m_position(position), m_smartInsert(smartInsert), m_smartDelete(smartDelete)
 {
     ASSERT(m_fragment);
 }
 
 void MoveSelectionCommand::doApply()
 {
-    VisibleSelection selection = endingSelection();
-    ASSERT(selection.isRange());
+    ASSERT(endingSelection().isNonOrphanedRange());
 
     Position pos = m_position;
     if (pos.isNull())
         return;
-        
+
     // Update the position otherwise it may become invalid after the selection is deleted.
-    Node *positionNode = m_position.node();
-    int positionOffset = m_position.deprecatedEditingOffset();
-    Position selectionEnd = selection.end();
-    int selectionEndOffset = selectionEnd.deprecatedEditingOffset();
-    if (selectionEnd.node() == positionNode && selectionEndOffset < positionOffset) {
-        positionOffset -= selectionEndOffset;
-        Position selectionStart = selection.start();
-        if (selectionStart.node() == positionNode) {
-            positionOffset += selectionStart.deprecatedEditingOffset();
-        }
-        pos = Position(positionNode, positionOffset);
+    Position selectionEnd = endingSelection().end();
+    if (pos.anchorType() == Position::PositionIsOffsetInAnchor && selectionEnd.anchorType() == Position::PositionIsOffsetInAnchor
+        && selectionEnd.containerNode() == pos.containerNode() && selectionEnd.offsetInContainerNode() < pos.offsetInContainerNode()) {
+        pos.moveToOffset(pos.offsetInContainerNode() - selectionEnd.offsetInContainerNode());
+
+        Position selectionStart = endingSelection().start();
+        if (selectionStart.anchorType() == Position::PositionIsOffsetInAnchor && selectionStart.containerNode() == pos.containerNode())
+            pos.moveToOffset(pos.offsetInContainerNode() + selectionStart.offsetInContainerNode());
     }
 
-    deleteSelection(m_smartMove);
+    deleteSelection(m_smartDelete);
 
     // If the node for the destination has been removed as a result of the deletion,
     // set the destination to the ending point after the deletion.
     // Fixes: <rdar://problem/3910425> REGRESSION (Mail): Crash in ReplaceSelectionCommand; 
     //        selection is empty, leading to null deref
-    if (!pos.node()->inDocument())
+    if (!pos.anchorNode()->inDocument())
         pos = endingSelection().start();
 
-    setEndingSelection(VisibleSelection(pos, endingSelection().affinity()));
-    if (!positionNode->inDocument()) {
+    setEndingSelection(VisibleSelection(pos, endingSelection().affinity(), endingSelection().isDirectional()));
+    if (!pos.anchorNode()->inDocument()) {
         // Document was modified out from under us.
         return;
     }
-    applyCommandToComposite(ReplaceSelectionCommand::create(positionNode->document(), m_fragment, true, m_smartMove));
+    ReplaceSelectionCommand::CommandOptions options = ReplaceSelectionCommand::SelectReplacement | ReplaceSelectionCommand::PreventNesting;
+    if (m_smartInsert)
+        options |= ReplaceSelectionCommand::SmartReplace;
+    applyCommandToComposite(ReplaceSelectionCommand::create(document(), m_fragment, options));
 }
 
 EditAction MoveSelectionCommand::editingAction() const

@@ -31,21 +31,31 @@
 #include "config.h"
 #include "MIMETypeRegistry.h"
 
-#include "ChromiumBridge.h"
-#include "CString.h"
 #include "MediaPlayer.h"
 #include "PluginDataChromium.h"
 
-// NOTE: Unlike other ports, we don't use the shared implementation bits in
-// MIMETypeRegistry.cpp.  Instead, we need to route most functions via the
-// ChromiumBridge to the embedder.
+#include <public/Platform.h>
+#include <public/WebMimeRegistry.h>
+#include <wtf/text/CString.h>
+
+// NOTE: Unlike other ports, we don't use the shared implementation in
+// MIMETypeRegistry.cpp.  Instead, we need to route most functions via
+// Platform.h to the embedder.
 
 namespace WebCore {
 
 String MIMETypeRegistry::getMIMETypeForExtension(const String &ext)
 {
-    return ChromiumBridge::mimeTypeForExtension(ext);
+    return WebKit::Platform::current()->mimeRegistry()->mimeTypeForExtension(ext);
 }
+
+#if ENABLE(FILE_SYSTEM)
+String MIMETypeRegistry::getWellKnownMIMETypeForExtension(const String &ext)
+{
+    // This method must be thread safe and should not consult the OS/registry.
+    return WebKit::Platform::current()->mimeRegistry()->wellKnownMimeTypeForExtension(ext);
+}
+#endif
 
 // Returns the file extension if one is found.  Does not include the dot in the
 // filename.  E.g., 'html'.
@@ -55,7 +65,7 @@ String MIMETypeRegistry::getPreferredExtensionForMIMEType(const String& type)
     // FIXME: Is this really necessary??
     String mimeType = type.substring(0, static_cast<unsigned>(type.find(';')));
 
-    String ext = ChromiumBridge::preferredExtensionForMIMEType(type);
+    String ext = WebKit::Platform::current()->mimeRegistry()->preferredExtensionForMIMEType(type);
     if (!ext.isEmpty() && ext[0] == '.')
         ext = ext.substring(1);
 
@@ -81,7 +91,8 @@ String MIMETypeRegistry::getMIMETypeForPath(const String& path)
 
 bool MIMETypeRegistry::isSupportedImageMIMEType(const String& mimeType)
 { 
-    return ChromiumBridge::isSupportedImageMIMEType(mimeType);
+    return WebKit::Platform::current()->mimeRegistry()->supportsImageMIMEType(mimeType)
+        != WebKit::WebMimeRegistry::IsNotSupported;
 }
 
 bool MIMETypeRegistry::isSupportedImageResourceMIMEType(const String& mimeType)
@@ -91,18 +102,25 @@ bool MIMETypeRegistry::isSupportedImageResourceMIMEType(const String& mimeType)
 
 bool MIMETypeRegistry::isSupportedImageMIMETypeForEncoding(const String& mimeType)
 {
-    // FIXME: Fill this out. See: http://trac.webkit.org/changeset/30888
-    return isSupportedImageMIMEType(mimeType);
+    if (mimeType == "image/jpeg" || mimeType == "image/png")
+        return true;
+#if USE(WEBP) && USE(SKIA)
+    if (mimeType == "image/webp")
+        return true;
+#endif
+    return false;
 }
 
 bool MIMETypeRegistry::isSupportedJavaScriptMIMEType(const String& mimeType)
 {
-    return ChromiumBridge::isSupportedJavaScriptMIMEType(mimeType);
+    return WebKit::Platform::current()->mimeRegistry()->supportsJavaScriptMIMEType(mimeType)
+        != WebKit::WebMimeRegistry::IsNotSupported;
 }
     
 bool MIMETypeRegistry::isSupportedNonImageMIMEType(const String& mimeType)
 {
-    return ChromiumBridge::isSupportedNonImageMIMEType(mimeType);
+    return WebKit::Platform::current()->mimeRegistry()->supportsNonImageMIMEType(mimeType)
+        != WebKit::WebMimeRegistry::IsNotSupported;
 }
 
 bool MIMETypeRegistry::isSupportedMediaMIMEType(const String& mimeType)
@@ -130,10 +148,15 @@ String MIMETypeRegistry::getMediaMIMETypeForExtension(const String&)
     return String();
 }
 
+bool MIMETypeRegistry::isApplicationPluginMIMEType(const String&)
+{
+    return false;
+}
+
 static HashSet<String>& dummyHashSet()
 {
     ASSERT_NOT_REACHED();
-    static HashSet<String> dummy;
+    DEFINE_STATIC_LOCAL(HashSet<String>, dummy, ());
     return dummy;
 }
 

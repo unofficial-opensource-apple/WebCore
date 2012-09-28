@@ -23,51 +23,41 @@
 #define CSSStyleRule_h
 
 #include "CSSRule.h"
-#include "CSSSelectorList.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
-class CSSMutableStyleDeclaration;
-class CSSSelector;
+class CSSStyleDeclaration;
+class StyleRuleCSSStyleDeclaration;
+class StyleRule;
 
 class CSSStyleRule : public CSSRule {
 public:
-    static PassRefPtr<CSSStyleRule> create(CSSStyleSheet* parent)
-    {
-        return adoptRef(new CSSStyleRule(parent));
-    }
-    virtual ~CSSStyleRule();
+    static PassRefPtr<CSSStyleRule> create(StyleRule* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSStyleRule(rule, sheet)); }
+
+    ~CSSStyleRule();
 
     String selectorText() const;
-    void setSelectorText(const String&, ExceptionCode&);
+    void setSelectorText(const String&);
 
-    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
+    CSSStyleDeclaration* style() const;
 
-    virtual String cssText() const;
+    String cssText() const;
+    
+    // FIXME: Not CSSOM. Remove.
+    StyleRule* styleRule() const { return m_styleRule.get(); }
 
-    // Not part of the CSSOM
-    virtual bool parseString(const String&, bool = false);
-
-    void adoptSelectorVector(Vector<CSSSelector*>& selectors) { m_selectorList.adoptSelectorVector(selectors); }
-    void setDeclaration(PassRefPtr<CSSMutableStyleDeclaration>);
-
-    const CSSSelectorList& selectorList() const { return m_selectorList; }
-    CSSMutableStyleDeclaration* declaration() { return m_style.get(); }
-
-    virtual void addSubresourceStyleURLs(ListHashSet<KURL>& urls);
+    void reattach(StyleRule*);
 
 private:
-    CSSStyleRule(CSSStyleSheet* parent);
+    CSSStyleRule(StyleRule*, CSSStyleSheet*);
 
-    virtual bool isStyleRule() { return true; }
+    String generateSelectorText() const;
 
-    // Inherited from CSSRule
-    virtual unsigned short type() const { return STYLE_RULE; }
+    RefPtr<StyleRule> m_styleRule;    
 
-    RefPtr<CSSMutableStyleDeclaration> m_style;
-    CSSSelectorList m_selectorList;
+    mutable RefPtr<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;
 };
 
 } // namespace WebCore

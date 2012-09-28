@@ -31,7 +31,8 @@
 
 namespace WebCore {
 
-class TransformOperations : public FastAllocBase {
+class TransformOperations {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     TransformOperations(bool makeIdentity = false);
     
@@ -41,7 +42,7 @@ public:
         return !(*this == o);
     }
     
-    void apply(const IntSize& sz, TransformationMatrix& t) const
+    void apply(const FloatSize& sz, TransformationMatrix& t) const
     {
         for (unsigned i = 0; i < m_operations.size(); ++i)
             m_operations[i]->apply(t, sz);
@@ -55,6 +56,13 @@ public:
             if (m_operations[i]->is3DOperation())
                 return true;
         return false;
+    }
+    
+    bool operationsMatch(const TransformOperations&) const;
+    
+    void clear()
+    {
+        m_operations.clear();
     }
     
     Vector<RefPtr<TransformOperation> >& operations() { return m_operations; }

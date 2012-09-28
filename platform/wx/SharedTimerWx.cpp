@@ -49,7 +49,6 @@ class WebKitTimer: public wxTimer
 
 WebKitTimer::WebKitTimer()
 {
-    wxTimer::wxTimer();
 }
 
 WebKitTimer::~WebKitTimer()
@@ -68,11 +67,9 @@ void setSharedTimerFiredFunction(void (*f)())
     sharedTimerFiredFunction = f;
 }
 
-void setSharedTimerFireTime(double fireTime)
+void setSharedTimerFireInterval(double interval)
 {
     ASSERT(sharedTimerFiredFunction);
-    
-    double interval = fireTime - currentTime();
     
     if (!wkTimer)
         wkTimer = new WebKitTimer();

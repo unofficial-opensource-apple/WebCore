@@ -25,6 +25,7 @@
 
 #include "Document.h"
 #include "DOMWindow.h"
+#include "EventDispatcher.h"
 #include "EventNames.h"
 #include "EventHandler.h"
 #include "Frame.h"
@@ -33,17 +34,19 @@
 
 namespace WebCore {
 
-static inline const AtomicString& eventTypeForKeyboardEventType(PlatformKeyboardEvent::Type type)
+static inline const AtomicString& eventTypeForKeyboardEventType(PlatformEvent::Type type)
 {
     switch (type) {
-        case PlatformKeyboardEvent::KeyUp:
+        case PlatformEvent::KeyUp:
             return eventNames().keyupEvent;
-        case PlatformKeyboardEvent::RawKeyDown:
+        case PlatformEvent::RawKeyDown:
             return eventNames().keydownEvent;
-        case PlatformKeyboardEvent::Char:
+        case PlatformEvent::Char:
             return eventNames().keypressEvent;
-        case PlatformKeyboardEvent::KeyDown:
+        case PlatformEvent::KeyDown:
             // The caller should disambiguate the combined event into RawKeyDown or Char events.
+            break;
+        default:
             break;
     }
     ASSERT_NOT_REACHED();
@@ -51,8 +54,7 @@ static inline const AtomicString& eventTypeForKeyboardEventType(PlatformKeyboard
 }
 
 KeyboardEvent::KeyboardEvent()
-    : m_keyEvent(0)
-    , m_keyLocation(DOM_KEY_LOCATION_STANDARD)
+    : m_keyLocation(DOM_KEY_LOCATION_STANDARD)
     , m_altGraphKey(false)
 {
 }
@@ -60,7 +62,7 @@ KeyboardEvent::KeyboardEvent()
 KeyboardEvent::KeyboardEvent(const PlatformKeyboardEvent& key, AbstractView* view)
     : UIEventWithKeyState(eventTypeForKeyboardEventType(key.type()),
                           true, true, view, 0, key.ctrlKey(), key.altKey(), key.shiftKey(), key.metaKey())
-    , m_keyEvent(new PlatformKeyboardEvent(key))
+    , m_keyEvent(adoptPtr(new PlatformKeyboardEvent(key)))
     , m_keyIdentifier(key.keyIdentifier())
     , m_keyLocation(key.isKeypad() ? DOM_KEY_LOCATION_NUMPAD : DOM_KEY_LOCATION_STANDARD) // FIXME: differentiate right/left, too
     , m_altGraphKey(false)
@@ -71,7 +73,6 @@ KeyboardEvent::KeyboardEvent(const AtomicString& eventType, bool canBubble, bool
                              const String &keyIdentifier,  unsigned keyLocation,
                              bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, bool altGraphKey)
     : UIEventWithKeyState(eventType, canBubble, cancelable, view, 0, ctrlKey, altKey, shiftKey, metaKey)
-    , m_keyEvent(0)
     , m_keyIdentifier(keyIdentifier)
     , m_keyLocation(keyLocation)
     , m_altGraphKey(altGraphKey)
@@ -131,13 +132,18 @@ int KeyboardEvent::charCode() const
     // Firefox: 0 for keydown/keyup events, character code for keypress
     // We match Firefox, unless in backward compatibility mode, where we always return the character code.
     bool backwardCompatibilityMode = false;
-    if (view())
+    if (view() && view()->frame())
         backwardCompatibilityMode = view()->frame()->eventHandler()->needsKeyboardEventDisambiguationQuirks();
 
     if (!m_keyEvent || (type() != eventNames().keypressEvent && !backwardCompatibilityMode))
         return 0;
     String text = m_keyEvent->text();
     return static_cast<int>(text.characterStartingAt(0));
+}
+
+const AtomicString& KeyboardEvent::interfaceName() const
+{
+    return eventNames().interfaceForKeyboardEvent;
 }
 
 bool KeyboardEvent::isKeyboardEvent() const
@@ -158,6 +164,22 @@ KeyboardEvent* findKeyboardEvent(Event* event)
         if (e->isKeyboardEvent())
             return static_cast<KeyboardEvent*>(e);
     return 0;
+}
+
+PassRefPtr<KeyboardEventDispatchMediator> KeyboardEventDispatchMediator::create(PassRefPtr<KeyboardEvent> event)
+{
+    return adoptRef(new KeyboardEventDispatchMediator(event));
+}
+
+KeyboardEventDispatchMediator::KeyboardEventDispatchMediator(PassRefPtr<KeyboardEvent> event)
+    : EventDispatchMediator(event)
+{
+}
+
+bool KeyboardEventDispatchMediator::dispatchEvent(EventDispatcher* dispatcher) const
+{
+    // Make sure not to return true if we already took default action while handling the event.
+    return EventDispatchMediator::dispatchEvent(dispatcher) && !event()->defaultHandled();
 }
 
 } // namespace WebCore

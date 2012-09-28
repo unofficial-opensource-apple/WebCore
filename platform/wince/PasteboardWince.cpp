@@ -28,7 +28,6 @@
 #include "config.h"
 #include "Pasteboard.h"
 
-#include "CString.h"
 #include "ClipboardUtilitiesWin.h"
 #include "Document.h"
 #include "DocumentFragment.h"
@@ -37,11 +36,14 @@
 #include "HitTestResult.h"
 #include "Image.h"
 #include "KURL.h"
+#include "NotImplemented.h"
 #include "Page.h"
 #include "Range.h"
 #include "RenderImage.h"
 #include "TextEncoding.h"
+#include "WebCoreInstanceHandle.h"
 #include "markup.h"
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -87,7 +89,7 @@ Pasteboard::Pasteboard()
     WNDCLASS wc = {0};
     memset(&wc, 0, sizeof(wc));
     wc.lpfnWndProc    = PasteboardOwnerWndProc;
-    wc.hInstance      = Page::instanceHandle();
+    wc.hInstance      = WebCore::instanceHandle();
     wc.lpszClassName  = L"PasteboardOwnerWindowClass";
     ::RegisterClass(&wc);
 
@@ -199,11 +201,15 @@ void Pasteboard::writeURL(const KURL& url, const String& titleStr, Frame* frame)
 
 void Pasteboard::writeImage(Node* node, const KURL&, const String&)
 {
-    ASSERT(node && node->renderer() && node->renderer()->isImage());
+    ASSERT(node);
+
+    if (!(node->renderer() && node->renderer()->isImage()))
+        return;
+
     RenderImage* renderer = static_cast<RenderImage*>(node->renderer());
     CachedImage* cachedImage = static_cast<CachedImage*>(renderer->cachedImage());
     ASSERT(cachedImage);
-    Image* image = cachedImage->image();
+    Image* image = cachedImage->imageForRenderer(renderer);
     ASSERT(image);
 
     clear();
@@ -224,6 +230,11 @@ void Pasteboard::writeImage(Node* node, const KURL&, const String&)
         ::CloseClipboard();
     } else
         DeleteObject(resultBitmap);
+}
+
+void Pasteboard::writeClipboard(Clipboard*)
+{
+    notImplemented();
 }
 
 bool Pasteboard::canSmartReplace()

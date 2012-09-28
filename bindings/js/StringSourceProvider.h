@@ -29,6 +29,7 @@
 #ifndef StringSourceProvider_h
 #define StringSourceProvider_h
 
+#include "JSDOMBinding.h"
 #include "ScriptSourceProvider.h"
 #include <parser/SourceCode.h>
 
@@ -36,16 +37,27 @@ namespace WebCore {
 
     class StringSourceProvider : public ScriptSourceProvider {
     public:
-        static PassRefPtr<StringSourceProvider> create(const String& source, const String& url) { return adoptRef(new StringSourceProvider(source, url)); }
+        static PassRefPtr<StringSourceProvider> create(const String& source, const String& url, const TextPosition& startPosition)
+        {
+            return adoptRef(new StringSourceProvider(source, url, startPosition));
+        }
 
-        JSC::UString getRange(int start, int end) const { return JSC::UString(m_source.characters() + start, end - start); }
-        const UChar* data() const { return m_source.characters(); }
+        virtual JSC::UString getRange(int start, int end) const OVERRIDE
+        {
+            int length = end - start;
+            ASSERT(length >= 0);
+            ASSERT(start + length <= this->length());
+
+            return JSC::UString(StringImpl::create(m_source.impl(), start, length));
+        }
+
+        const StringImpl* data() const { return m_source.impl(); }
         int length() const { return m_source.length(); }
         const String& source() const { return m_source; }
 
     private:
-        StringSourceProvider(const String& source, const String& url)
-            : ScriptSourceProvider(url)
+        StringSourceProvider(const String& source, const String& url, const TextPosition& startPosition)
+            : ScriptSourceProvider(stringToUString(url), startPosition)
             , m_source(source)
         {
         }
@@ -53,9 +65,9 @@ namespace WebCore {
         String m_source;
     };
 
-    inline JSC::SourceCode makeSource(const String& source, const String& url = String(), int firstLine = 1)
+    inline JSC::SourceCode makeSource(const String& source, const String& url = String(), const TextPosition& startPosition = TextPosition::minimumPosition())
     {
-        return JSC::SourceCode(StringSourceProvider::create(source, url), firstLine);
+        return JSC::SourceCode(StringSourceProvider::create(source, url, startPosition), startPosition.m_line.oneBasedInt());
     }
 
 } // namespace WebCore

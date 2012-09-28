@@ -23,20 +23,39 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * @constructor
+ */
 WebInspector.Object = function() {
 }
 
 WebInspector.Object.prototype = {
-    addEventListener: function(eventType, listener, thisObject) {
-        if (!("_listeners" in this))
+    /**
+     * @param {string} eventType
+     * @param {function(WebInspector.Event)} listener
+     * @param {Object=} thisObject
+     */
+    addEventListener: function(eventType, listener, thisObject)
+    {
+        console.assert(listener);
+
+        if (!this._listeners)
             this._listeners = {};
-        if (!(eventType in this._listeners))
+        if (!this._listeners[eventType])
             this._listeners[eventType] = [];
         this._listeners[eventType].push({ thisObject: thisObject, listener: listener });
     },
 
-    removeEventListener: function(eventType, listener, thisObject) {
-        if (!("_listeners" in this) || !(eventType in this._listeners))
+    /**
+     * @param {string} eventType
+     * @param {function(WebInspector.Event)} listener
+     * @param {Object=} thisObject
+     */
+    removeEventListener: function(eventType, listener, thisObject)
+    {
+        console.assert(listener);
+
+        if (!this._listeners || !this._listeners[eventType])
             return;
         var listeners = this._listeners[eventType];
         for (var i = 0; i < listeners.length; ++i) {
@@ -50,33 +69,79 @@ WebInspector.Object.prototype = {
             delete this._listeners[eventType];
     },
 
-    dispatchEventToListeners: function(eventType) {
-        if (!("_listeners" in this) || !(eventType in this._listeners))
-            return;
+    removeAllListeners: function()
+    {
+        delete this._listeners;
+    },
 
-        var stoppedPropagation = false;
+    /**
+     * @param {string} eventType
+     * @return {boolean}
+     */
+    hasEventListeners: function(eventType)
+    {
+        if (!this._listeners || !this._listeners[eventType])
+            return false;
+        return true;
+    },
 
-        function stopPropagation()
-        {
-            stoppedPropagation = true;
-        }
+    /**
+     * @param {string} eventType
+     * @param {*=} eventData
+     * @return {boolean}
+     */
+    dispatchEventToListeners: function(eventType, eventData)
+    {
+        if (!this._listeners || !this._listeners[eventType])
+            return false;
 
-        function preventDefault()
-        {
-            this.defaultPrevented = true;
-        }
-
-        var event = {target: this, type: eventType, defaultPrevented: false};
-        event.stopPropagation = stopPropagation;
-        event.preventDefault = preventDefault;
-
+        var event = new WebInspector.Event(this, eventType, eventData);
         var listeners = this._listeners[eventType].slice(0);
         for (var i = 0; i < listeners.length; ++i) {
             listeners[i].listener.call(listeners[i].thisObject, event);
-            if (stoppedPropagation)
+            if (event._stoppedPropagation)
                 break;
         }
 
         return event.defaultPrevented;
     }
 }
+
+/**
+ * @constructor
+ * @param {WebInspector.Object} target
+ * @param {string} type
+ * @param {*=} data
+ */
+WebInspector.Event = function(target, type, data)
+{
+    this.target = target;
+    this.type = type;
+    this.data = data;
+    this.defaultPrevented = false;
+    this._stoppedPropagation = false;
+}
+
+WebInspector.Event.prototype = {
+    stopPropagation: function()
+    {
+        this._stoppedPropagation = true;
+    },
+
+    preventDefault: function()
+    {
+        this.defaultPrevented = true;
+    },
+
+    /**
+     * @param {boolean=} preventDefault
+     */
+    consume: function(preventDefault)
+    {
+        this.stopPropagation();
+        if (preventDefault)
+            this.preventDefault();
+    }
+}
+
+WebInspector.notifications = new WebInspector.Object();

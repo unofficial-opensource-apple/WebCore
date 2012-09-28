@@ -30,26 +30,27 @@
 
 #include "config.h"
 #include "StaticDOMDataStore.h"
+#include "V8Binding.h"
 
 namespace WebCore {
 
-StaticDOMDataStore::StaticDOMDataStore(DOMData* domData)
-    : DOMDataStore(domData)
+StaticDOMDataStore::StaticDOMDataStore()
+    : DOMDataStore()
     , m_staticDomNodeMap(&DOMDataStore::weakNodeCallback)
-    , m_staticDomObjectMap(domData, &DOMDataStore::weakDOMObjectCallback)
-    , m_staticActiveDomObjectMap(domData, &DOMDataStore::weakActiveDOMObjectCallback)
-#if ENABLE(SVG)
-    , m_staticDomSvgElementInstanceMap(domData, &DOMDataStore::weakSVGElementInstanceCallback)
-    , m_staticDomSvgObjectWithContextMap(domData, &DOMDataStore::weakSVGObjectWithContextCallback)
-#endif
+    , m_staticActiveDomNodeMap(&DOMDataStore::weakNodeCallback)
+    , m_staticDomObjectMap(&DOMDataStore::weakDOMObjectCallback)
+    , m_staticActiveDomObjectMap(&DOMDataStore::weakActiveDOMObjectCallback)
 {
     m_domNodeMap = &m_staticDomNodeMap;
+    m_activeDomNodeMap = &m_staticActiveDomNodeMap;
     m_domObjectMap = &m_staticDomObjectMap;
     m_activeDomObjectMap = &m_staticActiveDomObjectMap;
-#if ENABLE(SVG)
-    m_domSvgElementInstanceMap = &m_staticDomSvgElementInstanceMap;
-    m_domSvgObjectWithContextMap = &m_staticDomSvgObjectWithContextMap;
-#endif
+    V8BindingPerIsolateData::current()->registerDOMDataStore(this);
+}
+
+StaticDOMDataStore::~StaticDOMDataStore()
+{
+    V8BindingPerIsolateData::current()->unregisterDOMDataStore(this);
 }
 
 } // namespace WebCore

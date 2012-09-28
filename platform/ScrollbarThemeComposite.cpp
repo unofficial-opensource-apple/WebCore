@@ -33,27 +33,14 @@
 #include "GraphicsContext.h"
 #include "Page.h"
 #include "PlatformMouseEvent.h"
-#include "Scrollbar.h"
-#include "ScrollbarClient.h"
+#include "ScrollbarThemeClient.h"
 #include "Settings.h"
+
+using namespace std;
 
 namespace WebCore {
 
-#if PLATFORM(WIN)
-static Page* pageForScrollView(ScrollView* view)
-{
-    if (!view)
-        return 0;
-    if (!view->isFrameView())
-        return 0;
-    FrameView* frameView = static_cast<FrameView*>(view);
-    if (!frameView->frame())
-        return 0;
-    return frameView->frame()->page();
-}
-#endif
-
-bool ScrollbarThemeComposite::paint(Scrollbar* scrollbar, GraphicsContext* graphicsContext, const IntRect& damageRect)
+bool ScrollbarThemeComposite::paint(ScrollbarThemeClient* scrollbar, GraphicsContext* graphicsContext, const IntRect& damageRect)
 {
     // Create the ScrollbarControlPartMask based on the damageRect
     ScrollbarControlPartMask scrollMask = NoPart;
@@ -93,36 +80,7 @@ bool ScrollbarThemeComposite::paint(Scrollbar* scrollbar, GraphicsContext* graph
             scrollMask |= BackTrackPart;
         if (damageRect.intersects(endTrackRect))
             scrollMask |= ForwardTrackPart;
-    } 
-
-#if PLATFORM(WIN)
-    // FIXME: This API makes the assumption that the custom scrollbar's metrics will match
-    // the theme's metrics.  This is not a valid assumption.  The ability for a client to paint
-    // custom scrollbars should be removed once scrollbars can be styled via CSS.
-    if (Page* page = pageForScrollView(scrollbar->parent())) {
-        if (page->settings()->shouldPaintCustomScrollbars()) {
-            float proportion = static_cast<float>(scrollbar->visibleSize()) / scrollbar->totalSize();
-            float value = scrollbar->currentPos() / static_cast<float>(scrollbar->maximum());
-            ScrollbarControlState s = 0;
-            if (scrollbar->client()->isActive())
-                s |= ActiveScrollbarState;
-            if (scrollbar->enabled())
-                s |= EnabledScrollbarState;
-            if (scrollbar->pressedPart() != NoPart)
-                s |= PressedScrollbarState;
-            if (page->chrome()->client()->paintCustomScrollbar(graphicsContext,
-                                                               scrollbar->frameRect(), 
-                                                               scrollbar->controlSize(),
-                                                               s, 
-                                                               scrollbar->pressedPart(), 
-                                                               scrollbar->orientation() == VerticalScrollbar,
-                                                               value,
-                                                               proportion,
-                                                               scrollMask))
-                return true;
-        }
     }
-#endif
 
     // Paint the scrollbar background (only used by custom CSS scrollbars).
     paintScrollbarBackground(graphicsContext, scrollbar);
@@ -157,13 +115,13 @@ bool ScrollbarThemeComposite::paint(Scrollbar* scrollbar, GraphicsContext* graph
     return true;
 }
 
-ScrollbarPart ScrollbarThemeComposite::hitTest(Scrollbar* scrollbar, const PlatformMouseEvent& evt)
+ScrollbarPart ScrollbarThemeComposite::hitTest(ScrollbarThemeClient* scrollbar, const PlatformMouseEvent& evt)
 {
     ScrollbarPart result = NoPart;
     if (!scrollbar->enabled())
         return result;
 
-    IntPoint mousePosition = scrollbar->convertFromContainingWindow(evt.pos());
+    IntPoint mousePosition = scrollbar->convertFromContainingWindow(evt.position());
     mousePosition.move(scrollbar->x(), scrollbar->y());
     
     if (!scrollbar->frameRect().contains(mousePosition))
@@ -196,7 +154,7 @@ ScrollbarPart ScrollbarThemeComposite::hitTest(Scrollbar* scrollbar, const Platf
     return result;
 }
 
-void ScrollbarThemeComposite::invalidatePart(Scrollbar* scrollbar, ScrollbarPart part)
+void ScrollbarThemeComposite::invalidatePart(ScrollbarThemeClient* scrollbar, ScrollbarPart part)
 {
     if (part == NoPart)
         return;
@@ -232,11 +190,11 @@ void ScrollbarThemeComposite::invalidatePart(Scrollbar* scrollbar, ScrollbarPart
                 result = thumbRect;
         }
     }
-    result.move(-scrollbar->x(), -scrollbar->y());
+    result.moveBy(-scrollbar->location());
     scrollbar->invalidateRect(result);
 }
 
-void ScrollbarThemeComposite::splitTrack(Scrollbar* scrollbar, const IntRect& unconstrainedTrackRect, IntRect& beforeThumbRect, IntRect& thumbRect, IntRect& afterThumbRect)
+void ScrollbarThemeComposite::splitTrack(ScrollbarThemeClient* scrollbar, const IntRect& unconstrainedTrackRect, IntRect& beforeThumbRect, IntRect& thumbRect, IntRect& afterThumbRect)
 {
     // This function won't even get called unless we're big enough to have some combination of these three rects where at least
     // one of them is non-empty.
@@ -246,27 +204,43 @@ void ScrollbarThemeComposite::splitTrack(Scrollbar* scrollbar, const IntRect& un
     if (scrollbar->orientation() == HorizontalScrollbar) {
         thumbRect = IntRect(trackRect.x() + thumbPos, trackRect.y() + (trackRect.height() - thickness) / 2, thumbLength(scrollbar), thickness); 
         beforeThumbRect = IntRect(trackRect.x(), trackRect.y(), thumbPos + thumbRect.width() / 2, trackRect.height()); 
-        afterThumbRect = IntRect(trackRect.x() + beforeThumbRect.width(), trackRect.y(), trackRect.right() - beforeThumbRect.right(), trackRect.height());
+        afterThumbRect = IntRect(trackRect.x() + beforeThumbRect.width(), trackRect.y(), trackRect.maxX() - beforeThumbRect.maxX(), trackRect.height());
     } else {
         thumbRect = IntRect(trackRect.x() + (trackRect.width() - thickness) / 2, trackRect.y() + thumbPos, thickness, thumbLength(scrollbar));
         beforeThumbRect = IntRect(trackRect.x(), trackRect.y(), trackRect.width(), thumbPos + thumbRect.height() / 2); 
-        afterThumbRect = IntRect(trackRect.x(), trackRect.y() + beforeThumbRect.height(), trackRect.width(), trackRect.bottom() - beforeThumbRect.bottom());
+        afterThumbRect = IntRect(trackRect.x(), trackRect.y() + beforeThumbRect.height(), trackRect.width(), trackRect.maxY() - beforeThumbRect.maxY());
     }
 }
 
-int ScrollbarThemeComposite::thumbPosition(Scrollbar* scrollbar)
+// Returns the size represented by track taking into account scrolling past
+// the end of the document.
+static float usedTotalSize(ScrollbarThemeClient* scrollbar)
 {
-    if (scrollbar->enabled())
-        return scrollbar->currentPos() * (trackLength(scrollbar) - thumbLength(scrollbar)) / scrollbar->maximum();
+    float overhangAtStart = -scrollbar->currentPos();
+    float overhangAtEnd = scrollbar->currentPos() + scrollbar->visibleSize() - scrollbar->totalSize();
+    float overhang = max(0.0f, max(overhangAtStart, overhangAtEnd));
+    return scrollbar->totalSize() + overhang;
+}
+
+int ScrollbarThemeComposite::thumbPosition(ScrollbarThemeClient* scrollbar)
+{
+    if (scrollbar->enabled()) {
+        float size = usedTotalSize(scrollbar) - scrollbar->visibleSize();
+        // Avoid doing a floating point divide by zero and return 1 when usedTotalSize == visibleSize.
+        if (!size)
+            return 1;
+        float pos = max(0.0f, scrollbar->currentPos()) * (trackLength(scrollbar) - thumbLength(scrollbar)) / size;
+        return (pos < 1 && pos > 0) ? 1 : pos;
+    }
     return 0;
 }
 
-int ScrollbarThemeComposite::thumbLength(Scrollbar* scrollbar)
+int ScrollbarThemeComposite::thumbLength(ScrollbarThemeClient* scrollbar)
 {
     if (!scrollbar->enabled())
         return 0;
 
-    float proportion = (float)scrollbar->visibleSize() / scrollbar->totalSize();
+    float proportion = scrollbar->visibleSize() / usedTotalSize(scrollbar);
     int trackLen = trackLength(scrollbar);
     int length = proportion * trackLen;
     length = max(length, minimumThumbLength(scrollbar));
@@ -275,31 +249,37 @@ int ScrollbarThemeComposite::thumbLength(Scrollbar* scrollbar)
     return length;
 }
 
-int ScrollbarThemeComposite::minimumThumbLength(Scrollbar* scrollbar)
+int ScrollbarThemeComposite::minimumThumbLength(ScrollbarThemeClient* scrollbar)
 {
     return scrollbarThickness(scrollbar->controlSize());
 }
 
-int ScrollbarThemeComposite::trackPosition(Scrollbar* scrollbar)
+int ScrollbarThemeComposite::trackPosition(ScrollbarThemeClient* scrollbar)
 {
     IntRect constrainedTrackRect = constrainTrackRectToTrackPieces(scrollbar, trackRect(scrollbar));
     return (scrollbar->orientation() == HorizontalScrollbar) ? constrainedTrackRect.x() - scrollbar->x() : constrainedTrackRect.y() - scrollbar->y();
 }
 
-int ScrollbarThemeComposite::trackLength(Scrollbar* scrollbar)
+int ScrollbarThemeComposite::trackLength(ScrollbarThemeClient* scrollbar)
 {
     IntRect constrainedTrackRect = constrainTrackRectToTrackPieces(scrollbar, trackRect(scrollbar));
     return (scrollbar->orientation() == HorizontalScrollbar) ? constrainedTrackRect.width() : constrainedTrackRect.height();
 }
 
-void ScrollbarThemeComposite::paintScrollCorner(ScrollView* view, GraphicsContext* context, const IntRect& cornerRect)
+void ScrollbarThemeComposite::paintScrollCorner(ScrollView*, GraphicsContext* context, const IntRect& cornerRect)
 {
-    FrameView* frameView = static_cast<FrameView*>(view);
-    Page* page = frameView->frame() ? frameView->frame()->page() : 0;
-    if (page && page->settings()->shouldPaintCustomScrollbars()) {
-        if (!page->chrome()->client()->paintCustomScrollCorner(context, cornerRect))
-            context->fillRect(cornerRect, Color::white, DeviceColorSpace);
-    }
+    context->fillRect(cornerRect, Color::white, ColorSpaceDeviceRGB);
+}
+
+void ScrollbarThemeComposite::paintOverhangAreas(ScrollView*, GraphicsContext* context, const IntRect& horizontalOverhangRect, const IntRect& verticalOverhangRect, const IntRect& dirtyRect)
+{    
+    context->setFillColor(Color::white, ColorSpaceDeviceRGB);
+    if (!horizontalOverhangRect.isEmpty())
+        context->fillRect(intersection(horizontalOverhangRect, dirtyRect));
+
+    context->setFillColor(Color::white, ColorSpaceDeviceRGB);
+    if (!verticalOverhangRect.isEmpty())
+        context->fillRect(intersection(verticalOverhangRect, dirtyRect));
 }
 
 }

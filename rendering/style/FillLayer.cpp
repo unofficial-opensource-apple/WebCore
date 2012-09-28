@@ -24,10 +24,27 @@
 
 namespace WebCore {
 
+struct SameSizeAsFillLayer {
+    FillLayer* m_next;
+
+    RefPtr<StyleImage> m_image;
+
+    Length m_xPosition;
+    Length m_yPosition;
+
+    LengthSize m_sizeLength;
+
+    unsigned m_bitfields;
+};
+
+COMPILE_ASSERT(sizeof(FillLayer) == sizeof(SameSizeAsFillLayer), FillLayer_should_stay_small);
+
 FillLayer::FillLayer(EFillLayerType type)
-    : m_image(FillLayer::initialFillImage(type))
+    : m_next(0)
+    , m_image(FillLayer::initialFillImage(type))
     , m_xPosition(FillLayer::initialFillXPosition(type))
     , m_yPosition(FillLayer::initialFillYPosition(type))
+    , m_sizeLength(FillLayer::initialFillSizeLength(type))
     , m_attachment(FillLayer::initialFillAttachment(type))
     , m_clip(FillLayer::initialFillClip(type))
     , m_origin(FillLayer::initialFillOrigin(type))
@@ -35,7 +52,6 @@ FillLayer::FillLayer(EFillLayerType type)
     , m_repeatY(FillLayer::initialFillRepeatY(type))
     , m_composite(FillLayer::initialFillComposite(type))
     , m_sizeType(SizeNone)
-    , m_sizeLength(FillLayer::initialFillSizeLength(type))
     , m_imageSet(false)
     , m_attachmentSet(false)
     , m_clipSet(false)
@@ -46,14 +62,15 @@ FillLayer::FillLayer(EFillLayerType type)
     , m_yPosSet(false)
     , m_compositeSet(type == MaskFillLayer)
     , m_type(type)
-    , m_next(0)
 {
 }
 
 FillLayer::FillLayer(const FillLayer& o)
-    : m_image(o.m_image)
+    : m_next(o.m_next ? new FillLayer(*o.m_next) : 0)
+    , m_image(o.m_image)
     , m_xPosition(o.m_xPosition)
     , m_yPosition(o.m_yPosition)
+    , m_sizeLength(o.m_sizeLength)
     , m_attachment(o.m_attachment)
     , m_clip(o.m_clip)
     , m_origin(o.m_origin)
@@ -61,7 +78,6 @@ FillLayer::FillLayer(const FillLayer& o)
     , m_repeatY(o.m_repeatY)
     , m_composite(o.m_composite)
     , m_sizeType(o.m_sizeType)
-    , m_sizeLength(o.m_sizeLength)
     , m_imageSet(o.m_imageSet)
     , m_attachmentSet(o.m_attachmentSet)
     , m_clipSet(o.m_clipSet)
@@ -72,7 +88,6 @@ FillLayer::FillLayer(const FillLayer& o)
     , m_yPosSet(o.m_yPosSet)
     , m_compositeSet(o.m_compositeSet)
     , m_type(o.m_type)
-    , m_next(o.m_next ? new FillLayer(*o.m_next) : 0)
 {
 }
 
@@ -91,6 +106,7 @@ FillLayer& FillLayer::operator=(const FillLayer& o)
     m_image = o.m_image;
     m_xPosition = o.m_xPosition;
     m_yPosition = o.m_yPosition;
+    m_sizeLength = o.m_sizeLength;
     m_attachment = o.m_attachment;
     m_clip = o.m_clip;
     m_composite = o.m_composite;
@@ -98,7 +114,6 @@ FillLayer& FillLayer::operator=(const FillLayer& o)
     m_repeatX = o.m_repeatX;
     m_repeatY = o.m_repeatY;
     m_sizeType = o.m_sizeType;
-    m_sizeLength = o.m_sizeLength;
 
     m_imageSet = o.m_imageSet;
     m_attachmentSet = o.m_attachmentSet;
@@ -129,17 +144,6 @@ bool FillLayer::operator==(const FillLayer& o) const
 void FillLayer::fillUnsetProperties()
 {
     FillLayer* curr;
-    for (curr = this; curr && curr->isImageSet(); curr = curr->next()) { }
-    if (curr && curr != this) {
-        // We need to fill in the remaining values with the pattern specified.
-        for (FillLayer* pattern = this; curr; curr = curr->next()) {
-            curr->m_image = pattern->m_image;
-            pattern = pattern->next();
-            if (pattern == curr || !pattern)
-                pattern = this;
-        }
-    }
-    
     for (curr = this; curr && curr->isXPositionSet(); curr = curr->next()) { }
     if (curr && curr != this) {
         // We need to fill in the remaining values with the pattern specified.
@@ -246,12 +250,7 @@ void FillLayer::cullEmptyLayers()
     FillLayer* next;
     for (FillLayer* p = this; p; p = next) {
         next = p->m_next;
-        if (next && !next->isImageSet() &&
-            !next->isXPositionSet() && !next->isYPositionSet() &&
-            !next->isAttachmentSet() && !next->isClipSet() &&
-            !next->isCompositeSet() && !next->isOriginSet() &&
-            !next->isRepeatXSet() && !next->isRepeatYSet()
-            && !next->isSizeSet()) {
+        if (next && !next->isImageSet()) {
             delete next;
             p->m_next = 0;
             break;

@@ -23,8 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#ifndef SessionCredentialStorage_h
-#define SessionCredentialStorage_h
+#ifndef CredentialStorage_h
+#define CredentialStorage_h
 
 namespace WebCore {
 
@@ -37,11 +37,13 @@ public:
     // WebCore session credential storage.
     static void set(const Credential&, const ProtectionSpace&, const KURL&);
     static Credential get(const ProtectionSpace&);
+    static void remove(const ProtectionSpace&);
 
     // OS persistent storage.
     static Credential getFromPersistentStorage(const ProtectionSpace&);
 
     static void saveToPersistentStorage(const ProtectionSpace&, const Credential&);
+    static void clearCredentials();
 
     // These methods work for authentication schemes that support sending credentials without waiting for a request. E.g., for HTTP Basic authentication scheme
     // a client should assume that all paths at or deeper than the depth of a known protected resource share are within the same protection space.
@@ -51,4 +53,4 @@ public:
 
 } // namespace WebCore
 
-#endif // SessionCredentialStorage_h
+#endif // CredentialStorage_h

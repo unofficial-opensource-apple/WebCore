@@ -20,25 +20,32 @@
 #ifndef FrameTree_h
 #define FrameTree_h
 
-#include "AtomicString.h"
+#include <wtf/NotFound.h>
+#include <wtf/text/AtomicString.h>
 
 namespace WebCore {
 
     class Frame;
+    class TreeScope;
 
-    class FrameTree : public Noncopyable {
+    class FrameTree {
+        WTF_MAKE_NONCOPYABLE(FrameTree);
     public:
+        const static unsigned invalidCount = static_cast<unsigned>(WTF::notFound);
+
         FrameTree(Frame* thisFrame, Frame* parentFrame) 
             : m_thisFrame(thisFrame)
             , m_parent(parentFrame)
             , m_previousSibling(0)
             , m_lastChild(0)
-            , m_childCount(0)
+            , m_scopedChildCount(invalidCount)
         {
         }
+
         ~FrameTree();
 
         const AtomicString& name() const { return m_name; }
+        const AtomicString& uniqueName() const { return m_uniqueName; }
         void setName(const AtomicString&);
         void clearName();
         Frame* parent(bool checkForDisconnectedFrame = false) const;
@@ -48,7 +55,6 @@ namespace WebCore {
         Frame* previousSibling() const { return m_previousSibling; }
         Frame* firstChild() const { return m_firstChild.get(); }
         Frame* lastChild() const { return m_lastChild; }
-        unsigned childCount() const { return m_childCount; }
 
         bool isDescendantOf(const Frame* ancestor) const;
         Frame* traverseNext(const Frame* stayWithin = 0) const;
@@ -56,33 +62,51 @@ namespace WebCore {
         Frame* traversePreviousWithWrap(bool) const;
         
         void appendChild(PassRefPtr<Frame>);
+        bool transferChild(PassRefPtr<Frame>);
         void detachFromParent() { m_parent = 0; }
         void removeChild(Frame*);
 
         Frame* child(unsigned index) const;
         Frame* child(const AtomicString& name) const;
         Frame* find(const AtomicString& name) const;
+        unsigned childCount() const;
 
         AtomicString uniqueChildName(const AtomicString& requestedName) const;
 
         Frame* top(bool checkForDisconnectedFrame = false) const;
 
+        Frame* scopedChild(unsigned index) const;
+        Frame* scopedChild(const AtomicString& name) const;
+        unsigned scopedChildCount() const;
+
     private:
         Frame* deepLastChild() const;
+        void actuallyAppendChild(PassRefPtr<Frame>);
+
+        bool scopedBy(TreeScope*) const;
+        Frame* scopedChild(unsigned index, TreeScope*) const;
+        Frame* scopedChild(const AtomicString& name, TreeScope*) const;
+        unsigned scopedChildCount(TreeScope*) const;
 
         Frame* m_thisFrame;
 
         Frame* m_parent;
-        AtomicString m_name;
+        AtomicString m_name; // The actual frame name (may be empty).
+        AtomicString m_uniqueName;
 
         // FIXME: use ListRefPtr?
         RefPtr<Frame> m_nextSibling;
         Frame* m_previousSibling;
         RefPtr<Frame> m_firstChild;
         Frame* m_lastChild;
-        unsigned m_childCount;
+        mutable unsigned m_scopedChildCount;
     };
 
 } // namespace WebCore
+
+#ifndef NDEBUG
+// Outside the WebCore namespace for ease of invocation from gdb.
+void showFrameTree(const WebCore::Frame*);
+#endif
 
 #endif // FrameTree_h

@@ -11,12 +11,21 @@
 
 @interface WAKView (WAKPrivate)
 - (WKViewRef)_viewRef;
-+ (void)_addViewWrapper:(WAKView *)view;
-+ (void)_removeViewWrapper:(WAKView *)view;
 + (WAKView *)_wrapperForViewRef:(WKViewRef)_viewRef;
-- (void)_handleEvent:(WebEvent *)event;
+- (id)_initWithViewRef:(WKViewRef)view;
 - (BOOL)_handleResponderCall:(WKViewResponderCallbackType)type;
 - (NSMutableSet *)_subviewReferences;
+- (BOOL)_selfHandleEvent:(WebEvent *)event;
 @end
+
+static inline WAKView *WAKViewForWKViewRef(WKViewRef view)
+{
+    if (!view)
+        return nil;
+    WAKView *wrapper = (WAKView *)view->wrapper;
+    if (wrapper)
+        return wrapper;
+    return [WAKView _wrapperForViewRef:view];
+}
 
 #endif // WAKViewPrivate_h

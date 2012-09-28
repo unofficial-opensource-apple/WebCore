@@ -31,7 +31,7 @@
 #include "V8NamedNodesCollection.h"
 
 #include "Element.h"
-#include "NamedAttrMap.h"
+#include "NamedNodeMap.h"
 
 namespace WebCore {
 
@@ -46,7 +46,7 @@ Node* V8NamedNodesCollection::itemWithName(const AtomicString& id) const
 {
     for (unsigned i = 0; i < m_nodes.size(); ++i) {
         Node* node = m_nodes[i].get();
-        if (node->hasAttributes() && node->attributes()->id() == id)
+        if (node->hasID() && static_cast<Element*>(node)->getIdAttribute() == id)
             return node;
     }
     return 0;

@@ -33,184 +33,115 @@
 
 #include "DOMData.h"
 #include "DOMDataStore.h"
-#include "DOMObjectsInclude.h"
-#include "MainThreadDOMData.h"
 #include "ScopedDOMDataStore.h"
+#include "V8Binding.h"
+#include <wtf/MainThread.h>
 
 namespace WebCore {
 
 DOMDataStoreHandle::DOMDataStoreHandle()
-    : m_store(new ScopedDOMDataStore(DOMData::getCurrent()))
+    : m_store(adoptPtr(new ScopedDOMDataStore()))
 {
+    V8BindingPerIsolateData::current()->registerDOMDataStore(m_store.get());
 }
 
 DOMDataStoreHandle::~DOMDataStoreHandle()
 {
-}
-
-static bool fasterDOMStoreAccess = false;
-
-static inline DOMDataStore& getDOMDataStore()
-{
-    if (LIKELY(fasterDOMStoreAccess)) {
-        ASSERT(WTF::isMainThread());
-        return MainThreadDOMData::getCurrentMainThreadStore();
-    }
-
-    return DOMData::getCurrent()->getStore();
+    V8BindingPerIsolateData::current()->unregisterDOMDataStore(m_store.get());
 }
 
 void enableFasterDOMStoreAccess()
 {
-    fasterDOMStoreAccess = true;
 }
 
-DOMNodeMapping& getDOMNodeMap()
+DOMNodeMapping& getDOMNodeMap(v8::Isolate* isolate)
 {
-    return getDOMDataStore().domNodeMap();
+    return DOMData::getCurrentStore(isolate).domNodeMap();
 }
 
-DOMWrapperMap<void>& getDOMObjectMap()
+DOMNodeMapping& getActiveDOMNodeMap(v8::Isolate* isolate)
 {
-    return getDOMDataStore().domObjectMap();
+    return DOMData::getCurrentStore(isolate).activeDomNodeMap();
 }
 
-DOMWrapperMap<void>& getActiveDOMObjectMap()
+DOMWrapperMap<void>& getDOMObjectMap(v8::Isolate* isolate)
 {
-    return getDOMDataStore().activeDomObjectMap();
+    return DOMData::getCurrentStore(isolate).domObjectMap();
 }
 
-#if ENABLE(SVG)
-
-DOMWrapperMap<SVGElementInstance>& getDOMSVGElementInstanceMap()
+DOMWrapperMap<void>& getActiveDOMObjectMap(v8::Isolate* isolate)
 {
-    return getDOMDataStore().domSvgElementInstanceMap();
+    return DOMData::getCurrentStore(isolate).activeDomObjectMap();
 }
 
-// Map of SVG objects with contexts to V8 objects
-DOMWrapperMap<void>& getDOMSVGObjectWithContextMap()
+void removeAllDOMObjects()
 {
-    return getDOMDataStore().domSvgObjectWithContextMap();
-}
+    DOMDataStore& store = DOMData::getCurrentStore();
 
-#endif // ENABLE(SVG)
-
-static void removeAllDOMObjectsInCurrentThreadHelper()
-{
     v8::HandleScope scope;
 
-    // Deref all objects in the delayed queue.
-    DOMData::getCurrent()->derefDelayedObjects();
-
     // The DOM objects with the following types only exist on the main thread.
-    if (WTF::isMainThread()) {
+    if (isMainThread()) {
         // Remove all DOM nodes.
-        DOMData::removeObjectsFromWrapperMap<Node>(getDOMNodeMap());
+        DOMData::removeObjectsFromWrapperMap<Node>(&store, store.domNodeMap());
 
-#if ENABLE(SVG)
-        // Remove all SVG element instances in the wrapper map.
-        DOMData::removeObjectsFromWrapperMap<SVGElementInstance>(getDOMSVGElementInstanceMap());
-
-        // Remove all SVG objects with context in the wrapper map.
-        DOMData::removeObjectsFromWrapperMap<void>(getDOMSVGObjectWithContextMap());
-#endif
+        // Remove all active DOM nodes.
+        DOMData::removeObjectsFromWrapperMap<Node>(&store, store.activeDomNodeMap());
     }
 
     // Remove all DOM objects in the wrapper map.
-    DOMData::removeObjectsFromWrapperMap<void>(getDOMObjectMap());
+    DOMData::removeObjectsFromWrapperMap<void>(&store, store.domObjectMap());
 
     // Remove all active DOM objects in the wrapper map.
-    DOMData::removeObjectsFromWrapperMap<void>(getActiveDOMObjectMap());
+    DOMData::removeObjectsFromWrapperMap<void>(&store, store.activeDomObjectMap());
 }
 
-void removeAllDOMObjectsInCurrentThread()
-{
-    // Use the locker only if it has already been invoked before, as by worker thread.
-    if (v8::Locker::IsActive()) {
-        v8::Locker locker;
-        removeAllDOMObjectsInCurrentThreadHelper();
-    } else
-        removeAllDOMObjectsInCurrentThreadHelper();
-}
-
-
-void visitDOMNodesInCurrentThread(DOMWrapperMap<Node>::Visitor* visitor)
+void visitDOMNodes(DOMWrapperMap<Node>::Visitor* visitor)
 {
     v8::HandleScope scope;
 
-    WTF::MutexLocker locker(DOMDataStore::allStoresMutex());
     DOMDataList& list = DOMDataStore::allStores();
     for (size_t i = 0; i < list.size(); ++i) {
         DOMDataStore* store = list[i];
-        if (!store->domData()->owningThread() == WTF::currentThread())
-            continue;
 
-        store->domNodeMap().visit(visitor);
+        store->domNodeMap().visit(store, visitor);
     }
 }
 
-void visitDOMObjectsInCurrentThread(DOMWrapperMap<void>::Visitor* visitor)
+void visitActiveDOMNodes(DOMWrapperMap<Node>::Visitor* visitor)
 {
     v8::HandleScope scope;
 
-    WTF::MutexLocker locker(DOMDataStore::allStoresMutex());
     DOMDataList& list = DOMDataStore::allStores();
     for (size_t i = 0; i < list.size(); ++i) {
         DOMDataStore* store = list[i];
-        if (!store->domData()->owningThread() == WTF::currentThread())
-            continue;
 
-        store->domObjectMap().visit(visitor);
+        store->activeDomNodeMap().visit(store, visitor);
     }
 }
 
-void visitActiveDOMObjectsInCurrentThread(DOMWrapperMap<void>::Visitor* visitor)
+void visitDOMObjects(DOMWrapperMap<void>::Visitor* visitor)
 {
     v8::HandleScope scope;
 
-    WTF::MutexLocker locker(DOMDataStore::allStoresMutex());
     DOMDataList& list = DOMDataStore::allStores();
     for (size_t i = 0; i < list.size(); ++i) {
         DOMDataStore* store = list[i];
-        if (!store->domData()->owningThread() == WTF::currentThread())
-            continue;
 
-        store->activeDomObjectMap().visit(visitor);
+        store->domObjectMap().visit(store, visitor);
     }
 }
 
-#if ENABLE(SVG)
-
-void visitDOMSVGElementInstancesInCurrentThread(DOMWrapperMap<SVGElementInstance>::Visitor* visitor)
+void visitActiveDOMObjects(DOMWrapperMap<void>::Visitor* visitor)
 {
     v8::HandleScope scope;
 
-    WTF::MutexLocker locker(DOMDataStore::allStoresMutex());
     DOMDataList& list = DOMDataStore::allStores();
     for (size_t i = 0; i < list.size(); ++i) {
         DOMDataStore* store = list[i];
-        if (!store->domData()->owningThread() == WTF::currentThread())
-            continue;
 
-        store->domSvgElementInstanceMap().visit(visitor);
+        store->activeDomObjectMap().visit(store, visitor);
     }
 }
-
-void visitSVGObjectsInCurrentThread(DOMWrapperMap<void>::Visitor* visitor)
-{
-    v8::HandleScope scope;
-
-    WTF::MutexLocker locker(DOMDataStore::allStoresMutex());
-    DOMDataList& list = DOMDataStore::allStores();
-    for (size_t i = 0; i < list.size(); ++i) {
-        DOMDataStore* store = list[i];
-        if (!store->domData()->owningThread() == WTF::currentThread())
-            continue;
-
-        store->domSvgObjectWithContextMap().visit(visitor);
-    }
-}
-
-#endif
 
 } // namespace WebCore

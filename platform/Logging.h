@@ -27,6 +27,9 @@
 #define Logging_h
 
 #include <wtf/Assertions.h>
+#include <wtf/Forward.h>
+
+#if !LOG_DISABLED
 
 #ifndef LOG_CHANNEL_PREFIX
 #define LOG_CHANNEL_PREFIX Log
@@ -34,15 +37,13 @@
 
 namespace WebCore {
 
-    class String;
-
     extern WTFLogChannel LogNotYetImplemented;
     extern WTFLogChannel LogFrames;
     extern WTFLogChannel LogLoading;
     extern WTFLogChannel LogPopupBlocking;
     extern WTFLogChannel LogEvents;
     extern WTFLogChannel LogEditing;
-    extern WTFLogChannel LogTextConversion;
+    extern WTFLogChannel LogLiveConnect;
     extern WTFLogChannel LogIconDatabase;
     extern WTFLogChannel LogSQLDatabase;
     extern WTFLogChannel LogSpellingAndGrammar;
@@ -50,6 +51,7 @@ namespace WebCore {
     extern WTFLogChannel LogHistory;
     extern WTFLogChannel LogPageCache;
     extern WTFLogChannel LogPlatformLeaks;
+    extern WTFLogChannel LogResourceLoading;
     extern WTFLogChannel LogNetwork;
     extern WTFLogChannel LogFTP;
     extern WTFLogChannel LogThreading;
@@ -57,9 +59,20 @@ namespace WebCore {
     extern WTFLogChannel LogMedia;
     extern WTFLogChannel LogPlugins;
     extern WTFLogChannel LogArchives;
+    extern WTFLogChannel LogProgress;
+    extern WTFLogChannel LogFileAPI;
+    extern WTFLogChannel LogWebAudio;
+    extern WTFLogChannel LogCompositing;
 
-    void InitializeLoggingChannelsIfNecessary();
+#if ENABLE(DISK_IMAGE_CACHE)
+    extern WTFLogChannel LogDiskImageCache;
+#endif
+    extern WTFLogChannel LogMemoryPressure;
+
+    void initializeLoggingChannelsIfNecessary();
     WTFLogChannel* getChannelFromName(const String& channelName);
 }
+
+#endif // !LOG_DISABLED
 
 #endif // Logging_h

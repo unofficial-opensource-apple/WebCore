@@ -26,10 +26,11 @@
 #include "config.h"
 #include "Path.h"
 
-#include "TransformationMatrix.h"
+#include "AffineTransform.h"
 #include "FloatPoint.h"
 #include "FloatRect.h"
 #include "NotImplemented.h"
+#include "PlatformString.h"
 #include "StrokeStyleApplier.h" 
 
 #include <stdio.h>
@@ -56,7 +57,12 @@ Path::Path()
     // renderer an app is using right now with wx API, so we will just handle
     // the common case.
 #if USE(WXGC)
-    wxGraphicsRenderer* renderer = wxGraphicsRenderer::GetDefaultRenderer(); 
+    wxGraphicsRenderer* renderer = 0;
+#if wxUSE_CAIRO
+    renderer = wxGraphicsRenderer::GetCairoRenderer();
+#else
+    renderer = wxGraphicsRenderer::GetDefaultRenderer();
+#endif
     if (renderer) {
         wxGraphicsPath path = renderer->CreatePath();
         m_path = new wxGraphicsPath(path);
@@ -104,16 +110,22 @@ FloatRect Path::boundingRect() const
     return FloatRect();
 }
 
-FloatRect Path::strokeBoundingRect(StrokeStyleApplier* applier)
+FloatRect Path::strokeBoundingRect(StrokeStyleApplier* applier) const
 {
     notImplemented();
     return FloatRect();
 }
 
-Path& Path::operator=(const Path&)
+bool Path::strokeContains(StrokeStyleApplier*, const FloatPoint&) const
+{
+    notImplemented();
+    return false;
+}
+
+Path& Path::operator=(const Path& path)
 { 
-    notImplemented(); 
-    return*this; 
+    *m_path = *path.platformPath();
+    return *this; 
 }
 
 void Path::clear() 
@@ -121,8 +133,12 @@ void Path::clear()
     if (m_path)
         delete m_path;
 
-#if USE(WXGC)   
-    wxGraphicsRenderer* renderer = wxGraphicsRenderer::GetDefaultRenderer(); 
+#if USE(WXGC)
+#if wxUSE_CAIRO
+    wxGraphicsRenderer* renderer = wxGraphicsRenderer::GetCairoRenderer();
+#else
+    wxGraphicsRenderer* renderer = wxGraphicsRenderer::GetDefaultRenderer();
+#endif
     if (renderer) {
         wxGraphicsPath path = renderer->CreatePath();
         m_path = new wxGraphicsPath(path);
@@ -202,7 +218,7 @@ void Path::addEllipse(const FloatRect& rect)
 #endif
 }
 
-void Path::transform(const TransformationMatrix& transform) 
+void Path::transform(const AffineTransform& transform) 
 {
 #if USE(WXGC)
     if (m_path)
@@ -219,8 +235,8 @@ bool Path::isEmpty() const
 {
 #if USE(WXGC)
     if (m_path) {
-        wxDouble width, height;
-        m_path->GetBox(NULL, NULL, &width, &height);
+        wxDouble x, y, width, height;
+        m_path->GetBox(&x, &y, &width, &height);
         return (width == 0 && height == 0);
     }
 #endif
@@ -230,6 +246,13 @@ bool Path::isEmpty() const
 bool Path::hasCurrentPoint() const
 {
     return !isEmpty();
+}
+
+FloatPoint Path::currentPoint() const 
+{
+    // FIXME: return current point of subpath.
+    float quietNaN = std::numeric_limits<float>::quiet_NaN();
+    return FloatPoint(quietNaN, quietNaN);
 }
 
 }

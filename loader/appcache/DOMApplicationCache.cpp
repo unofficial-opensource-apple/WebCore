@@ -26,33 +26,46 @@
 #include "config.h"
 #include "DOMApplicationCache.h"
 
-#if ENABLE(OFFLINE_WEB_APPLICATIONS)
-
 #include "ApplicationCacheHost.h"
+#include "Document.h"
 #include "DocumentLoader.h"
 #include "Event.h"
 #include "EventException.h"
 #include "EventListener.h"
 #include "EventNames.h"
+#include "ExceptionCode.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 
 namespace WebCore {
 
 DOMApplicationCache::DOMApplicationCache(Frame* frame)
-    : m_frame(frame)
+    : DOMWindowProperty(frame)
 {
     ApplicationCacheHost* cacheHost = applicationCacheHost();
     if (cacheHost)
         cacheHost->setDOMApplicationCache(this);
 }
 
-void DOMApplicationCache::disconnectFrame()
+void DOMApplicationCache::disconnectFrameForPageCache()
 {
-    ApplicationCacheHost* cacheHost = applicationCacheHost();
-    if (cacheHost)
+    if (ApplicationCacheHost* cacheHost = applicationCacheHost())
         cacheHost->setDOMApplicationCache(0);
-    m_frame = 0;
+    DOMWindowProperty::disconnectFrameForPageCache();
+}
+
+void DOMApplicationCache::reconnectFrameFromPageCache(Frame* frame)
+{
+    DOMWindowProperty::reconnectFrameFromPageCache(frame);
+    if (ApplicationCacheHost* cacheHost = applicationCacheHost())
+        cacheHost->setDOMApplicationCache(this);
+}
+
+void DOMApplicationCache::willDestroyGlobalObjectInFrame()
+{
+    if (ApplicationCacheHost* cacheHost = applicationCacheHost())
+        cacheHost->setDOMApplicationCache(0);
+    DOMWindowProperty::willDestroyGlobalObjectInFrame();
 }
 
 ApplicationCacheHost* DOMApplicationCache::applicationCacheHost() const
@@ -82,6 +95,18 @@ void DOMApplicationCache::swapCache(ExceptionCode& ec)
     ApplicationCacheHost* cacheHost = applicationCacheHost();
     if (!cacheHost || !cacheHost->swapCache())
         ec = INVALID_STATE_ERR;
+}
+
+void DOMApplicationCache::abort()
+{
+    ApplicationCacheHost* cacheHost = applicationCacheHost();
+    if (cacheHost)
+        cacheHost->abort();
+}
+
+const AtomicString& DOMApplicationCache::interfaceName() const
+{
+    return eventNames().interfaceForDOMApplicationCache;
 }
 
 ScriptExecutionContext* DOMApplicationCache::scriptExecutionContext() const
@@ -126,5 +151,3 @@ EventTargetData* DOMApplicationCache::ensureEventTargetData()
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(OFFLINE_WEB_APPLICATIONS)

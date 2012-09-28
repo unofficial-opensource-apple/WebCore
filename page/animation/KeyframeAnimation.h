@@ -53,7 +53,7 @@ public:
     int index() const { return m_index; }
     void setIndex(int i) { m_index = i; }
 
-    bool hasAnimationForProperty(int property) const;
+    bool hasAnimationForProperty(CSSPropertyID) const;
     
     void setUnanimatedStyle(PassRefPtr<RenderStyle> style) { m_unanimatedStyle = style; }
     RenderStyle* unanimatedStyle() const { return m_unanimatedStyle.get(); }
@@ -74,22 +74,26 @@ protected:
     bool shouldSendEventForListener(Document::ListenerType inListenerType) const;
     bool sendAnimationEvent(const AtomicString&, double elapsedTime);
 
-    virtual bool affectsProperty(int) const;
+    virtual bool affectsProperty(CSSPropertyID) const;
 
     void validateTransformFunctionList();
+#if ENABLE(CSS_FILTERS)
+    void checkForMatchingFilterFunctionLists();
+#endif
 
 private:
     KeyframeAnimation(const Animation* animation, RenderObject*, int index, CompositeAnimation*, RenderStyle* unanimatedStyle);
     virtual ~KeyframeAnimation();
     
-    // Get the styles surrounding the current animation time and the progress between them
-    void getKeyframeAnimationInterval(const RenderStyle*& fromStyle, const RenderStyle*& toStyle, double& progress) const;
+    // Get the styles for the given property surrounding the current animation time and the progress between them.
+    void fetchIntervalEndpointsForProperty(CSSPropertyID, const RenderStyle*& fromStyle, const RenderStyle*& toStyle, double& progress) const;
 
     // The keyframes that we are blending.
     KeyframeList m_keyframes;
 
     // The order in which this animation appears in the animation-name style.
     int m_index;
+    bool m_startEventDispatched;
 
     // The style just before we started animation
     RefPtr<RenderStyle> m_unanimatedStyle;

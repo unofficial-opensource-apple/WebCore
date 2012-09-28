@@ -26,16 +26,18 @@
 #include "config.h"
 #include "Logging.h"
 
-#include "CString.h"
+#if !LOG_DISABLED
+
 #include "PlatformString.h"
 #include <wtf/Vector.h>
+#include <wtf/text/CString.h>
 
 #include <wx/defs.h>
 #include <wx/utils.h>
 
 namespace WebCore {
 
-void InitializeLoggingChannelsIfNecessary()
+void initializeLoggingChannelsIfNecessary()
 {
     static bool haveInitializedLoggingChannels = false;
     if (haveInitializedLoggingChannels)
@@ -62,3 +64,5 @@ void InitializeLoggingChannelsIfNecessary()
 }
 
 }
+
+#endif // !LOG_DISABLED

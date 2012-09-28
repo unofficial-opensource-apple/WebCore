@@ -21,25 +21,31 @@
 #ifndef CheckedRadioButtons_h
 #define CheckedRadioButtons_h
 
+#include <wtf/Forward.h>
 #include <wtf/HashMap.h>
 #include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
-class AtomicString;
-class AtomicStringImpl;
 class HTMLInputElement;
-class HTMLFormControlElement;
+class RadioButtonGroup;
 
+// FIXME: Rename the class. The class was a simple map from a name to a checked
+// radio button. It manages RadioButtonGroup objects now.
 class CheckedRadioButtons {
 public:
-    void addButton(HTMLFormControlElement*);
-    void removeButton(HTMLFormControlElement*);
+    CheckedRadioButtons();
+    ~CheckedRadioButtons();
+    void addButton(HTMLInputElement*);
+    void updateCheckedState(HTMLInputElement*);
+    void requiredAttributeChanged(HTMLInputElement*);
+    void removeButton(HTMLInputElement*);
     HTMLInputElement* checkedButtonForGroup(const AtomicString& groupName) const;
+    bool isRequiredGroup(const AtomicString& groupName) const;
 
 private:
-    typedef HashMap<AtomicStringImpl*, HTMLInputElement*> NameToInputMap;
-    OwnPtr<NameToInputMap> m_nameToCheckedRadioButtonMap;
+    typedef HashMap<AtomicStringImpl*, OwnPtr<RadioButtonGroup> > NameToGroupMap;
+    OwnPtr<NameToGroupMap> m_nameToGroupMap;
 };
 
 } // namespace WebCore

@@ -22,13 +22,10 @@
 #include "Icon.h"
 
 #include "GraphicsContext.h"
-#include "PlatformString.h"
 #include "IntRect.h"
+#include "NotImplemented.h"
+#include "PlatformString.h"
 
-#include <qpainter.h>
-#include <qpixmap.h>
-#include <qrect.h>
-#include <qglobal.h>
 
 namespace WebCore {
 
@@ -40,27 +37,17 @@ Icon::~Icon()
 {
 }
 
-PassRefPtr<Icon> Icon::createIconForFiles(const Vector<String>& filenames)
+// FIXME: Move the code to ChromeClient::iconForFiles().
+PassRefPtr<Icon> Icon::createIconForFiles(const Vector<String>&)
 {
-    if (filenames.isEmpty())
-        return 0;
-
-    if (filenames.size() == 1) {
-        RefPtr<Icon> i = adoptRef(new Icon);
-        i->m_icon = QIcon(filenames[0]);
-        return i.release();
-    }
-
-    //FIXME: Implement this
+    // FIXME: Should use QMimeType in Qt 5.
+    notImplemented();
     return 0;
 }
 
-void Icon::paint(GraphicsContext* ctx, const IntRect& rect)
+void Icon::paint(GraphicsContext*, const IntRect&)
 {
-    QPixmap px = m_icon.pixmap(rect.size());
-    QPainter *p = static_cast<QPainter*>(ctx->platformContext());
-    if (p && !px.isNull())
-        p->drawPixmap(rect.x(), rect.y(), px);
+    notImplemented();
 }
 
 }

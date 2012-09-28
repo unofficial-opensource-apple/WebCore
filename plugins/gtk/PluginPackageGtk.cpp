@@ -29,13 +29,14 @@
 #include "config.h"
 #include "PluginPackage.h"
 
-#include <stdio.h>
-
-#include "CString.h"
+#include "GOwnPtrGtk.h"
+#include "GRefPtrGtk.h"
 #include "MIMETypeRegistry.h"
 #include "NotImplemented.h"
 #include "npruntime_impl.h"
 #include "PluginDebug.h"
+#include <gio/gio.h>
+#include <wtf/text/CString.h>
 
 namespace WebCore {
 
@@ -57,19 +58,23 @@ bool PluginPackage::fetchInfo()
     char* buffer = 0;
     NPError err = NPP_GetValue(0, NPPVpluginNameString, &buffer);
     if (err == NPERR_NO_ERROR)
-        m_name = buffer;
+        m_name = String::fromUTF8(buffer);
 
     buffer = 0;
     err = NPP_GetValue(0, NPPVpluginDescriptionString, &buffer);
     if (err == NPERR_NO_ERROR) {
-        m_description = buffer;
+        m_description = String::fromUTF8(buffer);
         determineModuleVersionFromDescription();
     }
 
     const gchar* types = NP_GetMIMEDescription();
+    if (!types)
+        return true;
+
     gchar** mimeDescs = g_strsplit(types, ";", -1);
     for (int i = 0; mimeDescs[i] && mimeDescs[i][0]; i++) {
-        gchar** mimeData = g_strsplit(mimeDescs[i], ":", 3);
+        GOwnPtr<char> mime(g_utf8_strdown(mimeDescs[i], -1));
+        gchar** mimeData = g_strsplit(mime.get(), ":", 3);
         if (g_strv_length(mimeData) < 3) {
             g_strfreev(mimeData);
             continue;
@@ -98,6 +103,22 @@ bool PluginPackage::fetchInfo()
 #endif
 }
 
+#if defined(XP_UNIX)
+static int webkitgtkXError(Display* xdisplay, XErrorEvent* error)
+{
+    gchar errorMessage[64];
+    XGetErrorText(xdisplay, error->error_code, errorMessage, 63);
+    g_warning("The program '%s' received an X Window System error.\n"
+              "This probably reflects a bug in the Adobe Flash plugin.\n"
+              "The error was '%s'.\n"
+              "  (Details: serial %ld error_code %d request_code %d minor_code %d)\n",
+              g_get_prgname(), errorMessage,
+              error->serial, error->error_code,
+              error->request_code, error->minor_code);
+    return 0;
+}
+#endif
+
 bool PluginPackage::load()
 {
     if (m_isLoaded) {
@@ -105,7 +126,24 @@ bool PluginPackage::load()
         return true;
     }
 
-    m_module = g_module_open((m_path.utf8()).data(), G_MODULE_BIND_LOCAL);
+    GOwnPtr<gchar> finalPath(g_strdup(m_path.utf8().data()));
+    while (g_file_test(finalPath.get(), G_FILE_TEST_IS_SYMLINK)) {
+        GRefPtr<GFile> file = adoptGRef(g_file_new_for_path(finalPath.get()));
+        GRefPtr<GFile> dir = adoptGRef(g_file_get_parent(file.get()));
+        GOwnPtr<gchar> linkPath(g_file_read_link(finalPath.get(), 0));
+        GRefPtr<GFile> resolvedFile = adoptGRef(g_file_resolve_relative_path(dir.get(), linkPath.get()));
+        finalPath.set(g_file_get_path(resolvedFile.get()));
+    }
+
+    // No joke. If there is a netscape component in the path, go back
+    // to the symlink, as flash breaks otherwise.
+    // See http://src.chromium.org/viewvc/chrome/trunk/src/webkit/glue/plugins/plugin_list_posix.cc
+    GOwnPtr<gchar> baseName(g_path_get_basename(finalPath.get()));
+    if (!g_strcmp0(baseName.get(), "libflashplayer.so")
+        && g_strstr_len(finalPath.get(), -1, "/netscape/"))
+        finalPath.set(g_strdup(m_path.utf8().data()));
+
+    m_module = g_module_open(finalPath.get(), G_MODULE_BIND_LOCAL);
 
     if (!m_module) {
         LOG(Plugins,"Module Load Failed :%s, Error:%s\n", (m_path.utf8()).data(), g_module_error());
@@ -113,6 +151,15 @@ bool PluginPackage::load()
     }
 
     m_isLoaded = true;
+
+#if defined(XP_UNIX)
+    if (!g_strcmp0(baseName.get(), "libflashplayer.so")) {
+        // Flash plugin can produce X errors that are handled by the GDK X error handler, which
+        // exits the process. Since we don't want to crash due to flash bugs, we install a
+        // custom error handler to show a warning when a X error happens without aborting.
+        XSetErrorHandler(webkitgtkXError);
+    }
+#endif
 
     NP_InitializeFuncPtr NP_Initialize = 0;
     m_NPP_Shutdown = 0;
@@ -146,4 +193,8 @@ abort:
     return false;
 }
 
+uint16_t PluginPackage::NPVersion() const
+{
+    return NPVERS_HAS_PLUGIN_THREAD_ASYNC_CALL;
+}
 }

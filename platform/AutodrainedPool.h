@@ -31,15 +31,12 @@
 
 #include <wtf/Noncopyable.h>
 
-#ifdef __OBJC__
-@class NSAutoreleasePool;
-#else
-class NSAutoreleasePool;
-#endif
+OBJC_CLASS NSAutoreleasePool;
 
 namespace WebCore {
 
-class AutodrainedPool : public Noncopyable {
+class AutodrainedPool {
+    WTF_MAKE_NONCOPYABLE(AutodrainedPool);
 public:
     AutodrainedPool(int iterationLimit = 1);
     ~AutodrainedPool();

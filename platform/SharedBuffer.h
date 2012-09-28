@@ -23,6 +23,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
+
 #ifndef SharedBuffer_h
 #define SharedBuffer_h
 
@@ -32,17 +33,12 @@
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 
-#if PLATFORM(CF)
+#if USE(CF)
 #include <wtf/RetainPtr.h>
 #endif
 
-#if PLATFORM(MAC)
-#ifdef __OBJC__
-@class NSData;
-#else
-class NSData;
-#endif
-
+#if PLATFORM(MAC) || (PLATFORM(QT) && USE(QTKIT))
+OBJC_CLASS NSData;
 #endif
 
 namespace WebCore {
@@ -52,6 +48,7 @@ class PurgeableBuffer;
 class SharedBuffer : public RefCounted<SharedBuffer> {
 public:
     static PassRefPtr<SharedBuffer> create() { return adoptRef(new SharedBuffer); }
+    static PassRefPtr<SharedBuffer> create(size_t size) { return adoptRef(new SharedBuffer(size)); }
     static PassRefPtr<SharedBuffer> create(const char* c, int i) { return adoptRef(new SharedBuffer(c, i)); }
     static PassRefPtr<SharedBuffer> create(const unsigned char* c, int i) { return adoptRef(new SharedBuffer(c, i)); }
 
@@ -61,15 +58,15 @@ public:
     
     // The buffer must be in non-purgeable state before adopted to a SharedBuffer. 
     // It will stay that way until released.
-    static PassRefPtr<SharedBuffer> adoptPurgeableBuffer(PurgeableBuffer* buffer);
+    static PassRefPtr<SharedBuffer> adoptPurgeableBuffer(PassOwnPtr<PurgeableBuffer>);
     
     ~SharedBuffer();
     
-#if PLATFORM(MAC)
+#if PLATFORM(MAC) || (PLATFORM(QT) && USE(QTKIT))
     NSData *createNSData();
     static PassRefPtr<SharedBuffer> wrapNSData(NSData *data);
 #endif
-#if PLATFORM(CF)
+#if USE(CF)
     CFDataRef createCFData();
     static PassRefPtr<SharedBuffer> wrapCFData(CFDataRef);
 #endif
@@ -81,24 +78,27 @@ public:
 
     unsigned size() const;
 
-    // Calling this function will force internal segmented buffers
-    // to be merged into a flat buffer. Use getSomeData() whenever possible
-    // for better performance.
-    const Vector<char>& buffer() const;
 
     bool isEmpty() const { return !size(); }
 
+    void append(SharedBuffer*);
     void append(const char*, unsigned);
+    void append(const Vector<char>&);
+
     void clear();
     const char* platformData() const;
     unsigned platformDataSize() const;
+
+#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
+    void append(CFDataRef);
+#endif
 
     PassRefPtr<SharedBuffer> copy() const;
     
     bool hasPurgeableBuffer() const { return m_purgeableBuffer.get(); }
 
     // Ensure this buffer has no other clients before calling this.
-    PurgeableBuffer* releasePurgeableBuffer();
+    PassOwnPtr<PurgeableBuffer> releasePurgeableBuffer();
 
     // Return the number of consecutive bytes after "position". "data"
     // points to the first byte.
@@ -114,11 +114,46 @@ public:
     //      }
     unsigned getSomeData(const char*& data, unsigned position = 0) const;
 
+    void createPurgeableBuffer() const;
+    void shouldUsePurgeableMemory(bool use) { m_shouldUsePurgeableMemory = use; }
+
+#if ENABLE(DISK_IMAGE_CACHE)
+    enum MemoryMappingState { QueuedForMapping, PreviouslyQueuedForMapping, SuccessAlreadyMapped, FailureCacheFull };
+
+    // Calling this will cause this buffer to be memory mapped.
+    MemoryMappingState allowToBeMemoryMapped();
+    bool isAllowedToBeMemoryMapped() const;
+
+    // This is called to indicate that the memory mapping failed.
+    void failedMemoryMap();
+    
+    // This is called only once the buffer has been completely memory mapped.
+    void markAsMemoryMapped();
+    bool isMemoryMapped() const { return m_isMemoryMapped; }
+    
+    // This proc will be called when the file has been memory mapped or failed to map.
+    enum CompletionStatus { Failed, Succeeded };
+    typedef void* MemoryMappedNotifyCallbackData;
+    typedef void (*MemoryMappedNotifyCallback)(PassRefPtr<SharedBuffer> buffer, CompletionStatus mapStatus, MemoryMappedNotifyCallbackData data);
+
+    MemoryMappedNotifyCallbackData memoryMappedNotificationCallbackData() const;
+    MemoryMappedNotifyCallback memoryMappedNotificationCallback() const;
+    void setMemoryMappedNotificationCallback(MemoryMappedNotifyCallback callback, MemoryMappedNotifyCallbackData data);
+#endif
+
 private:
     SharedBuffer();
+    SharedBuffer(size_t);
     SharedBuffer(const char*, int);
     SharedBuffer(const unsigned char*, int);
     
+    // Calling this function will force internal segmented buffers
+    // to be merged into a flat buffer. Use getSomeData() whenever possible
+    // for better performance.
+    // As well, be aware that this method does *not* return any purgeable
+    // memory, which can be a source of bugs.
+    const Vector<char>& buffer() const;
+
     void clearPlatformData();
     void maybeTransferPlatformData();
     bool hasPlatformData() const;
@@ -126,8 +161,20 @@ private:
     unsigned m_size;
     mutable Vector<char> m_buffer;
     mutable Vector<char*> m_segments;
-    OwnPtr<PurgeableBuffer> m_purgeableBuffer;
-#if PLATFORM(CF)
+    bool m_shouldUsePurgeableMemory;
+    mutable OwnPtr<PurgeableBuffer> m_purgeableBuffer;
+#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
+    mutable Vector<RetainPtr<CFDataRef> > m_dataArray;
+    void copyDataArrayAndClear(char *destination, unsigned bytesToCopy) const;
+    unsigned copySomeDataFromDataArray(const char*& someData, unsigned position) const;
+#endif
+#if ENABLE(DISK_IMAGE_CACHE)
+    bool m_isMemoryMapped;
+    unsigned m_diskImageCacheId; // disk_cache_id_t is unsigned.
+    MemoryMappedNotifyCallback m_notifyMemoryMappedCallback;
+    MemoryMappedNotifyCallbackData m_notifyMemoryMappedCallbackData;
+#endif
+#if USE(CF)
     SharedBuffer(CFDataRef);
     RetainPtr<CFDataRef> m_cfData;
 #endif

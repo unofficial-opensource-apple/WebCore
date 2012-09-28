@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,31 +35,28 @@
 
 #ifdef __OBJC__
 #import <QTKit/QTTime.h>
-@class QTMovie;
-@class QTMovieView;
-@class QTMovieLayer;
-@class QTVideoRendererWebKitOnly;
-@class WebCoreMovieObserver;
 #else
-class QTMovie;
-class QTMovieView;
 class QTTime;
-class QTMovieLayer;
-class QTVideoRendererWebKitOnly;
-class WebCoreMovieObserver;
 #endif
+
+OBJC_CLASS NSDictionary;
+OBJC_CLASS NSMutableDictionary;
+OBJC_CLASS QTMovie;
+OBJC_CLASS QTMovieView;
+OBJC_CLASS QTMovieLayer;
+OBJC_CLASS QTVideoRendererWebKitOnly;
+OBJC_CLASS WebCoreMovieObserver;
 
 #ifndef DRAW_FRAME_RATE
 #define DRAW_FRAME_RATE 0
 #endif
 
 namespace WebCore {
-
-class MediaPlayerPrivate : public MediaPlayerPrivateInterface {
+    
+class MediaPlayerPrivateQTKit : public MediaPlayerPrivateInterface {
 public:
+    ~MediaPlayerPrivateQTKit();
     static void registerMediaEngine(MediaEngineRegistrar);
-
-    ~MediaPlayerPrivate();
 
     void repaint();
     void loadStateChanged();
@@ -67,28 +64,41 @@ public:
     void sizeChanged();
     void timeChanged();
     void didEnd();
+#if USE(ACCELERATED_COMPOSITING)
+    void layerHostChanged(PlatformLayer* rootLayer);
+#endif
 
 private:
-    MediaPlayerPrivate(MediaPlayer*);
+    MediaPlayerPrivateQTKit(MediaPlayer*);
 
     // engine support
-    static MediaPlayerPrivateInterface* create(MediaPlayer* player);
+    static PassOwnPtr<MediaPlayerPrivateInterface> create(MediaPlayer*);
     static void getSupportedTypes(HashSet<String>& types);
     static MediaPlayer::SupportsType supportsType(const String& type, const String& codecs);
+    static void getSitesInMediaCache(Vector<String>&);
+    static void clearMediaCache();
+    static void clearMediaCacheForSite(const String&);
     static bool isAvailable();
 
     PlatformMedia platformMedia() const;
+#if USE(ACCELERATED_COMPOSITING) && !(PLATFORM(QT) && USE(QTKIT))
+    PlatformLayer* platformLayer() const;
+#endif
 
     IntSize naturalSize() const;
     bool hasVideo() const;
     bool hasAudio() const;
     bool supportsFullscreen() const;
+    virtual bool supportsScanning() const { return true; }
     
     void load(const String& url);
     void cancelLoad();
+    void loadInternal(const String& url);
+    void resumeLoad();
     
     void play();
     void pause();    
+    void prepareToPlay();
     
     bool paused() const;
     bool seeking() const;
@@ -103,6 +113,8 @@ private:
 
     bool hasClosedCaptions() const;
     void setClosedCaptionsVisible(bool);
+
+    void setPreload(MediaPlayer::Preload);
 
     MediaPlayer::NetworkState networkState() const { return m_networkState; }
     MediaPlayer::ReadyState readyState() const { return m_readyState; }
@@ -119,8 +131,10 @@ private:
 
     void paint(GraphicsContext*, const IntRect&);
     void paintCurrentFrameInContext(GraphicsContext*, const IntRect&);
+    virtual void prepareForRendering();
 
-#if USE(ACCELERATED_COMPOSITING)
+
+#if USE(ACCELERATED_COMPOSITING) && !(PLATFORM(QT) && USE(QTKIT))
     bool supportsAcceleratedRendering() const;
     void acceleratedRenderingStateChanged();
 #endif
@@ -154,7 +168,7 @@ private:
     void updateStates();
     void doSeek();
     void cancelSeek();
-    void seekTimerFired(Timer<MediaPlayerPrivate>*);
+    void seekTimerFired(Timer<MediaPlayerPrivateQTKit>*);
     float maxTimeLoaded() const;
     void disableUnsupportedTracks();
     
@@ -162,15 +176,24 @@ private:
     void cacheMovieScale();
     bool metaDataAvailable() const { return m_qtMovie && m_readyState >= MediaPlayer::HaveMetadata; }
 
-    bool isReadyForRendering() const;
+    bool isReadyForVideoSetup() const;
     
+    virtual float mediaTimeForTimeValue(float) const;
+
+    virtual double maximumDurationToCacheMediaTime() const { return 5; }
+
+    virtual void setPrivateBrowsingMode(bool);
+    
+    NSMutableDictionary* commonMovieAttributes();
+
     MediaPlayer* m_player;
     RetainPtr<QTMovie> m_qtMovie;
     RetainPtr<QTMovieView> m_qtMovieView;
     RetainPtr<QTVideoRendererWebKitOnly> m_qtVideoRenderer;
     RetainPtr<WebCoreMovieObserver> m_objcObserver;
+    String m_movieURL;
     float m_seekTo;
-    Timer<MediaPlayerPrivate> m_seekTimer;
+    Timer<MediaPlayerPrivateQTKit> m_seekTimer;
     MediaPlayer::NetworkState m_networkState;
     MediaPlayer::ReadyState m_readyState;
     IntRect m_rect;
@@ -181,16 +204,20 @@ private:
     float m_cachedDuration;
     float m_timeToRestore;
     RetainPtr<QTMovieLayer> m_qtVideoLayer;
+    MediaPlayer::Preload m_preload;
     bool m_startedPlaying;
     bool m_isStreaming;
     bool m_visible;
     bool m_hasUnsupportedTracks;
     bool m_videoFrameHasDrawn;
+    bool m_isAllowedToRender;
+    bool m_privateBrowsing;
 #if DRAW_FRAME_RATE
     int  m_frameCountWhilePlaying;
     double m_timeStartedPlaying;
     double m_timeStoppedPlaying;
 #endif
+    mutable FloatSize m_cachedNaturalSize;
 };
 
 }

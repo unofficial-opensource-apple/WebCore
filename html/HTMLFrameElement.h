@@ -34,26 +34,24 @@ public:
 
     bool hasFrameBorder() const { return m_frameBorder; }
 
-    bool noResize() const { return m_noResize; }
-    void setNoResize(bool);
+    bool noResize() const;
 
 private:
     HTMLFrameElement(const QualifiedName&, Document*);
 
-    virtual HTMLTagStatus endTagRequirement() const { return TagStatusForbidden; }
-    virtual int tagPriority() const { return 0; }
-  
     virtual void attach();
 
-    virtual bool rendererIsNeeded(RenderStyle*);
+    virtual bool rendererIsNeeded(const NodeRenderingContext&);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
     
-    virtual void parseMappedAttribute(MappedAttribute*);
+    virtual void parseAttribute(Attribute*) OVERRIDE;
+
+#if ENABLE(FULLSCREEN_API)
+    virtual bool allowFullScreen() const { return false; }
+#endif
 
     bool m_frameBorder;
     bool m_frameBorderSet;
-
-    bool m_noResize;
 };
 
 } // namespace WebCore

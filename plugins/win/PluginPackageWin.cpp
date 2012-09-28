@@ -29,7 +29,6 @@
 #include "config.h"
 #include "PluginPackage.h"
 
-#include "CString.h"
 #include "MIMETypeRegistry.h"
 #include "PluginDatabase.h"
 #include "PluginDebug.h"
@@ -37,6 +36,7 @@
 #include "npruntime_impl.h"
 #include <string.h>
 #include <wtf/OwnArrayPtr.h>
+#include <wtf/text/CString.h>
 #include <shlwapi.h>
 
 namespace WebCore {
@@ -71,8 +71,11 @@ bool PluginPackage::isPluginBlacklisted()
 
         if (compareFileVersion(slPluginMinRequired) < 0)
             return true;
-    } else if (fileName() == "npmozax.dll") {
+    } else if (equalIgnoringCase(fileName(), "npmozax.dll")) {
         // Bug 15217: Mozilla ActiveX control complains about missing xpcom_core.dll
+        return true;
+    } else if (equalIgnoringCase(fileName(), "npwpf.dll")) {
+        // Bug 57119: Microsoft Windows Presentation Foundation (WPF) plug-in complains about missing xpcom.dll
         return true;
     } else if (name() == "Yahoo Application State Plugin") {
         // https://bugs.webkit.org/show_bug.cgi?id=26860
@@ -168,7 +171,7 @@ bool PluginPackage::fetchInfo()
     if (versionInfoSize == 0)
         return false;
 
-    OwnArrayPtr<char> versionInfoData(new char[versionInfoSize]);
+    OwnArrayPtr<char> versionInfoData = adoptArrayPtr(new char[versionInfoSize]);
 
     if (!GetFileVersionInfoW(const_cast<UChar*>(m_path.charactersWithNullTermination()),
             0, versionInfoSize, versionInfoData.get()))
@@ -181,7 +184,7 @@ bool PluginPackage::fetchInfo()
 
     VS_FIXEDFILEINFO* info;
     UINT infoSize;
-    if (!VerQueryValue(versionInfoData.get(), TEXT("\\"), (LPVOID*) &info, &infoSize) || infoSize < sizeof(VS_FIXEDFILEINFO))
+    if (!VerQueryValueW(versionInfoData.get(), L"\\", (LPVOID*) &info, &infoSize) || infoSize < sizeof(VS_FIXEDFILEINFO))
         return false;
     m_moduleVersion.leastSig = info->dwFileVersionLS;
     m_moduleVersion.mostSig = info->dwFileVersionMS;
@@ -312,7 +315,7 @@ unsigned PluginPackage::hash() const
         m_mimeToExtensions.size()
     };
 
-    return StringImpl::computeHash(reinterpret_cast<const UChar*>(hashCodes), sizeof(hashCodes) / sizeof(UChar));
+    return StringHasher::hashMemory<sizeof(hashCodes)>(hashCodes);
 }
 
 bool PluginPackage::equal(const PluginPackage& a, const PluginPackage& b)
@@ -335,4 +338,8 @@ bool PluginPackage::equal(const PluginPackage& a, const PluginPackage& b)
     return true;
 }
 
+uint16_t PluginPackage::NPVersion() const
+{
+    return NP_VERSION_MINOR;
+}
 }

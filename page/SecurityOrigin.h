@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007,2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,41 +29,38 @@
 #ifndef SecurityOrigin_h
 #define SecurityOrigin_h
 
-#include <wtf/HashSet.h>
-#include <wtf/RefCounted.h>
-#include <wtf/PassRefPtr.h>
-#include <wtf/Threading.h>
-
-#include "FrameLoaderTypes.h"
 #include "PlatformString.h"
-#include "StringHash.h"
+#include <wtf/ThreadSafeRefCounted.h>
 
 namespace WebCore {
-
-typedef HashSet<String, CaseFoldingHash> URLSchemesMap;
 
 class Document;
 class KURL;
 
-class SecurityOrigin : public ThreadSafeShared<SecurityOrigin> {
+class SecurityOrigin : public ThreadSafeRefCounted<SecurityOrigin> {
 public:
+    enum Policy {
+        AlwaysDeny = 0,
+        AlwaysAllow,
+        Ask
+    };
+
+    static PassRefPtr<SecurityOrigin> create(const KURL&);
+    static PassRefPtr<SecurityOrigin> createUnique();
+
     static PassRefPtr<SecurityOrigin> createFromDatabaseIdentifier(const String&);
     static PassRefPtr<SecurityOrigin> createFromString(const String&);
-    static PassRefPtr<SecurityOrigin> create(const KURL&, SandboxFlags = SandboxNone);
-    static PassRefPtr<SecurityOrigin> createEmpty();
+    static PassRefPtr<SecurityOrigin> create(const String& protocol, const String& host, int port);
 
     // Create a deep copy of this SecurityOrigin. This method is useful
     // when marshalling a SecurityOrigin to another thread.
-    PassRefPtr<SecurityOrigin> threadsafeCopy();
+    PassRefPtr<SecurityOrigin> isolatedCopy();
 
     // Set the domain property of this security origin to newDomain. This
     // function does not check whether newDomain is a suffix of the current
     // domain. The caller is responsible for validating newDomain.
     void setDomainFromDOM(const String& newDomain);
     bool domainWasSetInDOM() const { return m_domainWasSetInDOM; }
-
-    static void setDomainRelaxationForbiddenForURLScheme(bool forbidden, const String&);
-    static bool isDomainRelaxationForbiddenForURLScheme(const String&);
 
     String protocol() const { return m_protocol; }
     String host() const { return m_host; }
@@ -86,10 +83,15 @@ public:
     // drawing an image onto an HTML canvas element with the drawImage API.
     bool taintsCanvas(const KURL&) const;
 
-    // Returns true for any non-local URL. If document parameter is supplied,
-    // its local load policy dictates, otherwise if referrer is non-empty and
-    // represents a local file, then the local load is allowed.
-    static bool canLoad(const KURL&, const String& referrer, Document* document);
+    // Returns true if this SecurityOrigin can receive drag content from the
+    // initiator. For example, call this function before allowing content to be
+    // dropped onto a target.
+    bool canReceiveDragData(const SecurityOrigin* dragInitiator) const;    
+
+    // Returns true if |document| can display content from the given URL (e.g.,
+    // in an iframe or as an image). For example, web sites generally cannot
+    // display content from the user's files system.
+    bool canDisplay(const KURL&) const;
 
     // Returns true if this SecurityOrigin can load local resources, such
     // as images, iframes, and style sheets, and can link to local URLs.
@@ -114,22 +116,22 @@ public:
     // WARNING: This is an extremely powerful ability. Use with caution!
     void grantUniversalAccess();
 
-    void setSandboxFlags(SandboxFlags);
-    bool isSandboxed(SandboxFlags mask) const { return m_sandboxFlags & mask; }
-
     bool canAccessDatabase() const { return !isUnique(); }
-    bool canAccessStorage() const { return !isUnique(); }
+    bool canAccessLocalStorage() const { return !isUnique(); }
     bool canAccessCookies() const { return !isUnique(); }
+    bool canAccessPasswordManager() const { return !isUnique(); }
+    bool canAccessFileSystem() const { return !isUnique(); }
+    Policy canShowNotifications() const;
 
-    bool isSecureTransitionTo(const KURL&) const;
+    // Technically, we should always allow access to sessionStorage, but we
+    // currently don't handle creating a sessionStorage area for unique
+    // origins.
+    bool canAccessSessionStorage() const { return !isUnique(); }
 
     // The local SecurityOrigin is the most privileged SecurityOrigin.
     // The local SecurityOrigin can script any document, navigate to local
     // resources, and can set arbitrary headers on XMLHttpRequests.
     bool isLocal() const;
-
-    // The empty SecurityOrigin is the least privileged SecurityOrigin.
-    bool isEmpty() const;
 
     // The origin is a globally unique identifier assigned when the Document is
     // created. http://www.whatwg.org/specs/web-apps/current-work/#sandboxOrigin
@@ -138,6 +140,11 @@ public:
     // has the SandboxOrigin flag set. The latter implies the former, and, in
     // addition, the SandboxOrigin flag is inherited by iframes.
     bool isUnique() const { return m_isUnique; }
+
+    // Marks a file:// origin as being in a domain defined by its path.
+    // FIXME 81578: The naming of this is confusing. Files with restricted access to other local files
+    // still can have other privileges that can be remembered, thereby not making them unique.
+    void enforceFilePathSeparation();
 
     // Convert this SecurityOrigin into a string. The string
     // representation of a SecurityOrigin is similar to a URL, except it
@@ -150,6 +157,10 @@ public:
     // SecurityOrigin might be empty, or we might have explicitly decided that
     // we shouldTreatURLSchemeAsNoAccess.
     String toString() const;
+
+    // Similar to toString(), but does not take into account any factors that
+    // could make the string return "null".
+    String toRawString() const;
 
     // Serialize the security origin to a string that could be used as part of
     // file names. This format should be used in storage APIs only.
@@ -166,43 +177,26 @@ public:
     // (and whether it was set) but considering the host. It is used for postMessage.
     bool isSameSchemeHostPort(const SecurityOrigin*) const;
 
-    static void registerURLSchemeAsLocal(const String&);
-    static void removeURLSchemeRegisteredAsLocal(const String&);
-    static const URLSchemesMap& localURLSchemes();
-    static bool shouldTreatURLAsLocal(const String&);
-    static bool shouldTreatURLSchemeAsLocal(const String&);
-
-    static bool shouldHideReferrer(const KURL&, const String& referrer);
-
-    enum LocalLoadPolicy {
-        AllowLocalLoadsForAll, // No restriction on local loads.
-        AllowLocalLoadsForLocalAndSubstituteData,
-        AllowLocalLoadsForLocalOnly,
-    };
-    static void setLocalLoadPolicy(LocalLoadPolicy);
-    static bool restrictAccessToLocal();
-    static bool allowSubstituteDataAccessToLocal();
-
-    static void registerURLSchemeAsNoAccess(const String&);
-    static bool shouldTreatURLSchemeAsNoAccess(const String&);
-
-    static void whiteListAccessFromOrigin(const SecurityOrigin& sourceOrigin, const String& destinationProtocol, const String& destinationDomains, bool allowDestinationSubdomains);
-    static void resetOriginAccessWhiteLists();
-
 private:
-    SecurityOrigin(const KURL&, SandboxFlags);
+    SecurityOrigin();
+    explicit SecurityOrigin(const KURL&);
     explicit SecurityOrigin(const SecurityOrigin*);
 
-    SandboxFlags m_sandboxFlags;
+    // FIXME: Rename this function to something more semantic.
+    bool passesFileCheck(const SecurityOrigin*) const;
+
     String m_protocol;
     String m_host;
     mutable String m_encodedHost;
     String m_domain;
+    String m_filePath;
     unsigned short m_port;
     bool m_isUnique;
     bool m_universalAccess;
     bool m_domainWasSetInDOM;
     bool m_canLoadLocalResources;
+    bool m_enforceFilePathSeparation;
+    bool m_needsDatabaseIdentifierQuirkForFiles;
 };
 
 } // namespace WebCore

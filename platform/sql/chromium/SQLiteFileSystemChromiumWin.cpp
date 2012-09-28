@@ -31,7 +31,7 @@
 #include "config.h"
 #include "SQLiteFileSystem.h"
 
-#include "ChromiumBridge.h"
+#include "PlatformSupport.h"
 #include <sqlite3.h>
 #include <windows.h>
 
@@ -55,7 +55,7 @@ namespace {
 int chromiumOpen(sqlite3_vfs*, const char* fileName,
                  sqlite3_file* id, int desiredFlags, int* usedFlags)
 {
-    HANDLE h = ChromiumBridge::databaseOpenFile(fileName, desiredFlags);
+    HANDLE h = PlatformSupport::databaseOpenFile(fileName, desiredFlags);
     if (h == INVALID_HANDLE_VALUE) {
         if (desiredFlags & SQLITE_OPEN_READWRITE) {
             int newFlags = (desiredFlags | SQLITE_OPEN_READONLY) & ~SQLITE_OPEN_READWRITE;
@@ -82,7 +82,7 @@ int chromiumOpen(sqlite3_vfs*, const char* fileName,
 //           should be synched after the file is deleted.
 int chromiumDelete(sqlite3_vfs*, const char* fileName, int)
 {
-    return ChromiumBridge::databaseDeleteFile(fileName);
+    return PlatformSupport::databaseDeleteFile(fileName);
 }
 
 // Check the existance and status of the given file.
@@ -93,7 +93,7 @@ int chromiumDelete(sqlite3_vfs*, const char* fileName, int)
 // res - the result.
 int chromiumAccess(sqlite3_vfs*, const char* fileName, int flag, int* res)
 {
-    DWORD attr = ChromiumBridge::databaseGetFileAttributes(fileName);
+    DWORD attr = PlatformSupport::databaseGetFileAttributes(fileName);
     switch (flag) {
     case SQLITE_ACCESS_READ:
     case SQLITE_ACCESS_EXISTS:
@@ -142,12 +142,6 @@ namespace WebCore {
 
 void SQLiteFileSystem::registerSQLiteVFS()
 {
-    // FIXME: Make sure there aren't any unintended consequences when VFS code is called in the browser process.
-    if (!ChromiumBridge::sandboxEnabled()) {
-        ASSERT_NOT_REACHED();
-        return;
-    }
-
     sqlite3_vfs* win32_vfs = sqlite3_vfs_find("win32");
     static sqlite3_vfs chromium_vfs = {
         1,

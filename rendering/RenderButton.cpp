@@ -28,24 +28,21 @@
 #include "RenderTextFragment.h"
 #include "RenderTheme.h"
 
-#include "RenderThemeIPhone.h"
-
-#if ENABLE(WML)
-#include "WMLDoElement.h"
-#include "WMLNames.h"
-#endif
+#include "RenderThemeIOS.h"
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-using namespace std;
-
 RenderButton::RenderButton(Node* node)
-    : RenderFlexibleBox(node)
+    : RenderDeprecatedFlexibleBox(node)
     , m_buttonText(0)
     , m_inner(0)
     , m_default(false)
+{
+}
+
+RenderButton::~RenderButton()
 {
 }
 
@@ -54,10 +51,9 @@ void RenderButton::addChild(RenderObject* newChild, RenderObject* beforeChild)
     if (!m_inner) {
         // Create an anonymous block.
         ASSERT(!firstChild());
-        bool isFlexibleBox = style()->display() == BOX || style()->display() == INLINE_BOX;
-        m_inner = createAnonymousBlock(isFlexibleBox);
+        m_inner = createAnonymousBlock(style()->display());
         setupInnerStyle(m_inner->style());
-        RenderFlexibleBox::addChild(m_inner);
+        RenderDeprecatedFlexibleBox::addChild(m_inner);
     }
     
     m_inner->addChild(newChild, beforeChild);
@@ -66,7 +62,7 @@ void RenderButton::addChild(RenderObject* newChild, RenderObject* beforeChild)
 void RenderButton::removeChild(RenderObject* oldChild)
 {
     if (oldChild == m_inner || !m_inner) {
-        RenderFlexibleBox::removeChild(oldChild);
+        RenderDeprecatedFlexibleBox::removeChild(oldChild);
         m_inner = 0;
     } else
         m_inner->removeChild(oldChild);
@@ -92,11 +88,10 @@ void RenderButton::styleDidChange(StyleDifference diff, const RenderStyle* oldSt
         m_buttonText->setStyle(style());
     if (m_inner) // RenderBlock handled updating the anonymous block's style.
         setupInnerStyle(m_inner->style());
-    setReplaced(isInline());
 
     if (!m_default && theme()->isDefault(this)) {
         if (!m_timer)
-            m_timer.set(new Timer<RenderButton>(this, &RenderButton::timerFired));
+            m_timer = adoptPtr(new Timer<RenderButton>(this, &RenderButton::timerFired));
         m_timer->startRepeating(0.03);
         m_default = true;
     } else if (m_default && !theme()->isDefault(this)) {
@@ -112,11 +107,6 @@ void RenderButton::setupInnerStyle(RenderStyle* innerStyle)
     // safe to modify.
     innerStyle->setBoxFlex(1.0f);
     innerStyle->setBoxOrient(style()->boxOrient());
-
-    innerStyle->setPaddingTop(Length(theme()->buttonInternalPaddingTop(), Fixed));
-    innerStyle->setPaddingRight(Length(theme()->buttonInternalPaddingRight(), Fixed));
-    innerStyle->setPaddingBottom(Length(theme()->buttonInternalPaddingBottom(), Fixed));
-    innerStyle->setPaddingLeft(Length(theme()->buttonInternalPaddingLeft(), Fixed));
 }
 
 void RenderButton::updateFromElement()
@@ -127,27 +117,6 @@ void RenderButton::updateFromElement()
         String value = input->valueWithDefault();
         setText(value);
     }
-
-
-#if ENABLE(WML)
-    else if (node()->hasTagName(WMLNames::doTag)) {
-        WMLDoElement* doElement = static_cast<WMLDoElement*>(node());
-
-        String value = doElement->label();
-        if (value.isEmpty())
-            value = doElement->name();
-
-        setText(value);
-    }
-#endif
-}
-
-bool RenderButton::canHaveChildren() const
-{
-    // Input elements can't have children, but button elements can.  We'll
-    // write the code assuming any other button types that might emerge in the future
-    // can also have children.
-    return !node()->hasTagName(inputTag);
 }
 
 void RenderButton::setText(const String& str)
@@ -173,6 +142,14 @@ String RenderButton::text() const
     return m_buttonText ? m_buttonText->text() : 0;
 }
 
+bool RenderButton::canHaveGeneratedChildren() const
+{
+    // Input elements can't have generated children, but button elements can. We'll
+    // write the code assuming any other button types that might emerge in the future
+    // can also have children.
+    return !node()->hasTagName(inputTag);
+}
+
 void RenderButton::updateBeforeAfterContent(PseudoId type)
 {
     if (m_inner)
@@ -181,10 +158,10 @@ void RenderButton::updateBeforeAfterContent(PseudoId type)
         children()->updateBeforeAfterContent(this, type);
 }
 
-IntRect RenderButton::controlClipRect(int tx, int ty) const
+LayoutRect RenderButton::controlClipRect(const LayoutPoint& additionalOffset) const
 {
     // Clip to the padding box to at least give content the extra padding space.
-    return IntRect(tx + borderLeft(), ty + borderTop(), width() - borderLeft() - borderRight(), height() - borderTop() - borderBottom());
+    return LayoutRect(additionalOffset.x() + borderLeft(), additionalOffset.y() + borderTop(), width() - borderLeft() - borderRight(), height() - borderTop() - borderBottom());
 }
 
 void RenderButton::timerFired(Timer<RenderButton>*)
@@ -201,10 +178,10 @@ void RenderButton::timerFired(Timer<RenderButton>*)
 
 void RenderButton::layout()
 {
-    RenderFlexibleBox::layout();
+    RenderDeprecatedFlexibleBox::layout();
     
     // FIXME: We should not be adjusting styles during layout. <rdar://problem/7675493>
-    RenderThemeIPhone::adjustButtonBorderRadius(style(), this);
+    RenderThemeIOS::adjustRoundBorderRadius(style(), this);
 }
 
 } // namespace WebCore

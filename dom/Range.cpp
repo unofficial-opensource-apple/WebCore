@@ -3,7 +3,8 @@
  * (C) 2000 Gunnstein Lye (gunnstein@netcom.no)
  * (C) 2000 Frederik Holljen (frederik.holljen@hig.no)
  * (C) 2001 Peter Kelly (pmk@post.com)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011 Motorola Mobility. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,16 +24,23 @@
 
 #include "config.h"
 #include "Range.h"
-#include "RangeException.h"
 
-#include "CString.h"
 #include "ClientRect.h"
 #include "ClientRectList.h"
 #include "DocumentFragment.h"
+#include "ExceptionCode.h"
+#include "FloatQuad.h"
+#include "Frame.h"
 #include "FrameView.h"
 #include "HTMLElement.h"
+#include "HTMLNames.h"
+#include "Node.h"
 #include "NodeWithIndex.h"
+#include "Page.h"
 #include "ProcessingInstruction.h"
+#include "RangeException.h"
+#include "RenderBoxModelObject.h"
+#include "RenderText.h"
 #include "Text.h"
 #include "TextIterator.h"
 #include "VisiblePosition.h"
@@ -41,6 +49,9 @@
 #include "visible_units.h"
 #include <stdio.h>
 #include <wtf/RefCountedLeakCounter.h>
+#include <wtf/Vector.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/StringBuilder.h>
 
 #include "HTMLNames.h"
 #include "htmlediting.h"
@@ -48,10 +59,9 @@
 namespace WebCore {
 
 using namespace std;
+using namespace HTMLNames;
 
-#ifndef NDEBUG
-static WTF::RefCountedLeakCounter rangeCounter("Range");
-#endif
+DEFINE_DEBUG_ONLY_GLOBAL(WTF::RefCountedLeakCounter, rangeCounter, ("Range"));
 
 inline Range::Range(PassRefPtr<Document> ownerDocument)
     : m_ownerDocument(ownerDocument)
@@ -83,11 +93,8 @@ inline Range::Range(PassRefPtr<Document> ownerDocument, PassRefPtr<Node> startCo
 
     // Simply setting the containers and offsets directly would not do any of the checking
     // that setStart and setEnd do, so we call those functions.
-    ExceptionCode ec = 0;
-    setStart(startContainer, startOffset, ec);
-    ASSERT(!ec);
-    setEnd(endContainer, endOffset, ec);
-    ASSERT(!ec);
+    setStart(startContainer, startOffset);
+    setEnd(endContainer, endOffset);
 }
 
 PassRefPtr<Range> Range::create(PassRefPtr<Document> ownerDocument, PassRefPtr<Node> startContainer, int startOffset, PassRefPtr<Node> endContainer, int endOffset)
@@ -97,14 +104,13 @@ PassRefPtr<Range> Range::create(PassRefPtr<Document> ownerDocument, PassRefPtr<N
 
 PassRefPtr<Range> Range::create(PassRefPtr<Document> ownerDocument, const Position& start, const Position& end)
 {
-    // FIXME: we shouldn't be using deprecatedEditingOffset here
-    return adoptRef(new Range(ownerDocument, start.node(), start.deprecatedEditingOffset(), end.node(), end.deprecatedEditingOffset()));
+    return adoptRef(new Range(ownerDocument, start.containerNode(), start.computeOffsetInContainerNode(), end.containerNode(), end.computeOffsetInContainerNode()));
 }
 
 PassRefPtr<Range> Range::create(PassRefPtr<Document> ownerDocument, const VisiblePosition& visibleStart, const VisiblePosition& visibleEnd)
 {
-    Position start = rangeCompliantEquivalent(visibleStart.deepEquivalent());
-    Position end = rangeCompliantEquivalent(visibleEnd.deepEquivalent());
+    Position start = visibleStart.deepEquivalent().parentAnchoredEquivalent();
+    Position end = visibleEnd.deepEquivalent().parentAnchoredEquivalent();
     return adoptRef(new Range(ownerDocument, start.anchorNode(), start.deprecatedEditingOffset(), end.anchorNode(), end.deprecatedEditingOffset()));
 }
     
@@ -116,6 +122,17 @@ Range::~Range()
 #ifndef NDEBUG
     rangeCounter.decrement();
 #endif
+}
+
+void Range::setDocument(Document* document)
+{
+    ASSERT(m_ownerDocument != document);
+    if (m_ownerDocument)
+        m_ownerDocument->detachRange(this);
+    m_ownerDocument = document;
+    m_start.setToStartOfNode(document);
+    m_end.setToStartOfNode(document);
+    m_ownerDocument->attachRange(this);
 }
 
 Node* Range::startContainer(ExceptionCode& ec) const
@@ -223,8 +240,10 @@ void Range::setStart(PassRefPtr<Node> refNode, int offset, ExceptionCode& ec)
     if (startRootContainer != endRootContainer)
         collapse(true, ec);
     // check if new start after end
-    else if (compareBoundaryPoints(m_start, m_end) > 0)
+    else if (compareBoundaryPoints(m_start, m_end, ec) > 0) {
+        ASSERT(!ec);
         collapse(true, ec);
+    }
 }
 
 void Range::setEnd(PassRefPtr<Node> refNode, int offset, ExceptionCode& ec)
@@ -261,8 +280,22 @@ void Range::setEnd(PassRefPtr<Node> refNode, int offset, ExceptionCode& ec)
     if (startRootContainer != endRootContainer)
         collapse(false, ec);
     // check if new end before start
-    if (compareBoundaryPoints(m_start, m_end) > 0)
+    if (compareBoundaryPoints(m_start, m_end, ec) > 0) {
+        ASSERT(!ec);
         collapse(false, ec);
+    }
+}
+
+void Range::setStart(const Position& start, ExceptionCode& ec)
+{
+    Position parentAnchored = start.parentAnchoredEquivalent();
+    setStart(parentAnchored.containerNode(), parentAnchored.offsetInContainerNode(), ec);
+}
+
+void Range::setEnd(const Position& end, ExceptionCode& ec)
+{
+    Position parentAnchored = end.parentAnchoredEquivalent();
+    setEnd(parentAnchored.containerNode(), parentAnchored.offsetInContainerNode(), ec);
 }
 
 void Range::collapse(bool toStart, ExceptionCode& ec)
@@ -305,8 +338,8 @@ bool Range::isPointInRange(Node* refNode, int offset, ExceptionCode& ec)
     if (ec)
         return false;
 
-    return compareBoundaryPoints(refNode, offset, m_start.container(), m_start.offset()) >= 0
-        && compareBoundaryPoints(refNode, offset, m_end.container(), m_end.offset()) <= 0;
+    return compareBoundaryPoints(refNode, offset, m_start.container(), m_start.offset(), ec) >= 0 && !ec
+        && compareBoundaryPoints(refNode, offset, m_end.container(), m_end.offset(), ec) <= 0 && !ec;
 }
 
 short Range::comparePoint(Node* refNode, int offset, ExceptionCode& ec) const
@@ -336,11 +369,14 @@ short Range::comparePoint(Node* refNode, int offset, ExceptionCode& ec) const
         return 0;
 
     // compare to start, and point comes before
-    if (compareBoundaryPoints(refNode, offset, m_start.container(), m_start.offset()) < 0)
+    if (compareBoundaryPoints(refNode, offset, m_start.container(), m_start.offset(), ec) < 0)
         return -1;
 
+    if (ec)
+        return 0;
+
     // compare to end, and point comes after
-    if (compareBoundaryPoints(refNode, offset, m_end.container(), m_end.offset()) > 0)
+    if (compareBoundaryPoints(refNode, offset, m_end.container(), m_end.offset(), ec) > 0 && !ec)
         return 1;
 
     // point is in the middle of this range, or on the boundary points
@@ -373,7 +409,7 @@ Range::CompareResults Range::compareNode(Node* refNode, ExceptionCode& ec) const
         return NODE_BEFORE;
     }
 
-    Node* parentNode = refNode->parentNode();
+    ContainerNode* parentNode = refNode->parentNode();
     int nodeIndex = refNode->nodeIndex();
     
     if (!parentNode) {
@@ -432,20 +468,20 @@ short Range::compareBoundaryPoints(CompareHow how, const Range* sourceRange, Exc
 
     switch (how) {
         case START_TO_START:
-            return compareBoundaryPoints(m_start, sourceRange->m_start);
+            return compareBoundaryPoints(m_start, sourceRange->m_start, ec);
         case START_TO_END:
-            return compareBoundaryPoints(m_end, sourceRange->m_start);
+            return compareBoundaryPoints(m_end, sourceRange->m_start, ec);
         case END_TO_END:
-            return compareBoundaryPoints(m_end, sourceRange->m_end);
+            return compareBoundaryPoints(m_end, sourceRange->m_end, ec);
         case END_TO_START:
-            return compareBoundaryPoints(m_start, sourceRange->m_end);
+            return compareBoundaryPoints(m_start, sourceRange->m_end, ec);
     }
 
     ec = SYNTAX_ERR;
     return 0;
 }
 
-short Range::compareBoundaryPoints(Node* containerA, int offsetA, Node* containerB, int offsetB)
+short Range::compareBoundaryPoints(Node* containerA, int offsetA, Node* containerB, int offsetB, ExceptionCode& ec)
 {
     ASSERT(containerA);
     ASSERT(containerB);
@@ -506,8 +542,10 @@ short Range::compareBoundaryPoints(Node* containerA, int offsetA, Node* containe
     // case 4: containers A & B are siblings, or children of siblings
     // ### we need to do a traversal here instead
     Node* commonAncestor = commonAncestorContainer(containerA, containerB);
-    if (!commonAncestor)
+    if (!commonAncestor) {
+        ec = WRONG_DOCUMENT_ERR;
         return 0;
+    }
     Node* childA = containerA;
     while (childA && childA->parentNode() != commonAncestor)
         childA = childA->parentNode();
@@ -536,14 +574,15 @@ short Range::compareBoundaryPoints(Node* containerA, int offsetA, Node* containe
     return 0;
 }
 
-short Range::compareBoundaryPoints(const RangeBoundaryPoint& boundaryA, const RangeBoundaryPoint& boundaryB)
+short Range::compareBoundaryPoints(const RangeBoundaryPoint& boundaryA, const RangeBoundaryPoint& boundaryB, ExceptionCode& ec)
 {
-    return compareBoundaryPoints(boundaryA.container(), boundaryA.offset(), boundaryB.container(), boundaryB.offset());
+    return compareBoundaryPoints(boundaryA.container(), boundaryA.offset(), boundaryB.container(), boundaryB.offset(), ec);
 }
 
 bool Range::boundaryPointsValid() const
 {
-    return m_start.container() && compareBoundaryPoints(m_start, m_end) <= 0;
+    ExceptionCode ec = 0;
+    return m_start.container() && compareBoundaryPoints(m_start, m_end, ec) <= 0 && !ec;
 }
 
 void Range::deleteContents(ExceptionCode& ec)
@@ -560,19 +599,22 @@ bool Range::intersectsNode(Node* refNode, ExceptionCode& ec)
     // http://developer.mozilla.org/en/docs/DOM:range.intersectsNode
     // Returns a bool if the node intersects the range.
 
+    // Throw exception if the range is already detached.
+    if (!m_start.container()) {
+        ec = INVALID_STATE_ERR;
+        return false;
+    }
     if (!refNode) {
         ec = NOT_FOUND_ERR;
         return false;
     }
-    
-    if ((!m_start.container() && refNode->attached())
-            || (m_start.container() && !refNode->attached())
-            || refNode->document() != m_ownerDocument) {
+
+    if (!refNode->attached() || refNode->document() != m_ownerDocument) {
         // Firefox doesn't throw an exception for these cases; it returns false.
         return false;
     }
 
-    Node* parentNode = refNode->parentNode();
+    ContainerNode* parentNode = refNode->parentNode();
     int nodeIndex = refNode->nodeIndex();
     
     if (!parentNode) {
@@ -593,89 +635,93 @@ bool Range::intersectsNode(Node* refNode, ExceptionCode& ec)
     return true; // all other cases
 }
 
+static inline Node* highestAncestorUnderCommonRoot(Node* node, Node* commonRoot)
+{
+    if (node == commonRoot)
+        return 0;
+
+    ASSERT(commonRoot->contains(node));
+
+    while (node->parentNode() != commonRoot)
+        node = node->parentNode();
+
+    return node;
+}
+
+static inline Node* childOfCommonRootBeforeOffset(Node* container, unsigned offset, Node* commonRoot)
+{
+    ASSERT(container);
+    ASSERT(commonRoot);
+    
+    if (!commonRoot->contains(container))
+        return 0;
+
+    if (container == commonRoot) {
+        container = container->firstChild();
+        for (unsigned i = 0; container && i < offset; i++)
+            container = container->nextSibling();
+    } else {
+        while (container->parentNode() != commonRoot)
+            container = container->parentNode();
+    }
+
+    return container;
+}
+
+static inline unsigned lengthOfContentsInNode(Node* node)
+{
+    // This switch statement must be consistent with that of Range::processContentsBetweenOffsets.
+    switch (node->nodeType()) {
+    case Node::TEXT_NODE:
+    case Node::CDATA_SECTION_NODE:
+    case Node::COMMENT_NODE:
+        return static_cast<CharacterData*>(node)->length();
+    case Node::PROCESSING_INSTRUCTION_NODE:
+        return static_cast<ProcessingInstruction*>(node)->data().length();
+    case Node::ELEMENT_NODE:
+    case Node::ATTRIBUTE_NODE:
+    case Node::ENTITY_REFERENCE_NODE:
+    case Node::ENTITY_NODE:
+    case Node::DOCUMENT_NODE:
+    case Node::DOCUMENT_TYPE_NODE:
+    case Node::DOCUMENT_FRAGMENT_NODE:
+    case Node::NOTATION_NODE:
+    case Node::XPATH_NAMESPACE_NODE:
+        return node->childNodeCount();
+    }
+    ASSERT_NOT_REACHED();
+    return 0;
+}
+
 PassRefPtr<DocumentFragment> Range::processContents(ActionType action, ExceptionCode& ec)
 {
-    // FIXME: To work properly with mutation events, we will have to take into account
-    // situations where the tree is being transformed while we work on it - ugh!
+    typedef Vector<RefPtr<Node> > NodeVector;
 
     RefPtr<DocumentFragment> fragment;
     if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS)
         fragment = DocumentFragment::create(m_ownerDocument.get());
-    
+
     ec = 0;
     if (collapsed(ec))
         return fragment.release();
     if (ec)
         return 0;
 
-    Node* commonRoot = commonAncestorContainer(ec);
+    RefPtr<Node> commonRoot = commonAncestorContainer(ec);
     if (ec)
         return 0;
     ASSERT(commonRoot);
 
-    // what is the highest node that partially selects the start of the range?
-    Node* partialStart = 0;
-    if (m_start.container() != commonRoot) {
-        partialStart = m_start.container();
-        while (partialStart->parentNode() != commonRoot)
-            partialStart = partialStart->parentNode();
-    }
-
-    // what is the highest node that partially selects the end of the range?
-    Node* partialEnd = 0;
-    if (m_end.container() != commonRoot) {
-        partialEnd = m_end.container();
-        while (partialEnd->parentNode() != commonRoot)
-            partialEnd = partialEnd->parentNode();
-    }
-
-    // Simple case: the start and end containers are the same. We just grab
-    // everything >= start offset and < end offset
     if (m_start.container() == m_end.container()) {
-        Node::NodeType startNodeType = m_start.container()->nodeType();
-        if (startNodeType == Node::TEXT_NODE || startNodeType == Node::CDATA_SECTION_NODE || startNodeType == Node::COMMENT_NODE) {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
-                RefPtr<CharacterData> c = static_pointer_cast<CharacterData>(m_start.container()->cloneNode(true));
-                c->deleteData(m_end.offset(), c->length() - m_end.offset(), ec);
-                c->deleteData(0, m_start.offset(), ec);
-                fragment->appendChild(c.release(), ec);
-            }
-            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS)
-                static_cast<CharacterData*>(m_start.container())->deleteData(m_start.offset(), m_end.offset() - m_start.offset(), ec);
-        } else if (startNodeType == Node::PROCESSING_INSTRUCTION_NODE) {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
-                RefPtr<ProcessingInstruction> c = static_pointer_cast<ProcessingInstruction>(m_start.container()->cloneNode(true));
-                c->setData(c->data().substring(m_start.offset(), m_end.offset() - m_start.offset()), ec);
-                fragment->appendChild(c.release(), ec);
-            }
-            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS) {
-                ProcessingInstruction* pi = static_cast<ProcessingInstruction*>(m_start.container());
-                String data(pi->data());
-                data.remove(m_start.offset(), m_end.offset() - m_start.offset());
-                pi->setData(data, ec);
-            }
-        } else {
-            Node* n = m_start.container()->firstChild();
-            int i;
-            for (i = 0; n && i < m_start.offset(); i++) // skip until start offset
-                n = n->nextSibling();
-            int endOffset = m_end.offset();
-            while (n && i < endOffset) { // delete until end offset
-                Node* next = n->nextSibling();
-                if (action == EXTRACT_CONTENTS)
-                    fragment->appendChild(n, ec); // will remove n from its parent
-                else if (action == CLONE_CONTENTS)
-                    fragment->appendChild(n->cloneNode(true), ec);
-                else
-                    m_start.container()->removeChild(n, ec);
-                n = next;
-                i++;
-            }
-        }
-        return fragment.release();
+        processContentsBetweenOffsets(action, fragment, m_start.container(), m_start.offset(), m_end.offset(), ec);
+        return fragment;
     }
 
-    // Complex case: Start and end containers are different.
+    // what is the highest node that partially selects the start / end of the range?
+    RefPtr<Node> partialStart = highestAncestorUnderCommonRoot(m_start.container(), commonRoot.get());
+    RefPtr<Node> partialEnd = highestAncestorUnderCommonRoot(m_end.container(), commonRoot.get());
+
+    // Start and end containers are different.
     // There are three possibilities here:
     // 1. Start container == commonRoot (End container must be a descendant)
     // 2. End container == commonRoot (Start container must be a descendant)
@@ -692,170 +738,32 @@ PassRefPtr<DocumentFragment> Range::processContents(ActionType action, Exception
     //
     // These are deleted, cloned, or extracted (i.e. both) depending on action.
 
+    // Note that we are verifying that our common root hierarchy is still intact
+    // after any DOM mutation event, at various stages below. See webkit bug 60350.
+
     RefPtr<Node> leftContents;
-    if (m_start.container() != commonRoot) {
-        // process the left-hand side of the range, up until the last ancestor of
-        // start container before commonRoot
-        Node::NodeType startNodeType = m_start.container()->nodeType();
-        if (startNodeType == Node::TEXT_NODE || startNodeType == Node::CDATA_SECTION_NODE || startNodeType == Node::COMMENT_NODE) {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
-                RefPtr<CharacterData> c = static_pointer_cast<CharacterData>(m_start.container()->cloneNode(true));
-                c->deleteData(0, m_start.offset(), ec);
-                leftContents = c.release();
-            }
-            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS)
-                static_cast<CharacterData*>(m_start.container())->deleteData(
-                    m_start.offset(), static_cast<CharacterData*>(m_start.container())->length() - m_start.offset(), ec);
-        } else if (startNodeType == Node::PROCESSING_INSTRUCTION_NODE) {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
-                RefPtr<ProcessingInstruction> c = static_pointer_cast<ProcessingInstruction>(m_start.container()->cloneNode(true));
-                c->setData(c->data().substring(m_start.offset()), ec);
-                leftContents = c.release();
-            }
-            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS) {
-                ProcessingInstruction* pi = static_cast<ProcessingInstruction*>(m_start.container());
-                String data(pi->data());
-                pi->setData(data.left(m_start.offset()), ec);
-            }
-        } else {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS)
-                leftContents = m_start.container()->cloneNode(false);
-            Node* n = m_start.container()->firstChild();
-            for (int i = 0; n && i < m_start.offset(); i++) // skip until start offset
-                n = n->nextSibling();
-            while (n) { // process until end
-                Node* next = n->nextSibling();
-                if (action == EXTRACT_CONTENTS)
-                    leftContents->appendChild(n, ec); // will remove n from start container
-                else if (action == CLONE_CONTENTS)
-                    leftContents->appendChild(n->cloneNode(true), ec);
-                else
-                    m_start.container()->removeChild(n, ec);
-                n = next;
-            }
-        }
-
-        Node* leftParent = m_start.container()->parentNode();
-        Node* n = m_start.container()->nextSibling();
-        for (; leftParent != commonRoot; leftParent = leftParent->parentNode()) {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
-                RefPtr<Node> leftContentsParent = leftParent->cloneNode(false);
-                leftContentsParent->appendChild(leftContents, ec);
-                leftContents = leftContentsParent;
-            }
-
-            Node* next;
-            for (; n; n = next) {
-                next = n->nextSibling();
-                if (action == EXTRACT_CONTENTS)
-                    leftContents->appendChild(n, ec); // will remove n from leftParent
-                else if (action == CLONE_CONTENTS)
-                    leftContents->appendChild(n->cloneNode(true), ec);
-                else
-                    leftParent->removeChild(n, ec);
-            }
-            n = leftParent->nextSibling();
-        }
+    if (m_start.container() != commonRoot && commonRoot->contains(m_start.container())) {
+        leftContents = processContentsBetweenOffsets(action, 0, m_start.container(), m_start.offset(), lengthOfContentsInNode(m_start.container()), ec);
+        leftContents = processAncestorsAndTheirSiblings(action, m_start.container(), ProcessContentsForward, leftContents, commonRoot.get(), ec);
     }
 
     RefPtr<Node> rightContents;
-    if (m_end.container() != commonRoot) {
-        // delete the right-hand side of the range, up until the last ancestor of
-        // end container before commonRoot
-        Node::NodeType endNodeType = m_end.container()->nodeType();
-        if (endNodeType == Node::TEXT_NODE || endNodeType == Node::CDATA_SECTION_NODE || endNodeType == Node::COMMENT_NODE) {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
-                RefPtr<CharacterData> c = static_pointer_cast<CharacterData>(m_end.container()->cloneNode(true));
-                c->deleteData(m_end.offset(), static_cast<CharacterData*>(m_end.container())->length() - m_end.offset(), ec);
-                rightContents = c;
-            }
-            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS)
-                static_cast<CharacterData*>(m_end.container())->deleteData(0, m_end.offset(), ec);
-        } else if (endNodeType == Node::PROCESSING_INSTRUCTION_NODE) {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
-                RefPtr<ProcessingInstruction> c = static_pointer_cast<ProcessingInstruction>(m_end.container()->cloneNode(true));
-                c->setData(c->data().left(m_end.offset()), ec);
-                rightContents = c.release();
-            }
-            if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS) {
-                ProcessingInstruction* pi = static_cast<ProcessingInstruction*>(m_end.container());
-                pi->setData(pi->data().substring(m_end.offset()), ec);
-            }
-        } else {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS)
-                rightContents = m_end.container()->cloneNode(false);
-            Node* n = m_end.container()->firstChild();
-            if (n && m_end.offset()) {
-                for (int i = 0; i + 1 < m_end.offset(); i++) { // skip to end.offset()
-                    Node* next = n->nextSibling();
-                    if (!next)
-                        break;
-                    n = next;
-                }
-                Node* prev;
-                for (; n; n = prev) {
-                    prev = n->previousSibling();
-                    if (action == EXTRACT_CONTENTS)
-                        rightContents->insertBefore(n, rightContents->firstChild(), ec); // will remove n from its parent
-                    else if (action == CLONE_CONTENTS)
-                        rightContents->insertBefore(n->cloneNode(true), rightContents->firstChild(), ec);
-                    else
-                        m_end.container()->removeChild(n, ec);
-                }
-            }
-        }
-
-        Node* rightParent = m_end.container()->parentNode();
-        Node* n = m_end.container()->previousSibling();
-        for (; rightParent != commonRoot; rightParent = rightParent->parentNode()) {
-            if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
-                RefPtr<Node> rightContentsParent = rightParent->cloneNode(false);
-                rightContentsParent->appendChild(rightContents, ec);
-                rightContents = rightContentsParent;
-            }
-            Node* prev;
-            for (; n; n = prev) {
-                prev = n->previousSibling();
-                if (action == EXTRACT_CONTENTS)
-                    rightContents->insertBefore(n, rightContents->firstChild(), ec); // will remove n from its parent
-                else if (action == CLONE_CONTENTS)
-                    rightContents->insertBefore(n->cloneNode(true), rightContents->firstChild(), ec);
-                else
-                    rightParent->removeChild(n, ec);
-            }
-            n = rightParent->previousSibling();
-        }
+    if (m_end.container() != commonRoot && commonRoot->contains(m_end.container())) {
+        rightContents = processContentsBetweenOffsets(action, 0, m_end.container(), 0, m_end.offset(), ec);
+        rightContents = processAncestorsAndTheirSiblings(action, m_end.container(), ProcessContentsBackward, rightContents, commonRoot.get(), ec);
     }
 
     // delete all children of commonRoot between the start and end container
-
-    Node* processStart; // child of commonRoot
-    if (m_start.container() == commonRoot) {
-        processStart = m_start.container()->firstChild();
-        for (int i = 0; i < m_start.offset(); i++)
-            processStart = processStart->nextSibling();
-    } else {
-        processStart = m_start.container();
-        while (processStart->parentNode() != commonRoot)
-            processStart = processStart->parentNode();
+    RefPtr<Node> processStart = childOfCommonRootBeforeOffset(m_start.container(), m_start.offset(), commonRoot.get());
+    if (processStart && m_start.container() != commonRoot) // processStart contains nodes before m_start.
         processStart = processStart->nextSibling();
-    }
-    Node* processEnd; // child of commonRoot
-    if (m_end.container() == commonRoot) {
-        processEnd = m_end.container()->firstChild();
-        for (int i = 0; i < m_end.offset(); i++)
-            processEnd = processEnd->nextSibling();
-    } else {
-        processEnd = m_end.container();
-        while (processEnd->parentNode() != commonRoot)
-            processEnd = processEnd->parentNode();
-    }
+    RefPtr<Node> processEnd = childOfCommonRootBeforeOffset(m_end.container(), m_end.offset(), commonRoot.get());
 
     // Collapse the range, making sure that the result is not within a node that was partially selected.
     if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS) {
-        if (partialStart)
+        if (partialStart && commonRoot->contains(partialStart.get()))
             setStart(partialStart->parentNode(), partialStart->nodeIndex() + 1, ec);
-        else if (partialEnd)
+        else if (partialEnd && commonRoot->contains(partialEnd.get()))
             setStart(partialEnd->parentNode(), partialEnd->nodeIndex(), ec);
         if (ec)
             return 0;
@@ -868,24 +776,171 @@ PassRefPtr<DocumentFragment> Range::processContents(ActionType action, Exception
     if ((action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) && leftContents)
         fragment->appendChild(leftContents, ec);
 
-    Node* next;
-    Node* n;
     if (processStart) {
-        for (n = processStart; n && n != processEnd; n = next) {
-            next = n->nextSibling();
-            if (action == EXTRACT_CONTENTS)
-                fragment->appendChild(n, ec); // will remove from commonRoot
-            else if (action == CLONE_CONTENTS)
-                fragment->appendChild(n->cloneNode(true), ec);
-            else
-                commonRoot->removeChild(n, ec);
-        }
+        NodeVector nodes;
+        for (Node* n = processStart.get(); n && n != processEnd; n = n->nextSibling())
+            nodes.append(n);
+        processNodes(action, nodes, commonRoot, fragment, ec);
     }
 
     if ((action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) && rightContents)
         fragment->appendChild(rightContents, ec);
 
     return fragment.release();
+}
+
+static inline void deleteCharacterData(PassRefPtr<CharacterData> data, unsigned startOffset, unsigned endOffset, ExceptionCode& ec)
+{
+    if (data->length() - endOffset)
+        data->deleteData(endOffset, data->length() - endOffset, ec);
+    if (startOffset)
+        data->deleteData(0, startOffset, ec);
+}
+
+PassRefPtr<Node> Range::processContentsBetweenOffsets(ActionType action, PassRefPtr<DocumentFragment> fragment,
+    Node* container, unsigned startOffset, unsigned endOffset, ExceptionCode& ec)
+{
+    ASSERT(container);
+    ASSERT(startOffset <= endOffset);
+
+    // This switch statement must be consistent with that of lengthOfContentsInNode.
+    RefPtr<Node> result;   
+    switch (container->nodeType()) {
+    case Node::TEXT_NODE:
+    case Node::CDATA_SECTION_NODE:
+    case Node::COMMENT_NODE:
+        ASSERT(endOffset <= static_cast<CharacterData*>(container)->length());
+        if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
+            RefPtr<CharacterData> c = static_pointer_cast<CharacterData>(container->cloneNode(true));
+            deleteCharacterData(c, startOffset, endOffset, ec);
+            if (fragment) {
+                result = fragment;
+                result->appendChild(c.release(), ec);
+            } else
+                result = c.release();
+        }
+        if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS)
+            static_cast<CharacterData*>(container)->deleteData(startOffset, endOffset - startOffset, ec);
+        break;
+    case Node::PROCESSING_INSTRUCTION_NODE:
+        ASSERT(endOffset <= static_cast<ProcessingInstruction*>(container)->data().length());
+        if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
+            RefPtr<ProcessingInstruction> c = static_pointer_cast<ProcessingInstruction>(container->cloneNode(true));
+            c->setData(c->data().substring(startOffset, endOffset - startOffset), ec);
+            if (fragment) {
+                result = fragment;
+                result->appendChild(c.release(), ec);
+            } else
+                result = c.release();
+        }
+        if (action == EXTRACT_CONTENTS || action == DELETE_CONTENTS) {
+            ProcessingInstruction* pi = static_cast<ProcessingInstruction*>(container);
+            String data(pi->data());
+            data.remove(startOffset, endOffset - startOffset);
+            pi->setData(data, ec);
+        }
+        break;
+    case Node::ELEMENT_NODE:
+    case Node::ATTRIBUTE_NODE:
+    case Node::ENTITY_REFERENCE_NODE:
+    case Node::ENTITY_NODE:
+    case Node::DOCUMENT_NODE:
+    case Node::DOCUMENT_TYPE_NODE:
+    case Node::DOCUMENT_FRAGMENT_NODE:
+    case Node::NOTATION_NODE:
+    case Node::XPATH_NAMESPACE_NODE:
+        // FIXME: Should we assert that some nodes never appear here?
+        if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
+            if (fragment)
+                result = fragment;
+            else
+                result = container->cloneNode(false);
+        }
+
+        Node* n = container->firstChild();
+        Vector<RefPtr<Node> > nodes;
+        for (unsigned i = startOffset; n && i; i--)
+            n = n->nextSibling();
+        for (unsigned i = startOffset; n && i < endOffset; i++, n = n->nextSibling())
+            nodes.append(n);
+
+        processNodes(action, nodes, container, result, ec);
+        break;
+    }
+
+    return result.release();
+}
+
+void Range::processNodes(ActionType action, Vector<RefPtr<Node> >& nodes, PassRefPtr<Node> oldContainer, PassRefPtr<Node> newContainer, ExceptionCode& ec)
+{
+    for (unsigned i = 0; i < nodes.size(); i++) {
+        switch (action) {
+        case DELETE_CONTENTS:
+            oldContainer->removeChild(nodes[i].get(), ec);
+            break;
+        case EXTRACT_CONTENTS:
+            newContainer->appendChild(nodes[i].release(), ec); // will remove n from its parent
+            break;
+        case CLONE_CONTENTS:
+            newContainer->appendChild(nodes[i]->cloneNode(true), ec);
+            break;
+        }
+    }
+}
+
+PassRefPtr<Node> Range::processAncestorsAndTheirSiblings(ActionType action, Node* container, ContentsProcessDirection direction, PassRefPtr<Node> passedClonedContainer, Node* commonRoot, ExceptionCode& ec)
+{
+    typedef Vector<RefPtr<Node> > NodeVector;
+
+    RefPtr<Node> clonedContainer = passedClonedContainer;
+    Vector<RefPtr<Node> > ancestors;
+    for (ContainerNode* n = container->parentNode(); n && n != commonRoot; n = n->parentNode())
+        ancestors.append(n);
+
+    RefPtr<Node> firstChildInAncestorToProcess = direction == ProcessContentsForward ? container->nextSibling() : container->previousSibling();
+    for (Vector<RefPtr<Node> >::const_iterator it = ancestors.begin(); it != ancestors.end(); it++) {
+        RefPtr<Node> ancestor = *it;
+        if (action == EXTRACT_CONTENTS || action == CLONE_CONTENTS) {
+            if (RefPtr<Node> clonedAncestor = ancestor->cloneNode(false)) { // Might have been removed already during mutation event.
+                clonedAncestor->appendChild(clonedContainer, ec);
+                clonedContainer = clonedAncestor;
+            }
+        }
+
+        // Copy siblings of an ancestor of start/end containers
+        // FIXME: This assertion may fail if DOM is modified during mutation event
+        // FIXME: Share code with Range::processNodes
+        ASSERT(!firstChildInAncestorToProcess || firstChildInAncestorToProcess->parentNode() == ancestor);
+        
+        NodeVector nodes;
+        for (Node* child = firstChildInAncestorToProcess.get(); child;
+            child = (direction == ProcessContentsForward) ? child->nextSibling() : child->previousSibling())
+            nodes.append(child);
+
+        for (NodeVector::const_iterator it = nodes.begin(); it != nodes.end(); it++) {
+            Node* child = it->get();
+            switch (action) {
+            case DELETE_CONTENTS:
+                ancestor->removeChild(child, ec);
+                break;
+            case EXTRACT_CONTENTS: // will remove child from ancestor
+                if (direction == ProcessContentsForward)
+                    clonedContainer->appendChild(child, ec);
+                else
+                    clonedContainer->insertBefore(child, clonedContainer->firstChild(), ec);
+                break;
+            case CLONE_CONTENTS:
+                if (direction == ProcessContentsForward)
+                    clonedContainer->appendChild(child->cloneNode(true), ec);
+                else
+                    clonedContainer->insertBefore(child->cloneNode(true), clonedContainer->firstChild(), ec);
+                break;
+            }
+        }
+        firstChildInAncestorToProcess = direction == ProcessContentsForward ? ancestor->nextSibling() : ancestor->previousSibling();
+    }
+
+    return clonedContainer.release();
 }
 
 PassRefPtr<DocumentFragment> Range::extractContents(ExceptionCode& ec)
@@ -930,13 +985,6 @@ void Range::insertNode(PassRefPtr<Node> prpNewNode, ExceptionCode& ec)
         return;
     }
 
-    // WRONG_DOCUMENT_ERR: Raised if newParent and the container of the start of the Range were
-    // not created from the same document.
-    if (newNode->document() != m_start.container()->document()) {
-        ec = WRONG_DOCUMENT_ERR;
-        return;
-    }
-
     // HIERARCHY_REQUEST_ERR: Raised if the container of the start of the Range is of a type that
     // does not allow children of the type of newNode or if newNode is an ancestor of the container.
 
@@ -957,7 +1005,7 @@ void Range::insertNode(PassRefPtr<Node> prpNewNode, ExceptionCode& ec)
 
     Node::NodeType newNodeType = newNode->nodeType();
     int numNewChildren;
-    if (newNodeType == Node::DOCUMENT_FRAGMENT_NODE) {
+    if (newNodeType == Node::DOCUMENT_FRAGMENT_NODE && !newNode->isShadowRoot()) {
         // check each child node, not the DocumentFragment itself
         numNewChildren = 0;
         for (Node* c = newNode->firstChild(); c; c = c->nextSibling()) {
@@ -982,19 +1030,32 @@ void Range::insertNode(PassRefPtr<Node> prpNewNode, ExceptionCode& ec)
         }
     }
 
-    // INVALID_NODE_TYPE_ERR: Raised if newNode is an Attr, Entity, Notation, or Document node.
-    if (newNodeType == Node::ATTRIBUTE_NODE || newNodeType == Node::ENTITY_NODE
-            || newNodeType == Node::NOTATION_NODE || newNodeType == Node::DOCUMENT_NODE) {
+    // INVALID_NODE_TYPE_ERR: Raised if newNode is an Attr, Entity, Notation, ShadowRoot or Document node.
+    switch (newNodeType) {
+    case Node::ATTRIBUTE_NODE:
+    case Node::ENTITY_NODE:
+    case Node::NOTATION_NODE:
+    case Node::DOCUMENT_NODE:
         ec = RangeException::INVALID_NODE_TYPE_ERR;
         return;
+    default:
+        if (newNode->isShadowRoot()) {
+            ec = RangeException::INVALID_NODE_TYPE_ERR;
+            return;
+        }
+        break;
     }
 
     bool collapsed = m_start == m_end;
+    RefPtr<Node> container;
     if (startIsText) {
-        RefPtr<Text> newText = static_cast<Text*>(m_start.container())->splitText(m_start.offset(), ec);
+        container = m_start.container();
+        RefPtr<Text> newText = toText(container.get())->splitText(m_start.offset(), ec);
         if (ec)
             return;
-        m_start.container()->parentNode()->insertBefore(newNode.release(), newText.get(), ec);
+        
+        container = m_start.container();
+        container->parentNode()->insertBefore(newNode.release(), newText.get(), ec);
         if (ec)
             return;
 
@@ -1008,13 +1069,14 @@ void Range::insertNode(PassRefPtr<Node> prpNewNode, ExceptionCode& ec)
             lastChild = (newNodeType == Node::DOCUMENT_FRAGMENT_NODE) ? newNode->lastChild() : newNode;
 
         int startOffset = m_start.offset();
-        m_start.container()->insertBefore(newNode.release(), m_start.container()->childNode(startOffset), ec);
+        container = m_start.container();
+        container->insertBefore(newNode.release(), container->childNode(startOffset), ec);
         if (ec)
             return;
 
         // This special case doesn't seem to match the DOM specification, but it's currently required
         // to pass Acid3. We might later decide to remove this.
-        if (collapsed)
+        if (collapsed && numNewChildren)
             m_end.set(m_start.container(), startOffset + numNewChildren, lastChild.get());
     }
 }
@@ -1026,7 +1088,7 @@ String Range::toString(ExceptionCode& ec) const
         return String();
     }
 
-    Vector<UChar> result;
+    StringBuilder builder;
 
     Node* pastLast = pastLastNode();
     for (Node* n = firstNode(); n != pastLast; n = n->traverseNextNode()) {
@@ -1035,11 +1097,11 @@ String Range::toString(ExceptionCode& ec) const
             int length = data.length();
             int start = (n == m_start.container()) ? min(max(0, m_start.offset()), length) : 0;
             int end = (n == m_end.container()) ? min(max(start, m_end.offset()), length) : length;
-            result.append(data.characters() + start, end - start);
+            builder.append(data.characters() + start, end - start);
         }
     }
 
-    return String::adopt(result);
+    return builder.toString();
 }
 
 String Range::toHTML() const
@@ -1059,7 +1121,58 @@ String Range::text() const
     return plainText(this);
 }
 
-PassRefPtr<DocumentFragment> Range::createContextualFragment(const String& markup, ExceptionCode& ec) const
+static inline void removeElementPreservingChildren(PassRefPtr<DocumentFragment> fragment, HTMLElement* element)
+{
+    ExceptionCode ignoredExceptionCode;
+
+    RefPtr<Node> nextChild;
+    for (RefPtr<Node> child = element->firstChild(); child; child = nextChild) {
+        nextChild = child->nextSibling();
+        element->removeChild(child.get(), ignoredExceptionCode);
+        ASSERT(!ignoredExceptionCode);
+        fragment->insertBefore(child, element, ignoredExceptionCode);
+        ASSERT(!ignoredExceptionCode);
+    }
+    fragment->removeChild(element, ignoredExceptionCode);
+    ASSERT(!ignoredExceptionCode);
+}
+
+PassRefPtr<DocumentFragment> Range::createDocumentFragmentForElement(const String& markup, Element* element,  FragmentScriptingPermission scriptingPermission)
+{
+    ASSERT(element);
+    HTMLElement* htmlElement = toHTMLElement(element);
+    if (htmlElement->ieForbidsInsertHTML())
+        return 0;
+
+    if (htmlElement->hasLocalName(colTag) || htmlElement->hasLocalName(colgroupTag) || htmlElement->hasLocalName(framesetTag)
+        || htmlElement->hasLocalName(headTag) || htmlElement->hasLocalName(styleTag) || htmlElement->hasLocalName(titleTag))
+        return 0;
+
+    RefPtr<DocumentFragment> fragment = element->document()->createDocumentFragment();
+
+    if (element->document()->isHTMLDocument())
+        fragment->parseHTML(markup, element, scriptingPermission);
+    else if (!fragment->parseXML(markup, element, scriptingPermission))
+        return 0; // FIXME: We should propagate a syntax error exception out here.
+
+    // We need to pop <html> and <body> elements and remove <head> to
+    // accommodate folks passing complete HTML documents to make the
+    // child of an element.
+
+    RefPtr<Node> nextNode;
+    for (RefPtr<Node> node = fragment->firstChild(); node; node = nextNode) {
+        nextNode = node->nextSibling();
+        if (node->hasTagName(htmlTag) || node->hasTagName(headTag) || node->hasTagName(bodyTag)) {
+            HTMLElement* element = toHTMLElement(node.get());
+            if (Node* firstChild = element->firstChild())
+                nextNode = firstChild;
+            removeElementPreservingChildren(fragment, element);
+        }
+    }
+    return fragment.release();
+}
+
+PassRefPtr<DocumentFragment> Range::createContextualFragment(const String& markup, ExceptionCode& ec, FragmentScriptingPermission scriptingPermission)
 {
     if (!m_start.container()) {
         ec = INVALID_STATE_ERR;
@@ -1072,7 +1185,8 @@ PassRefPtr<DocumentFragment> Range::createContextualFragment(const String& marku
         return 0;
     }
 
-    RefPtr<DocumentFragment> fragment = static_cast<HTMLElement*>(element)->createContextualFragment(markup);
+    RefPtr<DocumentFragment> fragment = createDocumentFragmentForElement(markup, toElement(element), scriptingPermission);
+
     if (!fragment) {
         ec = NOT_SUPPORTED_ERR;
         return 0;
@@ -1135,8 +1249,8 @@ Node* Range::checkNodeWOffset(Node* n, int offset, ExceptionCode& ec) const
 void Range::checkNodeBA(Node* n, ExceptionCode& ec) const
 {
     // INVALID_NODE_TYPE_ERR: Raised if the root container of refNode is not an
-    // Attr, Document or DocumentFragment node or part of a shadow DOM tree
-    // or if refNode is a Document, DocumentFragment, Attr, Entity, or Notation node.
+    // Attr, Document, DocumentFragment or ShadowRoot node, or part of a SVG shadow DOM tree,
+    // or if refNode is a Document, DocumentFragment, ShadowRoot, Attr, Entity, or Notation node.
 
     switch (n->nodeType()) {
         case Node::ATTRIBUTE_NODE:
@@ -1158,7 +1272,7 @@ void Range::checkNodeBA(Node* n, ExceptionCode& ec) const
     }
 
     Node* root = n;
-    while (Node* parent = root->parentNode())
+    while (ContainerNode* parent = root->parentNode())
         root = parent;
 
     switch (root->nodeType()) {
@@ -1176,8 +1290,6 @@ void Range::checkNodeBA(Node* n, ExceptionCode& ec) const
         case Node::PROCESSING_INSTRUCTION_NODE:
         case Node::TEXT_NODE:
         case Node::XPATH_NAMESPACE_NODE:
-            if (root->isShadowNode())
-                break;
             ec = RangeException::INVALID_NODE_TYPE_ERR;
             return;
     }
@@ -1282,9 +1394,9 @@ void Range::selectNode(Node* refNode, ExceptionCode& ec)
     }
 
     // INVALID_NODE_TYPE_ERR: Raised if an ancestor of refNode is an Entity, Notation or
-    // DocumentType node or if refNode is a Document, DocumentFragment, Attr, Entity, or Notation
+    // DocumentType node or if refNode is a Document, DocumentFragment, ShadowRoot, Attr, Entity, or Notation
     // node.
-    for (Node* anc = refNode->parentNode(); anc; anc = anc->parentNode()) {
+    for (ContainerNode* anc = refNode->parentNode(); anc; anc = anc->parentNode()) {
         switch (anc->nodeType()) {
             case Node::ATTRIBUTE_NODE:
             case Node::CDATA_SECTION_NODE:
@@ -1323,6 +1435,9 @@ void Range::selectNode(Node* refNode, ExceptionCode& ec)
             ec = RangeException::INVALID_NODE_TYPE_ERR;
             return;
     }
+
+    if (m_ownerDocument != refNode->document())
+        setDocument(refNode->document());
 
     ec = 0;
     setStartBefore(refNode, ec);
@@ -1365,6 +1480,9 @@ void Range::selectNodeContents(Node* refNode, ExceptionCode& ec)
                 return;
         }
     }
+
+    if (m_ownerDocument != refNode->document())
+        setDocument(refNode->document());
 
     m_start.setToStartOfNode(refNode);
     m_end.setToEndOfNode(refNode);
@@ -1412,13 +1530,6 @@ void Range::surroundContents(PassRefPtr<Node> passNewParent, ExceptionCode& ec)
         return;
     }
 
-    // WRONG_DOCUMENT_ERR: Raised if newParent and the container of the start of the Range were
-    // not created from the same document.
-    if (newParent->document() != m_start.container()->document()) {
-        ec = WRONG_DOCUMENT_ERR;
-        return;
-    }
-
     // Raise a HIERARCHY_REQUEST_ERR if m_start.container() doesn't accept children like newParent.
     Node* parentOfNewParent = m_start.container();
 
@@ -1454,7 +1565,7 @@ void Range::surroundContents(PassRefPtr<Node> passNewParent, ExceptionCode& ec)
 
     ec = 0;
     while (Node* n = newParent->firstChild()) {
-        newParent->removeChild(n, ec);
+        toContainerNode(newParent.get())->removeChild(n, ec);
         if (ec)
             return;
     }
@@ -1550,32 +1661,6 @@ Node* Range::firstNode() const
     return m_start.container()->traverseNextSibling();
 }
 
-Position Range::editingStartPosition() const
-{
-    // This function is used by range style computations to avoid bugs like:
-    // <rdar://problem/4017641> REGRESSION (Mail): you can only bold/unbold a selection starting from end of line once
-    // It is important to skip certain irrelevant content at the start of the selection, so we do not wind up 
-    // with a spurious "mixed" style.
-    
-    VisiblePosition visiblePosition(m_start.container(), m_start.offset(), VP_DEFAULT_AFFINITY);
-    if (visiblePosition.isNull())
-        return Position();
-
-    ExceptionCode ec = 0;
-    // if the selection is a caret, just return the position, since the style
-    // behind us is relevant
-    if (collapsed(ec))
-        return visiblePosition.deepEquivalent();
-
-    // if the selection starts just before a paragraph break, skip over it
-    if (isEndOfParagraph(visiblePosition))
-        return visiblePosition.next().deepEquivalent().downstream();
-
-    // otherwise, make sure to be at the start of the first selected node,
-    // instead of possibly at the end of the last node before the selection
-    return visiblePosition.deepEquivalent().downstream();
-}
-
 Node* Range::shadowTreeRootNode() const
 {
     return startContainer() ? startContainer()->shadowTreeRootNode() : 0;
@@ -1603,13 +1688,19 @@ IntRect Range::boundingBox()
     return result;
 }
 
-void Range::textRects(Vector<IntRect>& rects, bool useSelectionHeight)
+void Range::textRects(Vector<IntRect>& rects, bool useSelectionHeight, RangeInFixedPosition* inFixed)
 {
     Node* startContainer = m_start.container();
     Node* endContainer = m_end.container();
 
-    if (!startContainer || !endContainer)
+    if (!startContainer || !endContainer) {
+        if (inFixed)
+            *inFixed = NotFixedPosition;
         return;
+    }
+
+    bool allFixed = true;
+    bool someFixed = false;
 
     Node* stopNode = pastLastNode();
     for (Node* node = firstNode(); node != stopNode; node = node->traverseNextNode()) {
@@ -1619,17 +1710,29 @@ void Range::textRects(Vector<IntRect>& rects, bool useSelectionHeight)
         RenderText* renderText = toRenderText(r);
         int startOffset = node == startContainer ? m_start.offset() : 0;
         int endOffset = node == endContainer ? m_end.offset() : numeric_limits<int>::max();
-        renderText->absoluteRectsForRange(rects, startOffset, endOffset, useSelectionHeight);
+        bool isFixed = false;
+        renderText->absoluteRectsForRange(rects, startOffset, endOffset, useSelectionHeight, &isFixed);
+        allFixed &= isFixed;
+        someFixed |= isFixed;
     }
+    
+    if (inFixed)
+        *inFixed = allFixed ? EntirelyFixedPosition : (someFixed ? PartiallyFixedPosition : NotFixedPosition);
 }
 
-void Range::textQuads(Vector<FloatQuad>& quads, bool useSelectionHeight)
+void Range::textQuads(Vector<FloatQuad>& quads, bool useSelectionHeight, RangeInFixedPosition* inFixed) const
 {
     Node* startContainer = m_start.container();
     Node* endContainer = m_end.container();
 
-    if (!startContainer || !endContainer)
+    if (!startContainer || !endContainer) {
+        if (inFixed)
+            *inFixed = NotFixedPosition;
         return;
+    }
+
+    bool allFixed = true;
+    bool someFixed = false;
 
     Node* stopNode = pastLastNode();
     for (Node* node = firstNode(); node != stopNode; node = node->traverseNextNode()) {
@@ -1639,8 +1742,33 @@ void Range::textQuads(Vector<FloatQuad>& quads, bool useSelectionHeight)
         RenderText* renderText = toRenderText(r);
         int startOffset = node == startContainer ? m_start.offset() : 0;
         int endOffset = node == endContainer ? m_end.offset() : numeric_limits<int>::max();
-        renderText->absoluteQuadsForRange(quads, startOffset, endOffset, useSelectionHeight);
+        bool isFixed = false;
+        renderText->absoluteQuadsForRange(quads, startOffset, endOffset, useSelectionHeight, &isFixed);
+        allFixed &= isFixed;
+        someFixed |= isFixed;
     }
+
+    if (inFixed)
+        *inFixed = allFixed ? EntirelyFixedPosition : (someFixed ? PartiallyFixedPosition : NotFixedPosition);
+}
+
+static bool intervalsSufficientlyOverlap(int startA, int endA, int startB, int endB)
+{
+    if (endA <= startA || endB <= startB)
+        return false;
+
+    const float sufficientOverlap = .75;
+
+    int lengthA = endA - startA;
+    int lengthB = endB - startB;
+
+    int maxStart = max(startA, startB);
+    int minEnd = min(endA, endB);
+
+    if (maxStart > minEnd)
+        return false;
+
+    return minEnd - maxStart >= sufficientOverlap * min(lengthA, lengthB);
 }
 
 // This function is similar in spirit to addLineBoxRects, but annotates the
@@ -1650,18 +1778,20 @@ void Range::collectSelectionRects(Vector<SelectionRect>& rects)
 {
     if (!m_start.container() || !m_end.container())
         return;
-        
+
     Node* startContainer = m_start.container();
     Node* endContainer = m_end.container();
     int startOffset = m_start.offset();
     int endOffset = m_end.offset();
- 
+
+    bool hasFlippedWritingMode = false;
     Vector<SelectionRect> newRects;
     Node* stopNode = pastLastNode();
     for (Node* node = firstNode(); node && node != stopNode; node = node->traverseNextNode()) {
         RenderObject* r = node->renderer();
         // only ask leaf render objects for their line box rects
-        if (r && !r->firstChild()) {
+        if (r && !r->firstChild() && r->style()->userSelect() != SELECT_NONE) {
+            hasFlippedWritingMode = r->style()->isFlippedBlocksWritingMode();
             bool isStartNode = (r->node() == startContainer);
             bool isEndNode = (r->node() == endContainer);
             // FIXME: Sending 0 for the startOffset is a weird way of telling the renderer that the selection
@@ -1678,7 +1808,7 @@ void Range::collectSelectionRects(Vector<SelectionRect>& rects)
                     s.setContainsStart(false);
                 if (s.containsEnd() && !isEndNode)
                     s.setContainsEnd(false);
-            }            
+            }
             rects.append(newRects);
             newRects.shrink(0);
         }
@@ -1690,93 +1820,135 @@ void Range::collectSelectionRects(Vector<SelectionRect>& rects)
         // Only set the line break bit if the end of the range actually
         // extends all the way to include the <br>. VisiblePosition helps to
         // figure this out.
-        VisiblePosition endPos(endContainer, endOffset, VP_DEFAULT_AFFINITY);
-        VisiblePosition brPos(stopNode, 0, VP_DEFAULT_AFFINITY);
+        VisiblePosition endPos(createLegacyEditingPosition(endContainer, endOffset), VP_DEFAULT_AFFINITY);
+        VisiblePosition brPos(createLegacyEditingPosition(stopNode, 0), VP_DEFAULT_AFFINITY);
         if (endPos == brPos)
             rects.last().setIsLineBreak(true);    
     }
 
-    // Find line tops.
-    int tops[rects.size()];
-    memset(tops, 0, sizeof(int) * rects.size());
-    int topc = 0;
-    int top = INT32_MIN;
-    for (unsigned i = 0; i < rects.size(); i++) {
-        int t = rects[i].rect().y();
-        if (top != t) {
-            top = t;
-            tops[topc] = top;   
-            topc++;
-        }
-    }
-
-    // Make sure every rect touches the line below.
-    int tidx = 0;
-    for (unsigned i = 0; i < rects.size(); i++) {
-        IntRect r = rects[i].rect();
-        int t = r.y();
-        if (t == tops[topc - 1])
-            break;
-        if (t != tops[tidx])
-            tidx++;
-        int n = tops[tidx + 1];
-        if (n > t) {
-            r.setHeight(n - t);
-            rects[i].setRect(r);
-        }
-    }
-
-    // Assign line numbers
+    int lineTop = numeric_limits<int>::max();
+    int lineBottom = numeric_limits<int>::min();
+    int lastLineTop = lineTop;
+    int lastLineBottom = lineBottom;
     int lineNumber = 0;
-    int prevY = INT32_MIN;
-    for (unsigned i = 0; i < rects.size(); i++) {
-        IntRect r = rects[i].rect();
-        if (prevY != r.y()) {
+
+    for (size_t i = 0, size = rects.size(); i < size; ++i) {
+        int currentRectTop = rects[i].logicalTop();
+        int currentRectBottom = currentRectTop + rects[i].logicalHeight();
+
+        if (intervalsSufficientlyOverlap(currentRectTop, currentRectBottom, lineTop, lineBottom)) {
+            // Grow the current line bounds.
+            lineTop = min(lineTop, currentRectTop);
+            lineBottom = max(lineBottom, currentRectBottom);
+            // Avoid overlap with the previous line.
+            if (!hasFlippedWritingMode)
+                lineTop = max(lastLineBottom, lineTop);
+            else
+                lineBottom = min(lastLineTop, lineBottom);
+        } else {
+            for (size_t j = i; j > 0; --j) {
+                if (rects[j - 1].lineNumber())
+                    break;
+                rects[j - 1].setLineNumber(lineNumber);
+                rects[j - 1].setLogicalTop(lineTop);
+                rects[j - 1].setLogicalHeight(lineBottom - lineTop);
+            }
+            if (!hasFlippedWritingMode) {
+                lastLineTop = lineTop;
+                if (currentRectBottom >= lastLineTop) {
+                    lastLineBottom = lineBottom;
+                    lineTop = lastLineBottom;
+                } else {
+                    lineTop = currentRectTop;
+                    lastLineBottom = numeric_limits<int>::min();
+                }
+                lineBottom = currentRectBottom;
+            } else {
+                lastLineBottom = lineBottom;
+                if (currentRectTop <= lastLineBottom) {
+                    lastLineTop = lineTop;
+                    lineBottom = lastLineTop;
+                } else {
+                    lastLineTop = numeric_limits<int>::max();
+                    lineBottom = currentRectBottom;
+                }
+                lineTop = currentRectTop;
+            }
             lineNumber++;
-            prevY = r.y();
         }
-        rects[i].setLineNumber(lineNumber);
+    }
+
+    for (size_t j = rects.size(); j > 0; --j) {
+        if (rects[j - 1].lineNumber())
+            break;
+        rects[j - 1].setLineNumber(lineNumber);
+        rects[j - 1].setLogicalTop(lineTop);
+        rects[j - 1].setLogicalHeight(lineBottom - lineTop);
     }
     int maxLineNumber = lineNumber;
 
     // Extend rects out to edges as needed.
     for (unsigned i = 0; i < rects.size(); i++) {
         SelectionRect &s = rects[i];
-        if (s.direction() == RTL && s.isFirstOnLine() && (s.isLineBreak() || s.lineNumber() < maxLineNumber)) {
-            IntRect intRect(s.rect());
-            intRect.setWidth(intRect.width() + (intRect.x() - s.minX()));
-            intRect.setX(s.minX());
-            s.setRect(intRect);
-        }
-        else if (s.direction() == LTR && s.isLastOnLine() && (s.isLineBreak() || s.lineNumber() < maxLineNumber)) {
-            IntRect intRect(s.rect());
-            intRect.setWidth(intRect.width() + (s.maxX() - intRect.right()));
-            s.setRect(intRect);
+        if (s.isLineBreak() || s.lineNumber() < maxLineNumber) {
+            if (s.direction() == RTL && s.isFirstOnLine()) {
+                s.setLogicalWidth(s.logicalWidth() + s.logicalLeft() - s.minX());
+                s.setLogicalLeft(s.minX());
+            } else if (s.direction() == LTR && s.isLastOnLine())
+                s.setLogicalWidth(s.maxX() - s.logicalLeft());
         }
     }
     
-    // Union all the rectangles on interior lines (i.e. not first or last)
+    // Union all the rectangles on interior lines (i.e. not first or last).
+    // On first and last lines, just avoid having overlaps by merging intersecting rectangles.
     Vector<SelectionRect> unionedRects;
-    IntRect unionRect;
-    bool processingInterior = false;
+    IntRect interiorUnionRect;
     for (unsigned i = 0; i < rects.size(); i++) {
-        SelectionRect &s = rects[i];
+        SelectionRect& s = rects[i];
         if (s.lineNumber() == 1) {
-            unionedRects.append(s);
-        }
-        else if (s.lineNumber() < maxLineNumber) {
-            if (!processingInterior)
-                unionRect = s.rect();         
-            else
-                unionRect.unite(s.rect());
-            processingInterior = true;
-        }
-        else {
-            if (processingInterior) {
-                SelectionRect srect(unionRect);
-                unionedRects.append(srect);
+            ASSERT(interiorUnionRect.isEmpty());
+            if (!unionedRects.isEmpty()) {
+                SelectionRect& previousRect = unionedRects.last();
+                if (previousRect.rect().intersects(s.rect())) {
+                    previousRect = SelectionRect(unionRect(previousRect.rect(), s.rect()), s.isHorizontal());
+                    continue;
+                }
             }
-            processingInterior = false;
+            // Couldn't merge with previous rect, so just appending.
+            unionedRects.append(s);
+        } else if (s.lineNumber() < maxLineNumber) {
+            if (interiorUnionRect.isEmpty()) {
+                // Start collecting interior rects.
+                interiorUnionRect = s.rect();         
+            } else if (interiorUnionRect.intersects(s.rect())
+                    || interiorUnionRect.maxX() == s.rect().x()
+                    || interiorUnionRect.maxY() == s.rect().y()
+                    || interiorUnionRect.x() == s.rect().maxX()
+                    || interiorUnionRect.y() == s.rect().maxY()) {
+                // Only union the lines that are attached.
+                // For iBooks, the interior lines may cross multiple horizontal pages.
+                interiorUnionRect.unite(s.rect());
+            } else {
+                SelectionRect srect(interiorUnionRect, s.isHorizontal());
+                unionedRects.append(srect);
+                interiorUnionRect = s.rect();
+            }
+        } else {
+            // Processing last line.
+            if (!interiorUnionRect.isEmpty()) {
+                SelectionRect srect(interiorUnionRect, s.isHorizontal());
+                unionedRects.append(srect);
+                interiorUnionRect = IntRect();
+            }
+
+            ASSERT(!unionedRects.isEmpty());
+            SelectionRect& previousRect = unionedRects.last();
+            if (previousRect.rect().y() == s.rect().y() && previousRect.rect().intersects(s.rect())) {
+                // previousRect is also on the last line, and intersects the current one.
+                previousRect = SelectionRect(unionRect(previousRect.rect(), s.rect()), s.isHorizontal());
+                continue;
+            }
+            // Couldn't merge with previous rect, so just appending.
             unionedRects.append(s);
         }
     }
@@ -1812,15 +1984,13 @@ void Range::formatForDebugger(char* buffer, unsigned length) const
 #undef FormatBufferSize
 #endif
 
-bool operator==(const Range& a, const Range& b)
+bool areRangesEqual(const Range* a, const Range* b)
 {
-    if (&a == &b)
+    if (a == b)
         return true;
-    // Not strictly legal C++, but in practice this can happen, and this check works
-    // fine with GCC to detect such cases and return false rather than crashing.
-    if (!&a || !&b)
+    if (!a || !b)
         return false;
-    return a.startPosition() == b.startPosition() && a.endPosition() == b.endPosition();
+    return a->startPosition() == b->startPosition() && a->endPosition() == b->endPosition();
 }
 
 PassRefPtr<Range> rangeOfContents(Node* node)
@@ -2023,7 +2193,7 @@ void Range::expand(const String& unit, ExceptionCode& ec)
 PassRefPtr<ClientRectList> Range::getClientRects() const
 {
     if (!m_start.container())
-        return 0;
+        return ClientRectList::create();
 
     m_ownerDocument->updateLayoutIgnorePendingStylesheets();
 
@@ -2035,34 +2205,25 @@ PassRefPtr<ClientRectList> Range::getClientRects() const
 
 PassRefPtr<ClientRect> Range::getBoundingClientRect() const
 {
-    if (!m_start.container())
-        return 0;
-
-    m_ownerDocument->updateLayoutIgnorePendingStylesheets();
-
-    Vector<FloatQuad> quads;
-    getBorderAndTextQuads(quads);
-
-    if (quads.isEmpty())
-        return ClientRect::create();
-
-    IntRect result;
-    for (size_t i = 0; i < quads.size(); ++i)
-        result.unite(quads[i].enclosingBoundingBox());
-
-    return ClientRect::create(result);
+    return ClientRect::create(boundingRect());
 }
 
-static void adjustFloatQuadsForScrollAndAbsoluteZoom(Vector<FloatQuad>& quads, Document* document, RenderObject* renderer)
+static void adjustFloatQuadsForScrollAndAbsoluteZoomAndPageScale(Vector<FloatQuad>& quads, Document* document, RenderObject* renderer)
 {
     FrameView* view = document->view();
     if (!view)
         return;
 
-    IntRect visibleContentRect = view->visibleContentRect();
+    float pageScale = 1;
+    if (Page* page = document->page())
+        pageScale = page->pageScaleFactor();
+
+    LayoutRect visibleContentRect = view->actualVisibleContentRect();
     for (size_t i = 0; i < quads.size(); ++i) {
         quads[i].move(-visibleContentRect.x(), -visibleContentRect.y());
         adjustFloatQuadForAbsoluteZoom(quads[i], renderer);
+        if (pageScale != 1)
+            adjustFloatQuadForPageScale(quads[i], pageScale);
     }
 }
 
@@ -2084,25 +2245,45 @@ void Range::getBorderAndTextQuads(Vector<FloatQuad>& quads) const
                 if (RenderBoxModelObject* renderBoxModelObject = static_cast<Element*>(node)->renderBoxModelObject()) {
                     Vector<FloatQuad> elementQuads;
                     renderBoxModelObject->absoluteQuads(elementQuads);
-                    adjustFloatQuadsForScrollAndAbsoluteZoom(elementQuads, m_ownerDocument.get(), renderBoxModelObject);
+                    adjustFloatQuadsForScrollAndAbsoluteZoomAndPageScale(elementQuads, m_ownerDocument.get(), renderBoxModelObject);
 
                     quads.append(elementQuads);
                 }
             }
         } else if (node->isTextNode()) {
-            if (RenderObject* renderer = static_cast<Text*>(node)->renderer()) {
+            if (RenderObject* renderer = toText(node)->renderer()) {
                 RenderText* renderText = toRenderText(renderer);
                 int startOffset = (node == startContainer) ? m_start.offset() : 0;
                 int endOffset = (node == endContainer) ? m_end.offset() : INT_MAX;
                 
                 Vector<FloatQuad> textQuads;
                 renderText->absoluteQuadsForRange(textQuads, startOffset, endOffset);
-                adjustFloatQuadsForScrollAndAbsoluteZoom(textQuads, m_ownerDocument.get(), renderText);
+                adjustFloatQuadsForScrollAndAbsoluteZoomAndPageScale(textQuads, m_ownerDocument.get(), renderText);
 
                 quads.append(textQuads);
             }
         }
     }
+}
+
+    
+FloatRect Range::boundingRect() const
+{
+    if (!m_start.container())
+        return FloatRect();
+
+    m_ownerDocument->updateLayoutIgnorePendingStylesheets();
+
+    Vector<FloatQuad> quads;
+    getBorderAndTextQuads(quads);
+    if (quads.isEmpty())
+        return FloatRect();
+
+    FloatRect result;
+    for (size_t i = 0; i < quads.size(); ++i)
+        result.unite(quads[i].boundingBox());
+
+    return result;
 }
 
 } // namespace WebCore
@@ -2112,10 +2293,8 @@ void Range::getBorderAndTextQuads(Vector<FloatQuad>& quads) const
 void showTree(const WebCore::Range* range)
 {
     if (range && range->boundaryPointsValid()) {
-        WebCore::Position start = range->startPosition();
-        WebCore::Position end = range->endPosition();
-        start.node()->showTreeAndMark(start.node(), "S", end.node(), "E");
-        fprintf(stderr, "start offset: %d, end offset: %d\n", start.deprecatedEditingOffset(), end.deprecatedEditingOffset());
+        range->startContainer()->showTreeAndMark(range->startContainer(), "S", range->endContainer(), "E");
+        fprintf(stderr, "start offset: %d, end offset: %d\n", range->startOffset(), range->endOffset());
     }
 }
 

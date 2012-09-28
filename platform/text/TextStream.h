@@ -26,12 +26,11 @@
 #ifndef TextStream_h
 #define TextStream_h
 
-#include <wtf/Vector.h>
+#include <wtf/Forward.h>
+#include <wtf/text/StringBuilder.h>
 #include <wtf/unicode/Unicode.h>
 
 namespace WebCore {
-
-class String;
 
 class TextStream {
 public:
@@ -43,9 +42,9 @@ public:
     TextStream& operator<<(float);
     TextStream& operator<<(double);
     TextStream& operator<<(const char*);
-    TextStream& operator<<(void*);
+    TextStream& operator<<(const void*);
     TextStream& operator<<(const String&);
-#if OS(WINDOWS) && PLATFORM(X86_64) && COMPILER(MSVC)
+#if OS(WINDOWS) && CPU(X86_64)
     TextStream& operator<<(unsigned __int64);
     TextStream& operator<<(__int64);
 #endif
@@ -53,7 +52,7 @@ public:
     String release();
 
 private:
-    Vector<UChar> m_text;
+    StringBuilder m_text;
 };
 
 }

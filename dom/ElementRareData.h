@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2009, 2010 Apple Inc. All rights reserved.
  * Copyright (C) 2008 David Smith <catfish.man@gmail.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -22,36 +22,83 @@
 #ifndef ElementRareData_h
 #define ElementRareData_h
 
+#include "ClassList.h"
+#include "DatasetDOMStringMap.h"
 #include "Element.h"
+#include "HTMLCollection.h"
+#include "NamedNodeMap.h"
 #include "NodeRareData.h"
+#include "ShadowTree.h"
+#include <wtf/OwnPtr.h>
 
 namespace WebCore {
-
-using namespace HTMLNames;
 
 class ElementRareData : public NodeRareData {
 public:
     ElementRareData();
+    virtual ~ElementRareData();
 
     void resetComputedStyle();
 
     using NodeRareData::needsFocusAppearanceUpdateSoonAfterAttach;
     using NodeRareData::setNeedsFocusAppearanceUpdateSoonAfterAttach;
 
-    IntSize m_minimumSizeForResizing;
+    typedef FixedArray<OwnPtr<HTMLCollection>, NumNodeCollectionTypes> CachedHTMLCollectionArray;
+
+    bool hasCachedHTMLCollections() const
+    {
+        return m_cachedCollections;
+    }
+
+    HTMLCollection* ensureCachedHTMLCollection(Element* element, CollectionType type)
+    {
+        if (!m_cachedCollections)
+            m_cachedCollections = adoptPtr(new CachedHTMLCollectionArray);
+
+        OwnPtr<HTMLCollection>& collection = (*m_cachedCollections)[type - FirstNodeCollectionType];
+        if (!collection)
+            collection = HTMLCollection::create(element, type);
+        return collection.get();
+    }
+
+    OwnPtr<CachedHTMLCollectionArray> m_cachedCollections;
+
+    LayoutSize m_minimumSizeForResizing;
     RefPtr<RenderStyle> m_computedStyle;
-    QualifiedName m_idAttributeName;
+    AtomicString m_shadowPseudoId;
+
+    OwnPtr<DatasetDOMStringMap> m_datasetDOMStringMap;
+    OwnPtr<ClassList> m_classList;
+    OwnPtr<ShadowTree> m_shadowTree;
+    OwnPtr<NamedNodeMap> m_attributeMap;
+
+    bool m_styleAffectedByEmpty;
+
+    IntSize m_savedLayerScrollOffset;
+
+#if ENABLE(FULLSCREEN_API)
+    bool m_containsFullScreenElement;
+#endif
 };
 
 inline IntSize defaultMinimumSizeForResizing()
 {
-    return IntSize(INT_MAX, INT_MAX);
+    return IntSize(MAX_LAYOUT_UNIT, MAX_LAYOUT_UNIT);
 }
 
 inline ElementRareData::ElementRareData()
-    : m_minimumSizeForResizing(defaultMinimumSizeForResizing())
-    , m_idAttributeName(idAttr)
+    : NodeRareData()
+    , m_minimumSizeForResizing(defaultMinimumSizeForResizing())
+    , m_styleAffectedByEmpty(false)
+#if ENABLE(FULLSCREEN_API)
+    , m_containsFullScreenElement(false)
+#endif
 {
+}
+
+inline ElementRareData::~ElementRareData()
+{
+    ASSERT(!m_shadowTree);
 }
 
 inline void ElementRareData::resetComputedStyle()

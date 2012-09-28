@@ -27,9 +27,9 @@
 #import "BitmapImage.h"
 
 #import "FloatRect.h"
-#import "FoundationExtras.h"
 #import "GraphicsContext.h"
 #import "PlatformString.h"
+#import "SharedBuffer.h"
 
 @interface WebCoreBundleFinder : NSObject
 @end

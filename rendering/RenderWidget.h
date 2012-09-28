@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2005, 2006, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2009, 2010 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,10 +24,9 @@
 
 #include "OverlapTestRequestClient.h"
 #include "RenderReplaced.h"
+#include "Widget.h"
 
 namespace WebCore {
-
-class Widget;
 
 class RenderWidget : public RenderReplaced, private OverlapTestRequestClient {
 public:
@@ -39,11 +38,16 @@ public:
     static RenderWidget* find(const Widget*);
 
     void updateWidgetPosition();
+    void widgetPositionsUpdated();
+    IntRect windowClipRect() const;
 
-    void showSubstituteImage(PassRefPtr<Image>);
-
+    void notifyWidget(WidgetNotification);
+    
     static void suspendWidgetHierarchyUpdates();
     static void resumeWidgetHierarchyUpdates();
+
+    RenderArena* ref() { ++m_refCount; return renderArena(); }
+    void deref(RenderArena*);
 
 protected:
     RenderWidget(Node*);
@@ -54,25 +58,24 @@ protected:
 
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
     virtual void layout();
+    virtual void paint(PaintInfo&, const LayoutPoint&);
+    virtual CursorDirective getCursor(const LayoutPoint&, Cursor&) const;
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
 
 private:
     virtual bool isWidget() const { return true; }
 
-    virtual void paint(PaintInfo&, int x, int y);
+    virtual void willBeDestroyed();
     virtual void destroy();
     virtual void setSelectionState(SelectionState);
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, int x, int y, int tx, int ty, HitTestAction);
     virtual void setOverlapTestResult(bool);
 
-    bool setWidgetGeometry(const IntRect&);
-
-    friend class RenderWidgetProtector;
-    RenderArena* ref() { ++m_refCount; return renderArena(); }
-    void deref(RenderArena*);
+    bool setWidgetGeometry(const LayoutRect&);
+    bool updateWidgetGeometry();
 
     RefPtr<Widget> m_widget;
-    RefPtr<Image> m_substituteImage;
     FrameView* m_frameView;
+    IntRect m_clipRect; // The rectangle needs to remain correct after scrolling, so it is stored in content view coordinates, and not clipped to window.
     int m_refCount;
 };
 

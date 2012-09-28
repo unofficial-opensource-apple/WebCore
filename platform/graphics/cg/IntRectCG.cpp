@@ -26,7 +26,7 @@
 #include "config.h"
 #include "IntRect.h"
 
-#if PLATFORM(CG)
+#if USE(CG) || USE(SKIA_ON_MAC_CHROMIUM) || (PLATFORM(QT) && USE(QTKIT))
 
 #include <CoreGraphics/CoreGraphics.h>
 
@@ -48,4 +48,4 @@ IntRect enclosingIntRect(const CGRect& rect)
 
 }
 
-#endif // PLATFORM(CG)
+#endif // USE(CG)

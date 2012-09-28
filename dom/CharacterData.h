@@ -24,6 +24,7 @@
 #define CharacterData_h
 
 #include "Node.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -31,7 +32,7 @@ class CharacterData : public Node {
 public:
     String data() const { return m_data; }
     void setData(const String&, ExceptionCode&);
-    unsigned length() const { return m_data->length(); }
+    unsigned length() const { return m_data.length(); }
     String substringData(unsigned offset, unsigned count, ExceptionCode&);
     void appendData(const String&, ExceptionCode&);
     void insertData(unsigned offset, const String&, ExceptionCode&, bool canShowLastCharacterIfSecure = true);
@@ -40,15 +41,28 @@ public:
 
     bool containsOnlyWhitespace() const;
 
-    StringImpl* dataImpl() { return m_data.get(); }
+    StringImpl* dataImpl() { return m_data.impl(); }
+
+    // Like appendData, but optimized for the parser (e.g., no mutation events).
+    // Returns how much could be added before length limit was met.
+    unsigned parserAppendData(const UChar*, unsigned dataLength, unsigned lengthLimit);
 
 protected:
-    CharacterData(Document*, const String&, ConstructionType);
+    CharacterData(Document* document, const String& text, ConstructionType type)
+        : Node(document, type)
+        , m_data(!text.isNull() ? text : emptyString())
+    {
+        ASSERT(type == CreateOther || type == CreateText);
+    }
 
-    virtual bool rendererIsNeeded(RenderStyle*);
+    virtual bool rendererIsNeeded(const NodeRenderingContext&);
 
-    void setDataImpl(PassRefPtr<StringImpl> impl) { m_data = impl; }
-    void dispatchModifiedEvent(StringImpl* oldValue);
+    void setDataWithoutUpdate(const String& data)
+    {
+        ASSERT(!data.isNull());
+        m_data = data;
+    }
+    void dispatchModifiedEvent(const String& oldValue);
 
 private:
     virtual String nodeValue() const;
@@ -56,13 +70,18 @@ private:
     virtual bool isCharacterDataNode() const { return true; }
     virtual int maxCharacterOffset() const;
     virtual bool offsetInCharacters() const;
-
+    enum LastCharacterBehavior {
+        DefaultLastCharacterBehavior,
+        RevealLastCharacterBehavior,
+        SecureLastCharacterBehavior,
+    };
+    void setDataAndUpdate(const String&, unsigned offsetOfReplacedData, unsigned oldLength, unsigned newLength, LastCharacterBehavior = DefaultLastCharacterBehavior);
+    void updateRenderer(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData, LastCharacterBehavior = DefaultLastCharacterBehavior);
     void checkCharDataOperation(unsigned offset, ExceptionCode&);
 
-    RefPtr<StringImpl> m_data;
+    String m_data;
 };
 
 } // namespace WebCore
 
 #endif // CharacterData_h
-

@@ -42,21 +42,55 @@ void FontCache::platformInit()
 const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, const UChar* characters, int length)
 {
     SimpleFontData* fontData = 0;
-    fontData = new SimpleFontData(FontPlatformData(font.fontDescription(), font.family().family()));
+    fontData = getCachedFontData(font.fontDescription(), font.family().family(), false, DoNotRetain);
+    if (!fontData->containsCharacters(characters, length))
+        fontData = getSimilarFontPlatformData(font);
+    if (!fontData->containsCharacters(characters, length))
+        fontData = getLastResortFallbackFont(font.fontDescription());
+
+    ASSERT(fontData);
     return fontData;
 }
 
-FontPlatformData* FontCache::getSimilarFontPlatformData(const Font& font)
+SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
 {
-    return new FontPlatformData(font.fontDescription(), font.family().family());
+    SimpleFontData* simpleFontData = 0;
+#if OS(DARWIN)
+    // Attempt to find an appropriate font using a match based on 
+    // the presence of keywords in the the requested names.  For example, we'll
+    // match any name that contains "Arabic" to Geeza Pro.
+    const FontFamily* currFamily = &font.fontDescription().family();
+    while (currFamily && !simpleFontData) {
+        if (currFamily->family().length()) {
+            static String* matchWords[3] = { new String("Arabic"), new String("Pashto"), new String("Urdu") };
+            DEFINE_STATIC_LOCAL(AtomicString, geezaStr, ("Geeza Pro"));
+            for (int j = 0; j < 3 && !simpleFontData; ++j)
+                if (currFamily->family().contains(*matchWords[j], false))
+                    simpleFontData = getCachedFontData(font.fontDescription(), geezaStr);
+        }
+        currFamily = currFamily->next();
+    }
+#endif
+    if (!simpleFontData)
+        simpleFontData = getCachedFontData(font.fontDescription(), font.family().family());
+
+    return simpleFontData;
 }
 
-FontPlatformData* FontCache::getLastResortFallbackFont(const FontDescription& fontDescription)
+SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& fontDescription, ShouldRetain shouldRetain)
 {
     // FIXME: Would be even better to somehow get the user's default font here.  For now we'll pick
     // the default that the user would get without changing any prefs.
-    static AtomicString timesStr("systemfont");
-    return getCachedFontPlatformData(fontDescription, timesStr);
+    SimpleFontData* fallback = 0;
+#if OS(WINDOWS)
+    static AtomicString fallbackName("Arial Unicode MS");
+#else
+    static AtomicString fallbackName("Times New Roman");
+#endif
+    fallback = getCachedFontData(fontDescription, fallbackName, false, shouldRetain);
+    ASSERT(fallback);
+    
+    return fallback;
 }
 
 FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontDescription, const AtomicString& family)
